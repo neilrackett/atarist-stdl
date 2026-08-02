@@ -1,0 +1,9 @@
+*.o
+libstdl.a
+dist/
+tests/host/test_pixel
+tests/host/test_compose
+tests/host/test_cursor
+tests/host/test_assets
+tests/host/*.dSYM/
+tests/hatari/out/

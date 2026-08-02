@@ -1,0 +1,370 @@
+/*
+ * Copyright (C) 2026 Neil Rackett
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ */
+/*
+ * Host-side unit tests for the STDL pixel paths: fills, blits
+ * (aligned/unaligned/masked), colour keys, sprites, 1bpp expansion.
+ * Every operation is checked against a per-pixel reference model.
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdl/stdl.h>
+
+static int failures;
+
+#define CHECK(cond, ...) do { \
+    if (!(cond)) { \
+        failures++; \
+        printf("FAIL %s:%d: ", __FILE__, __LINE__); \
+        printf(__VA_ARGS__); \
+        printf("\n"); \
+    } \
+} while (0)
+
+/* reference model: plain byte-per-pixel image */
+typedef struct {
+    int w, h;
+    uint8_t *px;
+} Ref;
+
+static Ref *ref_new(int w, int h)
+{
+    Ref *r = malloc(sizeof(Ref));
+    r->w = w;
+    r->h = h;
+    r->px = calloc(1, (size_t)w * h);
+    return r;
+}
+
+static void ref_free(Ref *r) { free(r->px); free(r); }
+
+static void surf_to_ref(const STDL_Surface *s, Ref *r)
+{
+    int x, y;
+    for (y = 0; y < s->h; y++)
+        for (x = 0; x < s->w; x++)
+            r->px[y * r->w + x] = STDL_GetPixel(s, x, y);
+}
+
+static int ref_cmp(const STDL_Surface *s, const Ref *r, const char *what)
+{
+    int x, y, bad = 0;
+    for (y = 0; y < s->h && bad < 5; y++) {
+        for (x = 0; x < s->w && bad < 5; x++) {
+            uint8_t got = STDL_GetPixel(s, x, y);
+            uint8_t want = r->px[y * r->w + x];
+            if (got != want) {
+                printf("  %s mismatch at (%d,%d): got %d want %d\n",
+                       what, x, y, got, want);
+                bad++;
+            }
+        }
+    }
+    return bad == 0;
+}
+
+static void ref_fill(Ref *r, int x1, int y1, int w, int h, uint8_t c)
+{
+    int x, y;
+    for (y = y1; y < y1 + h; y++) {
+        if (y < 0 || y >= r->h) continue;
+        for (x = x1; x < x1 + w; x++) {
+            if (x < 0 || x >= r->w) continue;
+            r->px[y * r->w + x] = c;
+        }
+    }
+}
+
+/* reference blit incl. colour key + clip rect of dst */
+static void ref_blit(const Ref *src, int sx, int sy, int w, int h,
+                     Ref *dst, int dx, int dy,
+                     int usekey, uint8_t key, const STDL_Rect *clip)
+{
+    int x, y;
+    /* source clip */
+    if (sx < 0) { w += sx; dx -= sx; sx = 0; }
+    if (sy < 0) { h += sy; dy -= sy; sy = 0; }
+    if (sx + w > src->w) w = src->w - sx;
+    if (sy + h > src->h) h = src->h - sy;
+    for (y = 0; y < h; y++) {
+        for (x = 0; x < w; x++) {
+            int tx = dx + x, ty = dy + y;
+            uint8_t v = src->px[(sy + y) * src->w + (sx + x)];
+            if (tx < clip->x || tx >= clip->x + clip->w) continue;
+            if (ty < clip->y || ty >= clip->y + clip->h) continue;
+            if (usekey && v == key) continue;
+            dst->px[ty * dst->w + tx] = v;
+        }
+    }
+}
+
+static unsigned rng_state = 12345;
+static unsigned rnd(void)
+{
+    rng_state = rng_state * 1103515245 + 12345;
+    return (rng_state >> 16) & 0x7FFF;
+}
+
+static void randomise(STDL_Surface *s, int maxcol)
+{
+    int x, y;
+    for (y = 0; y < s->h; y++)
+        for (x = 0; x < s->w; x++)
+            STDL_PutPixel(s, x, y, (uint8_t)(rnd() % maxcol));
+}
+
+/* ---------------------------------------------------------------- */
+
+static void test_putget(void)
+{
+    STDL_Surface *s = STDL_CreateSurface(50, 40);
+    int x, y;
+    for (y = 0; y < 40; y++)
+        for (x = 0; x < 50; x++)
+            STDL_PutPixel(s, x, y, (uint8_t)((x + y) & 15));
+    for (y = 0; y < 40; y++)
+        for (x = 0; x < 50; x++)
+            CHECK(STDL_GetPixel(s, x, y) == ((x + y) & 15),
+                  "putget (%d,%d)", x, y);
+    STDL_FreeSurface(s);
+}
+
+static void test_fills(void)
+{
+    int i;
+    for (i = 0; i < 200; i++) {
+        STDL_Surface *s = STDL_CreateSurface(83, 47);
+        Ref *r = ref_new(83, 47);
+        int j;
+        for (j = 0; j < 10; j++) {
+            STDL_Rect rect;
+            uint8_t c = (uint8_t)(rnd() & 15);
+            rect.x = (int16_t)((int)(rnd() % 120) - 20);
+            rect.y = (int16_t)((int)(rnd() % 70) - 10);
+            rect.w = (uint16_t)(rnd() % 90);
+            rect.h = (uint16_t)(rnd() % 60);
+            STDL_FillRect(s, &rect, c);
+            ref_fill(r, rect.x, rect.y, rect.w, rect.h, c);
+        }
+        CHECK(ref_cmp(s, r, "fill"), "fill iteration %d", i);
+        ref_free(r);
+        STDL_FreeSurface(s);
+        if (failures) break;
+    }
+}
+
+static void test_hvlines(void)
+{
+    STDL_Surface *s = STDL_CreateSurface(70, 30);
+    Ref *r = ref_new(70, 30);
+    int i;
+    for (i = 0; i < 300; i++) {
+        int a = (int)(rnd() % 90) - 10, b = (int)(rnd() % 90) - 10;
+        int y = (int)(rnd() % 40) - 5;
+        uint8_t c = (uint8_t)(rnd() & 15);
+        if (rnd() & 1) {
+            STDL_HLine(s, a, b, y, c);
+            {
+                int lo = a < b ? a : b, hi = a < b ? b : a;
+                if (y >= 0 && y < 30)
+                    ref_fill(r, lo, y, hi - lo + 1, 1, c);
+            }
+        } else {
+            STDL_VLine(s, y, a, b, c);
+            {
+                int lo = a < b ? a : b, hi = a < b ? b : a;
+                if (y >= 0 && y < 70)
+                    ref_fill(r, y, lo, 1, hi - lo + 1, c);
+            }
+        }
+    }
+    CHECK(ref_cmp(s, r, "hvline"), "hvlines");
+    ref_free(r);
+    STDL_FreeSurface(s);
+}
+
+static void test_blits(void)
+{
+    int i;
+    for (i = 0; i < 400; i++) {
+        int sw = 17 + (int)(rnd() % 80);
+        int sh = 5 + (int)(rnd() % 40);
+        STDL_Surface *src = STDL_CreateSurface(sw, sh);
+        STDL_Surface *dst = STDL_CreateSurface(90, 60);
+        Ref *rs = ref_new(sw, sh);
+        Ref *rd = ref_new(90, 60);
+        STDL_Rect srcrect, dstrect, clip;
+        int usekey = (int)(rnd() & 1);
+        uint8_t key = 3;
+
+        randomise(src, usekey ? 6 : 16);
+        randomise(dst, 16);
+        if (usekey) {
+            STDL_SetColourKey(src, 1, key);
+        }
+        /* random clip rect on dst */
+        clip.x = (int16_t)(rnd() % 20);
+        clip.y = (int16_t)(rnd() % 15);
+        clip.w = (uint16_t)(30 + rnd() % 60);
+        clip.h = (uint16_t)(20 + rnd() % 40);
+        STDL_SetClipRect(dst, &clip);
+
+        surf_to_ref(src, rs);
+        surf_to_ref(dst, rd);
+
+        srcrect.x = (int16_t)((int)(rnd() % (sw + 10)) - 5);
+        srcrect.y = (int16_t)((int)(rnd() % (sh + 6)) - 3);
+        srcrect.w = (uint16_t)(rnd() % (sw + 5));
+        srcrect.h = (uint16_t)(rnd() % (sh + 4));
+        dstrect.x = (int16_t)((int)(rnd() % 110) - 10);
+        dstrect.y = (int16_t)((int)(rnd() % 70) - 6);
+        dstrect.w = 0;
+        dstrect.h = 0;
+
+        ref_blit(rs, srcrect.x, srcrect.y, srcrect.w, srcrect.h,
+                 rd, dstrect.x, dstrect.y, usekey, key, &dst->clip);
+        STDL_BlitSurface(src, &srcrect, dst, &dstrect);
+
+        CHECK(ref_cmp(dst, rd, "blit"),
+              "blit iter %d (key=%d src=%d,%d %ux%u dst=%d,%d "
+              "clip=%d,%d %ux%u)",
+              i, usekey, srcrect.x, srcrect.y, srcrect.w, srcrect.h,
+              dstrect.x, dstrect.y, clip.x, clip.y, clip.w, clip.h);
+
+        ref_free(rs);
+        ref_free(rd);
+        STDL_FreeSurface(src);
+        STDL_FreeSurface(dst);
+        if (failures > 3) return;
+    }
+}
+
+static void test_whole_blit_writeback(void)
+{
+    /* NULL srcrect + dstrect writeback semantics */
+    STDL_Surface *src = STDL_CreateSurface(32, 8);
+    STDL_Surface *dst = STDL_CreateSurface(64, 16);
+    STDL_Rect d = { -4, -2, 0, 0 };
+    randomise(src, 16);
+    STDL_BlitSurface(src, NULL, dst, &d);
+    CHECK(d.x == 0 && d.y == 0 && d.w == 28 && d.h == 6,
+          "writeback got %d,%d %ux%u", d.x, d.y, d.w, d.h);
+    STDL_FreeSurface(src);
+    STDL_FreeSurface(dst);
+}
+
+static void test_sprites(void)
+{
+    /* sprite from surface must draw identically to a keyed blit */
+    int iter;
+    for (iter = 0; iter < 60; iter++) {
+        STDL_Surface *img = STDL_CreateSurface(32, 20);
+        STDL_Surface *a = STDL_CreateSurface(90, 40);
+        STDL_Surface *b = STDL_CreateSurface(90, 40);
+        STDL_Sprite *spr;
+        int x = (int)(rnd() % 100) - 20;
+        int y = (int)(rnd() % 50) - 10;
+        int pre = (int)(rnd() & 1);
+        STDL_Rect d;
+
+        randomise(img, 5);
+        STDL_SetColourKey(img, 1, 2);
+        randomise(a, 16);
+        STDL_BlitSurface(a, NULL, b, NULL);
+
+        spr = STDL_SpriteFromSurface(img, 32,
+                                     pre ? STDL_PRESHIFT : 0);
+        CHECK(spr != NULL, "sprite build");
+        if (!spr) return;
+
+        d.x = (int16_t)x;
+        d.y = (int16_t)y;
+        d.w = 32;
+        d.h = 20;
+        STDL_BlitSurface(img, NULL, a, &d);
+        STDL_BlitSprite(spr, 0, b, x, y);
+
+        {
+            int xx, yy, bad = 0;
+            for (yy = 0; yy < 40 && bad < 4; yy++)
+                for (xx = 0; xx < 90 && bad < 4; xx++) {
+                    uint8_t va = STDL_GetPixel(a, xx, yy);
+                    uint8_t vb = STDL_GetPixel(b, xx, yy);
+                    if (va != vb) {
+                        printf("  sprite mismatch (%d,%d): surf=%d "
+                               "sprite=%d [x=%d y=%d pre=%d]\n",
+                               xx, yy, va, vb, x, y, pre);
+                        bad++;
+                        failures++;
+                    }
+                }
+        }
+        STDL_FreeSprite(spr);
+        STDL_FreeSurface(img);
+        STDL_FreeSurface(a);
+        STDL_FreeSurface(b);
+        if (failures > 3) return;
+    }
+}
+
+static void test_1bpp(void)
+{
+    static const uint8_t bits[] = {
+        0xF0, 0x0F,     /* row 0: 11110000 00001111 */
+        0xAA, 0x55,     /* row 1: 10101010 01010101 */
+    };
+    STDL_Surface *s = STDL_SurfaceFrom1bpp(bits, 16, 2, 7, 2);
+    int x;
+    CHECK(s != NULL, "1bpp create");
+    for (x = 0; x < 16; x++) {
+        int bit0 = (bits[x >> 3] >> (7 - (x & 7))) & 1;
+        int bit1 = (bits[2 + (x >> 3)] >> (7 - (x & 7))) & 1;
+        CHECK(STDL_GetPixel(s, x, 0) == (bit0 ? 7 : 2),
+              "1bpp row0 x=%d", x);
+        CHECK(STDL_GetPixel(s, x, 1) == (bit1 ? 7 : 2),
+              "1bpp row1 x=%d", x);
+    }
+    STDL_FreeSurface(s);
+}
+
+static void test_tiles(void)
+{
+    STDL_Surface *img = STDL_CreateSurface(32, 32);
+    STDL_Surface *dst = STDL_CreateSurface(64, 40);
+    STDL_Tileset *ts;
+    int x, y;
+
+    randomise(img, 16);
+    ts = STDL_TilesetFromSurface(img, 16, 16);
+    CHECK(ts != NULL && ts->ntiles == 4, "tileset build");
+    if (!ts) return;
+    STDL_BlitTile(ts, 3, dst, 16, 4);
+    for (y = 0; y < 16; y++)
+        for (x = 0; x < 16; x++)
+            CHECK(STDL_GetPixel(dst, 16 + x, 4 + y)
+                  == STDL_GetPixel(img, 16 + x, 16 + y),
+                  "tile 3 pixel (%d,%d)", x, y);
+    STDL_FreeTileset(ts);
+    STDL_FreeSurface(img);
+    STDL_FreeSurface(dst);
+}
+
+int main(void)
+{
+    test_putget();
+    test_fills();
+    test_hvlines();
+    test_blits();
+    test_whole_blit_writeback();
+    test_sprites();
+    test_1bpp();
+    test_tiles();
+    if (failures == 0) {
+        printf("all pixel-path tests passed\n");
+        return 0;
+    }
+    printf("%d failure(s)\n", failures);
+    return 1;
+}

@@ -1,0 +1,118 @@
+# Porting SDL 1.2 code to STDL
+
+The compat header (`include/compat/SDL.h`) maps the common SDL 1.2
+surface so ported source stays recognisable. Anything not mapped is
+a **compile error by design**: the porter finds the gaps at build
+time, not at runtime.
+
+## Workflow
+
+1. Convert assets with `stdlconv`; verify visually in Hatari.
+2. Add `-Iinclude/compat` and build; let compile and link errors
+   enumerate the work.
+3. Replace unsupported calls with STDL primitives.
+4. Replace per-pixel drawing with spans or pre-rendered sprites.
+5. Align sprites to 16px or enable `STDL_PRESHIFT`.
+6. Profile on Mega STE (`dist/TBLITSPD.TOS` gives the baseline;
+   the blitter accelerates large same-phase fills/blits
+   automatically - align to 16px to benefit).
+7. Verify on plain ST at 8MHz - the correctness floor.
+
+## What maps directly
+
+| SDL 1.2 | STDL | Notes |
+|---|---|---|
+| `SDL_Init` / `SDL_Quit` | `STDL_Init` / `STDL_Quit` | enters supervisor mode for the program's lifetime |
+| `SDL_SetVideoMode` | `STDL_SetVideoMode` | w/h/bpp ignored; always 320x200x4 |
+| `SDL_BlitSurface` | `STDL_BlitSurface` | full SDL semantics incl. dstrect writeback |
+| `SDL_FillRect` | wrapper | colour is a palette index, not mapped RGB |
+| `SDL_Flip` | `STDL_Flip` | VBL-synced; page flip with `SDL_DOUBLEBUF` |
+| `SDL_UpdateRect(s)` | no-op | single-buffer rendering is direct to screen RAM |
+| `SDL_MapRGB` | `STDL_MapRGB` | nearest palette index |
+| `SDL_LockSurface` | no-op | surfaces are always addressable |
+| `SDL_MUSTLOCK` | `0` | |
+| `SDL_DisplayFormat` | duplicate | already planar; result flagged `SDL_HWACCEL` |
+| `SDL_SetColorKey` | `STDL_SetColourKey` | builds the transparency mask (a snapshot) |
+| `SDL_LoadBMP` | `STDL_LoadBMP` | uncompressed 1/4/8bpp, max 16 colours |
+| `SDL_SetColors` / `SDL_SetPalette` | palette module | `SDL_LOGPAL` / `SDL_PHYSPAL` honoured |
+| events / keysyms / `SDL_GetKeyState` | event module | numbering matches SDL 1.2 |
+| `SDL_GetTicks` / `SDL_Delay` | time module | 200Hz clock: 5ms resolution |
+| `SDL_AddTimer` / `SDL_SetTimer` | compat | cooperative: callbacks fire inside `SDL_Delay` |
+| `SDL_OpenAudio` / `SDL_LoadWAV` | `STDL_Audio` | STE DMA; cooperative refill; PCM WAVs only (`stdlconv wav`) |
+| `Mix_PlayMusic` etc (SDL_mixer) | `STDL_Music` | YM register streams from `stdlconv midi`; works on every ST |
+| `Mix_PlayChannel` / `Mix_LoadWAV` | mixer shim | up to 4 chunks software-mixed over the DMA device (STE only) |
+| PC-speaker sound | `STDL_SpeakerOn/Off` | immediate YM tone; steals voice A from music, restores after |
+| PC-speaker sequences | `STDL_PlaySfx` | step-array effects (periods+volumes), tone or noise, auto voice |
+| `SDL_Joystick*` | compat veneer | port 1 as stick 0: 2 digital axes, 1 button |
+| `SDL_CreateCursor` / `SDL_SetCursor` | `STDL_Cursor` | software save-under cursor, max 32x32 |
+
+## Game services (extracted from the FreeNukum and Sopwith ports)
+
+* **Scrolling cameras**: `STDL_SetSurfaceOrigin(stripe, 0, camera_y)`
+  lets a short surface stripe stand in for a tall level - blits and
+  rect fills translate their coordinates, so the game keeps using
+  level coordinates unchanged.
+* **Composition**: filling with `STDL_TRANSPARENT` punches holes in
+  a masked surface; blits onto masked surfaces maintain the mask;
+  `STDL_SurfaceIsOpaque` is a cached query for skipping backdrop
+  under solid tiles; `STDL_CreateMask` attaches a mask without a
+  colour-key scan.
+* **Runtime asset decoding**: `STDL_PutGroup` writes one 16-pixel
+  group (planes + mask) - for games that decode proprietary data
+  files at load and cannot pre-convert with stdlconv.
+* **Splash screens**: `STDL_ShowDegas("SPLASH.PI1")` after
+  SetVideoMode shows a Degas picture with its palette while the
+  game loads (`stdlconv pi1` converts, `stdlconv embed` makes C
+  arrays for linked-in splashes).
+* **Joystick for keyboard games**: `STDL_JoyKeyEmulation(1)` turns
+  stick changes into key events (tagged `STDL_KMOD_JOYSTICK`, key
+  state included) - keyboard-bound games need no joystick code at
+  all. The default mapping is arrows + left Alt;
+  `STDL_JoyKeyMapping(STDLK_w, STDLK_s, STDLK_a, STDLK_d,
+  STDLK_SPACE)` rebinds it to the game's own convention (returns
+  how many keys resolved, so bad bindings are caught; 0 leaves an
+  input unmapped).
+* **Filenames**: loaders retry with an uppercased name, so
+  `"icon.bmp"` works on GEMDOS.
+
+## Rewrite patterns
+
+**Direct pixel access.** There is no chunky buffer; `memset` rows
+or `pixels[y*pitch+x]` writes corrupt planar data. Rewrite:
+
+* gradient / row fills -> `SDL_FillRect` band per row or
+  `STDL_HLine`
+* tiny overlays (FPS counters, debug text) -> `STDL_PutPixel`
+  (slow path, fine for a handful of pixels) or `STDL_DrawText`
+* 1bpp bitmap expansion -> `STDL_SurfaceFrom1bpp`
+* load-time transforms (flips, remaps) -> `STDL_GetPixel` /
+  `STDL_PutPixel` loops are acceptable off the hot path
+
+**Palette budget.** 16 entries replace 256. Divide them explicitly
+(the ported `testpalette` reserves 0-7 for the sprite, 8-14 for
+effects, 15 for the colour key / UI) and quantise assets to the
+slice they own with `stdlconv bmp16 --colors N`.
+
+**Colour keys.** Quantisation must not merge or approximate the key
+colour. `stdlconv bmp16 --keycolor RRGGBB` keeps the exact key at
+index 15 and excludes it from quantisation.
+
+**Per-pixel game loops.** Rendering that plots pixels every frame
+(plasma, scaled sprites, software 3D) has no cheap planar
+equivalent; redesign around spans, tiles and sprites, or pre-render.
+
+## ST-specific gotchas
+
+* **Filenames**: GEMDOS is 8.3 and uppercase; load `"ICON.BMP"`,
+  not `"icon.bmp"`.
+* **stdout is buffered**: console output may appear only at exit.
+  `fprintf(stderr, ...)` is unbuffered.
+* **The console prints onto your screen**: printf during play will
+  scribble over low-res screen RAM. Fine for tests, not for games.
+* **Arguments**: programs launched from the desktop get no argv;
+  make sure defaults are sensible.
+* **Overlapping dirty-rect sprites** (testsprite-style erase/redraw)
+  show tearing between overlapping sprites at ST frame rates; use
+  `STDL_Dirty` restore or a back buffer for real games.
+* **Key repeat**: the IKBD sends no auto-repeats; STDL synthesises
+  them only after `SDL_EnableKeyRepeat`, matching SDL.

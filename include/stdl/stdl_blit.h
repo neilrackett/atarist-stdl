@@ -1,0 +1,34 @@
+/*
+ * STDL - Planar Display Library for Atari ST
+ * Copyright (C) 2026 Neil Rackett
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ *
+ * Surface and sprite copying.
+ *
+ * Dispatch, in order of preference:
+ *   1. Same 16px phase, unmasked  - word copies with edge masks
+ *   2. Same phase, masked         - per-group mask/or
+ *   3. Pre-shifted sprite variant - select variant, use (1)/(2)
+ *   4. Unaligned                  - runtime shift chain (slow path)
+ */
+
+#ifndef STDL_BLIT_H
+#define STDL_BLIT_H
+
+#include <stdl/stdl_types.h>
+
+/*
+ * SDL 1.2 semantics: srcrect NULL = whole source, dstrect NULL =
+ * top-left; only dstrect x/y are read, and the final clipped
+ * rectangle is written back to dstrect. Uses the source mask when
+ * STDL_SRCKEY is set (see STDL_SetColourKey).
+ */
+int STDL_BlitSurface(STDL_Surface *src, const STDL_Rect *srcrect,
+                     STDL_Surface *dst, STDL_Rect *dstrect);
+
+void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
+                     int x, int y);
+void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,
+                   int x, int y);
+
+#endif /* STDL_BLIT_H */

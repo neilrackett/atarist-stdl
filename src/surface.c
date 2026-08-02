@@ -1,0 +1,311 @@
+/*
+ * STDL - Planar Display Library for Atari ST
+ * Copyright (C) 2026 Neil Rackett
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ *
+ * STDL_Surface: creation, colour keys, clipping.
+ */
+
+#include <stdlib.h>
+#include <string.h>
+#include "stdl_internal.h"
+
+/* One group of slack either side of the pixel data: the unaligned
+ * blit path may read (never write) one group before or after the
+ * rectangle it copies, and the slack keeps that inside the block. */
+#define GUARD 8
+
+STDL_Surface *STDL_CreateSurface(int w, int h)
+{
+    STDL_Surface *s;
+    int groups;
+    uint32_t size;
+    uint8_t *block;
+
+    if (w <= 0 || h <= 0 || w > 4096 || h > 4096) {
+        STDL_SetError("bad surface size");
+        return NULL;
+    }
+    groups = (w + 15) >> 4;
+    size = (uint32_t)groups * 8 * h;
+
+    s = calloc(1, sizeof(STDL_Surface));
+    if (s == NULL) {
+        STDL_SetError("out of memory");
+        return NULL;
+    }
+    block = malloc(size + 2 * GUARD);
+    s->format = calloc(1, sizeof(STDL_PixelFormat));
+    if (block == NULL || s->format == NULL) {
+        free(block);
+        free(s->format);
+        free(s);
+        STDL_SetError("out of memory");
+        return NULL;
+    }
+    memset(block, 0, size + 2 * GUARD);
+    s->pixels = block + GUARD;
+    s->w = (int16_t)w;
+    s->h = (int16_t)h;
+    s->stride = (uint16_t)(groups * 8);
+    s->planes = 4;
+    s->clip.x = 0;
+    s->clip.y = 0;
+    s->clip.w = (uint16_t)w;
+    s->clip.h = (uint16_t)h;
+
+    s->format->palette = calloc(1, sizeof(STDL_Palette)
+                                + 16 * sizeof(STDL_Colour));
+    if (s->format->palette == NULL) {
+        free(block);
+        free(s->format);
+        free(s);
+        STDL_SetError("out of memory");
+        return NULL;
+    }
+    s->format->palette->ncolors = 16;
+    s->format->palette->colors =
+        (STDL_Colour *)(s->format->palette + 1);
+    memcpy(s->format->palette->colors, stdl.colours,
+           16 * sizeof(STDL_Colour));
+    s->format->BitsPerPixel = 4;
+    s->format->BytesPerPixel = 1;
+    return s;
+}
+
+void STDL_FreeSurface(STDL_Surface *s)
+{
+    if (s == NULL || (s->flags & STDL_SCREEN)) {
+        return;
+    }
+    if (s->pixels != NULL) {
+        free(s->pixels - GUARD);
+    }
+    if (s->mask != NULL) {
+        free(s->mask - GUARD);
+    }
+    if (s->format != NULL) {
+        free(s->format->palette);
+        free(s->format);
+    }
+    free(s);
+}
+
+STDL_Surface *STDL_DuplicateSurface(const STDL_Surface *s)
+{
+    STDL_Surface *d;
+
+    if (s == NULL) {
+        return NULL;
+    }
+    d = STDL_CreateSurface(s->w, s->h);
+    if (d == NULL) {
+        return NULL;
+    }
+    memcpy(d->pixels, s->pixels, (uint32_t)s->stride * s->h);
+    memcpy(d->format->palette->colors, s->format->palette->colors,
+           16 * sizeof(STDL_Colour));
+    if (s->flags & STDL_SRCKEY) {
+        STDL_SetColourKey(d, 1, s->colourkey);
+    }
+    return d;
+}
+
+/* allocate the mask block with the same guard slack as the pixels:
+ * the unaligned blit path may read one word past either end */
+static int mask_alloc(STDL_Surface *s)
+{
+    int groups = s->stride / 8;
+
+    if (s->mask == NULL) {
+        uint32_t size = (uint32_t)groups * 2 * s->h;
+        uint8_t *block = malloc(size + 2 * GUARD);
+        if (block == NULL) {
+            STDL_SetError("out of memory for mask");
+            return -1;
+        }
+        memset(block, 0, size + 2 * GUARD);
+        s->mask = block + GUARD;
+        s->maskstride = (uint16_t)(groups * 2);
+    }
+    return 0;
+}
+
+int STDL_SetColourKey(STDL_Surface *s, int enable, uint8_t key)
+{
+    int groups, y, g;
+
+    if (s == NULL || (s->flags & STDL_SCREEN)) {
+        return -1;
+    }
+    if (!enable) {
+        if (s->mask != NULL) {
+            free(s->mask - GUARD);
+        }
+        s->mask = NULL;
+        s->flags &= ~STDL_SRCKEY;
+        return 0;
+    }
+    key &= 15;
+    if (mask_alloc(s) < 0) {
+        return -1;
+    }
+    groups = s->stride / 8;
+    s->colourkey = key;
+    s->flags |= STDL_SRCKEY;
+    s->opaque_state = 0;
+
+    /* mask bit set = pixel matches the key = destination preserved.
+     * Word-parallel: a pixel matches when every plane word agrees
+     * with the key's bit for that plane. */
+    for (y = 0; y < s->h; y++) {
+        const uint16_t *grp =
+            (const uint16_t *)(s->pixels + (uint32_t)y * s->stride);
+        uint16_t *mrow =
+            (uint16_t *)(s->mask + (uint32_t)y * s->maskstride);
+        for (g = 0; g < groups; g++) {
+            uint16_t m;
+            m  = (key & 1) ? grp[0] : (uint16_t)~grp[0];
+            m &= (key & 2) ? grp[1] : (uint16_t)~grp[1];
+            m &= (key & 4) ? grp[2] : (uint16_t)~grp[2];
+            m &= (key & 8) ? grp[3] : (uint16_t)~grp[3];
+            mrow[g] = m;
+            grp += 4;
+        }
+    }
+    return 0;
+}
+
+void STDL_SetSurfaceOrigin(STDL_Surface *s, int x, int y)
+{
+    if (s != NULL) {
+        s->org_x = (int16_t)x;
+        s->org_y = (int16_t)y;
+    }
+}
+
+int STDL_CreateMask(STDL_Surface *s, int transparent)
+{
+    if (s == NULL || (s->flags & STDL_SCREEN)) {
+        return -1;
+    }
+    if (mask_alloc(s) < 0) {
+        return -1;
+    }
+    memset(s->mask, transparent ? 0xFF : 0x00,
+           (uint32_t)s->maskstride * s->h);
+    s->flags |= STDL_SRCKEY;
+    s->opaque_state = 0;
+    return 0;
+}
+
+int STDL_SurfaceIsOpaque(STDL_Surface *s)
+{
+    if (s == NULL) {
+        return 0;
+    }
+    if (s->mask == NULL) {
+        return 1;
+    }
+    if (s->opaque_state == 0) {
+        uint32_t n = (uint32_t)s->maskstride * s->h;
+        const uint8_t *m = s->mask;
+        s->opaque_state = 1;
+        while (n--) {
+            if (*m++ != 0) {
+                s->opaque_state = 2;
+                break;
+            }
+        }
+    }
+    return s->opaque_state == 1;
+}
+
+void STDL_PutGroup(STDL_Surface *s, int x, int y,
+                   const uint16_t planes[4], uint16_t mask)
+{
+    uint16_t *grp;
+    int g;
+
+    if (s == NULL || planes == NULL || y < 0 || y >= s->h) {
+        return;
+    }
+    g = x >> 4;
+    if (g < 0 || g >= s->stride / 8) {
+        return;
+    }
+    grp = (uint16_t *)(s->pixels + (uint32_t)y * s->stride + g * 8);
+    grp[0] = planes[0];
+    grp[1] = planes[1];
+    grp[2] = planes[2];
+    grp[3] = planes[3];
+    if (s->mask != NULL) {
+        ((uint16_t *)(s->mask + (uint32_t)y * s->maskstride))[g] = mask;
+        s->opaque_state = 0;
+    }
+}
+
+void STDL_SetClipRect(STDL_Surface *s, const STDL_Rect *r)
+{
+    int x1, y1, x2, y2;
+
+    if (s == NULL) {
+        return;
+    }
+    if (r == NULL) {
+        s->clip.x = 0;
+        s->clip.y = 0;
+        s->clip.w = (uint16_t)s->w;
+        s->clip.h = (uint16_t)s->h;
+        return;
+    }
+    x1 = r->x < 0 ? 0 : r->x;
+    y1 = r->y < 0 ? 0 : r->y;
+    x2 = r->x + r->w > s->w ? s->w : r->x + r->w;
+    y2 = r->y + r->h > s->h ? s->h : r->y + r->h;
+    if (x2 < x1) x2 = x1;
+    if (y2 < y1) y2 = y1;
+    s->clip.x = (int16_t)x1;
+    s->clip.y = (int16_t)y1;
+    s->clip.w = (uint16_t)(x2 - x1);
+    s->clip.h = (uint16_t)(y2 - y1);
+}
+
+void STDL_GetClipRect(STDL_Surface *s, STDL_Rect *r)
+{
+    if (s != NULL && r != NULL) {
+        *r = s->clip;
+    }
+}
+
+STDL_Surface *STDL_SurfaceFrom1bpp(const uint8_t *bits, int w, int h,
+                                   uint8_t fg, uint8_t bg)
+{
+    STDL_Surface *s = STDL_CreateSurface(w, h);
+    int bpr, y, g, groups, p;
+
+    if (s == NULL) {
+        return NULL;
+    }
+    fg &= 15;
+    bg &= 15;
+    bpr = (w + 7) / 8;
+    groups = s->stride / 8;
+    for (y = 0; y < h; y++) {
+        const uint8_t *src = bits + (uint32_t)y * bpr;
+        uint16_t *row = (uint16_t *)(s->pixels + (uint32_t)y * s->stride);
+        for (g = 0; g < groups; g++) {
+            uint16_t v = 0;
+            int b0 = g * 2, b1 = g * 2 + 1;
+            if (b0 < bpr) v = (uint16_t)(src[b0] << 8);
+            if (b1 < bpr) v |= src[b1];
+            for (p = 0; p < 4; p++) {
+                uint16_t word = 0;
+                if (fg & (1 << p)) word |= v;
+                if (bg & (1 << p)) word |= (uint16_t)~v;
+                row[g * 4 + p] = word;
+            }
+        }
+    }
+    return s;
+}

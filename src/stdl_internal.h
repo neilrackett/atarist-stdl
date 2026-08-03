@@ -171,11 +171,14 @@ STDL_Sprite *stdl_sprite_preshift(STDL_Sprite *spr);
 extern void (*stdl_audio_hook)(void);
 extern void (*stdl_cursor_hook)(int x, int y);
 
-/* shutdown hooks run by restore_all before leaving supervisor
- * mode: stop DMA playback / remove the music VBL slot even when
- * the program exits without closing them. Defined in video.c. */
+/* shutdown hooks run before leaving supervisor mode: stop DMA
+ * playback, remove the music VBL slot and drop public VBL callbacks
+ * even when the program exits without closing them. They run from
+ * the GEMDOS terminate vector too, so they may only touch hardware
+ * and vectors - no GEMDOS calls, no heap. Defined in video.c. */
 extern void (*stdl_shutdown_audio)(void);
 extern void (*stdl_shutdown_music)(void);
+extern void (*stdl_shutdown_vbl)(void);
 
 /* brief interrupt masking (supervisor mode) for state shared with
  * interrupt context; no-ops when built for host-side unit tests */

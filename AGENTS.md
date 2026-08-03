@@ -19,7 +19,7 @@ stcmd make                        # interactive terminal
 
 Cross-compiles with m68k-atari-mint-gcc 4.6.4 via
 [atarist-toolkit-docker](https://github.com/sidecartridge/atarist-toolkit-docker).
-Produces `libstdl.a` and `dist/` (16 example .TOS binaries + assets
+Produces `libstdl.a` and `dist/` (17 example .TOS binaries + assets
 copied from `examples/assets/`). The build must stay at **zero
 warnings** with the Makefile's `-Wall -Wextra`.
 
@@ -77,11 +77,26 @@ warnings** with the Makefile's `-Wall -Wextra`.
   `stdl_ym_owned` ownership - see src/ym.c.
 - The library runs in supervisor mode between `STDL_Init` and exit.
   Low memory (cookie jar at $5A0, hz200 at $4BA) bus-errors in user
-  mode. `Super()` enter/exit at different stack depths crashes -
-  see `exit_supervisor()` in src/video.c before changing it.
+  mode. `Super(0)` is a *toggle*: calling it when the caller is
+  already supervisor drops to user mode, so `STDL_Init` asks
+  `Super(1)` first and only claims - and later gives back - the mode
+  when it was ours. `Super()` enter/exit at different stack depths
+  crashes - see `exit_supervisor()` in src/video.c before changing
+  it.
+- **Termination is not just `atexit`.** STDL installs a GEMDOS
+  terminate-vector handler ($0102) that puts back everything which
+  would outlive the process - VBL slots, the IKBD vector, palette,
+  resolution, DMA - because `abort()`, a failed `assert()` and a TOS
+  exception all reach `Pterm` without running `atexit` (and libcmini
+  runs the handlers it does have in registration order, not LIFO).
+  Anything that handler runs may touch hardware and vectors only:
+  no GEMDOS calls, no heap, no leaving supervisor mode. Keep new
+  shutdown work in `release_hardware()` on the right side of that
+  line.
 - Cooperative model: no interrupts except the VBL sound tick
-  (ym.c) and the IKBD handler (event.c). Services (audio refill,
-  compat timers, cursor) run from the pump and the native delays.
+  (ym.c), the public `STDL_AddVBL` callbacks (vbl.c) and the IKBD
+  handler (event.c). Services (audio refill, compat timers, cursor)
+  run from the pump and the native delays.
 
 ## 68000 / gcc 4.6.4 performance notes
 

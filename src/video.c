@@ -16,6 +16,7 @@ STDL_Surface stdl_screen;
 
 void (*stdl_shutdown_audio)(void);
 void (*stdl_shutdown_music)(void);
+void (*stdl_shutdown_vbl)(void);
 
 static STDL_Palette screen_palette;
 static STDL_PixelFormat screen_format;
@@ -104,13 +105,16 @@ static void megaste_speedrestore(void)
 
 /* ---------------------------------------------------------------- */
 
-static void restore_all(void)
+/*
+ * Everything that outlives the process if it is left installed:
+ * interrupt vectors and hardware registers. No GEMDOS calls and no
+ * free() - this also runs from the terminate vector below, where the
+ * process is already being torn down and the heap is not ours.
+ */
+static void release_hardware(void)
 {
     int i;
 
-    if (!stdl.initialised) {
-        return;
-    }
     if (stdl_shutdown_music != NULL) {
         stdl_shutdown_music();
         stdl_shutdown_music = NULL;
@@ -118,6 +122,10 @@ static void restore_all(void)
     if (stdl_shutdown_audio != NULL) {
         stdl_shutdown_audio();
         stdl_shutdown_audio = NULL;
+    }
+    if (stdl_shutdown_vbl != NULL) {
+        stdl_shutdown_vbl();
+        stdl_shutdown_vbl = NULL;
     }
     stdl_events_remove();
     if (stdl.video_set) {
@@ -127,9 +135,43 @@ static void restore_all(void)
         (void)Setscreen(stdl.page[0], stdl.page[0], stdl.old_rez);
         stdl.video_set = 0;
     }
+    megaste_speedrestore();
+}
+
+/*
+ * GEMDOS terminate vector ($0102). atexit is not enough: abort(), a
+ * failed assert(), a signal handler and a TOS exception all reach
+ * Pterm without running atexit handlers, and libcmini runs the ones
+ * it does have in registration order rather than LIFO. Whatever the
+ * route, GEMDOS is about to give this program's memory to someone
+ * else while a VBL queue slot still points into it - which turns an
+ * out-of-memory into a machine crash one frame later. (Measured:
+ * Sopwith at 512K asserts on a failed calloc and EmuTOS then panics
+ * with an illegal instruction taken from the level-4 autovector.)
+ */
+static void (*old_term)(void);
+
+static void term_handler(void)
+{
+    (void)Setexc(0x102, (void *)old_term);
+    if (stdl.initialised) {
+        release_hardware();
+        stdl.initialised = 0;
+    }
+    if (old_term != NULL) {
+        old_term();
+    }
+}
+
+static void restore_all(void)
+{
+    if (!stdl.initialised) {
+        return;
+    }
+    (void)Setexc(0x102, (void *)old_term);
+    release_hardware();
     free(stdl.page1_alloc);
     stdl.page1_alloc = NULL;
-    megaste_speedrestore();
     (void)Cconws("\33e");                               /* cursor back on */
     if (stdl.old_ssp != 0) {
         exit_supervisor(stdl.old_ssp);
@@ -146,9 +188,19 @@ int STDL_Init(uint32_t flags)
     }
     memset(&stdl, 0, sizeof(stdl));
 
-    /* supervisor mode from here on - even the cookie jar pointer
-     * at $5A0 is protected memory in user mode */
-    stdl.old_ssp = (long)Super(0L);
+    /*
+     * Supervisor mode from here on - low memory (the cookie jar
+     * pointer at $5A0, the 200Hz counter at $4BA) bus-errors in user
+     * mode. Super(0) is a *toggle*, not an idempotent "enter": called
+     * when the caller is already supervisor it drops to USER mode,
+     * and detect_machine() below then bus-errors on $5A0. Ports that
+     * took supervisor themselves before reaching STDL are entitled to
+     * a library that notices, so ask first and only claim the mode -
+     * and the responsibility for giving it back - when it is ours.
+     */
+    if (Super(1L) == 0L) {
+        stdl.old_ssp = (long)Super(0L);
+    }
     detect_machine();
     stdl.old_cpuspeed = megaste_speedup();
     stdl_time_init();
@@ -159,6 +211,7 @@ int STDL_Init(uint32_t flags)
     }
 
     stdl.initialised = 1;
+    old_term = (void (*)(void))Setexc(0x102, (void *)term_handler);
     atexit(restore_all);
     return 0;
 }

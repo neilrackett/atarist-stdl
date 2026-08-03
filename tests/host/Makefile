@@ -18,9 +18,9 @@ CFLAGS  = -std=gnu99 -O1 -g -fsanitize=address -Wall -Wextra \
 
 SRC     = ../../src
 CORE    = stubs.c $(SRC)/surface.c $(SRC)/draw.c $(SRC)/blit.c \
-          $(SRC)/sprite.c $(SRC)/palette.c
+          $(SRC)/sprite.c $(SRC)/palette.c $(SRC)/planes.c
 
-TESTS   = test_pixel test_compose test_cursor test_assets
+TESTS   = test_pixel test_compose test_cursor test_assets test_planes
 
 all: $(TESTS)
 
@@ -37,9 +37,13 @@ test_cursor: test_cursor.c $(CORE) $(SRC)/cursor.c
 test_assets: test_assets.c $(CORE) $(SRC)/bmp.c $(SRC)/asset.c
 	$(CC) $(CFLAGS) -o $@ $^
 
+test_planes: test_planes.c $(CORE)
+	$(CC) $(CFLAGS) -o $@ $^
+
 run: $(TESTS)
 	@./test_pixel && ./test_compose && ./test_cursor \
-	  && ./test_assets && echo "ALL HOST TESTS PASSED"
+	  && ./test_assets && ./test_planes \
+	  && echo "ALL HOST TESTS PASSED"
 
 clean:
 	rm -f $(TESTS)

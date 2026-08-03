@@ -74,6 +74,7 @@ STDL_Surface *STDL_LoadDegas(const char *file, STDL_Palette *pal_out)
     s = STDL_CreateSurface(320, 200);
     if (s != NULL) {
         memcpy(s->pixels, data, 32000);
+        stdl_planes_normalise(s->pixels, s->stride, s->h);
         for (i = 0; i < 16; i++) {
             hw_to_rgb(hwpal[i], &s->format->palette->colors[i]);
         }
@@ -110,6 +111,7 @@ int STDL_ShowDegas(const char *file)
         return -1;
     }
     memcpy(screen->pixels, data, 32000);
+    stdl_planes_normalise(screen->pixels, screen->stride, screen->h);
     free(data);
     for (i = 0; i < 16; i++) {
         hw_to_rgb(hwpal[i], &stdl.colours[i]);

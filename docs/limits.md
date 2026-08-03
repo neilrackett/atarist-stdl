@@ -74,6 +74,17 @@ stop trying and redesign instead.
 * `STDL_DrawText` fonts are limited to 16-pixel-wide cells.
 * Tiles blit at group-aligned x only (`x & ~15`); use sprites for
   free positioning.
+* `STDL_SetPlaneBudget(N)` trades colours for speed: promise never
+  to draw an index `>= 2^N` and every primitive (including the
+  BLiTTER passes) stops maintaining the higher planes, moving `N/4`
+  of the memory. It is a whole-program mode, not a per-surface or
+  per-region one - set it once, next to `STDL_SetVideoMode`. It is
+  global on purpose: a per-surface budget would put an extra load
+  in every inner loop and cost more than it saved. Lowering it
+  zeroes the high planes of the screen pages; surfaces the program
+  already filled with out-of-budget colours are *not* rescanned and
+  will render wrong until re-created. Colour indices above the
+  budget are truncated, not rejected.
 * Large same-phase fills and blits are BLiTTER-accelerated when
   the hardware has one (Mega ST/STE/Mega STE, detected at init);
   correctness never depends on it, `STDL_UseBlitter(0)` forces the

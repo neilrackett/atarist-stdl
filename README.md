@@ -72,12 +72,19 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | TCURSOR.TOS  | software mouse cursor with save-under                                            |
 | PLAYMUS.TOS  | YM music (stdlconv midi -> STDL_Music) + DMA chunks via the SDL_mixer shim       |
 | SFXDEMO.TOS  | Degas splash, YM effects stealing/restoring music voices, joystick key emulation |
-| BLITCHK.TOS  | BLiTTER vs CPU byte-identical verification + timing                              |
+| BLITCHK.TOS  | BLiTTER vs CPU byte-identical verification at two plane budgets + timing         |
 
 Large same-phase fills and blits are BLiTTER-accelerated where the
 hardware has one (fills 16.7 -> 50 FPS, aligned blits 8.3 -> 25 FPS
 on an emulated Mega STE); the CPU paths remain the correctness
 reference, verified byte-identical on target by BLITCHK.TOS.
+
+Games that do not need 16 colours can say so:
+`STDL_SetPlaneBudget(2)` promises no colour index above 3 and every
+primitive - fills, spans, blits, sprites, tiles, text, the XOR ops
+and the BLiTTER passes - stops maintaining the top two bitplanes.
+Measured with BLITCHK.TOS: 1.4x on a plain ST, 1.9x with a
+BLiTTER. The default is 4 planes and is bit-for-bit unchanged.
 
 The next milestone is proving the API against a real game port
 (Koules), which is expected to force `STDL_Dirty` into shape.

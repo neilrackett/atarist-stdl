@@ -57,6 +57,72 @@ extern volatile uint16_t stdl_host_hwpal[16];
     (((uint32_t)(second) << 16) | (uint32_t)(first))
 #endif
 
+/*
+ * Plane budget (planes.c): the number of low bitplanes the drawing
+ * paths maintain. 4 is the default and means "all of them" - the
+ * behaviour of every build before the budget existed. A lower value
+ * is the program's promise that no colour index >= 2^stdl_planes is
+ * drawn, so planes stdl_planes..3 are zero everywhere and writing
+ * them is a no-op that can be skipped.
+ *
+ * gcc 4.6 does not unswitch loops, so a runtime plane count in an
+ * inner loop would cost more than it saves. Hot paths put the loop
+ * body in an STDL_PLANE_INLINE helper taking a `const int np` and
+ * call it through STDL_PLANE_DISPATCH, placed outside every loop;
+ * each instantiation then unrolls with np as a constant.
+ *
+ * A budget only ever licenses skipping a write, never forces one,
+ * so a path may still write a high plane when the value it would
+ * write is provably zero (whole-block clears use memset for that).
+ */
+extern int stdl_planes;
+void stdl_planes_clear_screens(void);
+void stdl_planes_normalise(uint8_t *base, int stride, int h);
+
+/* colour indices are effectively masked to the budget: the XOR ops
+ * use this directly (a plane whose colour bit is clear is never
+ * touched), the rest get it for free by not writing high planes */
+#define STDL_COL_MASK ((uint8_t)((1u << stdl_planes) - 1u))
+
+#define STDL_PLANE_INLINE \
+    static __inline__ __attribute__((always_inline))
+
+#define STDL_PLANE_DISPATCH(np, BODY) \
+    do {                              \
+        switch (np) {                 \
+        case 1:  BODY(1); break;      \
+        case 2:  BODY(2); break;      \
+        case 3:  BODY(3); break;      \
+        default: BODY(4); break;      \
+        }                             \
+    } while (0)
+
+/*
+ * Store / merge the low np plane words of one group. The words are
+ * passed as scalars, not an array: an array parameter escapes and
+ * gcc 4.6 then reloads it after every store to the destination.
+ */
+STDL_PLANE_INLINE void stdl_put_planes(uint16_t *grp,
+    uint16_t w0, uint16_t w1, uint16_t w2, uint16_t w3, const int np)
+{
+    grp[0] = w0;
+    if (np > 1) grp[1] = w1;
+    if (np > 2) grp[2] = w2;
+    if (np > 3) grp[3] = w3;
+}
+
+/* grp = (grp & ~m) | (w & m), low np planes only */
+STDL_PLANE_INLINE void stdl_merge_planes(uint16_t *grp, uint16_t m,
+    uint16_t w0, uint16_t w1, uint16_t w2, uint16_t w3, const int np)
+{
+    uint16_t keep = (uint16_t)~m;
+
+    grp[0] = (uint16_t)((grp[0] & keep) | (w0 & m));
+    if (np > 1) grp[1] = (uint16_t)((grp[1] & keep) | (w1 & m));
+    if (np > 2) grp[2] = (uint16_t)((grp[2] & keep) | (w2 & m));
+    if (np > 3) grp[3] = (uint16_t)((grp[3] & keep) | (w3 & m));
+}
+
 #define STDL_SCREEN_W       320
 #define STDL_SCREEN_H       200
 #define STDL_SCREEN_PLANES  4

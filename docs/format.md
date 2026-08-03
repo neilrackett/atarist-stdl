@@ -29,6 +29,46 @@ the contract stays stable when they arrive.
 padded up to a multiple of 16 pixels internally while `w` keeps the
 requested value. Padding pixels exist in memory but are never drawn.
 
+### Plane budget
+
+The layout above never changes: a group is always `planes`
+consecutive words and `stride` is always computed from four planes
+in low resolution. What can change is how many of those planes STDL
+maintains.
+
+`STDL_SetPlaneBudget(N)` declares that no colour index `>= 2^N` will
+be drawn again. It adds one invariant to the contract:
+
+* **planes `N..3` of every surface, and of every screen page, are
+  zero.**
+
+Given that invariant, a primitive may skip any write whose value
+would be zero, which is every write to a plane at or above the
+budget. Skipping is a licence, never an obligation: a path that can
+write a whole group faster than it can write part of one (a `memset`
+clear) is still free to do so, because the bytes it puts in the high
+planes are the zeros already there.
+
+Consequences that are part of the contract, not implementation
+detail:
+
+* Colour indices are effectively masked to the low `N` bits. Drawing
+  colour 9 at budget 2 draws colour 1 - the same on every path,
+  CPU or BLiTTER.
+* Every public entry point that writes pixels honours the budget,
+  including the raw group writers (`STDL_PutGroup`,
+  `STDL_PutGroup8`) and the wholesale loaders (BMP, Degas, bank
+  surfaces), so the invariant cannot be broken from outside.
+* Lowering the budget re-zeroes planes `N..3` of the screen pages.
+  It does **not** walk surfaces the program allocated - those start
+  zeroed and stay compliant while the promise holds. Data poked
+  straight into a surface's `pixels` by the program is the program's
+  problem.
+* All 16 palette entries remain settable and are programmed to the
+  hardware unchanged; only the first `2^N` can appear on screen.
+* `N` is 1..4 and defaults to 4, which is the layout above with
+  nothing skipped.
+
 ### Guard bytes
 
 Surfaces allocated by `STDL_CreateSurface` carry 8 slack bytes

@@ -33,18 +33,21 @@ static uint32_t rnd(void)
     return (rng >> 16) & 0x7FFF;
 }
 
+static int maxcol = 16;         /* colours the plane budget allows */
+
 static STDL_Surface *make_src(int keyed)
 {
     STDL_Surface *s = STDL_CreateSurface(160, 64);
+    int lim = keyed ? (maxcol < 6 ? maxcol : 6) : maxcol;
     int x, y;
 
     for (y = 0; y < 64; y++) {
         for (x = 0; x < 160; x++) {
-            STDL_PutPixel(s, x, y, (uint8_t)(rnd() % (keyed ? 6 : 16)));
+            STDL_PutPixel(s, x, y, (uint8_t)(rnd() % lim));
         }
     }
     if (keyed) {
-        STDL_SetColourKey(s, 1, 3);
+        STDL_SetColourKey(s, 1, (uint8_t)(maxcol > 3 ? 3 : maxcol - 1));
     }
     return s;
 }
@@ -63,19 +66,19 @@ static int compare(const STDL_Surface *a, const STDL_Surface *b)
     return 0;
 }
 
-int main(void)
+/*
+ * One randomised CPU-vs-BLiTTER pass at the current plane budget.
+ * Every surface is built inside the pass so it starts zeroed - a
+ * reduced budget only licenses skipping writes to planes that are
+ * already zero, and reusing a 16-colour surface would break that.
+ * Returns the mismatch count.
+ */
+static int compare_pass(void)
 {
     STDL_Surface *src_plain, *src_keyed, *da, *db;
-    int i, failures = 0, blit_avail;
-    uint32_t t0, t1, cpu_ms, blit_ms;
+    int i, failures = 0;
 
-    if (STDL_Init(STDL_INIT_VIDEO) < 0) {
-        fprintf(stderr, "init failed: %s\n", STDL_GetError());
-        return 1;
-    }
-    blit_avail = STDL_GetMachineInfo()->has_blitter;
-    printf("blitter %s\n", blit_avail ? "present" : "ABSENT");
-
+    rng = 0x12345678;
     src_plain = make_src(0);
     src_keyed = make_src(1);
     da = STDL_CreateSurface(320, 160);
@@ -90,7 +93,10 @@ int main(void)
 
         if (op == 0) {
             /* fill: random rect, random colour or transparent */
-            uint8_t col = (uint8_t)(rnd() % 17);
+            uint8_t col = (uint8_t)(rnd() % (maxcol + 1));
+            if (col == maxcol) {
+                col = STDL_TRANSPARENT;
+            }
             r.x = (int16_t)((int)(rnd() % 360) - 20);
             r.y = (int16_t)((int)(rnd() % 180) - 10);
             r.w = (uint16_t)(rnd() % 200);
@@ -138,38 +144,75 @@ int main(void)
                          : "FAIL: %d mismatches in %d ops\n",
            failures == 0 ? ITERATIONS : failures, ITERATIONS);
 
-    /* timing: full-screen-ish fills and big aligned blits */
-    {
-        STDL_Rect big = { 0, 0, 320, 160 };
-        STDL_Rect d = { 0, 0, 0, 0 };
-        int n;
+    STDL_FreeSurface(src_plain);
+    STDL_FreeSurface(src_keyed);
+    STDL_FreeSurface(da);
+    STDL_FreeSurface(db);
+    return failures;
+}
 
-        STDL_UseBlitter(0);
+/* fill + keyed blit throughput, CPU path against BLiTTER path */
+static void timing_pass(const char *label)
+{
+    STDL_Surface *da = STDL_CreateSurface(320, 160);
+    STDL_Surface *src = make_src(1);
+    STDL_Rect big = { 0, 0, 320, 160 };
+    STDL_Rect d = { 0, 0, 0, 0 };
+    uint32_t t0, t1, cpu_ms = 0, blit_ms = 0;
+    int use, n;
+
+    for (use = 0; use <= 1; use++) {
+        STDL_UseBlitter(use);
         t0 = STDL_GetTicks();
         for (n = 0; n < 50; n++) {
             STDL_Rect f = big;
-            STDL_FillRect(da, &f, (uint8_t)(n & 15));
+            STDL_FillRect(da, &f, (uint8_t)(n % maxcol));
             d.x = 0; d.y = 0;
-            STDL_BlitSurface(src_keyed, NULL, da, &d);
+            STDL_BlitSurface(src, NULL, da, &d);
         }
         t1 = STDL_GetTicks();
-        cpu_ms = t1 - t0;
-
-        STDL_UseBlitter(1);
-        t0 = STDL_GetTicks();
-        for (n = 0; n < 50; n++) {
-            STDL_Rect f = big;
-            STDL_FillRect(da, &f, (uint8_t)(n & 15));
-            d.x = 0; d.y = 0;
-            STDL_BlitSurface(src_keyed, NULL, da, &d);
+        if (use) {
+            blit_ms = t1 - t0;
+        } else {
+            cpu_ms = t1 - t0;
         }
-        t1 = STDL_GetTicks();
-        blit_ms = t1 - t0;
-
-        printf("50x (fill 320x160 + keyed blit 160x64): "
-               "cpu %lums, blitter %lums\n",
-               (unsigned long)cpu_ms, (unsigned long)blit_ms);
     }
+    printf("%s 50x (fill 320x160 + keyed blit 160x64): "
+           "cpu %lums, blitter %lums\n", label,
+           (unsigned long)cpu_ms, (unsigned long)blit_ms);
+    STDL_FreeSurface(da);
+    STDL_FreeSurface(src);
+}
+
+int main(void)
+{
+    int failures, blit_avail;
+
+    if (STDL_Init(STDL_INIT_VIDEO) < 0) {
+        fprintf(stderr, "init failed: %s\n", STDL_GetError());
+        return 1;
+    }
+    blit_avail = STDL_GetMachineInfo()->has_blitter;
+    printf("blitter %s\n", blit_avail ? "present" : "ABSENT");
+
+    /*
+     * The default budget first, then a reduced one. The CPU and
+     * BLiTTER paths have to agree at every budget: the blitter runs
+     * one pass per plane, so a stale loop count there would show up
+     * as a mismatch against the CPU path immediately. The timing
+     * lines show what the budget is worth on this machine.
+     */
+    printf("plane budget 4:\n");
+    failures = compare_pass();
+    timing_pass("budget 4:");
+
+    printf("plane budget 2:\n");
+    STDL_SetPlaneBudget(2);
+    maxcol = 4;
+    failures += compare_pass();
+    timing_pass("budget 2:");
+    STDL_SetPlaneBudget(4);
+    maxcol = 16;
 
     STDL_Quit();
     return failures != 0;

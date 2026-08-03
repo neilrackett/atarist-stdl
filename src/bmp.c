@@ -133,7 +133,9 @@ STDL_Surface *STDL_LoadBMP(const char *file)
             }
             bit = (uint16_t)(0x8000u >> (x & 15));
             grp = drow + (x >> 4) * 4;
-            for (p = 0; p < 4; p++) {
+            /* planes above the budget stay zero: the index is
+             * truncated exactly as a drawn colour would be */
+            for (p = 0; p < stdl_planes; p++) {
                 if (idx & (1 << p)) {
                     grp[p] |= bit;
                 }

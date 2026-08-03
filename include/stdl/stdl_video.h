@@ -54,6 +54,38 @@ const STDL_MachineInfo *STDL_GetMachineInfo(void);
  */
 int STDL_UseBlitter(int enable);
 
+/*
+ * Plane budget: how many of the four bitplanes STDL maintains.
+ *
+ * The screen is always four planes, but a game that only uses
+ * colours 0-3 leaves planes 2 and 3 zero forever and every write
+ * STDL makes to them is wasted bus time. Setting the budget to N is
+ * a promise that no colour index >= 2^N will be drawn again; fills,
+ * spans, blits, sprites, tiles, text, the XOR ops and the BLiTTER
+ * paths then touch only planes 0..N-1 and move N/4 of the memory.
+ *
+ * N is 1..4 and defaults to 4, which is bit-for-bit the behaviour
+ * of a build with no budget set. A negative argument only queries.
+ * Returns the previous budget.
+ *
+ * Lowering the budget zeroes planes N..3 of the screen page(s) STDL
+ * owns, which is what makes skipping those writes sound; it can be
+ * called before or after STDL_SetVideoMode. Surfaces the program
+ * allocates start zeroed, so they stay compliant as long as the
+ * promise holds. Anything already holding colours >= 2^N when the
+ * budget drops (a 16-colour picture loaded earlier, planar data
+ * poked in by hand) keeps those high plane bits and will render
+ * wrong: re-create or re-fill it.
+ *
+ * Colours themselves degrade predictably rather than corrupting:
+ * every primitive behaves as if the colour index were masked to the
+ * low N bits, so a stray colour 9 at budget 2 draws colour 1.
+ * Palette entries are unaffected - all 16 registers stay settable
+ * and are programmed as before, but only the first 2^N can appear
+ * on screen (STDL_MapRGB will not return an index above that).
+ */
+int STDL_SetPlaneBudget(int planes);
+
 const char *STDL_GetError(void);
 void        STDL_SetError(const char *msg);
 

@@ -28,6 +28,7 @@ static STDL_Cursor *current;
 static int visible = 1;         /* SDL default: shown               */
 static int drawn;
 static int drawn_x, drawn_y;    /* hotspot position when drawn      */
+static int drawn_np = 4;        /* plane budget the save-under used */
 
 static uint16_t saved[CUR_MAX][CUR_GROUPS][4];
 
@@ -35,6 +36,7 @@ static void cursor_undraw(void)
 {
     STDL_Cursor *c = current;
     int x0, y0, row, g, p, gx, screen_groups;
+    int np = drawn_np;          /* restore exactly what was saved */
 
     if (!drawn || c == NULL || stdl_screen.pixels == NULL) {
         drawn = 0;
@@ -58,7 +60,7 @@ static void cursor_undraw(void)
                 continue;
             }
             grp = (uint16_t *)(line + (gx + g) * 8);
-            for (p = 0; p < 4; p++) {
+            for (p = 0; p < np; p++) {
                 grp[p] = saved[row][g][p];
             }
         }
@@ -70,6 +72,7 @@ static void cursor_draw(int mx, int my)
 {
     STDL_Cursor *c = current;
     int x0, y0, r, gx, row, g, p, screen_groups;
+    int np = stdl_planes;
 
     if (c == NULL || !visible || stdl_screen.pixels == NULL) {
         return;
@@ -104,9 +107,11 @@ static void cursor_draw(int mx, int my)
                 continue;
             }
             grp = (uint16_t *)(line + (gx + g) * 8);
-            for (p = 0; p < 4; p++) {
+            for (p = 0; p < np; p++) {
                 saved[row][g][p] = grp[p];
-                /* black = all plane bits clear, white = all set */
+                /* black = all plane bits clear, white = all set -
+                 * at a reduced budget "white" is the top colour of
+                 * the budget, and the planes above it stay zero */
                 grp[p] = (uint16_t)((grp[p] & ~pm) | wm);
             }
         }
@@ -114,6 +119,7 @@ static void cursor_draw(int mx, int my)
     drawn = 1;
     drawn_x = mx;
     drawn_y = my;
+    drawn_np = np;
 }
 
 /* event-pump hook: track the mouse */

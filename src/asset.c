@@ -159,6 +159,7 @@ STDL_Surface *STDL_LoadSurface(const char *bank, int id)
     s = STDL_CreateSurface(w, h);
     if (s != NULL) {
         memcpy(s->pixels, p + 6, datalen);
+        stdl_planes_normalise(s->pixels, s->stride, s->h);
         if (p[4]) {
             STDL_SetColourKey(s, 1, p[5]);
         }

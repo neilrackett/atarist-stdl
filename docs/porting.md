@@ -110,6 +110,18 @@ index 15 and excludes it from quantisation.
 (plasma, scaled sprites, software 3D) has no cheap planar
 equivalent; redesign around spans, tiles and sprites, or pre-render.
 
+**Fewer colours than 16.** Count the colour indices the game
+actually draws (not the palette size - the maximum index used). If
+it is under 4 or under 8, `STDL_SetPlaneBudget(2)` / `(3)` after
+`STDL_SetVideoMode` tells STDL to stop maintaining the higher
+bitplanes, and every fill, span, blit, sprite, tile, glyph and
+BLiTTER pass moves proportionally less memory. The catch is that
+the promise covers the whole program: any path that writes a higher
+index - including raw planar pokes into `surface->pixels` that
+bypass the API - has to be found first, because the budget
+truncates colours to the low N bits rather than rejecting them. See
+`docs/format.md` for the exact contract.
+
 ## ST-specific gotchas
 
 * **Filenames**: GEMDOS is 8.3 and uppercase; load `"ICON.BMP"`,

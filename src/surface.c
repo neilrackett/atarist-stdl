@@ -249,10 +249,11 @@ void STDL_PutGroup(STDL_Surface *s, int x, int y,
         return;
     }
     grp = (uint16_t *)(s->pixels + (uint32_t)y * s->stride + g * 8);
-    grp[0] = planes[0];
-    grp[1] = planes[1];
-    grp[2] = planes[2];
-    grp[3] = planes[3];
+    /* words above the plane budget are dropped, not stored: no
+     * public entry point may break the "high planes are zero"
+     * invariant the budget rests on */
+    stdl_put_planes(grp, planes[0], planes[1], planes[2], planes[3],
+                    stdl_planes);
     if (s->mask != NULL) {
         ((uint16_t *)(s->mask + (uint32_t)y * s->maskstride))[g] = mask;
         s->opaque_state = 0;
@@ -281,10 +282,10 @@ void STDL_PutGroup8(STDL_Surface *s, int x, int y,
     }
     half = STDL_WORD_BYTE((x >> 3) & 1);
     grp = s->pixels + (uint32_t)y * s->stride + g * 8 + half;
-    grp[0] = planes[0];
-    grp[2] = planes[1];
-    grp[4] = planes[2];
-    grp[6] = planes[3];
+    grp[0] = planes[0];                     /* budget-truncated, as */
+    if (stdl_planes > 1) grp[2] = planes[1];    /* STDL_PutGroup is */
+    if (stdl_planes > 2) grp[4] = planes[2];
+    if (stdl_planes > 3) grp[6] = planes[3];
     if (s->mask != NULL) {
         s->mask[(uint32_t)y * s->maskstride + g * 2 + half] = transmask;
         s->opaque_state = 0;
@@ -345,7 +346,7 @@ STDL_Surface *STDL_SurfaceFrom1bpp(const uint8_t *bits, int w, int h,
             int b0 = g * 2, b1 = g * 2 + 1;
             if (b0 < bpr) v = (uint16_t)(src[b0] << 8);
             if (b1 < bpr) v |= src[b1];
-            for (p = 0; p < 4; p++) {
+            for (p = 0; p < stdl_planes; p++) {
                 uint16_t word = 0;
                 if (fg & (1 << p)) word |= v;
                 if (bg & (1 << p)) word |= (uint16_t)~v;

@@ -82,6 +82,11 @@ uint8_t STDL_MapRGB(const STDL_PixelFormat *fmt,
         cols = fmt->palette->colors;
         n = fmt->palette->ncolors;
     }
+    /* only the first 2^budget entries can appear on screen, so never
+     * hand back an index the drawing paths would truncate */
+    if (n > (1 << stdl_planes)) {
+        n = 1 << stdl_planes;
+    }
     for (i = 0; i < n; i++) {
         int32_t dr = (int32_t)r - cols[i].r;
         int32_t dg = (int32_t)g - cols[i].g;

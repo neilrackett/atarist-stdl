@@ -219,11 +219,82 @@ STDL_Sprite *stdl_sprite_preshift(STDL_Sprite *spr)
  * loop; unshifted sprites at odd phases go through the runtime
  * shift chain (the documented slow path).
  */
+/*
+ * Sprite row loop, instantiated once per plane budget: with np a
+ * compile-time constant the per-group plane merges unroll and the
+ * out-of-budget words are never fetched from the sprite either.
+ */
+STDL_PLANE_INLINE void blit_sprite_rows(const uint16_t *srow,
+                              uint8_t *drow, uint32_t rowwords,
+                              int dstride, int rows,
+                              int g0, int g1, int sprgroups,
+                              uint16_t cover0, uint16_t cover1,
+                              int runtime_shift, int r, const int np)
+{
+    int yy, g, p;
+
+    for (yy = 0; yy < rows; yy++) {
+        uint16_t *dgrp = (uint16_t *)drow;
+        const uint16_t *src = srow;
+
+        for (g = g0; g < g1; g++) {
+            uint16_t mask, w[4];
+            uint16_t cover = (g == g0) ? cover0
+                           : (g == g1 - 1) ? cover1 : 0xFFFFu;
+
+            w[1] = 0;
+            w[2] = 0;
+            w[3] = 0;
+            if (!runtime_shift) {
+                const uint16_t *sg = src + g * SPR_WORDS;
+                mask = sg[0];
+                w[0] = sg[1];
+                if (np > 1) w[1] = sg[2];
+                if (np > 2) w[2] = sg[3];
+                if (np > 3) w[3] = sg[4];
+            } else {
+                const uint16_t *a =
+                    (g > 0) ? src + (g - 1) * SPR_WORDS : NULL;
+                const uint16_t *b =
+                    (g < sprgroups) ? src + g * SPR_WORDS : NULL;
+                uint16_t am = a ? a[0] : 0xFFFFu;
+                uint16_t bm = b ? b[0] : 0xFFFFu;
+                mask = (uint16_t)((am << (16 - r)) | (bm >> r));
+                for (p = 0; p < np; p++) {
+                    uint16_t aw = a ? a[1 + p] : 0;
+                    uint16_t bw = b ? b[1 + p] : 0;
+                    w[p] = (uint16_t)((aw << (16 - r)) | (bw >> r));
+                }
+            }
+
+            if (cover != 0xFFFFu) {
+                mask |= (uint16_t)~cover;
+                w[0] &= cover;
+                if (np > 1) w[1] &= cover;
+                if (np > 2) w[2] &= cover;
+                if (np > 3) w[3] &= cover;
+            }
+            if (mask != 0xFFFFu) {
+                dgrp[0] = (uint16_t)((dgrp[0] & mask) | w[0]);
+                if (np > 1)
+                    dgrp[1] = (uint16_t)((dgrp[1] & mask) | w[1]);
+                if (np > 2)
+                    dgrp[2] = (uint16_t)((dgrp[2] & mask) | w[2]);
+                if (np > 3)
+                    dgrp[3] = (uint16_t)((dgrp[3] & mask) | w[3]);
+            }
+            dgrp += 4;
+        }
+        srow += rowwords;
+        drow += dstride;
+    }
+}
+
 void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
                      int x, int y)
 {
     int phase, ng, row0, row1, g0, g1, gx0, cy1, cy2, cx1, cx2;
-    int runtime_shift, r, yy, g, p;
+    int runtime_shift, r, np;
     const uint16_t *fdata;
     uint32_t rowwords;
 
@@ -300,55 +371,13 @@ void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
             cover1 = cover0;
         }
 
-        for (yy = row0; yy < row1; yy++) {
-            uint16_t *dgrp = (uint16_t *)drow;
-            const uint16_t *src = srow;
-
-            for (g = g0; g < g1; g++) {
-                uint16_t mask, w[4];
-                uint16_t cover = (g == g0) ? cover0
-                               : (g == g1 - 1) ? cover1 : 0xFFFFu;
-
-                if (!runtime_shift) {
-                    const uint16_t *sg = src + g * SPR_WORDS;
-                    mask = sg[0];
-                    w[0] = sg[1];
-                    w[1] = sg[2];
-                    w[2] = sg[3];
-                    w[3] = sg[4];
-                } else {
-                    const uint16_t *a =
-                        (g > 0) ? src + (g - 1) * SPR_WORDS : NULL;
-                    const uint16_t *b =
-                        (g < spr->groups) ? src + g * SPR_WORDS : NULL;
-                    uint16_t am = a ? a[0] : 0xFFFFu;
-                    uint16_t bm = b ? b[0] : 0xFFFFu;
-                    mask = (uint16_t)((am << (16 - r)) | (bm >> r));
-                    for (p = 0; p < 4; p++) {
-                        uint16_t aw = a ? a[1 + p] : 0;
-                        uint16_t bw = b ? b[1 + p] : 0;
-                        w[p] = (uint16_t)((aw << (16 - r)) | (bw >> r));
-                    }
-                }
-
-                if (cover != 0xFFFFu) {
-                    mask |= (uint16_t)~cover;
-                    w[0] &= cover;
-                    w[1] &= cover;
-                    w[2] &= cover;
-                    w[3] &= cover;
-                }
-                if (mask != 0xFFFFu) {
-                    dgrp[0] = (uint16_t)((dgrp[0] & mask) | w[0]);
-                    dgrp[1] = (uint16_t)((dgrp[1] & mask) | w[1]);
-                    dgrp[2] = (uint16_t)((dgrp[2] & mask) | w[2]);
-                    dgrp[3] = (uint16_t)((dgrp[3] & mask) | w[3]);
-                }
-                dgrp += 4;
-            }
-            srow += rowwords;
-            drow += dst->stride;
-        }
+        np = stdl_planes;
+#define SPRITE_ROWS(np) \
+        blit_sprite_rows(srow, drow, rowwords, dst->stride, \
+                         row1 - row0, g0, g1, spr->groups, \
+                         cover0, cover1, runtime_shift, r, (np))
+        STDL_PLANE_DISPATCH(np, SPRITE_ROWS);
+#undef SPRITE_ROWS
     }
 }
 
@@ -431,10 +460,39 @@ void STDL_FreeTileset(STDL_Tileset *ts)
 
 /* x is rounded down to a group boundary: tiles are the aligned fast
  * path by definition. Use sprites for free positioning. */
+STDL_PLANE_INLINE void blit_tile_rows(const uint16_t *src,
+                              uint8_t *drow, int dstride, int rows,
+                              int gx0, int g0, int g1, int tsgroups,
+                              int words, int masked, const int np)
+{
+    int yy, g;
+
+    for (yy = 0; yy < rows; yy++) {
+        for (g = g0; g < g1; g++) {
+            uint16_t *dgrp = (uint16_t *)(drow + (gx0 + g) * 8);
+            const uint16_t *sg = src + g * words;
+            if (masked) {
+                uint16_t m = sg[0];
+                dgrp[0] = (uint16_t)((dgrp[0] & m) | sg[1]);
+                if (np > 1) dgrp[1] = (uint16_t)((dgrp[1] & m) | sg[2]);
+                if (np > 2) dgrp[2] = (uint16_t)((dgrp[2] & m) | sg[3]);
+                if (np > 3) dgrp[3] = (uint16_t)((dgrp[3] & m) | sg[4]);
+            } else {
+                dgrp[0] = sg[0];
+                if (np > 1) dgrp[1] = sg[1];
+                if (np > 2) dgrp[2] = sg[2];
+                if (np > 3) dgrp[3] = sg[3];
+            }
+        }
+        src += tsgroups * words;
+        drow += dstride;
+    }
+}
+
 void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,
                    int x, int y)
 {
-    int row0, row1, g, g0, g1, yy, gx0, words;
+    int row0, row1, g0, g1, gx0, words, np;
     const uint16_t *tdata;
 
     if (ts == NULL || dst == NULL || index < 0
@@ -469,26 +527,13 @@ void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,
         tdata + (uint32_t)row0 * ts->groups * words;
     uint8_t *drow =
         dst->pixels + (uint32_t)(y + row0) * dst->stride;
-    for (yy = row0; yy < row1; yy++) {
-        for (g = g0; g < g1; g++) {
-            uint16_t *dgrp = (uint16_t *)(drow + (gx0 + g) * 8);
-            const uint16_t *sg = src + g * words;
-            if (ts->masked) {
-                uint16_t m = sg[0];
-                dgrp[0] = (uint16_t)((dgrp[0] & m) | sg[1]);
-                dgrp[1] = (uint16_t)((dgrp[1] & m) | sg[2]);
-                dgrp[2] = (uint16_t)((dgrp[2] & m) | sg[3]);
-                dgrp[3] = (uint16_t)((dgrp[3] & m) | sg[4]);
-            } else {
-                dgrp[0] = sg[0];
-                dgrp[1] = sg[1];
-                dgrp[2] = sg[2];
-                dgrp[3] = sg[3];
-            }
-        }
-        src += ts->groups * words;
-        drow += dst->stride;
-    }
+
+    np = stdl_planes;
+#define TILE_ROWS(np) \
+    blit_tile_rows(src, drow, dst->stride, row1 - row0, gx0, g0, g1, \
+                   ts->groups, words, ts->masked, (np))
+    STDL_PLANE_DISPATCH(np, TILE_ROWS);
+#undef TILE_ROWS
     }
 }
 
@@ -511,40 +556,25 @@ void STDL_FreeFont(STDL_Font *font)
  * group shift, the plane fill words and the row pointers - is
  * hoisted out of the row loop by hand: gcc 4.6 will not unswitch it,
  * and games that render a status bar a character at a time run this
- * inner loop thousands of times a frame.
+ * inner loop thousands of times a frame. The plane budget is
+ * hoisted the same way - the glyph loop is instantiated once per
+ * budget, so a 4-colour game moves half the memory per glyph.
  */
-void STDL_DrawText(STDL_Surface *dst, const STDL_Font *font,
-                   int x, int y, const char *text, uint8_t col)
+STDL_PLANE_INLINE void draw_text_glyphs(uint8_t *pixels, int stride,
+                   const STDL_Font *font, int x, int y,
+                   const char *text,
+                   uint16_t pw0, uint16_t pw1, uint16_t pw2,
+                   uint16_t pw3, int row0, int row1,
+                   int cx1, int cx2, const int np)
 {
-    int i, cw, ch, bpr, row0, row1, cx1, cx2, wstride;
-    uint16_t widthmask, pw0, pw1, pw2, pw3;
+    int i, cw, ch, bpr, wstride;
+    uint16_t widthmask;
 
-    if (dst == NULL || font == NULL || text == NULL
-        || font->cw > 16 || font->cw <= 0) {
-        return;
-    }
-    col &= 15;
-    wstride = dst->stride >> 1;
+    wstride = stride >> 1;
     cw = font->cw;
     ch = font->ch;
     bpr = font->bytes_per_row;
     widthmask = (uint16_t)(0xFFFFu << (16 - cw));
-    pw0 = (col & 1) ? 0xFFFFu : 0;
-    pw1 = (col & 2) ? 0xFFFFu : 0;
-    pw2 = (col & 4) ? 0xFFFFu : 0;
-    pw3 = (col & 8) ? 0xFFFFu : 0;
-
-    /* vertical clip is the same for every glyph on the line */
-    row0 = 0;
-    row1 = ch;
-    if (y < dst->clip.y) row0 = dst->clip.y - y;
-    if (y + row1 > dst->clip.y + dst->clip.h)
-        row1 = dst->clip.y + dst->clip.h - y;
-    if (row0 >= row1) {
-        return;
-    }
-    cx1 = dst->clip.x;
-    cx2 = dst->clip.x + dst->clip.w;
 
     for (i = 0; text[i] != '\0'; i++, x += cw) {
         uint8_t c = (uint8_t)text[i];
@@ -573,8 +603,7 @@ void STDL_DrawText(STDL_Surface *dst, const STDL_Font *font,
         glyph = font->bits + (uint32_t)(c - font->first) * bpr * ch
               + (uint32_t)row0 * bpr;
         {
-            uint8_t *drow = dst->pixels
-                + (uint32_t)(y + row0) * dst->stride;
+            uint8_t *drow = pixels + (uint32_t)(y + row0) * stride;
             g1w = (uint16_t *)(drow + gx * 8);
             g2w = g1w + 4;
         }
@@ -597,17 +626,47 @@ void STDL_DrawText(STDL_Surface *dst, const STDL_Font *font,
             lo = (shift != 0) ? (uint16_t)(bits << (16 - shift)) : 0;
 
             if (hi != 0) {
-                g1w[0] = (uint16_t)((g1w[0] & ~hi) | (pw0 & hi));
-                g1w[1] = (uint16_t)((g1w[1] & ~hi) | (pw1 & hi));
-                g1w[2] = (uint16_t)((g1w[2] & ~hi) | (pw2 & hi));
-                g1w[3] = (uint16_t)((g1w[3] & ~hi) | (pw3 & hi));
+                stdl_merge_planes(g1w, hi, pw0, pw1, pw2, pw3, np);
             }
             if (lo != 0) {
-                g2w[0] = (uint16_t)((g2w[0] & ~lo) | (pw0 & lo));
-                g2w[1] = (uint16_t)((g2w[1] & ~lo) | (pw1 & lo));
-                g2w[2] = (uint16_t)((g2w[2] & ~lo) | (pw2 & lo));
-                g2w[3] = (uint16_t)((g2w[3] & ~lo) | (pw3 & lo));
+                stdl_merge_planes(g2w, lo, pw0, pw1, pw2, pw3, np);
             }
         }
     }
+}
+
+void STDL_DrawText(STDL_Surface *dst, const STDL_Font *font,
+                   int x, int y, const char *text, uint8_t col)
+{
+    int row0, row1, cx1, cx2, np;
+    uint16_t pw0, pw1, pw2, pw3;
+
+    if (dst == NULL || font == NULL || text == NULL
+        || font->cw > 16 || font->cw <= 0) {
+        return;
+    }
+    col &= 15;
+    pw0 = (col & 1) ? 0xFFFFu : 0;
+    pw1 = (col & 2) ? 0xFFFFu : 0;
+    pw2 = (col & 4) ? 0xFFFFu : 0;
+    pw3 = (col & 8) ? 0xFFFFu : 0;
+
+    /* vertical clip is the same for every glyph on the line */
+    row0 = 0;
+    row1 = font->ch;
+    if (y < dst->clip.y) row0 = dst->clip.y - y;
+    if (y + row1 > dst->clip.y + dst->clip.h)
+        row1 = dst->clip.y + dst->clip.h - y;
+    if (row0 >= row1) {
+        return;
+    }
+    cx1 = dst->clip.x;
+    cx2 = dst->clip.x + dst->clip.w;
+
+    np = stdl_planes;
+#define TEXT_GLYPHS(np) \
+    draw_text_glyphs(dst->pixels, dst->stride, font, x, y, text, \
+                     pw0, pw1, pw2, pw3, row0, row1, cx1, cx2, (np))
+    STDL_PLANE_DISPATCH(np, TEXT_GLYPHS);
+#undef TEXT_GLYPHS
 }

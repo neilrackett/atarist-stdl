@@ -252,6 +252,10 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
     }
     stdl_screen.pixels = stdl.page[stdl.backpage];
 
+    /* a budget set before the mode (or before the back page was
+     * allocated) still has to leave the high planes zeroed */
+    stdl_planes_clear_screens();
+
     return &stdl_screen;
 }
 

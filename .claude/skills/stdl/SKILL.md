@@ -35,6 +35,19 @@ Full contract: `docs/format.md`. Never invent a different layout.
 | `STDL_BlitTile` (16px aligned) | masked blits (colour key) | any per-pixel loop |
 | pre-shifted `STDL_BlitSprite` | `STDL_SetColourKey` (rebuilds mask) | `SDL_MapRGB` per frame |
 
+**Check the colour count first.** If the game uses 4 or 8 colours,
+call `STDL_SetPlaneBudget(2)` (or `3`) right after
+`STDL_SetVideoMode`: it is a promise that no index `>= 2^N` is ever
+drawn, and every primitive then stops maintaining the higher
+bitplanes - roughly `N/4` of the memory traffic, for one line of
+code. Measured on a plain 8MHz ST, budget 2 makes fills and keyed
+blits ~1.4x faster; with a BLiTTER ~1.9x. Caveats: the budget is
+global (there is no per-surface override); colours above it are
+truncated to the low N bits, so a stray index 7 draws as 3; and any
+surface already holding out-of-budget colours when you lower it
+will render wrong. Grep the port for every colour literal before
+choosing N - the maximum index used decides it, not the palette.
+
 Pre-shifted sprites (`STDL_PRESHIFT`) cost 16x RAM and make
 unaligned blits as cheap as aligned ones. Large same-phase fills
 and blits are BLiTTER-accelerated automatically when the hardware

@@ -113,6 +113,10 @@ void stdl_audio_convert(int8_t *dst, uint32_t dst_frames,
     }
 }
 
+/* one-shot playback state (STDL_PlaySample); shares the chip with
+ * the ring device, which is why only one of them may be open */
+static int sample_active;
+
 /* emergency stop for restore_all: the DMA must never keep looping
  * over freed RAM after the program exits */
 static void audio_shutdown(void)
@@ -120,9 +124,36 @@ static void audio_shutdown(void)
     DMA_CTRL = 0;
     stdl_audio_hook = NULL;
     au.open = 0;
+    sample_active = 0;
+}
+
+/* index of the DMA rate nearest `freq` */
+static int nearest_rate(int freq)
+{
+    int i, best = 0, bestdiff = 0x7FFFFFFF;
+
+    for (i = 0; i < 4; i++) {
+        int diff = dma_rates[i] - freq;
+        if (diff < 0) diff = -diff;
+        if (diff < bestdiff) {
+            bestdiff = diff;
+            best = i;
+        }
+    }
+    return best;
 }
 
 /* ---------------------------------------------------------------- */
+
+static void microwire_write(uint16_t data);
+
+/* master and both channels to 0dB */
+static void set_output_levels(void)
+{
+    microwire_write(0x4E8);     /* %10 011 101000  master 0dB   */
+    microwire_write(0x554);     /* %10 101 010100  left 0dB     */
+    microwire_write(0x514);     /* %10 100 010100  right 0dB    */
+}
 
 static void microwire_write(uint16_t data)
 {
@@ -238,10 +269,14 @@ static void stdl_audio_pump(void)
 
 int STDL_OpenAudio(STDL_AudioSpec *desired, STDL_AudioSpec *obtained)
 {
-    int i, best, bestdiff;
+    int best;
 
     if (au.open) {
         STDL_SetError("audio already open");
+        return -1;
+    }
+    if (STDL_SamplePlaying()) {
+        STDL_SetError("STDL_PlaySample owns the sound DMA");
         return -1;
     }
     if (!stdl.initialised) {
@@ -273,16 +308,7 @@ int STDL_OpenAudio(STDL_AudioSpec *desired, STDL_AudioSpec *obtained)
         au.spec.samples = 1024;
     }
 
-    best = 0;
-    bestdiff = 0x7FFFFFFF;
-    for (i = 0; i < 4; i++) {
-        int diff = dma_rates[i] - au.spec.freq;
-        if (diff < 0) diff = -diff;
-        if (diff < bestdiff) {
-            bestdiff = diff;
-            best = i;
-        }
-    }
+    best = nearest_rate(au.spec.freq);
     au.dma_freq = dma_rates[best];
     au.dma_mode = (uint8_t)(best
                   | (au.spec.channels == 1 ? 0x80 : 0x00));
@@ -318,10 +344,7 @@ int STDL_OpenAudio(STDL_AudioSpec *desired, STDL_AudioSpec *obtained)
         obtained->silence = 0;
     }
 
-    /* sane output levels: master and both channels to 0dB */
-    microwire_write(0x4E8);     /* %10 011 101000  master 0dB   */
-    microwire_write(0x554);     /* %10 101 010100  left 0dB     */
-    microwire_write(0x514);     /* %10 100 010100  right 0dB    */
+    set_output_levels();
 
     /* prime the whole ring, then start looping playback */
     fill_frames(au.ring, RING_FRAMES / 2);
@@ -356,6 +379,76 @@ STDL_audiostatus STDL_GetAudioStatus(void)
     }
     return au.paused ? STDL_AUDIO_PAUSED : STDL_AUDIO_PLAYING;
 }
+
+/* ---------------------------------------------------------------- */
+/* one-shot playback: the DMA reads the caller's buffer once        */
+
+int STDL_PlaySample(const void *data, uint32_t bytes, int freq)
+{
+    uint32_t start, end;
+
+    if (!stdl.initialised) {
+        STDL_Init(STDL_INIT_AUDIO);
+    }
+    if (!stdl.mach.is_ste) {
+        STDL_SetError("no DMA sound hardware (STE/Mega STE only)");
+        return -1;
+    }
+    if (au.open) {
+        STDL_SetError("STDL_Audio owns the sound DMA");
+        return -1;
+    }
+    bytes &= ~1UL;              /* the counter works in words */
+    start = (uint32_t)data;
+    if (data == NULL || bytes < 2 || (start & 1) != 0) {
+        STDL_SetError("bad sample buffer");
+        return -1;
+    }
+    end = start + bytes;
+
+    /*
+     * Programming order matters: stop first, because the address
+     * registers latch into the counter when playback starts, and
+     * writing them under a running DMA can be picked up mid-frame.
+     */
+    DMA_CTRL = 0;
+    DMA_MODE = (uint8_t)(nearest_rate(freq) | 0x80);    /* mono */
+    DMA_START_H = (uint8_t)(start >> 16);
+    DMA_START_M = (uint8_t)(start >> 8);
+    DMA_START_L = (uint8_t)start;
+    DMA_END_H = (uint8_t)(end >> 16);
+    DMA_END_M = (uint8_t)(end >> 8);
+    DMA_END_L = (uint8_t)end;
+    set_output_levels();
+    DMA_CTRL = 0x01;            /* enable, do not repeat */
+
+    sample_active = 1;
+    stdl_shutdown_audio = audio_shutdown;
+    return 0;
+}
+
+void STDL_StopSample(void)
+{
+    if (sample_active) {
+        DMA_CTRL = 0;
+        sample_active = 0;
+    }
+}
+
+int STDL_SamplePlaying(void)
+{
+    if (!sample_active) {
+        return 0;
+    }
+    /* in play-once mode the hardware clears the enable bit when it
+     * reaches the end address - no polling of our own required */
+    if ((DMA_CTRL & 1) == 0) {
+        sample_active = 0;
+    }
+    return sample_active;
+}
+
+/* ---------------------------------------------------------------- */
 
 void STDL_CloseAudio(void)
 {

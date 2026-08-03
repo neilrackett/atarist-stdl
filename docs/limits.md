@@ -42,6 +42,13 @@ stop trying and redesign instead.
   silent, as the design intends. Playback rates are the four DMA
   rates; other rates are nearest-neighbour resampled (convert
   offline with `stdlconv wav` for a bit-exact path).
+  The ring device is not free: its callback, mixing and resampling
+  are CPU work in the pump, measured at 36-75% of an 8MHz STE for
+  four SDL_mixer channels at 6258Hz. A game with no frame budget
+  to spare wants `STDL_PlaySample` instead, which hands the DMA a
+  buffer to read once and costs nothing per frame - at the price of
+  being monophonic. Only one of the two may own the chip at a time;
+  whichever is second fails cleanly.
 * Music is the one interrupt-driven part of STDL: the YM replay
   runs from a VBL queue slot (register updates cannot tolerate pump
   jitter). It is three square-wave voices plus noise - MIDI

@@ -115,6 +115,18 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
 - Sound effects: `STDL_SpeakerOn/Off` = PC-speaker idiom on voice A;
   `STDL_PlaySfx` = step sequences (tone or noise) on auto voices.
   Both steal voices from STDL_Music and hand them back restored.
+  These are free: they run off the 50Hz VBL sound tick.
+- Sample effects: `STDL_PlaySample(buf, bytes, rate)` points the STE
+  DMA at your buffer and the hardware reads it once - no ring, no
+  refill, **no per-frame cost**. Monophonic, so arbitrate by
+  priority yourself. Prefer it to `STDL_OpenAudio`/`Mix_PlayChannel`
+  for game effects: those are mixing devices, and software-mixing
+  four channels at 6258Hz measured **36-75% of an 8MHz STE** (still
+  25-43% on a 16MHz Mega STE) in Koules - the same effects through
+  `STDL_PlaySample` measured 0%. Reach for the ring device only when
+  you genuinely need a continuous mixed stream. Feed it signed 8-bit
+  mono at an exact DMA rate (`stdlconv wav --rate 6258`); the WAVs
+  `stdlconv` writes are unsigned, so flip the sign bit once at load.
 - Splash: `STDL_ShowDegas("SPLASH.PI1")` (make with `stdlconv pi1`).
 - Keyboard games + joystick: `STDL_JoyKeyEmulation(1)`, rebindable
   with `STDL_JoyKeyMapping(up, down, left, right, fire)` keysyms
@@ -132,6 +144,9 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
 - Calling `STDL_SetColourKey` per frame (it scans the surface).
 - Relying on non-goals: alpha, scaling, threads, >16 colours,
   arbitrary bpp (`docs/limits.md` is the authority).
+- Assuming DMA audio is free because "the hardware plays it":
+  true of `STDL_PlaySample`, false of the ring device, whose
+  callback and resample run on the CPU inside the pump.
 - Lowercase or long filenames in `fopen`/`STDL_LoadBMP`.
 
 ## Reference

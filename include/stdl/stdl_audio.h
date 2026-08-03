@@ -62,4 +62,29 @@ STDL_AudioSpec *STDL_LoadWAV(const char *file, STDL_AudioSpec *spec,
                              uint8_t **audio_buf, uint32_t *audio_len);
 void STDL_FreeWAV(uint8_t *audio_buf);
 
+/*
+ * One-shot playback, the cheap path.
+ *
+ * STDL_OpenAudio is a mixing device: it loops a ring and the pump
+ * refills it through your callback, which costs real CPU - on an
+ * 8MHz machine, mixing four channels at 6258 Hz costs tens of
+ * percent. A game whose frame budget is already spent cannot pay
+ * that. STDL_PlaySample instead points the DMA straight at a buffer
+ * you already hold and lets the hardware read it once, so playback
+ * costs six register writes and nothing per frame.
+ *
+ * The price is that it is monophonic: a second call replaces
+ * whatever is playing (do your own priority arbitration). `data`
+ * must be signed 8-bit mono at an even address, stay valid until
+ * playback ends, and be sampled at an exact DMA rate - `freq`
+ * snaps to the nearest of 6258/12517/25033/50066. `bytes` is
+ * rounded down to even.
+ *
+ * Returns 0, or -1 with STDL_GetError set: no DMA hardware, or
+ * STDL_OpenAudio currently owns the chip (the two cannot coexist).
+ */
+int  STDL_PlaySample(const void *data, uint32_t bytes, int freq);
+void STDL_StopSample(void);
+int  STDL_SamplePlaying(void);
+
 #endif /* STDL_AUDIO_H */

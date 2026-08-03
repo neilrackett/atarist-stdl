@@ -40,7 +40,8 @@ time, not at runtime.
 | `SDL_AddTimer` / `SDL_SetTimer` | compat | cooperative: callbacks fire inside `SDL_Delay` |
 | `SDL_OpenAudio` / `SDL_LoadWAV` | `STDL_Audio` | STE DMA; cooperative refill; PCM WAVs only (`stdlconv wav`) |
 | `Mix_PlayMusic` etc (SDL_mixer) | `STDL_Music` | YM register streams from `stdlconv midi`; works on every ST |
-| `Mix_PlayChannel` / `Mix_LoadWAV` | mixer shim | up to 4 chunks software-mixed over the DMA device (STE only) |
+| `Mix_PlayChannel` / `Mix_LoadWAV` | mixer shim | up to 4 chunks software-mixed over the DMA device (STE only) - **costs real CPU**, see below |
+| one-shot game effects | `STDL_PlaySample` | monophonic, but the DMA reads your buffer directly: no refill, no mixing, no per-frame cost |
 | PC-speaker sound | `STDL_SpeakerOn/Off` | immediate YM tone; steals voice A from music, restores after |
 | PC-speaker sequences | `STDL_PlaySfx` | step-array effects (periods+volumes), tone or noise, auto voice |
 | `SDL_Joystick*` | compat veneer | port 1 as stick 0: 2 digital axes, 1 button |

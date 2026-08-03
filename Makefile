@@ -50,6 +50,30 @@ $(LIB): $(LIBOBJS)
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+# libcmini variant. Games that have to fit a stock 520ST link with
+# -nostdlib -lcmini instead of mintlib; libstdl.a compiled against
+# mintlib headers cannot be mixed with that (different FILE, different
+# startup), so build a parallel archive against the libcmini headers:
+#
+#   STCMD_NO_TTY=1 stcmd make libstdl-cmini.a
+#   m68k-atari-mint-gcc -nostdlib -L$(CMINI)/lib -o P.TOS \
+#       $(CMINI)/lib/crt0.o objs... libstdl-cmini.a -lcmini -lgcc
+#
+# STDL only needs stdio/stdlib/string/ctype plus mint/osbind.h, all of
+# which libcmini provides. Note libcmini's stack is fixed by _stksize
+# in the program, and its malloc comes from Mxalloc.
+CMINI       ?= /freemint/libcmini
+CMINILIB     = libstdl-cmini.a
+CMINIOBJS    = $(LIBSRCS:.c=.cmini.o)
+
+cmini: $(CMINILIB)
+
+$(CMINILIB): $(CMINIOBJS)
+	$(AR) rcs $@ $(CMINIOBJS)
+
+%.cmini.o: %.c
+	$(CC) $(CFLAGS) -I$(CMINI)/include -c -o $@ $<
+
 dist/TBITMAP.TOS: examples/testbitmap.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
 dist/GRAYWIN.TOS: examples/graywin.c $(LIB)
@@ -89,6 +113,7 @@ test:
 	$(MAKE) -C tests/host run
 
 clean:
+	rm -f $(CMINIOBJS) $(CMINILIB)
 	rm -f $(LIBOBJS) $(LIB) $(EXAMPLES)
 	$(MAKE) -C tests/host clean
 
@@ -96,4 +121,4 @@ clean:
 run-%:
 	hatari --machine megaste --memsize 4 --fast-boot on dist/$*.TOS
 
-.PHONY: all clean assets test
+.PHONY: all clean assets test cmini

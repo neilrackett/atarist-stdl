@@ -7,3 +7,4 @@ tests/host/test_cursor
 tests/host/test_assets
 tests/host/*.dSYM/
 tests/hatari/out/
+libstdl-cmini.a

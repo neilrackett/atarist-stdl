@@ -11,8 +11,16 @@
 # The BLiTTER, YM, DMA and IKBD paths are hardware and cannot be
 # tested here - dist/BLITCHK.TOS and the Hatari harness cover them.
 
+#
+# -fsanitize=alignment earns its place on a library whose fast paths
+# read plane pairs as longs: the host would happily do a misaligned
+# 32-bit load, a 68000 takes an address error. It turns "the guard
+# that keeps a misaligned surface off the long path is missing" from
+# an on-target crash into a host-test failure.
+
 CC      = cc
-CFLAGS  = -std=gnu99 -O1 -g -fsanitize=address -Wall -Wextra \
+CFLAGS  = -std=gnu99 -O1 -g -fsanitize=address,alignment \
+          -fno-sanitize-recover=alignment -Wall -Wextra \
           -Wno-unused-parameter -Wno-unused-function \
           -I../../include -I../../src
 

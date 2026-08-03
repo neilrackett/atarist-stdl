@@ -809,10 +809,175 @@ STDL_PLANE_INLINE int hspans_run(STDL_Surface *dst,
 }
 
 /*
+ * One plane bit, duplicated into both halves of a long and indexed
+ * by x & 15. Merging a point through this covers two planes per
+ * long operation and replaces a variable shift with a load; both
+ * halves are equal, so it needs no byte-order form.
+ */
+static const uint32_t stdl_bit32[16] = {
+    0x80008000UL, 0x40004000UL, 0x20002000UL, 0x10001000UL,
+    0x08000800UL, 0x04000400UL, 0x02000200UL, 0x01000100UL,
+    0x00800080UL, 0x00400040UL, 0x00200020UL, 0x00100010UL,
+    0x00080008UL, 0x00040004UL, 0x00020002UL, 0x00010001UL
+};
+
+/* the half of a plane pair that a long merge must leave alone when
+ * the budget stops inside the pair (np 1 and 3) */
+#define STDL_PAIR_HI STDL_PACK2(0xFFFFu, 0u)
+
+/* a colour index as the two long plane pairs a group merge wants */
+#define STDL_PLANEPAIR(c) \
+    { STDL_PACK2((c) & 1 ? 0xFFFFu : 0u, (c) & 2 ? 0xFFFFu : 0u), \
+      STDL_PACK2((c) & 4 ? 0xFFFFu : 0u, (c) & 8 ? 0xFFFFu : 0u) }
+static const uint32_t stdl_planepair[16][2] = {
+    STDL_PLANEPAIR(0),  STDL_PLANEPAIR(1),  STDL_PLANEPAIR(2),
+    STDL_PLANEPAIR(3),  STDL_PLANEPAIR(4),  STDL_PLANEPAIR(5),
+    STDL_PLANEPAIR(6),  STDL_PLANEPAIR(7),  STDL_PLANEPAIR(8),
+    STDL_PLANEPAIR(9),  STDL_PLANEPAIR(10), STDL_PLANEPAIR(11),
+    STDL_PLANEPAIR(12), STDL_PLANEPAIR(13), STDL_PLANEPAIR(14),
+    STDL_PLANEPAIR(15)
+};
+#undef STDL_PLANEPAIR
+
+/*
+ * Batched single pixels, unmasked destination clipped at its own
+ * origin: the particle-field inner loop, and the one place in the
+ * library where the register file decides the speed. Written per
+ * plane -
+ *
+ *     grp[p] = (grp[p] & ~bit) | (pw[p] & bit)
+ *
+ * - it needs the four plane words, the bit and its complement live
+ * at once; gcc 4.6 runs out of registers and spills, and the merge
+ * costs nine instructions and five stack accesses per plane, per
+ * point (measured: 728 cycles a point on an 8MHz 68000, of which
+ * the merge alone is ~340). Carrying the plane words as two longs
+ * and merging with XOR-AND-XOR needs one temporary and no
+ * complement, so the whole point stays in registers.
+ *
+ * Two conditions get the last two registers back, and the caller
+ * sends anything else down points_run: the group has to be
+ * long-aligned for the long merge, and the clip origin has to be
+ * (0,0) so each axis costs one unsigned compare (a negative
+ * coordinate wraps above the width) instead of a pair.
+ */
+STDL_PLANE_INLINE void points_fast(STDL_Surface *dst,
+        const STDL_Point *pts, int count,
+        uint32_t pl01, uint32_t pl23, const int np)
+{
+    uint8_t *pixels = dst->pixels;
+    uint16_t stride = dst->stride;
+    unsigned cw = dst->clip.w, ch = dst->clip.h;
+    const STDL_Point *p = pts;
+    const STDL_Point *end = pts + count;
+
+    for (; p != end; p++) {
+        unsigned x = (unsigned)(int)p->x, y = (unsigned)(int)p->y;
+        uint32_t *g, m, t;
+
+        if (x >= cw || y >= ch) {
+            continue;
+        }
+        /* (x >> 4) * 8 without the round trip through the shifter */
+        g = (uint32_t *)(pixels + stdl_row_off((int)y, stride)
+                         + ((x >> 1) & ~7u));
+        m = stdl_bit32[x & 15];
+        if (np == 1) {
+            m &= STDL_PAIR_HI;
+        }
+        t = (g[0] ^ pl01) & m;
+        g[0] ^= t;
+        if (np > 2) {
+            if (np == 3) {
+                m &= STDL_PAIR_HI;
+            }
+            t = (g[1] ^ pl23) & m;
+            g[1] ^= t;
+        }
+    }
+}
+
+/*
+ * Erasing a particle field is the same loop with every plane word
+ * zero, which collapses the merge to one AND per long. Planes above
+ * the budget are already zero, so clearing a bit there is a no-op
+ * and this needs no plane dispatch.
+ */
+static void points_clear(STDL_Surface *dst, const STDL_Point *pts,
+                         int count)
+{
+    uint8_t *pixels = dst->pixels;
+    uint16_t stride = dst->stride;
+    unsigned cw = dst->clip.w, ch = dst->clip.h;
+    const STDL_Point *p = pts;
+    const STDL_Point *end = pts + count;
+
+    for (; p != end; p++) {
+        unsigned x = (unsigned)(int)p->x, y = (unsigned)(int)p->y;
+        uint32_t *g, m;
+
+        if (x >= cw || y >= ch) {
+            continue;
+        }
+        g = (uint32_t *)(pixels + stdl_row_off((int)y, stride)
+                         + ((x >> 1) & ~7u));
+        m = ~stdl_bit32[x & 15];
+        g[0] &= m;
+        g[1] &= m;
+    }
+}
+
+/*
+ * The same loop with a colour per point. The only extra work is one
+ * byte load and the plane-pair table lookup it indexes, which is
+ * far less than a caller pays to sort its list into colour runs and
+ * make a batched call per run.
+ */
+STDL_PLANE_INLINE void pointsc_fast(STDL_Surface *dst,
+        const STDL_Point *pts, const uint8_t *cols, int count,
+        const int np)
+{
+    uint8_t *pixels = dst->pixels;
+    uint16_t stride = dst->stride;
+    unsigned cw = dst->clip.w, ch = dst->clip.h;
+    const STDL_Point *p = pts;
+    const STDL_Point *end = pts + count;
+    const uint8_t *c = cols;
+
+    for (; p != end; p++, c++) {
+        unsigned x = (unsigned)(int)p->x, y = (unsigned)(int)p->y;
+        const uint32_t *pl;
+        uint32_t *g, m, t;
+
+        if (x >= cw || y >= ch) {
+            continue;
+        }
+        g = (uint32_t *)(pixels + stdl_row_off((int)y, stride)
+                         + ((x >> 1) & ~7u));
+        m = stdl_bit32[x & 15];
+        pl = stdl_planepair[*c & 15];
+        if (np == 1) {
+            m &= STDL_PAIR_HI;
+        }
+        t = (g[0] ^ pl[0]) & m;
+        g[0] ^= t;
+        if (np > 2) {
+            if (np == 3) {
+                m &= STDL_PAIR_HI;
+            }
+            t = (g[1] ^ pl[1]) & m;
+            g[1] ^= t;
+        }
+    }
+}
+
+/*
  * Batched single pixels. Everything a span needs and a point does
  * not - the length clamp, both edge masks, the "does it straddle two
  * groups" tail - is gone, and what is left per point is a clip test,
- * one mulu.w for the row and one read-modify-write per plane.
+ * one mulu.w for the row and one read-modify-write per plane. This
+ * is the general form: masked destinations, and surfaces whose rows
+ * are not long-aligned.
  */
 STDL_PLANE_INLINE int points_run(STDL_Surface *dst,
         const STDL_Point *pts, int count,
@@ -867,10 +1032,25 @@ void STDL_Points(STDL_Surface *dst, const STDL_Point *pts,
     }
     transparent = (col >= STDL_TRANSPARENT && dst->mask != NULL);
     col = transparent ? 0 : (uint8_t)(col & 15);
+    np = stdl_planes;
+    if (dst->mask == NULL && dst->clip.x == 0 && dst->clip.y == 0
+        && (((uintptr_t)dst->pixels | (uintptr_t)dst->stride) & 3u) == 0) {
+        if (col == 0) {
+            points_clear(dst, pts, count);
+        } else {
+            uint32_t pl01 = STDL_PACK2((col & 1) ? 0xFFFFu : 0u,
+                                       (col & 2) ? 0xFFFFu : 0u);
+            uint32_t pl23 = STDL_PACK2((col & 4) ? 0xFFFFu : 0u,
+                                       (col & 8) ? 0xFFFFu : 0u);
+#define POINTS_FAST(np) points_fast(dst, pts, count, pl01, pl23, (np))
+            STDL_PLANE_DISPATCH(np, POINTS_FAST);
+#undef POINTS_FAST
+        }
+        return;                 /* no mask, so nothing to invalidate */
+    }
     for (p = 0; p < 4; p++) {
         pw[p] = (col & (1 << p)) ? 0xFFFFu : 0;
     }
-    np = stdl_planes;
 #define POINTS_RUN(np) \
     drew = points_run(dst, pts, count, pw[0], pw[1], pw[2], pw[3], \
                       transparent, (np))
@@ -878,6 +1058,30 @@ void STDL_Points(STDL_Surface *dst, const STDL_Point *pts,
 #undef POINTS_RUN
     if (drew && dst->mask != NULL) {
         dst->opaque_state = 0;
+    }
+}
+
+void STDL_PointsC(STDL_Surface *dst, const STDL_Point *pts,
+                  const uint8_t *cols, int count)
+{
+    int np, i;
+
+    if (dst == NULL || pts == NULL || cols == NULL || count <= 0
+        || dst->clip.w == 0 || dst->clip.h == 0) {
+        return;
+    }
+    np = stdl_planes;
+    if (dst->mask == NULL && dst->clip.x == 0 && dst->clip.y == 0
+        && (((uintptr_t)dst->pixels | (uintptr_t)dst->stride) & 3u) == 0) {
+#define POINTSC_FAST(np) pointsc_fast(dst, pts, cols, count, (np))
+        STDL_PLANE_DISPATCH(np, POINTSC_FAST);
+#undef POINTSC_FAST
+        return;                 /* no mask, so nothing to invalidate */
+    }
+    /* masked or oddly aligned: rare enough that the definition is
+     * also the implementation */
+    for (i = 0; i < count; i++) {
+        STDL_PutPixel(dst, pts[i].x, pts[i].y, cols[i]);
     }
 }
 

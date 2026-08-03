@@ -98,12 +98,18 @@ or `pixels[y*pitch+x]` writes corrupt planar data. Rewrite:
   so no save-under is needed. Only the planes selected by the colour
   are touched.
 * **particle fields / starfields** (a loop of single pixels) -> fill
-  an `STDL_Point` array and make one `STDL_Points` call. Same result
-  as `STDL_PutPixel` per entry, but the clip setup, colour dispatch
-  and plane-word selection are paid once for the list; erase the
-  field next frame with a second call in the background colour and
-  it needs no save-under and no dirty rectangle each (measured 1.5x
-  against the equivalent one-pixel `STDL_HSpans` list on a plain ST)
+  an `STDL_Point` array and make one `STDL_Points` call, or
+  `STDL_PointsC` with a parallel colour array if the field is
+  multi-coloured. Same result as `STDL_PutPixel` per entry, but the
+  clip setup, colour dispatch and plane-word selection are paid once
+  for the list; erase the field next frame with a second call in the
+  background colour and it needs no save-under and no dirty
+  rectangle each (measured 1.5x against the equivalent one-pixel
+  `STDL_HSpans` list on a plain ST, and 3.4x against `STDL_PutPixel`
+  in a loop). Do not sort the list into colour runs to use the
+  one-colour call: on a plain ST at 250 particles the sort and the
+  fifteen calls it enables cost 23ms against 13.5 for a single
+  `STDL_PointsC`
 * **many short spans in a loop** (terrain profiles, column fields,
   raycaster walls, scanline shapes) -> fill an `STDL_Span` array
   and make one `STDL_VSpans` / `STDL_HSpans` / `STDL_XorVSpans` /

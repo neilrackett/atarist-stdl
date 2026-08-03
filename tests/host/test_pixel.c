@@ -378,23 +378,32 @@ static void batched(STDL_Surface *s, const STDL_Span *sp, int n,
 }
 
 /*
- * STDL_Points must be indistinguishable from STDL_PutPixel per
- * entry - same pixels, same mask, same clipping - for unsorted,
- * overlapping and off-the-edge lists, masked or not, with and
- * without a clip rect, and for STDL_TRANSPARENT.
+ * STDL_Points and STDL_PointsC must be indistinguishable from
+ * STDL_PutPixel per entry - same pixels, same mask, same clipping -
+ * for unsorted, overlapping and off-the-edge lists, masked or not,
+ * with and without a clip rect, and for STDL_TRANSPARENT.
+ *
+ * The unmasked, origin-clipped, long-aligned case has its own inner
+ * loop (points_fast / pointsc_fast / points_clear), so the mix below
+ * has to reach both it and the general points_run: masked on odd
+ * iterations, a clip rect away from the origin on every third, and
+ * colour 0 - which takes the clear-only path - as one of the
+ * seventeen colours.
  */
 static void test_points(void)
 {
     const int W = 83, H = 47;
     int iter;
 
-    for (iter = 0; iter < 300; iter++) {
+    for (iter = 0; iter < 400; iter++) {
         STDL_Surface *a = STDL_CreateSurface(W, H);
         STDL_Surface *b = STDL_CreateSurface(W, H);
         STDL_Point pts[32];
+        uint8_t cols[32];
         int n = 1 + (int)(rnd() % 32);
         int masked = (iter & 1);
         int clipped = (iter % 3) == 0;
+        int percol = (iter & 2);
         uint8_t col = (uint8_t)(rnd() % 17);   /* 16 = TRANSPARENT */
         int i;
 
@@ -411,23 +420,33 @@ static void test_points(void)
         }
         if (clipped) {
             STDL_Rect c;
-            c.x = 5; c.y = 3; c.w = 60; c.h = 30;
+            c.x = (int16_t)(iter % 5);      /* 0 reaches the fast loop */
+            c.y = (int16_t)(iter % 4);
+            c.w = 60; c.h = 30;
             STDL_SetClipRect(a, &c);
             STDL_SetClipRect(b, &c);
         }
         for (i = 0; i < n; i++) {
             pts[i].x = (int16_t)((int)(rnd() % (W + 24)) - 12);
             pts[i].y = (int16_t)((int)(rnd() % (H + 24)) - 12);
+            cols[i] = (uint8_t)(rnd() % 17);
         }
         STDL_SurfaceIsOpaque(a);
         STDL_SurfaceIsOpaque(b);
-        STDL_Points(a, pts, n, col);
-        for (i = 0; i < n; i++) {
-            STDL_PutPixel(b, pts[i].x, pts[i].y, col);
+        if (percol) {
+            STDL_PointsC(a, pts, cols, n);
+            for (i = 0; i < n; i++) {
+                STDL_PutPixel(b, pts[i].x, pts[i].y, cols[i]);
+            }
+        } else {
+            STDL_Points(a, pts, n, col);
+            for (i = 0; i < n; i++) {
+                STDL_PutPixel(b, pts[i].x, pts[i].y, col);
+            }
         }
-        CHECK(same_bytes(a, b, "point list"),
-              "points iter %d (n=%d col=%d masked=%d clipped=%d)",
-              iter, n, col, masked, clipped);
+        CHECK(same_bytes(a, b, percol ? "colour list" : "point list"),
+              "points iter %d (n=%d col=%d percol=%d masked=%d "
+              "clipped=%d)", iter, n, col, percol, masked, clipped);
         CHECK(a->opaque_state == b->opaque_state,
               "points iter %d opaque_state %d vs %d", iter,
               a->opaque_state, b->opaque_state);
@@ -436,17 +455,79 @@ static void test_points(void)
         if (failures) return;
     }
 
+    /*
+     * The fast loops merge two plane words at a time with a long
+     * access, so the caller only takes them when the rows are
+     * long-aligned. Nothing the public API can build is misaligned,
+     * which is exactly why the fallback needs a test of its own:
+     * describe a surface over an odd address and check it still
+     * draws what STDL_PutPixel would.
+     */
+    {
+        const int UW = 61, UH = 23;
+        uint16_t stride = (uint16_t)(((UW + 15) / 16) * 8);
+        uint8_t *raw = malloc((size_t)stride * UH + 2);
+        STDL_Surface u, v;
+        STDL_Point pts[24];
+        uint8_t cols[24];
+        int i;
+
+        memset(&u, 0, sizeof(u));
+        u.pixels = raw + 2;             /* word- but not long-aligned */
+        u.w = (int16_t)UW; u.h = (int16_t)UH;
+        u.stride = stride;
+        u.planes = 4;
+        u.clip.x = 0; u.clip.y = 0;
+        u.clip.w = (uint16_t)UW; u.clip.h = (uint16_t)UH;
+        memset(u.pixels, 0, (size_t)stride * UH);
+        v = u;
+        v.pixels = malloc((size_t)stride * UH);
+        memset(v.pixels, 0, (size_t)stride * UH);
+
+        for (i = 0; i < 24; i++) {
+            pts[i].x = (int16_t)((int)(rnd() % (UW + 8)) - 4);
+            pts[i].y = (int16_t)((int)(rnd() % (UH + 8)) - 4);
+            cols[i] = (uint8_t)(1 + rnd() % 15);
+        }
+        STDL_Points(&u, pts, 24, 11);
+        for (i = 0; i < 24; i++) {
+            STDL_PutPixel(&v, pts[i].x, pts[i].y, 11);
+        }
+        CHECK(memcmp(u.pixels, v.pixels, (size_t)stride * UH) == 0,
+              "unaligned STDL_Points fallback");
+        STDL_PointsC(&u, pts, cols, 24);
+        for (i = 0; i < 24; i++) {
+            STDL_PutPixel(&v, pts[i].x, pts[i].y, cols[i]);
+        }
+        CHECK(memcmp(u.pixels, v.pixels, (size_t)stride * UH) == 0,
+              "unaligned STDL_PointsC fallback");
+        STDL_Points(&u, pts, 24, 0);
+        for (i = 0; i < 24; i++) {
+            STDL_PutPixel(&v, pts[i].x, pts[i].y, 0);
+        }
+        CHECK(memcmp(u.pixels, v.pixels, (size_t)stride * UH) == 0,
+              "unaligned erase fallback");
+        free(raw);
+        free(v.pixels);
+    }
+
     /* degenerate arguments must be no-ops, not crashes */
     {
         STDL_Surface *s = STDL_CreateSurface(40, 20);
         Ref *r = ref_new(40, 20);
         STDL_Point p[2] = { { 0, 0 }, { 39, 19 } };
+        uint8_t c[2] = { 3, 7 };
         randomise(s, 16);
         surf_to_ref(s, r);
         STDL_Points(s, NULL, 3, 5);
         STDL_Points(s, p, 0, 5);
         STDL_Points(s, p, -1, 5);
         STDL_Points(NULL, p, 2, 5);
+        STDL_PointsC(s, NULL, c, 2);
+        STDL_PointsC(s, p, NULL, 2);
+        STDL_PointsC(s, p, c, 0);
+        STDL_PointsC(s, p, c, -1);
+        STDL_PointsC(NULL, p, c, 2);
         CHECK(ref_cmp(s, r, "points no-ops"), "points no-op cases");
         ref_free(r);
         STDL_FreeSurface(s);

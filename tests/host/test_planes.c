@@ -138,7 +138,7 @@ static void render(int budget, int maxcol, Snap *out)
 
     for (i = 0; i < 120; i++) {
         uint8_t col = (uint8_t)(rnd() % maxcol);
-        int op = (int)(rnd() % 14);
+        int op = (int)(rnd() % 15);
         STDL_Span sp[8];
 
         switch (op) {
@@ -233,6 +233,21 @@ static void render(int budget, int maxcol, Snap *out)
                     STDL_XorVSpans(dst, sp, 8, col);
                     STDL_XorHSpans(dst, sp, 8, col);
                 }
+            }
+            break;
+        case 13:                                    /* point lists */
+            {
+                STDL_Point pt[10];
+                uint8_t pc[10];
+                int k;
+                for (k = 0; k < 10; k++) {
+                    pt[k].x = (int16_t)((int)(rnd() % 108) - 6);
+                    pt[k].y = (int16_t)((int)(rnd() % 72) - 4);
+                    pc[k] = (uint8_t)(rnd() % maxcol);
+                }
+                STDL_Points(dst, pt, 10, col);
+                STDL_PointsC(dst, pt, pc, 10);
+                STDL_Points(dst, pt, 10, 0);   /* the clear-only path */
             }
             break;
         default:                                    /* XOR ops */
@@ -381,6 +396,48 @@ static void test_colour_truncation(void)
     STDL_FreeSurface(s);
 }
 
+/*
+ * The batched point primitives take their colours straight from the
+ * caller, so they are the easiest place to leak a bit above the
+ * budget - and the odd budgets are the interesting ones, because
+ * their fast loops merge a plane *pair* as one long and have to mask
+ * the half the budget does not reach. The whole-list script uses only
+ * in-budget colours, where the leak is invisible (the plane it would
+ * touch is zero anyway), so out-of-budget colours are checked here.
+ */
+static void test_point_truncation(void)
+{
+    int budget;
+
+    for (budget = 1; budget <= 4; budget++) {
+        STDL_Surface *s = STDL_CreateSurface(64, 8);
+        STDL_Point p[3] = { { 1, 1 }, { 17, 2 }, { 33, 3 } };
+        uint8_t pc[3] = { 15, 9, 6 };
+        int mask = (1 << budget) - 1;
+
+        STDL_SetPlaneBudget(budget);
+        STDL_Points(s, p, 3, 15);
+        CHECK(STDL_GetPixel(s, 1, 1) == (15 & mask),
+              "budget %d: STDL_Points 15 gave %d, want %d", budget,
+              STDL_GetPixel(s, 1, 1), 15 & mask);
+        CHECK(STDL_GetPixel(s, 33, 3) == (15 & mask),
+              "budget %d: STDL_Points 15 gave %d at x=33", budget,
+              STDL_GetPixel(s, 33, 3));
+        STDL_PointsC(s, p, pc, 3);
+        CHECK(STDL_GetPixel(s, 1, 1) == (15 & mask),
+              "budget %d: STDL_PointsC 15 gave %d", budget,
+              STDL_GetPixel(s, 1, 1));
+        CHECK(STDL_GetPixel(s, 17, 2) == (9 & mask),
+              "budget %d: STDL_PointsC 9 gave %d", budget,
+              STDL_GetPixel(s, 17, 2));
+        CHECK(STDL_GetPixel(s, 33, 3) == (6 & mask),
+              "budget %d: STDL_PointsC 6 gave %d", budget,
+              STDL_GetPixel(s, 33, 3));
+        STDL_SetPlaneBudget(4);
+        STDL_FreeSurface(s);
+    }
+}
+
 static void test_api(void)
 {
     CHECK(STDL_SetPlaneBudget(-1) == 4, "default budget is 4");
@@ -418,6 +475,7 @@ int main(void)
     test_api();
     test_budgets();
     test_colour_truncation();
+    test_point_truncation();
     test_readback();
     if (failures == 0) {
         printf("all plane-budget tests passed\n");

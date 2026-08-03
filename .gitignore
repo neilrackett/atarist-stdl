@@ -7,6 +7,7 @@ tests/host/test_cursor
 tests/host/test_assets
 tests/host/test_planes
 tests/host/test_footprint
+tests/host/test_indexed
 tests/host/test_vbl
 tests/host/*.dSYM/
 tests/hatari/out/

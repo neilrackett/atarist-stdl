@@ -25,11 +25,16 @@ CFLAGS  = -std=gnu99 -O1 -g -fsanitize=address,alignment \
           -I../../include -I../../src
 
 SRC     = ../../src
-CORE    = stubs.c $(SRC)/surface.c $(SRC)/draw.c $(SRC)/blit.c \
-          $(SRC)/sprite.c $(SRC)/palette.c $(SRC)/planes.c
+# indexed.c is in the core set because the source-art converters
+# (1bpp, byte-per-pixel, colour remap) build surfaces the other
+# suites draw with, not because every program links it - on target
+# it is a separate object precisely so that they don't.
+CORE    = stubs.c $(SRC)/surface.c $(SRC)/indexed.c $(SRC)/draw.c \
+          $(SRC)/blit.c $(SRC)/sprite.c $(SRC)/palette.c \
+          $(SRC)/planes.c
 
 TESTS   = test_pixel test_compose test_cursor test_assets test_planes \
-          test_footprint test_vbl
+          test_footprint test_indexed test_vbl
 
 all: $(TESTS)
 
@@ -52,13 +57,16 @@ test_planes: test_planes.c $(CORE)
 test_footprint: test_footprint.c $(CORE)
 	$(CC) $(CFLAGS) -o $@ $^
 
+test_indexed: test_indexed.c $(CORE)
+	$(CC) $(CFLAGS) -o $@ $^
+
 test_vbl: test_vbl.c $(CORE) $(SRC)/vbl.c
 	$(CC) $(CFLAGS) -o $@ $^
 
 run: $(TESTS)
 	@./test_pixel && ./test_compose && ./test_cursor \
 	  && ./test_assets && ./test_planes && ./test_footprint \
-	  && ./test_vbl \
+	  && ./test_indexed && ./test_vbl \
 	  && echo "ALL HOST TESTS PASSED"
 
 clean:

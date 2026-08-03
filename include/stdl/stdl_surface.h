@@ -40,6 +40,36 @@ STDL_Surface *STDL_SurfaceFrom1bpp(const uint8_t *bits, int w, int h,
                                    uint8_t fg, uint8_t bg);
 
 /*
+ * Byte-per-pixel (chunky) source art to planar - the conversion a
+ * port would otherwise hand-roll around STDL_PutGroup8. Each source
+ * byte is an ST palette index; `stride` is the source row pitch in
+ * bytes, so a frame can be lifted straight out of a wider sheet
+ * (pass w for tightly packed data). `keycolour` is a source byte
+ * value that becomes transparent and gives the surface a mask; pass
+ * -1 for a fully opaque surface.
+ *
+ * This is a load-time path, not a rendering one: convert once, then
+ * blit the surface or freeze it into a sprite.
+ */
+STDL_Surface *STDL_SurfaceFromIndexed8(const uint8_t *bytes, int w,
+                                       int h, int stride,
+                                       int keycolour);
+
+/*
+ * Recolour in place through a 16-entry map: a pixel of index c
+ * becomes map[c]. The mask is untouched, so transparency is
+ * unchanged.
+ *
+ * This is how a port gets the same artwork in several colour schemes
+ * - team colours, damage flashes, palette variants - without a
+ * blit-time remap, which planar data cannot do cheaply (see
+ * docs/limits.md). Convert or load the art once, duplicate the
+ * surface per variant, remap, and freeze each into a sprite; every
+ * variant then draws through the ordinary fast paths.
+ */
+void STDL_RemapSurface(STDL_Surface *s, const uint8_t map[16]);
+
+/*
  * Logical origin of the surface's top-left pixel. Blits and rect
  * fills translate their coordinates by the origin (both as source
  * and destination), so a 320x40 stripe with origin (0, camera_y)

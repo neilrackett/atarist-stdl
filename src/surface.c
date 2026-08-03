@@ -321,34 +321,6 @@ void STDL_GetClipRect(STDL_Surface *s, STDL_Rect *r)
     }
 }
 
-STDL_Surface *STDL_SurfaceFrom1bpp(const uint8_t *bits, int w, int h,
-                                   uint8_t fg, uint8_t bg)
-{
-    STDL_Surface *s = STDL_CreateSurface(w, h);
-    int bpr, y, g, groups, p;
-
-    if (s == NULL) {
-        return NULL;
-    }
-    fg &= 15;
-    bg &= 15;
-    bpr = (w + 7) / 8;
-    groups = s->stride / 8;
-    for (y = 0; y < h; y++) {
-        const uint8_t *src = bits + (uint32_t)y * bpr;
-        uint16_t *row = (uint16_t *)(s->pixels + (uint32_t)y * s->stride);
-        for (g = 0; g < groups; g++) {
-            uint16_t v = 0;
-            int b0 = g * 2, b1 = g * 2 + 1;
-            if (b0 < bpr) v = (uint16_t)(src[b0] << 8);
-            if (b1 < bpr) v |= src[b1];
-            for (p = 0; p < stdl_planes; p++) {
-                uint16_t word = 0;
-                if (fg & (1 << p)) word |= v;
-                if (bg & (1 << p)) word |= (uint16_t)~v;
-                row[g * 4 + p] = word;
-            }
-        }
-    }
-    return s;
-}
+/* STDL_SurfaceFrom1bpp lives in indexed.c, with the other converters
+ * from non-planar source art: surface.o is in every linked program
+ * and a port whose art is already planar must not carry them. */

@@ -60,6 +60,10 @@ stop trying and redesign instead.
 * All draw primitives maintain surface masks (fills, spans,
   `STDL_PutPixel`, and the line/circle shapes built on them), and
   all accept `STDL_TRANSPARENT`.
+* The XOR primitives (`STDL_XorRect` and friends) are the one
+  exception to `STDL_TRANSPARENT`: only bits 0-3 of the colour are
+  used, colour 0 is a no-op, and the pixels they touch are marked
+  opaque in a masked surface. They are always CPU paths.
 * The software cursor's save-under is a snapshot: hide the cursor
   before drawing beneath it, and prefer sprites for pointers in
   games that redraw every frame. Cursors are at most 32x32 with

@@ -185,6 +185,131 @@ static void test_hvlines(void)
     STDL_FreeSurface(s);
 }
 
+/* reference XOR: invert the planes selected by col */
+static void ref_xor(Ref *r, int x1, int y1, int w, int h, uint8_t c)
+{
+    int x, y;
+    for (y = y1; y < y1 + h; y++) {
+        if (y < 0 || y >= r->h) continue;
+        for (x = x1; x < x1 + w; x++) {
+            if (x < 0 || x >= r->w) continue;
+            r->px[y * r->w + x] ^= (uint8_t)(c & 15);
+        }
+    }
+}
+
+static void test_xor(void)
+{
+    int i;
+
+    /* rects and hlines against the reference model */
+    for (i = 0; i < 200; i++) {
+        STDL_Surface *s = STDL_CreateSurface(83, 47);
+        Ref *r = ref_new(83, 47);
+        int j;
+        randomise(s, 16);
+        surf_to_ref(s, r);
+        for (j = 0; j < 10; j++) {
+            STDL_Rect rect;
+            uint8_t c = (uint8_t)(rnd() & 15);
+            rect.x = (int16_t)((int)(rnd() % 120) - 20);
+            rect.y = (int16_t)((int)(rnd() % 70) - 10);
+            rect.w = (uint16_t)(rnd() % 90);
+            rect.h = (uint16_t)(rnd() % 60);
+            if (rnd() & 1) {
+                STDL_XorRect(s, &rect, c);
+                ref_xor(r, rect.x, rect.y, rect.w, rect.h, c);
+            } else {
+                int a = (int)(rnd() % 100) - 10;
+                int b = (int)(rnd() % 100) - 10;
+                int y = (int)(rnd() % 60) - 5;
+                int lo = a < b ? a : b, hi = a < b ? b : a;
+                STDL_XorHLine(s, a, b, y, c);
+                if (y >= 0 && y < 47)
+                    ref_xor(r, lo, y, hi - lo + 1, 1, c);
+            }
+        }
+        CHECK(ref_cmp(s, r, "xor"), "xor iteration %d", i);
+        ref_free(r);
+        STDL_FreeSurface(s);
+        if (failures) break;
+    }
+
+    /* vlines and pixels, including the two-plane long-word path */
+    {
+        STDL_Surface *s = STDL_CreateSurface(70, 30);
+        Ref *r = ref_new(70, 30);
+        randomise(s, 16);
+        surf_to_ref(s, r);
+        for (i = 0; i < 400; i++) {
+            int a = (int)(rnd() % 50) - 5, b = (int)(rnd() % 50) - 5;
+            int x = (int)(rnd() % 80) - 5;
+            /* colour 3 exercises the planes 0+1 long path */
+            uint8_t c = (uint8_t)((rnd() & 1) ? 3 : (rnd() & 15));
+            int lo = a < b ? a : b, hi = a < b ? b : a;
+            if (rnd() & 1) {
+                STDL_XorVLine(s, x, a, b, c);
+                if (x >= 0 && x < 70)
+                    ref_xor(r, x, lo, 1, hi - lo + 1, c);
+            } else {
+                STDL_XorPixel(s, x, a, c);
+                ref_xor(r, x, a, 1, 1, c);
+            }
+        }
+        CHECK(ref_cmp(s, r, "xorline"), "xor lines");
+        ref_free(r);
+        STDL_FreeSurface(s);
+    }
+
+    /* XOR is an involution: the same shape twice is a no-op */
+    {
+        STDL_Surface *s = STDL_CreateSurface(83, 47);
+        Ref *r = ref_new(83, 47);
+        STDL_Rect rect;
+        randomise(s, 16);
+        surf_to_ref(s, r);
+        rect.x = 5; rect.y = 3; rect.w = 61; rect.h = 29;
+        STDL_XorRect(s, &rect, 10);
+        rect.x = 5; rect.y = 3; rect.w = 61; rect.h = 29;
+        STDL_XorRect(s, &rect, 10);
+        STDL_XorVLine(s, 33, 2, 44, 3);
+        STDL_XorVLine(s, 33, 2, 44, 3);
+        STDL_XorPixel(s, 17, 9, 7);
+        STDL_XorPixel(s, 17, 9, 7);
+        CHECK(ref_cmp(s, r, "xor involution"), "xor twice restores");
+        ref_free(r);
+        STDL_FreeSurface(s);
+    }
+
+    /* colour 0 touches nothing; a masked surface goes opaque where
+     * the XOR landed */
+    {
+        STDL_Surface *s = STDL_CreateSurface(40, 20);
+        Ref *r = ref_new(40, 20);
+        STDL_Rect rect;
+        randomise(s, 16);
+        surf_to_ref(s, r);
+        rect.x = 0; rect.y = 0; rect.w = 40; rect.h = 20;
+        STDL_XorRect(s, &rect, 0);
+        STDL_XorHLine(s, 0, 39, 4, 0);
+        STDL_XorVLine(s, 4, 0, 19, 0);
+        STDL_XorPixel(s, 4, 4, 0);
+        CHECK(ref_cmp(s, r, "xor col 0"), "xor with colour 0 is a no-op");
+
+        STDL_CreateMask(s, 1);
+        CHECK(!STDL_SurfaceIsOpaque(s), "mask starts transparent");
+        rect.x = 2; rect.y = 2; rect.w = 4; rect.h = 4;
+        STDL_XorRect(s, &rect, 5);
+        CHECK((*(uint16_t *)(s->mask + 2 * s->maskstride)
+               & 0x2000u) == 0,
+              "xor cleared the mask bit at (2,2)");
+        CHECK((*(uint16_t *)s->mask & 0x8000u) != 0,
+              "xor left untouched mask bits alone");
+        STDL_FreeSurface(s);
+        ref_free(r);
+    }
+}
+
 static void test_blits(void)
 {
     int i;
@@ -356,6 +481,7 @@ int main(void)
     test_putget();
     test_fills();
     test_hvlines();
+    test_xor();
     test_blits();
     test_whole_blit_writeback();
     test_sprites();

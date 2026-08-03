@@ -42,6 +42,21 @@ extern volatile uint16_t stdl_host_hwpal[16];
 #define STDL_WORD_BYTE(half) (1 - (half))
 #endif
 
+/*
+ * Pack two adjacent plane words into one long so that `first` lands
+ * at the lower address - i.e. what a single long store writes on the
+ * 68000. Host-test builds may be little-endian, where the halves
+ * have to be swapped to produce the same bytes.
+ */
+#if defined(__m68k__) || (defined(__BYTE_ORDER__) \
+                          && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#define STDL_PACK2(first, second) \
+    (((uint32_t)(first) << 16) | (uint32_t)(second))
+#else
+#define STDL_PACK2(first, second) \
+    (((uint32_t)(second) << 16) | (uint32_t)(first))
+#endif
+
 #define STDL_SCREEN_W       320
 #define STDL_SCREEN_H       200
 #define STDL_SCREEN_PLANES  4

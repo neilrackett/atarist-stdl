@@ -190,10 +190,26 @@ void STDL_Circle(STDL_Surface *dst, int cx, int cy, int r, uint8_t col);
 void STDL_FillCircle(STDL_Surface *dst, int cx, int cy, int r, uint8_t col);
 void STDL_PutPixel(STDL_Surface *dst, int x, int y, uint8_t col);  /* slow */
 void STDL_SetClipRect(STDL_Surface *dst, const STDL_Rect *r);
+
+/* XOR raster op: invert the planes selected by col, leave the rest */
+void STDL_XorRect(STDL_Surface *dst, STDL_Rect *r, uint8_t col);
+void STDL_XorHLine(STDL_Surface *dst, int x1, int x2, int y, uint8_t col);
+void STDL_XorVLine(STDL_Surface *dst, int x, int y1, int y2, uint8_t col);
+void STDL_XorPixel(STDL_Surface *dst, int x, int y, uint8_t col);
 ```
 
 All fills route through a precomputed `fill[colour][plane]` word table; all
 shapes decompose to masked spans.
+
+The XOR family is the CGA-era erasable-overlay idiom that ports of
+1980s games keep needing (terrain outlines, tracer bullets, rubber
+bands): drawing the same shape twice restores the destination
+byte-for-byte, so no save-under buffer is needed. Only the planes
+whose colour bit is set are touched, which makes a two-colour
+overlay on planes 0-1 one long-word XOR per row. These paths are
+always CPU - the shapes worth XORing are small, and keeping the
+BLiTTER out means `BLITCHK.TOS`'s "both paths byte-identical"
+invariant still describes every accelerated path.
 
 ### 5.3 `STDL_Blit` — surface and sprite copying
 

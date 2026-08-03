@@ -91,6 +91,11 @@ or `pixels[y*pitch+x]` writes corrupt planar data. Rewrite:
 * 1bpp bitmap expansion -> `STDL_SurfaceFrom1bpp`
 * load-time transforms (flips, remaps) -> `STDL_GetPixel` /
   `STDL_PutPixel` loops are acceptable off the hot path
+* CGA/EGA `XOR` writes (erasable overlays, terrain outlines, tracer
+  bullets) -> `STDL_XorRect` / `STDL_XorHLine` / `STDL_XorVLine` /
+  `STDL_XorPixel`; drawing the shape twice restores the destination,
+  so no save-under is needed. Only the planes selected by the colour
+  are touched.
 
 **Palette budget.** 16 entries replace 256. Divide them explicitly
 (the ported `testpalette` reserves 0-7 for the sprite, 8-14 for

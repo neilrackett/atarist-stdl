@@ -30,6 +30,7 @@ Full contract: `docs/format.md`. Never invent a different layout.
 | Cheap - use freely | Careful | Avoid in loops |
 |---|---|---|
 | `STDL_FillRect`, `STDL_HLine` | `STDL_BlitSurface` unaligned (shift chain) | `STDL_PutPixel` / `STDL_GetPixel` |
+| `STDL_XorVLine` (short spans) | `STDL_XorRect` (CPU only, no BLiTTER) | `STDL_XorPixel` in a loop |
 | aligned blits (same `x & 15` phase) | `STDL_VLine`, `STDL_Line` | `STDL_Circle` outline |
 | `STDL_BlitTile` (16px aligned) | masked blits (colour key) | any per-pixel loop |
 | pre-shifted `STDL_BlitSprite` | `STDL_SetColourKey` (rebuilds mask) | `SDL_MapRGB` per frame |
@@ -62,7 +63,10 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
 3. Mechanical rewrites (see `docs/porting.md`):
    - direct pixel writes -> `SDL_FillRect` bands / `STDL_HLine`
      spans / `STDL_PutPixel` only for tiny overlays
-   - 1bpp data -> `STDL_SurfaceFrom1bpp`
+   - 1bpp data -> `STDL_SurfaceFrom1bpp`; paletted byte-per-pixel
+     decoders -> `STDL_PutGroup8` then `STDL_SpriteFromSurface`
+   - CGA `XOR` overlays -> `STDL_XorRect` / `STDL_XorVLine` /
+     `STDL_XorPixel` (draw twice to erase)
    - 256-colour palette logic -> explicit 16-entry budget
      (sprite colours / effect colours / key+UI slices)
    - `SDL_SetPalette(SDL_PHYSPAL)` fades work unchanged on 16 entries

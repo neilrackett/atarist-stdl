@@ -70,6 +70,14 @@ int           STDL_LoadPalette(const char *bank, int id,
 void STDL_DrawText(STDL_Surface *dst, const STDL_Font *font,
                    int x, int y, const char *text, uint8_t col);
 
+/* One glyph. Identical output to a one-character STDL_DrawText, but
+ * without the string: use it wherever ported text code draws a
+ * character at a time (status bars, scores, menus) rather than
+ * assembling a buffer per call. Characters outside the font's range
+ * draw nothing. */
+void STDL_DrawChar(STDL_Surface *dst, const STDL_Font *font,
+                   int x, int y, int ch, uint8_t col);
+
 /* Load-time BMP reader: uncompressed 1/4/8bpp indexed BMPs with at
  * most 16 used colours (a one-off conversion, not a rendering
  * path; anything richer goes through stdlconv offline). */

@@ -20,8 +20,6 @@
 #define YM_SELECT (*(volatile uint8_t *)0xFFFF8800UL)
 #define YM_DATA   (*(volatile uint8_t *)0xFFFF8802UL)
 
-#define NVBLS     (*(volatile uint16_t *)0x454UL)
-#define VBLQUEUE  (*(void (***)(void))0x456UL)
 #define CONTERM   (*(volatile uint8_t *)0x484UL)
 
 volatile uint8_t stdl_ym_owned;         /* bits 0-2 voices, 3 noise */
@@ -81,7 +79,7 @@ static void ym_shutdown(void)
     int v;
 
     if (vbl_slot >= 0) {
-        VBLQUEUE[vbl_slot] = NULL;
+        STDL_VBLQUEUE[vbl_slot] = NULL;
         vbl_slot = -1;
     }
     stdl_music_tick = NULL;
@@ -114,9 +112,9 @@ int stdl_ym_install(void)
     old_conterm = CONTERM;
     CONTERM = (uint8_t)(old_conterm & ~1);
 
-    for (i = 0; i < NVBLS; i++) {
-        if (VBLQUEUE[i] == NULL) {
-            VBLQUEUE[i] = ym_vbl;
+    for (i = 0; i < STDL_NVBLS; i++) {
+        if (STDL_VBLQUEUE[i] == NULL) {
+            STDL_VBLQUEUE[i] = ym_vbl;
             vbl_slot = i;
             stdl_shutdown_music = ym_shutdown;
             return 0;

@@ -21,7 +21,7 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/sprite.c src/asset.c src/compat.c src/bmp.c \
           src/audio.c src/cursor.c src/music.c src/mixer.c \
           src/sfx.c src/degas.c src/ym.c src/blitter.c \
-          src/planes.c
+          src/planes.c src/vbl.c
 LIBOBJS = $(LIBSRCS:.c=.o)
 
 # Examples: ported SDL 1.2 test programs (public domain).
@@ -31,7 +31,7 @@ EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
            dist/TTIMER.TOS dist/TBLITSPD.TOS dist/TVIDINFO.TOS \
            dist/TKEYS.TOS dist/TJOY.TOS dist/LOOPWAVE.TOS \
            dist/TCURSOR.TOS dist/PLAYMUS.TOS dist/SFXDEMO.TOS \
-           dist/BLITCHK.TOS
+           dist/BLITCHK.TOS dist/VBLCHK.TOS
 
 all: $(LIB) sizecheck $(EXAMPLES) assets
 
@@ -127,6 +127,8 @@ dist/PLAYMUS.TOS: examples/playmus.c $(LIB)
 dist/SFXDEMO.TOS: examples/sfxdemo.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
 dist/BLITCHK.TOS: examples/blitchk.c $(LIB)
+	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
+dist/VBLCHK.TOS: examples/vblchk.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
 
 # host-side unit tests: native clang + ASan, no cross toolchain

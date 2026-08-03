@@ -17,6 +17,30 @@ STDL_Surface stdl_screen;
 volatile uint32_t stdl_host_clock;
 volatile uint16_t stdl_host_hwpal[16];
 
+/*
+ * TOS's VBL queue: eight slots at *_vblqueue, with the count at
+ * $454. Plain memory here, so vbl.c's slot bookkeeping is testable
+ * natively - the tests call the queue entries themselves in place of
+ * the interrupt.
+ */
+static void (*host_vblslots[8])(void);
+volatile uint16_t stdl_host_nvbls = 8;
+void (**stdl_host_vblqueue)(void) = host_vblslots;
+
+void (*stdl_shutdown_audio)(void);
+void (*stdl_shutdown_music)(void);
+void (*stdl_shutdown_vbl)(void);
+
+/* video.c is the real STDL_Init and takes supervisor mode; on the
+ * host there is nothing to claim, so record the state the modules
+ * under test check for and move on. */
+int STDL_Init(uint32_t flags)
+{
+    (void)flags;
+    stdl.initialised = 1;
+    return 0;
+}
+
 static char errbuf[128];
 
 const char *STDL_GetError(void)

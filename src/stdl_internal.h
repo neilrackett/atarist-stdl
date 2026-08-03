@@ -18,14 +18,23 @@
 #define STDL_HZ200      (*(volatile uint32_t *)0x4BAUL)
 #define STDL_FRCLOCK    (*(volatile uint32_t *)0x466UL)
 #define STDL_HWPAL      ((volatile uint16_t *)0xFFFF8240UL)
+/* TOS vertical-blank queue: nvbls entries at *_vblqueue, each either
+ * NULL or a routine the VBL interrupt calls. Shared by the YM sound
+ * tick (ym.c) and the public callback API (vbl.c). */
+#define STDL_NVBLS      (*(volatile uint16_t *)0x454UL)
+#define STDL_VBLQUEUE   (*(void (***)(void))0x456UL)
 #else
 /* host-test builds: the "registers" are plain memory provided by
  * tests/host/stubs.c, so every module compiles natively */
 extern volatile uint32_t stdl_host_clock;
 extern volatile uint16_t stdl_host_hwpal[16];
+extern volatile uint16_t stdl_host_nvbls;
+extern void (**stdl_host_vblqueue)(void);
 #define STDL_HZ200      stdl_host_clock
 #define STDL_FRCLOCK    stdl_host_clock
 #define STDL_HWPAL      stdl_host_hwpal
+#define STDL_NVBLS      stdl_host_nvbls
+#define STDL_VBLQUEUE   stdl_host_vblqueue
 #endif
 
 /*

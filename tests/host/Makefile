@@ -29,7 +29,7 @@ CORE    = stubs.c $(SRC)/surface.c $(SRC)/draw.c $(SRC)/blit.c \
           $(SRC)/sprite.c $(SRC)/palette.c $(SRC)/planes.c
 
 TESTS   = test_pixel test_compose test_cursor test_assets test_planes \
-          test_footprint
+          test_footprint test_vbl
 
 all: $(TESTS)
 
@@ -52,9 +52,13 @@ test_planes: test_planes.c $(CORE)
 test_footprint: test_footprint.c $(CORE)
 	$(CC) $(CFLAGS) -o $@ $^
 
+test_vbl: test_vbl.c $(CORE) $(SRC)/vbl.c
+	$(CC) $(CFLAGS) -o $@ $^
+
 run: $(TESTS)
 	@./test_pixel && ./test_compose && ./test_cursor \
 	  && ./test_assets && ./test_planes && ./test_footprint \
+	  && ./test_vbl \
 	  && echo "ALL HOST TESTS PASSED"
 
 clean:

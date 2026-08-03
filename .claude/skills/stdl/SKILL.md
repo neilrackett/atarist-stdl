@@ -36,6 +36,7 @@ Full contract: `docs/format.md`. Never invent a different layout.
 | aligned blits (same `x & 15` phase) | `STDL_VLine`, `STDL_Line` | `STDL_Circle` outline |
 | `STDL_BlitTile` (16px aligned) | masked blits (colour key) | any per-pixel loop |
 | pre-shifted `STDL_BlitSprite` | `STDL_SetColourKey` (rebuilds mask) | `SDL_MapRGB` per frame |
+| `STDL_DrawChar` (one glyph) | `STDL_SurfaceFromIndexed8` (load time) | `STDL_RemapSurface` per frame |
 
 **Check the colour count first.** If the game uses 4 or 8 colours,
 call `STDL_SetPlaneBudget(2)` (or `3`) right after
@@ -78,8 +79,16 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
 3. Mechanical rewrites (see `docs/porting.md`):
    - direct pixel writes -> `SDL_FillRect` bands / `STDL_HLine`
      spans / `STDL_PutPixel` only for tiny overlays
-   - 1bpp data -> `STDL_SurfaceFrom1bpp`; paletted byte-per-pixel
-     decoders -> `STDL_PutGroup8` then `STDL_SpriteFromSurface`
+   - 1bpp data -> `STDL_SurfaceFrom1bpp`; byte-per-pixel (chunky)
+     art -> `STDL_SurfaceFromIndexed8(bytes, w, h, stride, key)`
+     then `STDL_SpriteFromSurface`. Only reach for `STDL_PutGroup` /
+     `STDL_PutGroup8` when the source is some format of its own
+   - the same art in several colour schemes (team/faction colours,
+     damage flashes) -> `STDL_RemapSurface(s, map)` once per
+     variant at load, then blit normally. There is no blit-time
+     remap and there will not be one: see `docs/limits.md`
+   - text drawn a character at a time -> `STDL_DrawChar`, not a
+     one-character string through `STDL_DrawText`
    - CGA `XOR` overlays -> `STDL_XorRect` / `STDL_XorVLine` /
      `STDL_XorPixel` (draw twice to erase)
    - a *loop* of single pixels (particles, starfields) -> fill an
@@ -130,6 +139,15 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   you genuinely need a continuous mixed stream. Feed it signed 8-bit
   mono at an exact DMA rate (`stdlconv wav --rate 6258`); the WAVs
   `stdlconv` writes are unsigned, so flip the sign bit once at load.
+- A steady 50Hz tick: `STDL_AddVBL(fn)` / `STDL_RemoveVBL(fn)` claim
+  a TOS VBL queue slot. This is the only interrupt STDL hands out and
+  the only thing that should ever have one - a sequencer step whose
+  timing must not follow the frame. Never poke `_vblqueue` at $456 by
+  hand: STDL removes its callbacks on every exit path including the
+  ones that skip `atexit`, and a live queue entry pointing into freed
+  memory panics the machine. The callback contract (no GEMDOS, no
+  allocation, no drawing, no YM writes while STDL owns the chip) is
+  in `include/stdl/stdl_vbl.h`.
 - Splash: `STDL_ShowDegas("SPLASH.PI1")` (make with `stdlconv pi1`).
 - Keyboard games + joystick: `STDL_JoyKeyEmulation(1)`, rebindable
   with `STDL_JoyKeyMapping(up, down, left, right, fire)` keysyms
@@ -144,7 +162,10 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   frame loop.
 - Assuming `screen->pitch == screen->w` or byte-per-pixel access.
 - Assuming unaligned blits are free; align to 16 or pre-shift.
-- Calling `STDL_SetColourKey` per frame (it scans the surface).
+- Calling `STDL_SetColourKey` or `STDL_RemapSurface` per frame (both
+  walk the whole surface; they are load-time calls).
+- Installing a VBL handler by writing `_vblqueue` ($456) directly
+  instead of `STDL_AddVBL`, or doing real work inside one.
 - Relying on non-goals: alpha, scaling, threads, >16 colours,
   arbitrary bpp (`docs/limits.md` is the authority).
 - Assuming DMA audio is free because "the hardware plays it":

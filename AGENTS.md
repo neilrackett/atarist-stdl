@@ -54,6 +54,19 @@ warnings** with the Makefile's `-Wall -Wextra`.
   pressure matters - so the check lives in the cross build, and
   `tests/host/test_footprint.c` covers the heap half by asserting
   a surface is one metadata allocation, not three.
+- **A new primitive gets its own source file.**
+  `-ffunction-sections` is unsupported on m68k-atari-mint, so there
+  is no section garbage collection and the linker's granularity is
+  the object file: anything added to an object every program links
+  is charged to every port, whether or not it calls the new
+  function. One primitive (or one family a caller would want all
+  of) per translation unit keeps that bill with the programs that
+  actually ask for it - `src/vbl.c`, `src/indexed.c` and
+  `src/drawchar.c` are the pattern. It works in both directions:
+  moving `STDL_SurfaceFrom1bpp` out of `surface.o`, which every
+  program links, and in with the other source-art converters made
+  all three ported games *smaller* while the library gained three
+  APIs. Measure it - rebuild the games and compare the .TOS sizes.
 - **After touching blit/fill paths**: run `dist/BLITCHK.TOS` - it
   randomises fills/blits and compares the CPU and BLiTTER paths
   byte-for-byte on target. Both paths must stay identical;
@@ -84,8 +97,9 @@ warnings** with the Makefile's `-Wall -Wextra`.
   crashes - see `exit_supervisor()` in src/video.c before changing
   it.
 - **Termination is not just `atexit`.** STDL installs a GEMDOS
-  terminate-vector handler ($0102) that puts back everything which
-  would outlive the process - VBL slots, the IKBD vector, palette,
+  terminate-vector handler (etv_term at $0408, reached through Setexc
+  vector number 0x102) that puts back everything which would outlive
+  the process - VBL slots, the IKBD vector, palette,
   resolution, DMA - because `abort()`, a failed `assert()` and a TOS
   exception all reach `Pterm` without running `atexit` (and libcmini
   runs the handlers it does have in registration order, not LIFO).

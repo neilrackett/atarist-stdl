@@ -58,13 +58,35 @@ time, not at runtime.
   `STDL_SurfaceIsOpaque` is a cached query for skipping backdrop
   under solid tiles; `STDL_CreateMask` attaches a mask without a
   colour-key scan.
+* **Byte-per-pixel source art**: `STDL_SurfaceFromIndexed8(bytes, w,
+  h, stride, keycolour)` converts a chunky, one-byte-per-pixel image
+  to a planar surface in one call - the thing every port so far has
+  hand-rolled. `stride` is the source row pitch, so a frame lifts
+  straight out of a wider sheet, and `keycolour` is a source byte
+  value that becomes transparent (`-1` for none). Freeze the result
+  with `STDL_SpriteFromSurface`.
+* **Recolouring the same artwork**: `STDL_RemapSurface(s, map)`
+  rewrites the pixels through a 16-entry index map, leaving the
+  transparency mask alone - team colours, faction colours, damage
+  flashes. Do it once per variant at load time and blit the variants
+  normally; there is deliberately no blit-time remap (`docs/limits.md`
+  explains why planar data cannot do one cheaply).
 * **Runtime asset decoding**: `STDL_PutGroup` writes one 16-pixel
   group (planes + mask) - for games that decode proprietary data
-  files at load and cannot pre-convert with stdlconv;
+  files at load in a format nothing else matches;
   `STDL_PutGroup8` does the same for the 8-pixel half-group when
   the source data is byte-granular. Pair either with
   `STDL_SetColourKey(s, 1, 16)`, which enables masked blits from
   the mask the decoder wrote instead of scanning for a key colour.
+* **A 50Hz tick**: `STDL_AddVBL(fn)` / `STDL_RemoveVBL(fn)` put a
+  callback in a TOS VBL queue slot, for the one job the cooperative
+  services cannot do - stepping a sequencer at a rate that does not
+  follow how long drawing takes. It is an interrupt, with the tight
+  contract in `include/stdl/stdl_vbl.h`: no GEMDOS, no allocation, no
+  YM writes while STDL owns the chip. Everything else belongs on the
+  pump. Ports that reached into `_vblqueue` at $456 themselves should
+  move to this: STDL removes its callbacks on every exit path,
+  including the ones that never run `atexit`.
 * **Splash screens**: `STDL_ShowDegas("SPLASH.PI1")` after
   SetVideoMode shows a Degas picture with its palette while the
   game loads (`stdlconv pi1` converts, `stdlconv embed` makes C
@@ -89,9 +111,17 @@ or `pixels[y*pitch+x]` writes corrupt planar data. Rewrite:
   `STDL_HLine`
 * tiny overlays (FPS counters, debug text) -> `STDL_PutPixel`
   (slow path, fine for a handful of pixels) or `STDL_DrawText`
-* 1bpp bitmap expansion -> `STDL_SurfaceFrom1bpp`
+* 1bpp bitmap expansion -> `STDL_SurfaceFrom1bpp`; byte-per-pixel
+  images -> `STDL_SurfaceFromIndexed8`
 * load-time transforms (flips, remaps) -> `STDL_GetPixel` /
-  `STDL_PutPixel` loops are acceptable off the hot path
+  `STDL_PutPixel` loops are acceptable off the hot path; a colour
+  remap has a primitive, `STDL_RemapSurface`
+* **text drawn a character at a time** (status bars, scores, ported
+  CGA console code) -> `STDL_DrawChar(dst, font, x, y, ch, col)`
+  rather than assembling a one-character string for `STDL_DrawText`.
+  Identical output; what it saves is the per-call setup, which is
+  what is left once the plane budget has halved the memory traffic
+  (Sopwith makes 350 of these calls a frame)
 * CGA/EGA `XOR` writes (erasable overlays, terrain outlines, tracer
   bullets) -> `STDL_XorRect` / `STDL_XorHLine` / `STDL_XorVLine` /
   `STDL_XorPixel`; drawing the shape twice restores the destination,

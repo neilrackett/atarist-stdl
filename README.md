@@ -26,7 +26,8 @@ emulated; see [docs/limits.md](docs/limits.md).
 | `include/stdl/`   | public headers, one per module                                                       |
 | `include/compat/` | SDL.h and SDL_mixer.h - the SDL 1.2 compatibility shims                              |
 | `src/`            | video, surface, draw, blit, blitter, planes, palette, event, cursor, time, dirty,    |
-|                   | sprite, asset, bmp, degas, audio, music, sfx, ym, compat, mixer                      |
+|                   | vbl, sprite, drawchar, indexed, asset, bmp, degas, audio, music, sfx, ym, compat,   |
+|                   | mixer                                                                               |
 | `tools/stdlconv/` | asset converter: image quantise + planar, sprite/tile/font banks, Degas PI1,         |
 |                   | WAV (incl. MS ADPCM) to STE DMA rates, MIDI to YM music, C-array embedding           |
 | `examples/`       | ported SDL 1.2 test programs + original STDL demos and their assets (public domain)  |
@@ -73,6 +74,7 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | PLAYMUS.TOS  | YM music (stdlconv midi -> STDL_Music) + DMA chunks via the SDL_mixer shim       |
 | SFXDEMO.TOS  | Degas splash, YM effects stealing/restoring music voices, joystick key emulation |
 | BLITCHK.TOS  | BLiTTER vs CPU byte-identical verification at two plane budgets + timing         |
+| VBLCHK.TOS   | 50Hz VBL callbacks, then an abnormal exit - the desktop coming back is the pass  |
 
 Large same-phase fills and blits are BLiTTER-accelerated where the
 hardware has one (fills 16.7 -> 50 FPS, aligned blits 8.3 -> 25 FPS
@@ -108,6 +110,25 @@ point primitives, the plane budget and `STDL_PlaySample` all exist
 because a real game needed them and profiling said so. Koules also
 gave `STDL_Dirty` its first real workout, which was the point of
 choosing it.
+
+The gaps the three ports worked around became the rest of the API:
+`STDL_SurfaceFromIndexed8` (all three hand-rolled a chunky-to-planar
+decoder), `STDL_RemapSurface` (Sopwith recolours every symbol per
+faction), `STDL_DrawChar` (Sopwith builds a one-character string 350
+times a frame) and `STDL_AddVBL` (Sopwith pokes the TOS VBL queue at
+$456 directly, because STDL claimed a slot for its own sound tick
+and never offered one). The last of those also fixed a crash: a
+program that dies without running `atexit` - a failed `assert`, an
+`abort`, a bus error - used to leave a VBL queue entry pointing into
+memory GEMDOS had already handed to somebody else, which turned an
+out-of-memory into a machine panic one frame later. STDL now cleans
+up from the GEMDOS terminate vector, whichever way the program goes.
+
+Because the linker's granularity on m68k-atari-mint is the object
+file, each of those lives in its own translation unit and costs
+nothing to a program that does not call it: adding all four, and
+moving `STDL_SurfaceFrom1bpp` in beside them, made every one of the
+three games *smaller*.
 
 Two findings worth repeating for anyone porting: gcc 4.6 turns
 `y * stride` into a `__mulsi3` call costing ~270 cycles, which is

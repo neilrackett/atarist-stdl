@@ -10,6 +10,7 @@ stop trying and redesign instead.
 |---|---|
 | Arbitrary bpp surfaces | v1 is 4bpp low res only; 1bpp and 2bpp deferred |
 | Per-pixel alpha / blending | no sane planar implementation; `SDL_SetAlpha` returns -1 |
+| Blit-time colour remap | too expensive in planar; remap the surface once instead (below) |
 | Runtime scaling / rotation | pre-render or redesign |
 | `SDL_LockSurface` semantics | surfaces are always directly addressable |
 | Threads, timers-as-threads | cooperative single-thread model; timer callbacks fire inside `SDL_Delay` |
@@ -119,6 +120,26 @@ stop trying and redesign instead.
   already filled with out-of-budget colours are *not* rescanned and
   will render wrong until re-created. Colour indices above the
   budget are truncated, not rejected.
+* There is **no blit-time colour remap**, and that is a measurement,
+  not an oversight. A pixel's index lives one bit per bitplane, so
+  applying a 16-entry map while blitting means, per 16-pixel group,
+  intersecting the four plane words into a mask for each source
+  colour and OR-ing the survivors into the output planes: 40-60
+  register operations against the five a plain masked sprite blit
+  costs, in the hottest loop most ports have. Recolour once instead -
+  `STDL_RemapSurface` before `STDL_SpriteFromSurface` - and every
+  variant then draws through the ordinary aligned and pre-shifted
+  paths at full speed. The cost is one copy of the artwork per
+  colour scheme, which is small: Sopwith's nine factions over its
+  whole symbol set measured 5,632 bytes.
+* `STDL_AddVBL` is the only interrupt STDL hands out, and it is a
+  raw one: the callback runs at level 4 in supervisor mode from
+  TOS's VBL dispatcher, and may not call GEMDOS/BIOS/XBIOS, allocate,
+  draw, or touch the YM2149 while STDL_Music / STDL_Sfx /
+  STDL_Speaker own it. Everything with any slack in its timing -
+  audio refill, compat timers, the cursor - stays on the cooperative
+  pump by design. See `include/stdl/stdl_vbl.h` for the full
+  contract.
 * Large same-phase fills and blits are BLiTTER-accelerated when
   the hardware has one (Mega ST/STE/Mega STE, detected at init);
   correctness never depends on it, `STDL_UseBlitter(0)` forces the

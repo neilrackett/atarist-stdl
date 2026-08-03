@@ -139,7 +139,8 @@ static void release_hardware(void)
 }
 
 /*
- * GEMDOS terminate vector ($0102). atexit is not enough: abort(), a
+ * GEMDOS terminate vector - etv_term at $0408, reached through
+ * Setexc vector number 0x102. atexit is not enough: abort(), a
  * failed assert(), a signal handler and a TOS exception all reach
  * Pterm without running atexit handlers, and libcmini runs the ones
  * it does have in registration order rather than LIFO. Whatever the

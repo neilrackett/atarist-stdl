@@ -28,6 +28,20 @@ extern volatile uint16_t stdl_host_hwpal[16];
 #define STDL_HWPAL      stdl_host_hwpal
 #endif
 
+/*
+ * Byte offset of a half-group inside a plane (or mask) word: on the
+ * 68000 pixels 0-7 are the word's most significant byte, i.e. byte
+ * 0. Host-test builds on a little-endian machine see the two bytes
+ * the other way round; the pixel layout itself is unchanged.
+ * half is 0 for pixels 0-7 of the group, 1 for pixels 8-15.
+ */
+#if defined(__m68k__) || (defined(__BYTE_ORDER__) \
+                          && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#define STDL_WORD_BYTE(half) (half)
+#else
+#define STDL_WORD_BYTE(half) (1 - (half))
+#endif
+
 #define STDL_SCREEN_W       320
 #define STDL_SCREEN_H       200
 #define STDL_SCREEN_PLANES  4

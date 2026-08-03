@@ -139,6 +139,82 @@ int main(void)
         STDL_FreeSurface(s);
     }
 
+    /* --- PutGroup8 half-group decoder path --------------------- */
+    {
+        STDL_Surface *s = STDL_CreateSurface(32, 4);
+        uint8_t lo[4] = { 0xF0, 0x0F, 0x00, 0xFF };
+        uint8_t hi[4] = { 0x0F, 0xF0, 0xFF, 0x00 };
+
+        CHECK(STDL_CreateMask(s, 1) == 0, "mask for putgroup8");
+        /* both halves of group 1: pixels 16-23, then 24-31 */
+        STDL_PutGroup8(s, 16, 2, lo, 0x03);
+        STDL_PutGroup8(s, 24, 2, hi, 0xC0);
+        /* x is rounded down to the half-group it falls in */
+        STDL_PutGroup8(s, 29, 3, hi, 0xC0);
+        CHECK(STDL_GetPixel(s, 24, 3) == 2 + 4, "putgroup8 rounds x down");
+
+        CHECK(STDL_GetPixel(s, 16, 2) == 1 + 8, "putgroup8 low pixel");
+        CHECK(STDL_GetPixel(s, 20, 2) == 2 + 8, "putgroup8 low pixel 4");
+        CHECK(STDL_GetPixel(s, 24, 2) == 2 + 4, "putgroup8 high pixel");
+        CHECK(STDL_GetPixel(s, 28, 2) == 1 + 4, "putgroup8 high pixel 4");
+
+        /* the mask byte follows the same even/odd split, and only
+         * the written halves change */
+        CHECK(mask_bit(s, 22, 2) == 1 && mask_bit(s, 21, 2) == 0,
+              "putgroup8 low mask");
+        CHECK(mask_bit(s, 24, 2) == 1 && mask_bit(s, 26, 2) == 0,
+              "putgroup8 high mask");
+        CHECK(mask_bit(s, 0, 2) == 1, "other groups untouched");
+        CHECK(s->opaque_state == 0, "putgroup8 invalidates cache");
+
+        /* out of range is a no-op, not a write */
+        STDL_PutGroup8(s, 32, 2, lo, 0);
+        STDL_PutGroup8(s, 0, 4, lo, 0);
+        STDL_PutGroup8(s, -8, 0, lo, 0);
+        CHECK(STDL_GetPixel(s, 0, 0) == 0, "putgroup8 clipped");
+        STDL_FreeSurface(s);
+    }
+
+    /* --- colour key 16: keep a decode-time mask, do not scan --- */
+    {
+        STDL_Surface *s = STDL_CreateSurface(32, 4);
+        uint8_t planes[4] = { 0xFF, 0x00, 0x00, 0x00 };
+        STDL_Surface *dst = STDL_CreateSurface(32, 4);
+        STDL_Rect d = { 0, 0, 0, 0 };
+
+        /* a decoder builds pixels and mask together: colour 1
+         * everywhere, right half of the first group transparent */
+        CHECK(STDL_CreateMask(s, 0) == 0, "mask for key 16");
+        STDL_PutGroup8(s, 0, 1, planes, 0x00);
+        STDL_PutGroup8(s, 8, 1, planes, 0xFF);
+
+        CHECK(STDL_SetColourKey(s, 1, STDL_TRANSPARENT) == 0,
+              "set key 16");
+        CHECK((s->flags & STDL_SRCKEY) != 0, "key 16 enables SRCKEY");
+        CHECK(s->colourkey == STDL_TRANSPARENT, "key 16 stored");
+        CHECK(mask_bit(s, 0, 1) == 0 && mask_bit(s, 8, 1) == 1,
+              "key 16 preserved the hand-built mask");
+
+        /* a scan for key 0 would have made everything but colour 1
+         * transparent; check the blit honours the decoder's mask */
+        STDL_FillRect(dst, NULL, 5);
+        STDL_BlitSurface(s, NULL, dst, &d);
+        CHECK(STDL_GetPixel(dst, 0, 1) == 1, "opaque half blitted");
+        CHECK(STDL_GetPixel(dst, 8, 1) == 5, "transparent half kept");
+        CHECK(STDL_GetPixel(dst, 0, 0) == 0, "opaque rows overwrite");
+
+        /* enabling it on a maskless surface gives an all-opaque mask */
+        {
+            STDL_Surface *m = STDL_CreateSurface(32, 4);
+            CHECK(STDL_SetColourKey(m, 1, 16) == 0, "key 16 no mask");
+            CHECK(m->mask != NULL, "key 16 allocated a mask");
+            CHECK(STDL_SurfaceIsOpaque(m) == 1, "allocated mask is opaque");
+            STDL_FreeSurface(m);
+        }
+        STDL_FreeSurface(s);
+        STDL_FreeSurface(dst);
+    }
+
     /* --- Degas round trip -------------------------------------- */
     {
         STDL_Surface *pic =

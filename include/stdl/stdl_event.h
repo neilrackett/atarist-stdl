@@ -27,6 +27,7 @@ enum {
     STDL_JOYBUTTONDOWN,
     STDL_JOYBUTTONUP,
     STDL_QUIT,
+    STDL_USEREVENT = 24,   /* .. STDL_NUMEVENTS: the game's own */
     STDL_NUMEVENTS = 32
 };
 
@@ -82,6 +83,15 @@ typedef struct {
     uint8_t type;
 } STDL_QuitEvent;
 
+/* Game-defined events pushed with STDL_PushEvent; the library never
+ * generates them and passes them through the queue untouched. */
+typedef struct {
+    uint8_t type;        /* STDL_USEREVENT or above */
+    int     code;
+    void   *data1;
+    void   *data2;
+} STDL_UserEvent;
+
 /* hats and balls don't exist on ST joysticks; present so ported
  * event switches compile */
 typedef struct {
@@ -116,6 +126,7 @@ typedef union {
     STDL_JoyBallEvent     jball;
     STDL_QuitEvent        quit;
     STDL_ResizeEvent      resize;
+    STDL_UserEvent        user;
 } STDL_Event;
 
 int  STDL_PollEvent(STDL_Event *e);

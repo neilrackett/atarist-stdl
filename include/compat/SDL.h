@@ -26,6 +26,8 @@ typedef uint16_t Uint16;
 typedef int16_t  Sint16;
 typedef uint32_t Uint32;
 typedef int32_t  Sint32;
+typedef uint64_t Uint64;
+typedef int64_t  Sint64;
 
 typedef enum { SDL_FALSE = 0, SDL_TRUE = 1 } SDL_bool;
 
@@ -92,6 +94,7 @@ typedef int              SDLMod;
 #define SDL_QUIT            STDL_QUIT
 #define SDL_VIDEORESIZE     16
 #define SDL_VIDEOEXPOSE     17
+#define SDL_USEREVENT       STDL_USEREVENT
 
 #define SDL_PRESSED  STDL_PRESSED
 #define SDL_RELEASED STDL_RELEASED
@@ -107,8 +110,37 @@ typedef int              SDLMod;
 #define SDLK_TAB       STDLK_TAB
 #define SDLK_RETURN    STDLK_RETURN
 #define SDLK_ESCAPE    STDLK_ESCAPE
+#define SDLK_CLEAR     STDLK_CLEAR
+#define SDLK_PAUSE     STDLK_PAUSE
 #define SDLK_SPACE     STDLK_SPACE
 #define SDLK_DELETE    STDLK_DELETE
+#define SDLK_EXCLAIM      STDLK_EXCLAIM
+#define SDLK_QUOTEDBL     STDLK_QUOTEDBL
+#define SDLK_HASH         STDLK_HASH
+#define SDLK_DOLLAR       STDLK_DOLLAR
+#define SDLK_AMPERSAND    STDLK_AMPERSAND
+#define SDLK_QUOTE        STDLK_QUOTE
+#define SDLK_LEFTPAREN    STDLK_LEFTPAREN
+#define SDLK_RIGHTPAREN   STDLK_RIGHTPAREN
+#define SDLK_ASTERISK     STDLK_ASTERISK
+#define SDLK_PLUS         STDLK_PLUS
+#define SDLK_COMMA        STDLK_COMMA
+#define SDLK_MINUS        STDLK_MINUS
+#define SDLK_PERIOD       STDLK_PERIOD
+#define SDLK_SLASH        STDLK_SLASH
+#define SDLK_COLON        STDLK_COLON
+#define SDLK_SEMICOLON    STDLK_SEMICOLON
+#define SDLK_LESS         STDLK_LESS
+#define SDLK_EQUALS       STDLK_EQUALS
+#define SDLK_GREATER      STDLK_GREATER
+#define SDLK_QUESTION     STDLK_QUESTION
+#define SDLK_AT           STDLK_AT
+#define SDLK_LEFTBRACKET  STDLK_LEFTBRACKET
+#define SDLK_BACKSLASH    STDLK_BACKSLASH
+#define SDLK_RIGHTBRACKET STDLK_RIGHTBRACKET
+#define SDLK_CARET        STDLK_CARET
+#define SDLK_UNDERSCORE   STDLK_UNDERSCORE
+#define SDLK_BACKQUOTE    STDLK_BACKQUOTE
 #define SDLK_0 STDLK_0
 #define SDLK_1 STDLK_1
 #define SDLK_2 STDLK_2
@@ -216,6 +248,10 @@ typedef int              SDLMod;
 #define KMOD_CTRL   STDL_KMOD_CTRL
 #define KMOD_SHIFT  STDL_KMOD_SHIFT
 #define KMOD_ALT    STDL_KMOD_ALT
+/* STDL extension: the event was synthesised from the joystick
+ * (STDL_JoyKeyEmulation), so a game can give e.g. joystick-up its
+ * own meaning without affecting the cursor key */
+#define KMOD_JOYSTICK STDL_KMOD_JOYSTICK
 
 #define SDL_DEFAULT_REPEAT_DELAY    STDL_DEFAULT_REPEAT_DELAY
 #define SDL_DEFAULT_REPEAT_INTERVAL STDL_DEFAULT_REPEAT_INTERVAL

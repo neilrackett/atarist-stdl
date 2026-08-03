@@ -49,6 +49,10 @@ bit per pixel, one word per group, same bit order as the planes:
 
 The mask is a snapshot of the pixels at the time the key is set.
 Modify the pixels and you must call `STDL_SetColourKey` again.
+A key of 16 or more is not a pixel value: it enables masked blits
+from whatever mask the surface already carries (built by
+`STDL_CreateMask`, `STDL_PutGroup`/`STDL_PutGroup8` or transparent
+fills) and never scans or overwrites it.
 
 ## 3. Sprite storage
 

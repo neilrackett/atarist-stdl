@@ -19,7 +19,13 @@ STDL_Surface *STDL_DuplicateSurface(const STDL_Surface *s);
 void          STDL_FreeSurface(STDL_Surface *s);
 
 /* Build (or drop) the transparency mask from a palette index.
- * Pixels equal to `key` become transparent in masked blits. */
+ * Pixels equal to `key` become transparent in masked blits.
+ * A key >= STDL_TRANSPARENT means "no pixel value is the key":
+ * masked blitting is enabled using the mask the surface already
+ * has (created all-opaque if there is none) and the pixels are
+ * not scanned - for surfaces whose transparency is built while
+ * decoding, with STDL_PutGroup / STDL_PutGroup8 or transparent
+ * fills, rather than carried in the pixel values. */
 int  STDL_SetColourKey(STDL_Surface *s, int enable, uint8_t key);
 #define STDL_SetColorKey STDL_SetColourKey
 
@@ -57,5 +63,12 @@ int  STDL_SurfaceIsOpaque(STDL_Surface *s);
  * a group boundary; the group must be fully inside the surface. */
 void STDL_PutGroup(STDL_Surface *s, int x, int y,
                    const uint16_t planes[4], uint16_t mask);
+
+/* Same for decoders whose data is byte-granular: writes the 8-pixel
+ * half-group containing x (x is rounded down to a multiple of 8).
+ * transmask follows the mask convention - bit set = transparent -
+ * so a decoder holding an opacity byte passes its complement. */
+void STDL_PutGroup8(STDL_Surface *s, int x, int y,
+                    const uint8_t planes[4], uint8_t transmask);
 
 #endif /* STDL_SURFACE_H */

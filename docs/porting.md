@@ -32,7 +32,7 @@ time, not at runtime.
 | `SDL_LockSurface` | no-op | surfaces are always addressable |
 | `SDL_MUSTLOCK` | `0` | |
 | `SDL_DisplayFormat` | duplicate | already planar; result flagged `SDL_HWACCEL` |
-| `SDL_SetColorKey` | `STDL_SetColourKey` | builds the transparency mask (a snapshot) |
+| `SDL_SetColorKey` | `STDL_SetColourKey` | builds the transparency mask (a snapshot); key >= 16 = use the existing mask, no scan - for surfaces whose transparency is built during decode |
 | `SDL_LoadBMP` | `STDL_LoadBMP` | uncompressed 1/4/8bpp, max 16 colours |
 | `SDL_SetColors` / `SDL_SetPalette` | palette module | `SDL_LOGPAL` / `SDL_PHYSPAL` honoured |
 | events / keysyms / `SDL_GetKeyState` | event module | numbering matches SDL 1.2 |
@@ -59,7 +59,11 @@ time, not at runtime.
   colour-key scan.
 * **Runtime asset decoding**: `STDL_PutGroup` writes one 16-pixel
   group (planes + mask) - for games that decode proprietary data
-  files at load and cannot pre-convert with stdlconv.
+  files at load and cannot pre-convert with stdlconv;
+  `STDL_PutGroup8` does the same for the 8-pixel half-group when
+  the source data is byte-granular. Pair either with
+  `STDL_SetColourKey(s, 1, 16)`, which enables masked blits from
+  the mask the decoder wrote instead of scanning for a key colour.
 * **Splash screens**: `STDL_ShowDegas("SPLASH.PI1")` after
   SetVideoMode shows a Degas picture with its palette while the
   game loads (`stdlconv pi1` converts, `stdlconv embed` makes C

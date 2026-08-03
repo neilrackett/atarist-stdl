@@ -146,6 +146,20 @@ int STDL_SetColourKey(STDL_Surface *s, int enable, uint8_t key)
         s->flags &= ~STDL_SRCKEY;
         return 0;
     }
+    /* key >= STDL_TRANSPARENT: no pixel value is the key, so keep
+     * the mask the surface already has (transparent fills,
+     * STDL_PutGroup, decoders) instead of rebuilding it from the
+     * pixels. A missing mask is created all-opaque - mask_alloc
+     * zero-fills, and a clear bit means "destination overwritten". */
+    if (key >= STDL_TRANSPARENT) {
+        if (mask_alloc(s) < 0) {
+            return -1;
+        }
+        s->colourkey = STDL_TRANSPARENT;
+        s->flags |= STDL_SRCKEY;
+        s->opaque_state = 0;
+        return 0;
+    }
     key &= 15;
     if (mask_alloc(s) < 0) {
         return -1;
@@ -241,6 +255,38 @@ void STDL_PutGroup(STDL_Surface *s, int x, int y,
     grp[3] = planes[3];
     if (s->mask != NULL) {
         ((uint16_t *)(s->mask + (uint32_t)y * s->maskstride))[g] = mask;
+        s->opaque_state = 0;
+    }
+}
+
+/*
+ * Half-group variant for decoders whose source data is byte (8
+ * pixel) granular. In a group the EVEN byte of a plane word holds
+ * pixels 0-7 and the ODD byte pixels 8-15, so the plane byte for x
+ * sits at group_base + p * 2 + ((x >> 3) & 1); the mask byte lives
+ * at the matching offset inside the group's mask word.
+ */
+void STDL_PutGroup8(STDL_Surface *s, int x, int y,
+                    const uint8_t planes[4], uint8_t transmask)
+{
+    uint8_t *grp;
+    int g, half;
+
+    if (s == NULL || planes == NULL || y < 0 || y >= s->h || x < 0) {
+        return;
+    }
+    g = x >> 4;
+    if (g >= s->stride / 8) {
+        return;
+    }
+    half = STDL_WORD_BYTE((x >> 3) & 1);
+    grp = s->pixels + (uint32_t)y * s->stride + g * 8 + half;
+    grp[0] = planes[0];
+    grp[2] = planes[1];
+    grp[4] = planes[2];
+    grp[6] = planes[3];
+    if (s->mask != NULL) {
+        s->mask[(uint32_t)y * s->maskstride + g * 2 + half] = transmask;
         s->opaque_state = 0;
     }
 }

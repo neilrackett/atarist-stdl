@@ -25,8 +25,8 @@ emulated; see [docs/limits.md](docs/limits.md).
 | ----------------- | ------------------------------------------------------------------------------------ |
 | `include/stdl/`   | public headers, one per module                                                       |
 | `include/compat/` | SDL.h and SDL_mixer.h - the SDL 1.2 compatibility shims                              |
-| `src/`            | video, surface, draw, blit, blitter, palette, event, cursor, time, dirty, sprite,    |
-|                   | asset, bmp, degas, audio, music, sfx, ym, compat, mixer                              |
+| `src/`            | video, surface, draw, blit, blitter, planes, palette, event, cursor, time, dirty,    |
+|                   | sprite, asset, bmp, degas, audio, music, sfx, ym, compat, mixer                      |
 | `tools/stdlconv/` | asset converter: image quantise + planar, sprite/tile/font banks, Degas PI1,         |
 |                   | WAV (incl. MS ADPCM) to STE DMA rates, MIDI to YM music, C-array embedding           |
 | `examples/`       | ported SDL 1.2 test programs + original STDL demos and their assets (public domain)  |
@@ -86,8 +86,34 @@ and the BLiTTER passes - stops maintaining the top two bitplanes.
 Measured with BLITCHK.TOS: 1.4x on a plain ST, 1.9x with a
 BLiTTER. The default is 4 planes and is bit-for-bit unchanged.
 
-The next milestone is proving the API against a real game port
-(Koules), which is expected to force `STDL_Dirty` into shape.
+## Ports
+
+The API has been proven against three SDL-era games, each in its own
+repository:
+
+| Game      | What it proved                                                             |
+| --------- | -------------------------------------------------------------------------- |
+| FreeNukum | replaced a bespoke planar shim; renders pixel-identically to it on target   |
+| Sopwith   | an STDL backend built beside its hand-written native ST one, to measure     |
+| Koules    | a 256-colour SVGALIB game, brought to 16 colours and fixed-point physics    |
+
+Sopwith is the honest benchmark, being the only one with a
+hand-optimised native ST backend to measure against. The STDL backend
+began roughly 1.6x slower than that native code on a plain 8MHz ST
+and is now around 1.3x, the difference being the optimisations these
+ports forced into the library.
+
+That is the useful part: the XOR primitives, the batched span and
+point primitives, the plane budget and `STDL_PlaySample` all exist
+because a real game needed them and profiling said so. Koules also
+gave `STDL_Dirty` its first real workout, which was the point of
+choosing it.
+
+Two findings worth repeating for anyone porting: gcc 4.6 turns
+`y * stride` into a `__mulsi3` call costing ~270 cycles, which is
+more than the pixel work in a short span; and the `SDL_mixer` shim
+software-mixes, which measured at 36-75% of an 8MHz CPU - use
+`STDL_PlaySample` for effects that matter.
 
 ## Porting with an LLM
 

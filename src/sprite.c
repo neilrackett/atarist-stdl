@@ -21,17 +21,24 @@
 /* ---------------------------------------------------------------- */
 /* building                                                         */
 
-/* Fill one frame of variant 0 (unshifted) from surface pixels. */
+/*
+ * Fill one frame of variant 0 (unshifted) from surface pixels.
+ *
+ * The row bases walk rather than being recomputed: `y * stride` is a
+ * 32-bit multiply, which gcc 4.6 turns into a __mulsi3 call (~270
+ * cycles on an 8MHz 68000). Two per row, and a pre-shifted sprite
+ * builds sixteen variants, so this is the one load-time site where
+ * they were worth removing.
+ */
 static void build_frame(const STDL_Surface *s, int fx, int frame_w,
                         int groups, uint16_t *out)
 {
+    const uint8_t *row = s->pixels;
+    const uint8_t *mbase = s->mask;
     int y, g, p;
 
     for (y = 0; y < s->h; y++) {
-        const uint8_t *row = s->pixels + (uint32_t)y * s->stride;
-        const uint16_t *mrow = (s->mask != NULL)
-            ? (const uint16_t *)(s->mask + (uint32_t)y * s->maskstride)
-            : NULL;
+        const uint16_t *mrow = (const uint16_t *)mbase;
 
         for (g = 0; g < groups; g++) {
             /* source pixels [fx + g*16, fx + g*16 + 15]; the frame
@@ -69,6 +76,10 @@ static void build_frame(const STDL_Surface *s, int fx, int frame_w,
             }
             out += SPR_WORDS;
         }
+        row += s->stride;
+        if (mbase != NULL) {
+            mbase += s->maskstride;
+        }
     }
 }
 
@@ -78,18 +89,21 @@ static uint16_t *preshift_expand(const uint16_t *v0, int groups,
                                  int rows_total)
 {
     int pg = groups + 1;                 /* padded groups per row */
+    int srcrow = groups * SPR_WORDS;     /* words per input row      */
     uint32_t rowsz = (uint32_t)pg * SPR_WORDS;
     uint32_t vsize = rowsz * (uint32_t)rows_total;
     uint16_t *data = malloc(vsize * 16 * 2);
+    uint16_t *dst = data;
     int v, y, g, p;
 
     if (data == NULL) {
         return NULL;
     }
+    /* dst walks the whole block: one variant is exactly vsize words,
+     * which is what the group loop below advances it by per variant */
     for (v = 0; v < 16; v++) {
-        uint16_t *dst = data + (uint32_t)v * vsize;
+        const uint16_t *src = v0;
         for (y = 0; y < rows_total; y++) {
-            const uint16_t *src = v0 + (uint32_t)y * groups * SPR_WORDS;
             for (g = 0; g < pg; g++) {
                 /* source groups g-1 and g feed output group g */
                 const uint16_t *a =
@@ -117,6 +131,7 @@ static uint16_t *preshift_expand(const uint16_t *v0, int groups,
                 }
                 dst += SPR_WORDS;
             }
+            src += srcrow;
         }
     }
     return data;
@@ -397,8 +412,10 @@ STDL_Tileset *STDL_TilesetFromSurface(const STDL_Surface *s, int tw,
                                       int th)
 {
     STDL_Tileset *ts;
-    int groups, cols, rows, tx, ty, t, y, g, p;
+    int groups, cols, rows, tx, ty, y, g, p;
     int masked;
+    uint16_t *out;
+    const uint8_t *rowbase, *mrowbase;
 
     if (s == NULL || tw <= 0 || th <= 0 || (tw & 15) != 0) {
         STDL_SetError("tiles must be a multiple of 16 wide");
@@ -432,28 +449,44 @@ STDL_Tileset *STDL_TilesetFromSurface(const STDL_Surface *s, int tw,
         return NULL;
     }
 
-    for (t = 0; t < ts->ntiles; t++) {
-        uint16_t *out = ts->data + ts->tilesize * (uint32_t)t;
-        tx = (t % cols) * tw;
-        ty = (t / cols) * th;
-        for (y = 0; y < th; y++) {
-            const uint8_t *row =
-                s->pixels + (uint32_t)(ty + y) * s->stride;
-            const uint16_t *mrow = masked
-                ? (const uint16_t *)(s->mask
-                    + (uint32_t)(ty + y) * s->maskstride)
-                : NULL;
-            for (g = 0; g < groups; g++) {
-                const uint16_t *grp =
-                    (const uint16_t *)(row + ((tx >> 4) + g) * 8);
-                uint16_t mask = masked ? mrow[(tx >> 4) + g] : 0;
-                if (masked) {
-                    *out++ = mask;
+    /*
+     * Walk the source rather than addressing it: the obvious form
+     * costs two __mulsi3 calls per tile row (~270 cycles each on an
+     * 8MHz 68000) plus a division per tile for the tile's column.
+     * Nesting the tile loops removes the division; carrying the row
+     * bases removes the multiplies.
+     */
+    out = ts->data;
+    rowbase = s->pixels;
+    mrowbase = s->mask;
+    for (ty = 0; ty < rows; ty++) {
+        for (tx = 0; tx < cols; tx++) {
+            const uint8_t *row = rowbase + tx * groups * 8;
+            const uint8_t *mbase = masked
+                ? mrowbase + tx * groups * 2 : NULL;
+
+            for (y = 0; y < th; y++) {
+                const uint16_t *mrow = (const uint16_t *)mbase;
+                for (g = 0; g < groups; g++) {
+                    const uint16_t *grp =
+                        (const uint16_t *)(row + g * 8);
+                    uint16_t mask = masked ? mrow[g] : 0;
+                    if (masked) {
+                        *out++ = mask;
+                    }
+                    for (p = 0; p < 4; p++) {
+                        *out++ = (uint16_t)(grp[p] & ~mask);
+                    }
                 }
-                for (p = 0; p < 4; p++) {
-                    *out++ = (uint16_t)(grp[p] & ~mask);
+                row += s->stride;
+                if (masked) {
+                    mbase += s->maskstride;
                 }
             }
+        }
+        rowbase += (uint32_t)(uint16_t)th * s->stride;
+        if (masked) {
+            mrowbase += (uint32_t)(uint16_t)th * s->maskstride;
         }
     }
     return ts;

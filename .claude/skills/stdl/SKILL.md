@@ -31,6 +31,7 @@ Full contract: `docs/format.md`. Never invent a different layout.
 |---|---|---|
 | `STDL_FillRect`, `STDL_HLine` | `STDL_BlitSurface` unaligned (shift chain) | `STDL_PutPixel` / `STDL_GetPixel` |
 | `STDL_XorVSpans` / `STDL_VSpans` (span lists) | `STDL_XorRect` (CPU only, no BLiTTER) | `STDL_XorPixel` in a loop |
+| `STDL_Points` (particle fields) | | `STDL_PutPixel` in a loop |
 | `STDL_XorVLine` (a few spans) | `STDL_XorVLine` x100+ (batch it instead) | one `STDL_*Line` call per column |
 | aligned blits (same `x & 15` phase) | `STDL_VLine`, `STDL_Line` | `STDL_Circle` outline |
 | `STDL_BlitTile` (16px aligned) | masked blits (colour key) | any per-pixel loop |
@@ -81,6 +82,9 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
      decoders -> `STDL_PutGroup8` then `STDL_SpriteFromSurface`
    - CGA `XOR` overlays -> `STDL_XorRect` / `STDL_XorVLine` /
      `STDL_XorPixel` (draw twice to erase)
+   - a *loop* of single pixels (particles, starfields) -> fill an
+     `STDL_Point` array and make one `STDL_Points` call; erase next
+     frame with a second call in the background colour
    - a *loop* of short spans (terrain profiles, column fields,
      raycaster walls) -> fill an `STDL_Span` array and make one
      `STDL_XorVSpans` / `STDL_VSpans` / `STDL_XorHSpans` /

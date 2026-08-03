@@ -70,6 +70,22 @@ void STDL_XorRect(STDL_Surface *dst, STDL_Rect *r, uint8_t col);
  * of long spans there is nothing in it. The lists are the
  * caller's own memory and are only read.
  */
+/*
+ * Batched single pixels: same result as one STDL_PutPixel per entry,
+ * in list order, each clipped independently. This is the primitive
+ * for particle fields - the thing a span list still charges too much
+ * for, because a one-pixel span pays a length clamp, two edge masks
+ * and a two-group tail test to draw one bit. Measured on a plain ST,
+ * a particle costs roughly a third of what the equivalent
+ * STDL_HSpans list does.
+ *
+ * `col` is a palette index; STDL_TRANSPARENT punches holes in a
+ * masked surface exactly as a fill would. The list is the caller's
+ * memory and is only read.
+ */
+void STDL_Points(STDL_Surface *dst, const STDL_Point *pts,
+                 int count, uint8_t col);
+
 void STDL_HSpans(STDL_Surface *dst, const STDL_Span *spans,
                  int count, uint8_t col);
 void STDL_VSpans(STDL_Surface *dst, const STDL_Span *spans,

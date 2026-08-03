@@ -114,6 +114,86 @@ static void test_drawtext(void)
     STDL_FreeSurface(want);
 }
 
+/*
+ * Sprites narrower than a group. A frame only has to start on a
+ * 16-pixel boundary, so a single frame can be any width: the pixels
+ * past frame_w must come out transparent, at every destination phase
+ * and pre-shifted or not. Koules' cast is 6, 8, 12, 14 and 24 wide.
+ */
+static void test_odd_width_sprite(uint32_t flags, const char *what)
+{
+    static const int widths[] = { 1, 6, 8, 12, 14, 15, 17, 24, 31 };
+    int wi;
+
+    for (wi = 0; wi < (int)(sizeof(widths) / sizeof(widths[0])); wi++) {
+        int w = widths[wi];
+        int h = 5, x, px, py;
+        STDL_Surface *src = STDL_CreateSurface(w, h);
+        STDL_Sprite *spr;
+
+        /* solid colour 3 over the whole frame; 0 is the key, so
+         * anything outside it must leave the destination alone */
+        STDL_FillRect(src, NULL, 3);
+        STDL_SetColourKey(src, 1, 0);
+        spr = STDL_SpriteFromSurface(src, w, flags);
+        CHECK(spr != NULL, "%s w=%d: %s", what, w, STDL_GetError());
+        if (spr == NULL) {
+            STDL_FreeSurface(src);
+            continue;
+        }
+        CHECK(spr->w == w, "%s w=%d: sprite w %d", what, w, spr->w);
+        CHECK(spr->nframes == 1, "%s w=%d: %d frames", what, w,
+              spr->nframes);
+
+        for (x = 0; x < 17; x++) {
+            STDL_Surface *dst = STDL_CreateSurface(64, 8);
+            STDL_FillRect(dst, NULL, 6);
+            STDL_BlitSprite(spr, 0, dst, x, 1);
+            for (py = 0; py < 8; py++) {
+                for (px = 0; px < 64; px++) {
+                    int inside = (px >= x && px < x + w
+                                  && py >= 1 && py < 1 + h);
+                    uint8_t want = inside ? 3 : 6;
+                    uint8_t got = STDL_GetPixel(dst, px, py);
+                    if (got != want) {
+                        CHECK(0, "%s w=%d x=%d (%d,%d) got %d want %d",
+                              what, w, x, px, py, got, want);
+                        px = 64; py = 8;
+                    }
+                }
+            }
+            STDL_FreeSurface(dst);
+        }
+        STDL_FreeSprite(spr);
+        STDL_FreeSurface(src);
+    }
+}
+
+/* A strip of frames still has to be group-aligned, and the library
+ * has to say so rather than quietly drawing the wrong pixels. */
+static void test_sprite_frame_rules(void)
+{
+    STDL_Surface *s = STDL_CreateSurface(48, 4);
+    STDL_Sprite *spr;
+
+    STDL_FillRect(s, NULL, 2);
+    spr = STDL_SpriteFromSurface(s, 16, 0);
+    CHECK(spr != NULL && spr->nframes == 3, "48/16 gives 3 frames");
+    STDL_FreeSprite(spr);
+
+    CHECK(STDL_SpriteFromSurface(s, 12, 0) == NULL,
+          "12-wide frames in a 48-wide strip must be rejected");
+    CHECK(STDL_SpriteFromSurface(s, 64, 0) == NULL,
+          "frame wider than the surface must be rejected");
+    CHECK(STDL_SpriteFromSurface(s, 0, 0) == NULL,
+          "zero-wide frame must be rejected");
+
+    spr = STDL_SpriteFromSurface(s, 48, 0);
+    CHECK(spr != NULL && spr->nframes == 1, "whole surface, 1 frame");
+    STDL_FreeSprite(spr);
+    STDL_FreeSurface(s);
+}
+
 int main(void)
 {
     STDL_Surface *sail, *icon, *dst;
@@ -121,6 +201,9 @@ int main(void)
     STDL_Rect d;
 
     test_drawtext();
+    test_odd_width_sprite(0, "plain");
+    test_odd_width_sprite(STDL_PRESHIFT, "preshift");
+    test_sprite_frame_rules();
 
     sail = STDL_LoadBMP("../../examples/assets/SAIL.BMP");
     CHECK(sail != NULL, "SAIL.BMP load: %s", STDL_GetError());

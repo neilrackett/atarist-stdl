@@ -96,6 +96,13 @@ or `pixels[y*pitch+x]` writes corrupt planar data. Rewrite:
   `STDL_XorPixel`; drawing the shape twice restores the destination,
   so no save-under is needed. Only the planes selected by the colour
   are touched.
+* **particle fields / starfields** (a loop of single pixels) -> fill
+  an `STDL_Point` array and make one `STDL_Points` call. Same result
+  as `STDL_PutPixel` per entry, but the clip setup, colour dispatch
+  and plane-word selection are paid once for the list; erase the
+  field next frame with a second call in the background colour and
+  it needs no save-under and no dirty rectangle each (measured 1.5x
+  against the equivalent one-pixel `STDL_HSpans` list on a plain ST)
 * **many short spans in a loop** (terrain profiles, column fields,
   raycaster walls, scanline shapes) -> fill an `STDL_Span` array
   and make one `STDL_VSpans` / `STDL_HSpans` / `STDL_XorVSpans` /

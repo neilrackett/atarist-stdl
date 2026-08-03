@@ -808,6 +808,79 @@ STDL_PLANE_INLINE int hspans_run(STDL_Surface *dst,
     return drew;
 }
 
+/*
+ * Batched single pixels. Everything a span needs and a point does
+ * not - the length clamp, both edge masks, the "does it straddle two
+ * groups" tail - is gone, and what is left per point is a clip test,
+ * one mulu.w for the row and one read-modify-write per plane.
+ */
+STDL_PLANE_INLINE int points_run(STDL_Surface *dst,
+        const STDL_Point *pts, int count,
+        uint16_t pw0, uint16_t pw1, uint16_t pw2, uint16_t pw3,
+        int transparent, const int np)
+{
+    int drew = 0;
+    uint8_t *pixels = dst->pixels;
+    uint8_t *maskbase = dst->mask;
+    uint16_t stride = dst->stride;
+    uint16_t maskstride = dst->maskstride;
+    int cx0 = dst->clip.x, cy0 = dst->clip.y;
+    int cx1 = cx0 + dst->clip.w - 1;
+    int cy1 = cy0 + dst->clip.h - 1;
+    const STDL_Point *p = pts;
+    int i;
+
+    for (i = 0; i < count; i++, p++) {
+        int x = p->x, y = p->y;
+        uint16_t bit, *grp;
+
+        if (x < cx0 || x > cx1 || y < cy0 || y > cy1) {
+            continue;
+        }
+        grp = (uint16_t *)(pixels + stdl_row_off(y, stride)
+                           + (x >> 4) * 8);
+        bit = (uint16_t)(0x8000u >> (x & 15));
+        stdl_merge_planes(grp, bit, pw0, pw1, pw2, pw3, np);
+        if (maskbase != NULL) {
+            uint16_t *mw = (uint16_t *)(maskbase
+                                        + stdl_row_off(y, maskstride));
+            if (transparent) {
+                mw[x >> 4] |= bit;
+            } else {
+                mw[x >> 4] &= (uint16_t)~bit;
+            }
+        }
+        drew = 1;
+    }
+    return drew;
+}
+
+void STDL_Points(STDL_Surface *dst, const STDL_Point *pts,
+                 int count, uint8_t col)
+{
+    uint16_t pw[4];
+    int transparent, np, p, drew = 0;
+
+    if (dst == NULL || pts == NULL || count <= 0
+        || dst->clip.w == 0 || dst->clip.h == 0) {
+        return;
+    }
+    transparent = (col >= STDL_TRANSPARENT && dst->mask != NULL);
+    col = transparent ? 0 : (uint8_t)(col & 15);
+    for (p = 0; p < 4; p++) {
+        pw[p] = (col & (1 << p)) ? 0xFFFFu : 0;
+    }
+    np = stdl_planes;
+#define POINTS_RUN(np) \
+    drew = points_run(dst, pts, count, pw[0], pw[1], pw[2], pw[3], \
+                      transparent, (np))
+    STDL_PLANE_DISPATCH(np, POINTS_RUN);
+#undef POINTS_RUN
+    if (drew && dst->mask != NULL) {
+        dst->opaque_state = 0;
+    }
+}
+
 void STDL_HSpans(STDL_Surface *dst, const STDL_Span *spans,
                  int count, uint8_t col)
 {

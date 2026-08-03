@@ -130,16 +130,25 @@ STDL_Sprite *STDL_SpriteFromSurface(const STDL_Surface *s,
     uint16_t *v0;
     uint32_t framesize;
 
-    if (s == NULL || frame_w <= 0 || (frame_w & 15) != 0) {
-        STDL_SetError("sprite frames must be a multiple of 16 wide");
+    /*
+     * A frame starts at f * frame_w in the source, and build_frame
+     * addresses the source by group, so every frame after the first
+     * has to begin on a 16-pixel boundary. That constrains strips of
+     * several frames, not the width of a single sprite: a lone frame
+     * starts at zero whatever it is wide, and the pixels past
+     * frame_w in its last group are masked transparent below.
+     */
+    if (s == NULL || frame_w <= 0 || frame_w > s->w) {
+        STDL_SetError("bad sprite frame width");
+        return NULL;
+    }
+    if ((frame_w & 15) != 0 && frame_w != s->w) {
+        STDL_SetError("multi-frame sprites must be a multiple of "
+                      "16 wide");
         return NULL;
     }
     nframes = s->w / frame_w;
-    if (nframes < 1) {
-        STDL_SetError("surface narrower than one frame");
-        return NULL;
-    }
-    groups = frame_w >> 4;
+    groups = (frame_w + 15) >> 4;
     framesize = (uint32_t)groups * SPR_WORDS * s->h;
 
     v0 = malloc(framesize * (uint32_t)nframes * 2);
@@ -568,13 +577,28 @@ STDL_PLANE_INLINE void draw_text_glyphs(uint8_t *pixels, int stride,
                    int cx1, int cx2, const int np)
 {
     int i, cw, ch, bpr, wstride;
-    uint16_t widthmask;
+    uint16_t widthmask, glyphsize;
+    const uint8_t *bits0;
+    uint8_t *rowbase;
 
     wstride = stride >> 1;
     cw = font->cw;
     ch = font->ch;
     bpr = font->bytes_per_row;
     widthmask = (uint16_t)(0xFFFFu << (16 - cw));
+
+    /*
+     * Everything that does not depend on which glyph this is comes
+     * out of the loop. That matters more than it looks: gcc 4.6 turns
+     * a 32-bit multiply into a __mulsi3 call (~270 cycles measured on
+     * an 8MHz 68000), and the obvious form of this loop makes four of
+     * them per character - `(c - first) * bpr * ch` is two on its own.
+     * What is left is one mulu.w: glyphsize is at most 16*32/8 and
+     * c - first at most 255, so both operands fit 16 bits.
+     */
+    glyphsize = (uint16_t)(bpr * ch);
+    bits0 = font->bits + (uint32_t)row0 * bpr;
+    rowbase = pixels + (uint32_t)(y + row0) * stride;
 
     for (i = 0; text[i] != '\0'; i++, x += cw) {
         uint8_t c = (uint8_t)text[i];
@@ -600,13 +624,9 @@ STDL_PLANE_INLINE void draw_text_glyphs(uint8_t *pixels, int stride,
 
         shift = x & 15;
         gx = x >> 4;
-        glyph = font->bits + (uint32_t)(c - font->first) * bpr * ch
-              + (uint32_t)row0 * bpr;
-        {
-            uint8_t *drow = pixels + (uint32_t)(y + row0) * stride;
-            g1w = (uint16_t *)(drow + gx * 8);
-            g2w = g1w + 4;
-        }
+        glyph = bits0 + (uint16_t)(c - font->first) * glyphsize;
+        g1w = (uint16_t *)(rowbase + gx * 8);
+        g2w = g1w + 4;
 
         for (row = row0; row < row1;
              row++, glyph += bpr, g1w += wstride, g2w += wstride) {

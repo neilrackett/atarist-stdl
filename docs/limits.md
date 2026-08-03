@@ -77,6 +77,14 @@ stop trying and redesign instead.
   not a reversed span), and read the list only. They are a
   call-overhead optimisation, not a different renderer: for a
   handful of long spans they are worth nothing.
+* `STDL_Points` is the same idea one step further down: a span list
+  still charges a one-pixel entry for a length clamp, two edge masks
+  and a straddle test, which measured about a third of the cost of a
+  particle on a plain ST. Use it for particle fields and starfields;
+  it is defined to equal `STDL_PutPixel` per entry, so it is a
+  drop-in for that loop and nothing more. It does not make per-pixel
+  rendering viable - a field of a few hundred points is still
+  milliseconds of an 8MHz frame.
 * The software cursor's save-under is a snapshot: hide the cursor
   before drawing beneath it, and prefer sprites for pointers in
   games that redraw every frame. Cursors are at most 32x32 with

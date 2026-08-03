@@ -378,6 +378,82 @@ static void batched(STDL_Surface *s, const STDL_Span *sp, int n,
 }
 
 /*
+ * STDL_Points must be indistinguishable from STDL_PutPixel per
+ * entry - same pixels, same mask, same clipping - for unsorted,
+ * overlapping and off-the-edge lists, masked or not, with and
+ * without a clip rect, and for STDL_TRANSPARENT.
+ */
+static void test_points(void)
+{
+    const int W = 83, H = 47;
+    int iter;
+
+    for (iter = 0; iter < 300; iter++) {
+        STDL_Surface *a = STDL_CreateSurface(W, H);
+        STDL_Surface *b = STDL_CreateSurface(W, H);
+        STDL_Point pts[32];
+        int n = 1 + (int)(rnd() % 32);
+        int masked = (iter & 1);
+        int clipped = (iter % 3) == 0;
+        uint8_t col = (uint8_t)(rnd() % 17);   /* 16 = TRANSPARENT */
+        int i;
+
+        randomise(a, 16);
+        STDL_BlitSurface(a, NULL, b, NULL);
+        if (masked) {
+            STDL_CreateMask(a, 1);
+            STDL_CreateMask(b, 1);
+            for (i = 0; i < 20; i++) {
+                int hx = (int)(rnd() % W), hy = (int)(rnd() % H);
+                STDL_PutPixel(a, hx, hy, STDL_TRANSPARENT);
+                STDL_PutPixel(b, hx, hy, STDL_TRANSPARENT);
+            }
+        }
+        if (clipped) {
+            STDL_Rect c;
+            c.x = 5; c.y = 3; c.w = 60; c.h = 30;
+            STDL_SetClipRect(a, &c);
+            STDL_SetClipRect(b, &c);
+        }
+        for (i = 0; i < n; i++) {
+            pts[i].x = (int16_t)((int)(rnd() % (W + 24)) - 12);
+            pts[i].y = (int16_t)((int)(rnd() % (H + 24)) - 12);
+        }
+        STDL_SurfaceIsOpaque(a);
+        STDL_SurfaceIsOpaque(b);
+        STDL_Points(a, pts, n, col);
+        for (i = 0; i < n; i++) {
+            STDL_PutPixel(b, pts[i].x, pts[i].y, col);
+        }
+        CHECK(same_bytes(a, b, "point list"),
+              "points iter %d (n=%d col=%d masked=%d clipped=%d)",
+              iter, n, col, masked, clipped);
+        CHECK(a->opaque_state == b->opaque_state,
+              "points iter %d opaque_state %d vs %d", iter,
+              a->opaque_state, b->opaque_state);
+        STDL_FreeSurface(a);
+        STDL_FreeSurface(b);
+        if (failures) return;
+    }
+
+    /* degenerate arguments must be no-ops, not crashes */
+    {
+        STDL_Surface *s = STDL_CreateSurface(40, 20);
+        Ref *r = ref_new(40, 20);
+        STDL_Point p[2] = { { 0, 0 }, { 39, 19 } };
+        randomise(s, 16);
+        surf_to_ref(s, r);
+        STDL_Points(s, NULL, 3, 5);
+        STDL_Points(s, p, 0, 5);
+        STDL_Points(s, p, -1, 5);
+        STDL_Points(NULL, p, 2, 5);
+        CHECK(ref_cmp(s, r, "points no-ops"), "points no-op cases");
+        ref_free(r);
+        STDL_FreeSurface(s);
+    }
+}
+
+/*
  * The batched call has to be indistinguishable from the per-span
  * one: same pixels, same mask, for the same list. Lists are
  * deliberately unsorted, overlapping, degenerate (len <= 0) and
@@ -698,6 +774,7 @@ int main(void)
     test_hvlines();
     test_xor();
     test_spans();
+    test_points();
     test_blits();
     test_whole_blit_writeback();
     test_sprites();

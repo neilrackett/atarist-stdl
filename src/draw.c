@@ -248,7 +248,7 @@ void STDL_FillRect(STDL_Surface *dst, STDL_Rect *r, uint8_t col)
     /* STDL_TRANSPARENT punches a hole in a masked surface; on a
      * maskless surface it degrades to colour 0 */
     transparent = (col >= STDL_TRANSPARENT && dst->mask != NULL);
-    col &= 15;
+    col &= STDL_COL_MASK;
     if (transparent) {
         col = 0;
     }
@@ -275,7 +275,8 @@ void STDL_HLine(STDL_Surface *dst, int x1, int x2, int y, uint8_t col)
     {
         int transparent = (col >= STDL_TRANSPARENT
                            && dst->mask != NULL);
-        fill_rows(dst, x1, x2, y, y, (uint8_t)(transparent ? 0 : col & 15),
+        fill_rows(dst, x1, x2, y, y,
+                  (uint8_t)(transparent ? 0 : col & STDL_COL_MASK),
                   transparent);
     }
 }
@@ -346,7 +347,7 @@ void STDL_VLine(STDL_Surface *dst, int x, int y1, int y2, uint8_t col)
 
         int np = stdl_planes;
 
-        col = transparent ? 0 : (uint8_t)(col & 15);
+        col = transparent ? 0 : (uint8_t)(col & STDL_COL_MASK);
         bit = (uint16_t)(0x8000u >> (x & 15));
         base = dst->pixels + (uint32_t)y1 * dst->stride
              + ((x >> 4) * 8);
@@ -373,7 +374,7 @@ void STDL_PutPixel(STDL_Surface *dst, int x, int y, uint8_t col)
         return;
     }
     transparent = (col >= STDL_TRANSPARENT && dst->mask != NULL);
-    col = transparent ? 0 : (uint8_t)(col & 15);
+    col = transparent ? 0 : (uint8_t)(col & STDL_COL_MASK);
     bit = (uint16_t)(0x8000u >> (x & 15));
     grp = (uint16_t *)(dst->pixels + (uint32_t)y * dst->stride
                        + ((x >> 4) * 8));
@@ -745,7 +746,7 @@ void STDL_VSpans(STDL_Surface *dst, const STDL_Span *spans,
         return;
     }
     transparent = (col >= STDL_TRANSPARENT && dst->mask != NULL);
-    col = transparent ? 0 : (uint8_t)(col & 15);
+    col = transparent ? 0 : (uint8_t)(col & STDL_COL_MASK);
     np = stdl_planes;
 #define VSPANS_RUN(np) \
     drew = vspans_run(dst, spans, count, col, transparent, (np))
@@ -821,10 +822,6 @@ static const uint32_t stdl_bit32[16] = {
     0x00080008UL, 0x00040004UL, 0x00020002UL, 0x00010001UL
 };
 
-/* the half of a plane pair that a long merge must leave alone when
- * the budget stops inside the pair (np 1 and 3) */
-#define STDL_PAIR_HI STDL_PACK2(0xFFFFu, 0u)
-
 /* a colour index as the two long plane pairs a group merge wants */
 #define STDL_PLANEPAIR(c) \
     { STDL_PACK2((c) & 1 ? 0xFFFFu : 0u, (c) & 2 ? 0xFFFFu : 0u), \
@@ -882,15 +879,9 @@ STDL_PLANE_INLINE void points_fast(STDL_Surface *dst,
         g = (uint32_t *)(pixels + stdl_row_off((int)y, stride)
                          + ((x >> 1) & ~7u));
         m = stdl_bit32[x & 15];
-        if (np == 1) {
-            m &= STDL_PAIR_HI;
-        }
         t = (g[0] ^ pl01) & m;
         g[0] ^= t;
         if (np > 2) {
-            if (np == 3) {
-                m &= STDL_PAIR_HI;
-            }
             t = (g[1] ^ pl23) & m;
             g[1] ^= t;
         }
@@ -943,6 +934,7 @@ STDL_PLANE_INLINE void pointsc_fast(STDL_Surface *dst,
     const STDL_Point *p = pts;
     const STDL_Point *end = pts + count;
     const uint8_t *c = cols;
+    const uint8_t cmask = STDL_COL_MASK;   /* loop-invariant */
 
     for (; p != end; p++, c++) {
         unsigned x = (unsigned)(int)p->x, y = (unsigned)(int)p->y;
@@ -955,16 +947,10 @@ STDL_PLANE_INLINE void pointsc_fast(STDL_Surface *dst,
         g = (uint32_t *)(pixels + stdl_row_off((int)y, stride)
                          + ((x >> 1) & ~7u));
         m = stdl_bit32[x & 15];
-        pl = stdl_planepair[*c & 15];
-        if (np == 1) {
-            m &= STDL_PAIR_HI;
-        }
+        pl = stdl_planepair[*c & cmask];
         t = (g[0] ^ pl[0]) & m;
         g[0] ^= t;
         if (np > 2) {
-            if (np == 3) {
-                m &= STDL_PAIR_HI;
-            }
             t = (g[1] ^ pl[1]) & m;
             g[1] ^= t;
         }
@@ -1031,7 +1017,7 @@ void STDL_Points(STDL_Surface *dst, const STDL_Point *pts,
         return;
     }
     transparent = (col >= STDL_TRANSPARENT && dst->mask != NULL);
-    col = transparent ? 0 : (uint8_t)(col & 15);
+    col = transparent ? 0 : (uint8_t)(col & STDL_COL_MASK);
     np = stdl_planes;
     if (dst->mask == NULL && dst->clip.x == 0 && dst->clip.y == 0
         && (((uintptr_t)dst->pixels | (uintptr_t)dst->stride) & 3u) == 0) {
@@ -1096,7 +1082,7 @@ void STDL_HSpans(STDL_Surface *dst, const STDL_Span *spans,
         return;
     }
     transparent = (col >= STDL_TRANSPARENT && dst->mask != NULL);
-    col = transparent ? 0 : (uint8_t)(col & 15);
+    col = transparent ? 0 : (uint8_t)(col & STDL_COL_MASK);
     for (p = 0; p < 4; p++) {
         pw[p] = (col & (1 << p)) ? 0xFFFFu : 0;
     }

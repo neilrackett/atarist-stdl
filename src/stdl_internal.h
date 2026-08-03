@@ -74,6 +74,15 @@ extern volatile uint16_t stdl_host_hwpal[16];
  * A budget only ever licenses skipping a write, never forces one,
  * so a path may still write a high plane when the value it would
  * write is provably zero (whole-block clears use memset for that).
+ * That is also why there are two instantiations and not four: a
+ * budget is rounded UP to the nearest one (1 -> 2, 3 -> 4), which
+ * maintains a plane the caller promised never to use - and that
+ * plane is zero everywhere, so every word written to it is a zero
+ * on top of a zero. Four instantiations cost 12K of text in every
+ * linked program, unreachable in the default-budget case; on a
+ * 512K-1M machine that is the difference between a port fitting
+ * and not (it broke FreeNukum at 1M). Two cost half as much and
+ * leave the two budgets ports actually use - 4 and 2 - unrolled.
  */
 extern int stdl_planes;
 void stdl_planes_clear_screens(void);
@@ -89,12 +98,8 @@ void stdl_planes_normalise(uint8_t *base, int stride, int h);
 
 #define STDL_PLANE_DISPATCH(np, BODY) \
     do {                              \
-        switch (np) {                 \
-        case 1:  BODY(1); break;      \
-        case 2:  BODY(2); break;      \
-        case 3:  BODY(3); break;      \
-        default: BODY(4); break;      \
-        }                             \
+        if ((np) <= 2) { BODY(2); }   \
+        else { BODY(4); }             \
     } while (0)
 
 /*

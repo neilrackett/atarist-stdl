@@ -29,16 +29,27 @@ STDL_Surface *STDL_CreateSurface(int w, int h)
     groups = (w + 15) >> 4;
     size = (uint32_t)groups * 8 * h;
 
-    s = calloc(1, sizeof(STDL_Surface));
+    /*
+     * Surface, format and palette are one allocation, not three.
+     * They have exactly the same lifetime, and a tile-per-surface
+     * game holds thousands of them: three malloc headers plus the
+     * allocator's rounding cost more than a 16x16 tile's 128 bytes
+     * of pixels. FreeNukum keeps 1259 surfaces alive, so this is
+     * ~40K of a 1M machine's heap.
+     */
+    s = calloc(1, sizeof(STDL_Surface) + sizeof(STDL_PixelFormat)
+                  + sizeof(STDL_Palette) + 16 * sizeof(STDL_Colour));
     if (s == NULL) {
         STDL_SetError("out of memory");
         return NULL;
     }
+    s->format = (STDL_PixelFormat *)(s + 1);
+    s->format->palette = (STDL_Palette *)(s->format + 1);
+    s->format->palette->colors =
+        (STDL_Colour *)(s->format->palette + 1);
+
     block = malloc(size + 2 * GUARD);
-    s->format = calloc(1, sizeof(STDL_PixelFormat));
-    if (block == NULL || s->format == NULL) {
-        free(block);
-        free(s->format);
+    if (block == NULL) {
         free(s);
         STDL_SetError("out of memory");
         return NULL;
@@ -54,18 +65,7 @@ STDL_Surface *STDL_CreateSurface(int w, int h)
     s->clip.w = (uint16_t)w;
     s->clip.h = (uint16_t)h;
 
-    s->format->palette = calloc(1, sizeof(STDL_Palette)
-                                + 16 * sizeof(STDL_Colour));
-    if (s->format->palette == NULL) {
-        free(block);
-        free(s->format);
-        free(s);
-        STDL_SetError("out of memory");
-        return NULL;
-    }
     s->format->palette->ncolors = 16;
-    s->format->palette->colors =
-        (STDL_Colour *)(s->format->palette + 1);
     memcpy(s->format->palette->colors, stdl.colours,
            16 * sizeof(STDL_Colour));
     s->format->BitsPerPixel = 4;
@@ -84,11 +84,7 @@ void STDL_FreeSurface(STDL_Surface *s)
     if (s->mask != NULL) {
         free(s->mask - GUARD);
     }
-    if (s->format != NULL) {
-        free(s->format->palette);
-        free(s->format);
-    }
-    free(s);
+    free(s);          /* format and palette share the same block */
 }
 
 STDL_Surface *STDL_DuplicateSurface(const STDL_Surface *s)

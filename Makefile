@@ -33,7 +33,28 @@ EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
            dist/TCURSOR.TOS dist/PLAYMUS.TOS dist/SFXDEMO.TOS \
            dist/BLITCHK.TOS
 
-all: $(LIB) $(EXAMPLES) assets
+all: $(LIB) sizecheck $(EXAMPLES) assets
+
+# Size budget for the pixel-path objects.
+#
+# The archive links whole objects into programs that run on 512K-1M
+# machines, so library text is a resource with an owner, not a
+# by-product. The plane budget once instantiated every hot loop four
+# times through STDL_PLANE_DISPATCH; three of the four copies are
+# unreachable at the default budget and they put 12K of dead code
+# into every port, which is what stopped FreeNukum fitting in 1M.
+# Nothing in tests/host can see that - it is native code there - so
+# the build measures it instead. Raise the ceiling deliberately,
+# with a number, or not at all.
+PIXEL_OBJS = src/draw.o src/blit.o src/sprite.o src/surface.o
+PIXEL_MAX  = 26000
+
+sizecheck: $(PIXEL_OBJS)
+	@n=`$(CROSS)size $(PIXEL_OBJS) | awk 'NR>1 {t+=$$1} END {print t}'`; \
+	 echo "pixel-path text $$n bytes (budget $(PIXEL_MAX))"; \
+	 if [ $$n -gt $(PIXEL_MAX) ]; then \
+	   echo "*** over the pixel-path size budget"; exit 1; \
+	 fi
 
 # runtime assets the examples load (tracked in examples/assets/,
 # regenerable via tools/mkdemo.py and tools/stdlconv/stdlconv.py)
@@ -122,4 +143,4 @@ clean:
 run-%:
 	hatari --machine megaste --memsize 4 --fast-boot on dist/$*.TOS
 
-.PHONY: all clean assets test cmini
+.PHONY: sizecheck all clean assets test cmini

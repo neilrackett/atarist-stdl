@@ -6,6 +6,7 @@ tests/host/test_compose
 tests/host/test_cursor
 tests/host/test_assets
 tests/host/test_planes
+tests/host/test_footprint
 tests/host/*.dSYM/
 tests/hatari/out/
 libstdl-cmini.a

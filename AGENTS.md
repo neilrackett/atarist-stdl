@@ -40,6 +40,20 @@ warnings** with the Makefile's `-Wall -Wextra`.
   lands in `tests/hatari/out/`. Sound verification: record with
   `hatari-shortcut recsound` (file path comes from the
   `szYMCaptureFileName` key in the Hatari config).
+- **Size is a test result too.** `stcmd make` runs a `sizecheck`
+  target that fails the build if the pixel-path objects outgrow
+  `PIXEL_MAX` in the Makefile. The archive links whole objects into
+  programs with 512K-1M of RAM to share between code and heap, so
+  library text spends the port's memory: a 12K growth in the
+  pixel-path objects (four `STDL_PLANE_DISPATCH` instantiations,
+  three of them unreachable at the default budget) is what stopped
+  FreeNukum fitting in 1M - it ran out of heap mid-level,
+  `STDL_CreateSurface` returned NULL and the game dereferenced it.
+  **`tests/host` cannot see this class of bug at all** - it compiles
+  the same sources natively, where neither text size nor heap
+  pressure matters - so the check lives in the cross build, and
+  `tests/host/test_footprint.c` covers the heap half by asserting
+  a surface is one metadata allocation, not three.
 - **After touching blit/fill paths**: run `dist/BLITCHK.TOS` - it
   randomises fills/blits and compares the CPU and BLiTTER paths
   byte-for-byte on target. Both paths must stay identical;

@@ -20,6 +20,17 @@
 typedef struct { int16_t x, y; }                STDL_Point;
 typedef struct { int16_t x, y; uint16_t w, h; } STDL_Rect;
 
+/*
+ * One span for the batched span calls: `len` pixels starting at
+ * (x, y), running right for the horizontal entry points and down
+ * for the vertical ones. A span with len <= 0 is skipped, so a
+ * caller can keep a fixed-size array and vary how much of it is
+ * used. Packed to 6 bytes and walked with a pointer - a whole
+ * frame's worth of spans is a few hundred bytes of the caller's
+ * own memory.
+ */
+typedef struct { int16_t x, y, len; }           STDL_Span;
+
 typedef struct { uint8_t r, g, b, unused; }     STDL_Colour;
 #define STDL_Color STDL_Colour
 

@@ -310,6 +310,221 @@ static void test_xor(void)
     }
 }
 
+/* ---------------------------------------------------------------- */
+/* batched span lists                                               */
+
+/* byte-for-byte: pixels and, when present, the mask */
+static int same_bytes(const STDL_Surface *a, const STDL_Surface *b,
+                      const char *what)
+{
+    if (memcmp(a->pixels, b->pixels,
+               (size_t)a->stride * (size_t)a->h) != 0) {
+        printf("  %s: pixel bytes differ\n", what);
+        return 0;
+    }
+    if ((a->mask == NULL) != (b->mask == NULL)) {
+        printf("  %s: one surface has a mask and the other does not\n",
+               what);
+        return 0;
+    }
+    if (a->mask != NULL
+        && memcmp(a->mask, b->mask,
+                  (size_t)a->maskstride * (size_t)a->h) != 0) {
+        printf("  %s: mask bytes differ\n", what);
+        return 0;
+    }
+    return 1;
+}
+
+/* the same list, one span at a time through the scalar primitives */
+static void per_span(STDL_Surface *s, const STDL_Span *sp, int n,
+                     uint8_t col, int vertical, int xor_op)
+{
+    int i;
+    for (i = 0; i < n; i++) {
+        if (sp[i].len <= 0) {
+            continue;               /* the batched calls skip these */
+        }
+        if (vertical) {
+            if (xor_op) {
+                STDL_XorVLine(s, sp[i].x, sp[i].y,
+                              sp[i].y + sp[i].len - 1, col);
+            } else {
+                STDL_VLine(s, sp[i].x, sp[i].y,
+                           sp[i].y + sp[i].len - 1, col);
+            }
+        } else {
+            if (xor_op) {
+                STDL_XorHLine(s, sp[i].x, sp[i].x + sp[i].len - 1,
+                              sp[i].y, col);
+            } else {
+                STDL_HLine(s, sp[i].x, sp[i].x + sp[i].len - 1,
+                           sp[i].y, col);
+            }
+        }
+    }
+}
+
+static void batched(STDL_Surface *s, const STDL_Span *sp, int n,
+                    uint8_t col, int vertical, int xor_op)
+{
+    if (vertical) {
+        if (xor_op) STDL_XorVSpans(s, sp, n, col);
+        else        STDL_VSpans(s, sp, n, col);
+    } else {
+        if (xor_op) STDL_XorHSpans(s, sp, n, col);
+        else        STDL_HSpans(s, sp, n, col);
+    }
+}
+
+/*
+ * The batched call has to be indistinguishable from the per-span
+ * one: same pixels, same mask, for the same list. Lists are
+ * deliberately unsorted, overlapping, degenerate (len <= 0) and
+ * off every edge, and both a masked and a maskless destination are
+ * used.
+ */
+static void test_spans(void)
+{
+    const int W = 83, H = 47;
+    int iter;
+
+    for (iter = 0; iter < 400; iter++) {
+        STDL_Surface *a = STDL_CreateSurface(W, H);
+        STDL_Surface *b = STDL_CreateSurface(W, H);
+        STDL_Span sp[24];
+        int n = 1 + (int)(rnd() % 24);
+        int vertical = (int)(rnd() & 1);
+        int xor_op = (int)(rnd() & 1);
+        int masked = (iter & 1);
+        int clipped = (iter % 3) == 0;
+        /* colour 3 is the two-plane long-word path; 16 is
+         * STDL_TRANSPARENT, which only the fills honour */
+        uint8_t col = (uint8_t)((rnd() % 3 == 0) ? 3
+                       : (xor_op ? (rnd() & 15)
+                                 : (rnd() % 17)));
+        int i;
+
+        randomise(a, 16);
+        STDL_BlitSurface(a, NULL, b, NULL);
+        if (masked) {
+            STDL_CreateMask(a, 1);
+            STDL_CreateMask(b, 1);
+            /* punch a few holes so the mask is not uniform */
+            for (i = 0; i < 20; i++) {
+                int hx = (int)(rnd() % W), hy = (int)(rnd() % H);
+                STDL_PutPixel(a, hx, hy, STDL_TRANSPARENT);
+                STDL_PutPixel(b, hx, hy, STDL_TRANSPARENT);
+            }
+        }
+        if (clipped) {
+            STDL_Rect clip;
+            clip.x = (int16_t)(rnd() % 20);
+            clip.y = (int16_t)(rnd() % 12);
+            clip.w = (uint16_t)(1 + rnd() % (unsigned)(W - clip.x));
+            clip.h = (uint16_t)(1 + rnd() % (unsigned)(H - clip.y));
+            STDL_SetClipRect(a, &clip);
+            STDL_SetClipRect(b, &clip);
+        }
+
+        for (i = 0; i < n; i++) {
+            switch (rnd() % 8) {
+            case 0:             /* off the left / top edge */
+                sp[i].x = (int16_t)(-(int)(rnd() % 40));
+                sp[i].y = (int16_t)(-(int)(rnd() % 40));
+                break;
+            case 1:             /* off the right / bottom edge */
+                sp[i].x = (int16_t)(W - 1 - (int)(rnd() % 4));
+                sp[i].y = (int16_t)(H - 1 - (int)(rnd() % 4));
+                break;
+            case 2:             /* exactly on the last row/column */
+                sp[i].x = (int16_t)(W - 1);
+                sp[i].y = (int16_t)(H - 1);
+                break;
+            case 3:             /* the origin */
+                sp[i].x = 0;
+                sp[i].y = 0;
+                break;
+            default:
+                sp[i].x = (int16_t)((int)(rnd() % (W + 30)) - 15);
+                sp[i].y = (int16_t)((int)(rnd() % (H + 30)) - 15);
+                break;
+            }
+            switch (rnd() % 10) {
+            case 0:  sp[i].len = 0; break;
+            case 1:  sp[i].len = (int16_t)(-(int)(rnd() % 20)); break;
+            case 2:  sp[i].len = (int16_t)(60 + rnd() % 60); break;
+            default: sp[i].len = (int16_t)(1 + rnd() % 4); break;
+            }
+        }
+
+        /* prime the opacity cache so a batched call that forgot to
+         * invalidate it would leave a stale value behind */
+        STDL_SurfaceIsOpaque(a);
+        STDL_SurfaceIsOpaque(b);
+
+        batched(a, sp, n, col, vertical, xor_op);
+        per_span(b, sp, n, col, vertical, xor_op);
+        CHECK(same_bytes(a, b, "span list"),
+              "span iter %d (n=%d vertical=%d xor=%d col=%d masked=%d "
+              "clipped=%d)", iter, n, vertical, xor_op, col, masked,
+              clipped);
+
+        /* opaque_state must be invalidated exactly as the per-span
+         * path invalidates it */
+        CHECK(a->opaque_state == b->opaque_state,
+              "span iter %d opaque_state %d vs %d", iter,
+              a->opaque_state, b->opaque_state);
+
+        STDL_FreeSurface(a);
+        STDL_FreeSurface(b);
+        if (failures) return;
+    }
+
+    /* XOR involution over a whole list, including clipped and
+     * degenerate entries */
+    {
+        STDL_Surface *s = STDL_CreateSurface(W, H);
+        Ref *r = ref_new(W, H);
+        STDL_Span sp[6] = {
+            { 3, -5, 20 }, { 40, 44, 9 }, { -6, 10, 12 },
+            { 82, 0, 47 }, { 12, 12, 0 }, { 50, 20, -3 }
+        };
+        randomise(s, 16);
+        surf_to_ref(s, r);
+        STDL_XorVSpans(s, sp, 6, 3);
+        STDL_XorVSpans(s, sp, 6, 3);
+        CHECK(ref_cmp(s, r, "xor vspans involution"),
+              "xor vspan list twice restores");
+        STDL_XorHSpans(s, sp, 6, 9);
+        STDL_XorHSpans(s, sp, 6, 9);
+        CHECK(ref_cmp(s, r, "xor hspans involution"),
+              "xor hspan list twice restores");
+        ref_free(r);
+        STDL_FreeSurface(s);
+    }
+
+    /* NULL and empty lists are no-ops, colour 0 is a no-op for XOR */
+    {
+        STDL_Surface *s = STDL_CreateSurface(40, 20);
+        Ref *r = ref_new(40, 20);
+        STDL_Span sp[2] = { { 0, 0, 20 }, { 39, 0, 20 } };
+        randomise(s, 16);
+        surf_to_ref(s, r);
+        STDL_XorVSpans(s, NULL, 3, 5);
+        STDL_XorVSpans(s, sp, 0, 5);
+        STDL_XorVSpans(s, sp, -1, 5);
+        STDL_XorVSpans(s, sp, 2, 0);
+        STDL_XorHSpans(s, sp, 2, 0);
+        STDL_XorVSpans(NULL, sp, 2, 5);
+        STDL_VSpans(s, NULL, 2, 5);
+        STDL_HSpans(s, sp, 0, 5);
+        CHECK(ref_cmp(s, r, "span no-ops"), "span no-op cases");
+        ref_free(r);
+        STDL_FreeSurface(s);
+    }
+}
+
 static void test_blits(void)
 {
     int i;
@@ -482,6 +697,7 @@ int main(void)
     test_fills();
     test_hvlines();
     test_xor();
+    test_spans();
     test_blits();
     test_whole_blit_writeback();
     test_sprites();

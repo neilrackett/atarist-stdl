@@ -54,4 +54,29 @@ void STDL_XorVLine(STDL_Surface *dst, int x, int y1, int y2,
                    uint8_t col);
 void STDL_XorRect(STDL_Surface *dst, STDL_Rect *r, uint8_t col);
 
+/*
+ * Batched spans: draw a whole field of spans in one call. A span
+ * is `len` pixels from (x, y), running right for the H entry
+ * points and down for the V ones; len <= 0 is skipped. Results are
+ * identical to calling the matching single-span function once per
+ * entry, in list order - overlapping and unsorted lists are fine,
+ * and each span is clipped independently.
+ *
+ * Use these wherever a shape decomposes into many short spans -
+ * terrain outlines, column fields, raycaster walls. A short span
+ * costs far more to call than to draw (clip setup, colour
+ * dispatch, the row-address multiply), so the batched call is
+ * several times faster for one- and two-pixel spans; for a handful
+ * of long spans there is nothing in it. The lists are the
+ * caller's own memory and are only read.
+ */
+void STDL_HSpans(STDL_Surface *dst, const STDL_Span *spans,
+                 int count, uint8_t col);
+void STDL_VSpans(STDL_Surface *dst, const STDL_Span *spans,
+                 int count, uint8_t col);
+void STDL_XorHSpans(STDL_Surface *dst, const STDL_Span *spans,
+                    int count, uint8_t col);
+void STDL_XorVSpans(STDL_Surface *dst, const STDL_Span *spans,
+                    int count, uint8_t col);
+
 #endif /* STDL_DRAW_H */

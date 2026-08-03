@@ -63,7 +63,20 @@ stop trying and redesign instead.
 * The XOR primitives (`STDL_XorRect` and friends) are the one
   exception to `STDL_TRANSPARENT`: only bits 0-3 of the colour are
   used, colour 0 is a no-op, and the pixels they touch are marked
-  opaque in a masked surface. They are always CPU paths.
+  opaque in a masked surface. They are always CPU paths - including
+  the batched `STDL_XorVSpans` / `STDL_XorHSpans`. The BLiTTER is
+  deliberately not used for them: the spans worth XORing are one or
+  two words wide, an order of magnitude below the measured
+  fill/blit break-even, so the register setup alone would cost more
+  than the whole span, and staying on the CPU keeps BLITCHK's
+  "both paths byte-identical" invariant covering every accelerated
+  path.
+* The batched span calls (`STDL_HSpans`, `STDL_VSpans`,
+  `STDL_XorHSpans`, `STDL_XorVSpans`) take spans in `int16_t`
+  coordinates, skip entries with `len <= 0` (a negative length is
+  not a reversed span), and read the list only. They are a
+  call-overhead optimisation, not a different renderer: for a
+  handful of long spans they are worth nothing.
 * The software cursor's save-under is a snapshot: hide the cursor
   before drawing beneath it, and prefer sprites for pointers in
   games that redraw every frame. Cursors are at most 32x32 with

@@ -96,6 +96,15 @@ or `pixels[y*pitch+x]` writes corrupt planar data. Rewrite:
   `STDL_XorPixel`; drawing the shape twice restores the destination,
   so no save-under is needed. Only the planes selected by the colour
   are touched.
+* **many short spans in a loop** (terrain profiles, column fields,
+  raycaster walls, scanline shapes) -> fill an `STDL_Span` array
+  and make one `STDL_VSpans` / `STDL_HSpans` / `STDL_XorVSpans` /
+  `STDL_XorHSpans` call. A one- or two-pixel span costs far more to
+  call than to draw, and the batched form pays the clip setup,
+  colour dispatch and row-address multiply once for the whole list
+  instead of once per span - measured at 1.6x on Sopwith's terrain
+  outline. The result is defined to be identical to the per-span
+  calls, so it is a drop-in change.
 
 **Palette budget.** 16 entries replace 256. Divide them explicitly
 (the ported `testpalette` reserves 0-7 for the sprite, 8-14 for

@@ -138,7 +138,8 @@ static void render(int budget, int maxcol, Snap *out)
 
     for (i = 0; i < 120; i++) {
         uint8_t col = (uint8_t)(rnd() % maxcol);
-        int op = (int)(rnd() % 12);
+        int op = (int)(rnd() % 14);
+        STDL_Span sp[8];
 
         switch (op) {
         case 0:                                     /* rect fill */
@@ -213,6 +214,26 @@ static void render(int budget, int maxcol, Snap *out)
                           (int)(rnd() % 110) - 10,
                           (int)(rnd() % 70) - 4,
                           "\1\2\3\4\5\6\7\10", col);
+            break;
+        case 11:                                    /* span lists */
+        case 12:
+            {
+                int k;
+                for (k = 0; k < 8; k++) {
+                    sp[k].x = (int16_t)((int)(rnd() % 110) - 10);
+                    sp[k].y = (int16_t)((int)(rnd() % 74) - 6);
+                    sp[k].len = (int16_t)((int)(rnd() % 24) - 2);
+                }
+                if (op == 11) {
+                    STDL_VSpans(dst, sp, 8, col);
+                    STDL_HSpans(dst, sp, 8,
+                                (uint8_t)((rnd() & 3) ? col
+                                          : STDL_TRANSPARENT));
+                } else {
+                    STDL_XorVSpans(dst, sp, 8, col);
+                    STDL_XorHSpans(dst, sp, 8, col);
+                }
+            }
             break;
         default:                                    /* XOR ops */
             r.x = (int16_t)((int)(rnd() % 100) - 10);

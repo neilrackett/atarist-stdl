@@ -196,10 +196,29 @@ void STDL_XorRect(STDL_Surface *dst, STDL_Rect *r, uint8_t col);
 void STDL_XorHLine(STDL_Surface *dst, int x1, int x2, int y, uint8_t col);
 void STDL_XorVLine(STDL_Surface *dst, int x, int y1, int y2, uint8_t col);
 void STDL_XorPixel(STDL_Surface *dst, int x, int y, uint8_t col);
+
+/* batched span lists: one call for a whole field of spans */
+typedef struct { int16_t x, y, len; } STDL_Span;
+void STDL_HSpans(STDL_Surface *dst, const STDL_Span *s, int n, uint8_t col);
+void STDL_VSpans(STDL_Surface *dst, const STDL_Span *s, int n, uint8_t col);
+void STDL_XorHSpans(STDL_Surface *dst, const STDL_Span *s, int n, uint8_t col);
+void STDL_XorVSpans(STDL_Surface *dst, const STDL_Span *s, int n, uint8_t col);
 ```
 
 All fills route through a precomputed `fill[colour][plane]` word table; all
 shapes decompose to masked spans.
+
+The span lists exist because a short span costs far more to *call*
+than to draw. A one- or two-pixel span pays a register save, the
+clip rectangle, the colour dispatch and a row-address multiply -
+on gcc 4.6 a plain `y * stride` is a `__mulsi3` call, measured at
+~270 cycles on an 8MHz 68000, which alone exceeds the pixel work.
+The list forms hoist all of it out of the loop and are otherwise
+defined to be exactly equivalent to calling the single-span
+function once per entry, in list order: same clipping, same mask
+maintenance, same opacity-cache invalidation. Sopwith's terrain
+outline (320 columns, ~1.8 rows each) went from 38.4ms to 23.9ms a
+frame against a hand-written floor of 18.6ms.
 
 The XOR family is the CGA-era erasable-overlay idiom that ports of
 1980s games keep needing (terrain outlines, tracer bullets, rubber

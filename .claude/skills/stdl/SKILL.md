@@ -30,7 +30,8 @@ Full contract: `docs/format.md`. Never invent a different layout.
 | Cheap - use freely | Careful | Avoid in loops |
 |---|---|---|
 | `STDL_FillRect`, `STDL_HLine` | `STDL_BlitSurface` unaligned (shift chain) | `STDL_PutPixel` / `STDL_GetPixel` |
-| `STDL_XorVLine` (short spans) | `STDL_XorRect` (CPU only, no BLiTTER) | `STDL_XorPixel` in a loop |
+| `STDL_XorVSpans` / `STDL_VSpans` (span lists) | `STDL_XorRect` (CPU only, no BLiTTER) | `STDL_XorPixel` in a loop |
+| `STDL_XorVLine` (a few spans) | `STDL_XorVLine` x100+ (batch it instead) | one `STDL_*Line` call per column |
 | aligned blits (same `x & 15` phase) | `STDL_VLine`, `STDL_Line` | `STDL_Circle` outline |
 | `STDL_BlitTile` (16px aligned) | masked blits (colour key) | any per-pixel loop |
 | pre-shifted `STDL_BlitSprite` | `STDL_SetColourKey` (rebuilds mask) | `SDL_MapRGB` per frame |
@@ -80,6 +81,12 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
      decoders -> `STDL_PutGroup8` then `STDL_SpriteFromSurface`
    - CGA `XOR` overlays -> `STDL_XorRect` / `STDL_XorVLine` /
      `STDL_XorPixel` (draw twice to erase)
+   - a *loop* of short spans (terrain profiles, column fields,
+     raycaster walls) -> fill an `STDL_Span` array and make one
+     `STDL_XorVSpans` / `STDL_VSpans` / `STDL_XorHSpans` /
+     `STDL_HSpans` call: same result, but the clip setup, colour
+     dispatch and row-address multiply are paid once for the whole
+     list instead of once per span (1.6x on Sopwith's terrain)
    - 256-colour palette logic -> explicit 16-entry budget
      (sprite colours / effect colours / key+UI slices)
    - `SDL_SetPalette(SDL_PHYSPAL)` fades work unchanged on 16 entries

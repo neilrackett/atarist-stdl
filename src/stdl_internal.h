@@ -255,6 +255,19 @@ static __inline__ void stdl_blitter_go(uintptr_t src, int16_t sxinc,
 #define STDL_BLIT_COPY_MIN_CELLS   32   /* unmasked blit            */
 #define STDL_BLIT_MASKED_MIN_CELLS 64   /* masked: 3 passes/plane   */
 
+/*
+ * Row offset y * stride. gcc 4.6 compiles a plain 32-bit multiply
+ * into a __mulsi3 library call - measured at ~270 cycles on an
+ * 8MHz 68000, which is more than a short span's worth of pixel
+ * writes. Both operands are 16-bit by construction (y is clipped
+ * to the surface, stride is a uint16_t), and a 16x16->32 mulu.w is
+ * a single instruction. Only valid for a clipped, non-negative y.
+ */
+static __inline__ uint32_t stdl_row_off(int y, uint16_t stride)
+{
+    return (uint32_t)(uint16_t)y * stride;
+}
+
 /* case-normalising fopen for GEMDOS: retries with an uppercased
  * basename so lowercase asset names in ported code just work */
 void *stdl_fopen_ci(const char *path, const char *mode);

@@ -503,89 +503,110 @@ void STDL_FreeFont(STDL_Font *font)
     }
 }
 
-/* Draw text with a 1bpp cell font (cw <= 16). Set bits get colour
- * col; clear bits leave the destination untouched. */
+/*
+ * Draw text with a 1bpp cell font (cw <= 16). Set bits get colour
+ * col; clear bits leave the destination untouched.
+ *
+ * Everything that does not vary per glyph row - the clip masks, the
+ * group shift, the plane fill words and the row pointers - is
+ * hoisted out of the row loop by hand: gcc 4.6 will not unswitch it,
+ * and games that render a status bar a character at a time run this
+ * inner loop thousands of times a frame.
+ */
 void STDL_DrawText(STDL_Surface *dst, const STDL_Font *font,
                    int x, int y, const char *text, uint8_t col)
 {
-    int i;
+    int i, cw, ch, bpr, row0, row1, cx1, cx2, wstride;
+    uint16_t widthmask, pw0, pw1, pw2, pw3;
 
     if (dst == NULL || font == NULL || text == NULL
-        || font->cw > 16) {
+        || font->cw > 16 || font->cw <= 0) {
         return;
     }
     col &= 15;
-    for (i = 0; text[i] != '\0'; i++, x += font->cw) {
+    wstride = dst->stride >> 1;
+    cw = font->cw;
+    ch = font->ch;
+    bpr = font->bytes_per_row;
+    widthmask = (uint16_t)(0xFFFFu << (16 - cw));
+    pw0 = (col & 1) ? 0xFFFFu : 0;
+    pw1 = (col & 2) ? 0xFFFFu : 0;
+    pw2 = (col & 4) ? 0xFFFFu : 0;
+    pw3 = (col & 8) ? 0xFFFFu : 0;
+
+    /* vertical clip is the same for every glyph on the line */
+    row0 = 0;
+    row1 = ch;
+    if (y < dst->clip.y) row0 = dst->clip.y - y;
+    if (y + row1 > dst->clip.y + dst->clip.h)
+        row1 = dst->clip.y + dst->clip.h - y;
+    if (row0 >= row1) {
+        return;
+    }
+    cx1 = dst->clip.x;
+    cx2 = dst->clip.x + dst->clip.w;
+
+    for (i = 0; text[i] != '\0'; i++, x += cw) {
         uint8_t c = (uint8_t)text[i];
         const uint8_t *glyph;
-        int row;
+        uint16_t clipmask;
+        int row, shift, gx, cl, cr;
+        uint16_t *g1w, *g2w;
 
         if (c < font->first || c > font->last) {
             continue;
         }
-        glyph = font->bits + (uint32_t)(c - font->first)
-              * font->bytes_per_row * font->ch;
+        cl = cx1 - x;
+        cr = (x + cw) - cx2;
+        if (cl >= cw || cr >= cw) {
+            continue;                       /* fully clipped away */
+        }
+        clipmask = widthmask;
+        if (cl > 0) clipmask &= (uint16_t)(0xFFFFu >> cl);
+        if (cr > 0) clipmask &= (uint16_t)(0xFFFFu << (16 - cw + cr));
+        if (clipmask == 0) {
+            continue;
+        }
 
-        for (row = 0; row < font->ch;
-             row++, glyph += font->bytes_per_row) {
-            int py = y + row;
-            uint32_t bits;
-            int shift, gx;
-            uint32_t win;
-            int p;
+        shift = x & 15;
+        gx = x >> 4;
+        glyph = font->bits + (uint32_t)(c - font->first) * bpr * ch
+              + (uint32_t)row0 * bpr;
+        {
+            uint8_t *drow = dst->pixels
+                + (uint32_t)(y + row0) * dst->stride;
+            g1w = (uint16_t *)(drow + gx * 8);
+            g2w = g1w + 4;
+        }
 
-            if (py < dst->clip.y
-                || py >= dst->clip.y + dst->clip.h) {
-                continue;
-            }
-            bits = (uint32_t)glyph[0] << 8;
-            if (font->bytes_per_row > 1) {
+        for (row = row0; row < row1;
+             row++, glyph += bpr, g1w += wstride, g2w += wstride) {
+            uint16_t bits = (uint16_t)(glyph[0] << 8);
+            uint16_t hi, lo;
+
+            if (bpr > 1) {
                 bits |= glyph[1];
             }
-            bits &= 0xFFFFu << (16 - font->cw);
+            bits &= clipmask;
             if (bits == 0) {
                 continue;
             }
 
-            /* clip horizontally */
-            {
-                int cl = dst->clip.x - x;
-                int cr = (x + font->cw) - (dst->clip.x + dst->clip.w);
-                if (cl >= font->cw || cr >= font->cw) {
-                    continue;
-                }
-                if (cl > 0) bits &= 0xFFFFu >> cl;
-                if (cr > 0) bits &= 0xFFFFu << (16 - font->cw + cr);
-                if (bits == 0) {
-                    continue;
-                }
-            }
-
             /* place the 16-bit strip across up to two groups */
-            shift = x & 15;
-            gx = x >> 4;
-            win = (uint32_t)bits << (16 - shift);  /* 32-bit window */
-            if (shift == 0) {
-                win = (uint32_t)bits << 16;
-            }
-            {
-                uint8_t *drow = dst->pixels
-                    + (uint32_t)py * dst->stride;
-                uint16_t hi = (uint16_t)(win >> 16);
-                uint16_t lo = (uint16_t)win;
-                uint16_t *g1w = (uint16_t *)(drow + gx * 8);
-                uint16_t *g2w = (uint16_t *)(drow + (gx + 1) * 8);
+            hi = (uint16_t)(bits >> shift);
+            lo = (shift != 0) ? (uint16_t)(bits << (16 - shift)) : 0;
 
-                for (p = 0; p < 4; p++) {
-                    if (hi != 0 && gx >= 0) {
-                        if (col & (1 << p)) g1w[p] |= hi;
-                        else                g1w[p] &= (uint16_t)~hi;
-                    }
-                    if (lo != 0) {
-                        if (col & (1 << p)) g2w[p] |= lo;
-                        else                g2w[p] &= (uint16_t)~lo;
-                    }
-                }
+            if (hi != 0) {
+                g1w[0] = (uint16_t)((g1w[0] & ~hi) | (pw0 & hi));
+                g1w[1] = (uint16_t)((g1w[1] & ~hi) | (pw1 & hi));
+                g1w[2] = (uint16_t)((g1w[2] & ~hi) | (pw2 & hi));
+                g1w[3] = (uint16_t)((g1w[3] & ~hi) | (pw3 & hi));
+            }
+            if (lo != 0) {
+                g2w[0] = (uint16_t)((g2w[0] & ~lo) | (pw0 & lo));
+                g2w[1] = (uint16_t)((g2w[1] & ~lo) | (pw1 & lo));
+                g2w[2] = (uint16_t)((g2w[2] & ~lo) | (pw2 & lo));
+                g2w[3] = (uint16_t)((g2w[3] & ~lo) | (pw3 & lo));
             }
         }
     }

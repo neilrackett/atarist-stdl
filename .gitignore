@@ -13,3 +13,4 @@ tests/host/test_vbl
 tests/host/*.dSYM/
 tests/hatari/out/
 libstdl-cmini.a
+.DS_Store

@@ -21,19 +21,19 @@ emulated; see [docs/limits.md](docs/limits.md).
 
 ## Layout
 
-| Path              | Contents                                                                             |
-| ----------------- | ------------------------------------------------------------------------------------ |
-| `include/stdl/`   | public headers, one per module                                                       |
-| `include/compat/` | SDL.h and SDL_mixer.h - the SDL 1.2 compatibility shims                              |
-| `src/`            | video, surface, draw, blit, blitter, planes, palette, event, cursor, time, dirty,    |
+| Path              | Contents                                                                            |
+| ----------------- | ----------------------------------------------------------------------------------- |
+| `include/stdl/`   | public headers, one per module                                                      |
+| `include/compat/` | SDL.h and SDL_mixer.h - the SDL 1.2 compatibility shims                             |
+| `src/`            | video, surface, draw, blit, blitter, planes, palette, event, cursor, time, dirty,   |
 |                   | vbl, sprite, drawchar, indexed, asset, bmp, degas, audio, music, sfx, ym, compat,   |
 |                   | mixer                                                                               |
-| `tools/stdlconv/` | asset converter: image quantise + planar, sprite/tile/font banks, Degas PI1,         |
-|                   | WAV (incl. MS ADPCM) to STE DMA rates, MIDI to YM music, C-array embedding           |
-| `examples/`       | ported SDL 1.2 test programs + original STDL demos and their assets (public domain)  |
-| `docs/`           | format.md (the contract), porting.md, limits.md, design-overview.md                  |
-| `.claude/skills/` | the `stdl` porting skill (auto-discovered by Claude Code in this repo)               |
-| `dist/`           | build output: .TOS binaries + copied assets (untracked; doubles as a GEMDOS drive)   |
+| `tools/stdlconv/` | asset converter: image quantise + planar, sprite/tile/font banks, Degas PI1,        |
+|                   | WAV (incl. MS ADPCM) to STE DMA rates, MIDI to YM music, C-array embedding          |
+| `examples/`       | ported SDL 1.2 test programs + original STDL demos and their assets (public domain) |
+| `docs/`           | format.md (the contract), porting.md, limits.md, design-overview.md                 |
+| `.claude/skills/` | the `stdl` porting skill (auto-discovered by Claude Code in this repo)              |
+| `dist/`           | build output: .TOS binaries + copied assets (untracked; doubles as a GEMDOS drive)  |
 
 ## Building
 
@@ -53,7 +53,9 @@ hatari --machine megaste dist/TSPRITE.TOS
 
 ## Status
 
-v1.0: 320x200, 4 planes, 16 colours. The library and the SDL 1.2
+### v1.0
+
+320x200, 4 planes, 16 colours. The library and the SDL 1.2
 test-suite ports below all run under EmuTOS/TOS on Hatari:
 
 | Example      | Exercises                                                                        |
@@ -85,25 +87,24 @@ Games that do not need 16 colours can say so:
 `STDL_SetPlaneBudget(2)` promises no colour index above 3 and every
 primitive - fills, spans, blits, sprites, tiles, text, the XOR ops
 and the BLiTTER passes - stops maintaining the top two bitplanes.
-Measured with BLITCHK.TOS: 1.4x on a plain ST, 1.9x with a
+Measured with BLITCHK.TOS: 1.4x on a stock ST, 1.9x with a
 BLiTTER. The default is 4 planes and is bit-for-bit unchanged.
 
 ## Ports
 
-The API has been proven against three SDL-era games, each in its own
-repository:
+The API has been proven and optimised against three formerly SDL-based
+games, each in its own repository:
 
-| Game      | What it proved                                                             |
-| --------- | -------------------------------------------------------------------------- |
-| FreeNukum | replaced a bespoke planar shim; renders pixel-identically to it on target   |
-| Sopwith   | an STDL backend built beside its hand-written native ST one, to measure     |
-| Koules    | a 256-colour SVGALIB game, brought to 16 colours and fixed-point physics    |
+| Game                                                             | What it proved                                                                   |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| [FreeNukum](https://downloads.neilrackett.com/atarist-freenukum) | Replaced a bespoke planar shim; renders pixel-identically                        |
+| [Sopwith](https://downloads.neilrackett.com/atarist-sopwith)     | STDL backend built beside its hand-written native ST one, to compare performance |
+| [Koules](https://downloads.neilrackett.com/atarist-koules)       | 256-colour SVGALIB game, ported to 16 colours and fixed-point physics            |
 
-Sopwith is the honest benchmark, being the only one with a
+Sopwith was used as a benchmark, being the only one with a
 hand-optimised native ST backend to measure against. The STDL backend
-began roughly 1.6x slower than that native code on a plain 8MHz ST
-and is now around 1.3x, the difference being the optimisations these
-ports forced into the library.
+began roughly 1.6x slower than native code on a stock 8MHz ST and is
+now around 1.3x.
 
 That is the useful part: the XOR primitives, the batched span and
 point primitives, the plane budget and `STDL_PlaySample` all exist
@@ -128,7 +129,7 @@ Because the linker's granularity on m68k-atari-mint is the object
 file, each of those lives in its own translation unit and costs
 nothing to a program that does not call it: adding all four, and
 moving `STDL_SurfaceFrom1bpp` in beside them, made every one of the
-three games *smaller*.
+three games _smaller_.
 
 Two findings worth repeating for anyone porting: gcc 4.6 turns
 `y * stride` into a `__mulsi3` call costing ~270 cycles, which is

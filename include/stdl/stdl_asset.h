@@ -90,4 +90,14 @@ STDL_Surface *STDL_LoadBMP(const char *file);
 STDL_Surface *STDL_LoadDegas(const char *file, STDL_Palette *pal_out);
 int           STDL_ShowDegas(const char *file);
 
+/* The same picture read from the END of an arbitrary file - the
+ * last 32034 bytes - classically the program's own .TOS/.PRG with
+ * the PI1 appended after the executable image (cat PROG.TOS
+ * SPLASH.PI1 > combined). GEMDOS loads only the segments named in
+ * the program header, so a splash shipped this way needs no
+ * separate file and occupies no memory. */
+STDL_Surface *STDL_LoadDegasTrailer(const char *file,
+                                    STDL_Palette *pal_out);
+int           STDL_ShowDegasTrailer(const char *file);
+
 #endif /* STDL_ASSET_H */

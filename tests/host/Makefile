@@ -48,7 +48,8 @@ test_compose: test_compose.c $(CORE) $(SRC)/bmp.c $(SRC)/degas.c \
 test_cursor: test_cursor.c $(CORE) $(SRC)/cursor.c
 	$(CC) $(CFLAGS) -o $@ $^
 
-test_assets: test_assets.c $(CORE) $(SRC)/bmp.c $(SRC)/asset.c
+test_assets: test_assets.c $(CORE) $(SRC)/bmp.c $(SRC)/asset.c \
+             $(SRC)/degas.c
 	$(CC) $(CFLAGS) -o $@ $^
 
 test_planes: test_planes.c $(CORE)

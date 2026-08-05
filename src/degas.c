@@ -30,7 +30,12 @@ static void hw_to_rgb(uint16_t hw, STDL_Colour *c)
     c->unused = 0;
 }
 
-static uint8_t *load_pi1(const char *file, uint16_t hwpal[16])
+#define PI1_SIZE (34L + 32000L)
+
+/* trailer != 0: the picture is the last PI1_SIZE bytes of the file
+ * rather than the whole of it */
+static uint8_t *load_pi1_from(const char *file, int trailer,
+                              uint16_t hwpal[16])
 {
     FILE *f = stdl_fopen_ci(file, "rb");
     uint8_t head[34];
@@ -39,6 +44,11 @@ static uint8_t *load_pi1(const char *file, uint16_t hwpal[16])
 
     if (f == NULL) {
         STDL_SetError("cannot open Degas picture");
+        return NULL;
+    }
+    if (trailer && fseek(f, -PI1_SIZE, SEEK_END) != 0) {
+        STDL_SetError("file too short for a Degas trailer");
+        fclose(f);
         return NULL;
     }
     if (fread(head, 1, 34, f) != 34
@@ -61,10 +71,11 @@ static uint8_t *load_pi1(const char *file, uint16_t hwpal[16])
     return data;
 }
 
-STDL_Surface *STDL_LoadDegas(const char *file, STDL_Palette *pal_out)
+static STDL_Surface *load_degas(const char *file, int trailer,
+                                STDL_Palette *pal_out)
 {
     uint16_t hwpal[16];
-    uint8_t *data = load_pi1(file, hwpal);
+    uint8_t *data = load_pi1_from(file, trailer, hwpal);
     STDL_Surface *s;
     int i;
 
@@ -89,13 +100,18 @@ STDL_Surface *STDL_LoadDegas(const char *file, STDL_Palette *pal_out)
     return s;
 }
 
-/*
- * Splash convenience: copy the picture straight onto the current
- * draw page and program its palette (hardware and logical). Call
- * after STDL_SetVideoMode; with double buffering, follow with
- * STDL_Flip to show it.
- */
-int STDL_ShowDegas(const char *file)
+STDL_Surface *STDL_LoadDegas(const char *file, STDL_Palette *pal_out)
+{
+    return load_degas(file, 0, pal_out);
+}
+
+STDL_Surface *STDL_LoadDegasTrailer(const char *file,
+                                    STDL_Palette *pal_out)
+{
+    return load_degas(file, 1, pal_out);
+}
+
+static int show_degas(const char *file, int trailer)
 {
     uint16_t hwpal[16];
     uint8_t *data;
@@ -106,7 +122,7 @@ int STDL_ShowDegas(const char *file)
         STDL_SetError("no video mode set");
         return -1;
     }
-    data = load_pi1(file, hwpal);
+    data = load_pi1_from(file, trailer, hwpal);
     if (data == NULL) {
         return -1;
     }
@@ -118,4 +134,27 @@ int STDL_ShowDegas(const char *file)
         STDL_SetColour(i, hwpal[i]);
     }
     return 0;
+}
+
+/*
+ * Splash convenience: copy the picture straight onto the current
+ * draw page and program its palette (hardware and logical). Call
+ * after STDL_SetVideoMode; with double buffering, follow with
+ * STDL_Flip to show it.
+ */
+int STDL_ShowDegas(const char *file)
+{
+    return show_degas(file, 0);
+}
+
+/*
+ * The same, but the picture is the last 32034 bytes of an arbitrary
+ * file - classically the program's own .TOS/.PRG, with the PI1
+ * simply appended after the executable image (cat PROG.TOS SPLASH.PI1).
+ * GEMDOS loads only the segments named in the program header, so a
+ * splash shipped this way needs no separate file and no RAM.
+ */
+int STDL_ShowDegasTrailer(const char *file)
+{
+    return show_degas(file, 1);
 }

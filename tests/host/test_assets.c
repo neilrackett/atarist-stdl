@@ -5,6 +5,7 @@
 /* Asset loaders end-to-end: the tracked example assets load, the
  * colour key survives at index 15, and keyed blits respect it. */
 #include <stdio.h>
+#include <string.h>
 #include <stdl/stdl.h>
 
 static int failures;
@@ -194,6 +195,68 @@ static void test_sprite_frame_rules(void)
     STDL_FreeSurface(s);
 }
 
+/*
+ * A PI1 appended to the end of another file (the single-file
+ * splash trick) must load byte-identically to the loose picture,
+ * and a file with no picture at its tail must be rejected.
+ */
+static void test_degas_trailer(void)
+{
+    static const char *tmp = "degas_trailer.tmp";
+    STDL_Surface *ref, *got;
+    FILE *out, *in;
+    uint8_t buf[4096];
+    size_t n;
+    int i;
+
+    ref = STDL_LoadDegas("../../examples/assets/SPLASH.PI1", NULL);
+    CHECK(ref != NULL, "SPLASH.PI1 load: %s", STDL_GetError());
+    if (ref == NULL) {
+        return;
+    }
+
+    out = fopen(tmp, "wb");
+    for (i = 0; i < 777; i++) {
+        fputc(i & 0xFF, out);           /* stand-in executable */
+    }
+    in = fopen("../../examples/assets/SPLASH.PI1", "rb");
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+        fwrite(buf, 1, n, out);
+    }
+    fclose(in);
+    fclose(out);
+
+    got = STDL_LoadDegasTrailer(tmp, NULL);
+    CHECK(got != NULL, "trailer load: %s", STDL_GetError());
+    if (got != NULL) {
+        CHECK(memcmp(got->pixels, ref->pixels,
+                     (size_t)got->stride * got->h) == 0,
+              "trailer pixels differ from loose file");
+        for (i = 0; i < 16; i++) {
+            STDL_Colour *a = &got->format->palette->colors[i];
+            STDL_Colour *b = &ref->format->palette->colors[i];
+            CHECK(a->r == b->r && a->g == b->g && a->b == b->b,
+                  "trailer palette entry %d differs", i);
+        }
+        STDL_FreeSurface(got);
+    }
+
+    /* the whole file being the picture is also a valid trailer */
+    got = STDL_LoadDegasTrailer("../../examples/assets/SPLASH.PI1",
+                                NULL);
+    CHECK(got != NULL, "self-trailer load: %s", STDL_GetError());
+    STDL_FreeSurface(got);
+
+    out = fopen(tmp, "wb");             /* too short for a picture */
+    fwrite(buf, 1, 100, out);
+    fclose(out);
+    got = STDL_LoadDegasTrailer(tmp, NULL);
+    CHECK(got == NULL, "short file accepted as trailer");
+
+    remove(tmp);
+    STDL_FreeSurface(ref);
+}
+
 int main(void)
 {
     STDL_Surface *sail, *icon, *dst;
@@ -201,6 +264,7 @@ int main(void)
     STDL_Rect d;
 
     test_drawtext();
+    test_degas_trailer();
     test_odd_width_sprite(0, "plain");
     test_odd_width_sprite(STDL_PRESHIFT, "preshift");
     test_sprite_frame_rules();

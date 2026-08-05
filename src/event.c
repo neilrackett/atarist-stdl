@@ -197,6 +197,11 @@ static int16_t  mouse_x = STDL_SCREEN_W / 2;
 static int16_t  mouse_y = STDL_SCREEN_H / 2;
 static uint8_t  mouse_state;        /* STDL button bitmask */
 static uint8_t  joy_state;
+static uint8_t  joy1_fire;          /* 0x80 while the right mouse
+                                       button - which the IKBD makes
+                                       of joystick 1's fire button
+                                       whenever mouse reporting is
+                                       on - is held */
 
 void (*stdl_audio_hook)(void);
 void (*stdl_cursor_hook)(int x, int y);
@@ -606,9 +611,21 @@ void STDL_PumpEvents(void)
                  * coordinates */
                 flush_motion();
                 handle_mouse_buttons((uint8_t)item);
+                /* While mouse reporting is on - and TOS leaves it
+                 * on - the IKBD strips the fire bit from joystick
+                 * 1's packets and reports that button as the right
+                 * mouse button instead; software cannot tell the
+                 * two apart.  Fold it back into the joystick state
+                 * (keeping the mouse event above) so fire works
+                 * whether or not a game also uses the mouse. */
+                joy1_fire = (uint8_t)((item & 0x01) ? 0x80 : 0);
+                handle_joy((uint8_t)((joy_state & 0x0F) | joy1_fire));
                 break;
             case TAG_JOY:
-                handle_joy((uint8_t)item);
+                /* OR rather than overwrite: a direction change in
+                 * this packet must not release a fire button that
+                 * is being held down over on the mouse side */
+                handle_joy((uint8_t)((item & 0xFF) | joy1_fire));
                 break;
             default:
                 break;

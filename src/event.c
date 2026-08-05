@@ -153,6 +153,36 @@ static void capture_keytabs(void)
     keytab_caps = kt->caps;
 }
 
+/* Send one command byte straight to the keyboard ACIA. Ikbdws would
+ * do, but install/remove also run from the terminate vector, where
+ * only hardware access is allowed. */
+static void ikbd_send(uint8_t b)
+{
+    while (!(ACIA_KBD_CTRL & 0x02)) { }     /* wait for TDRE */
+    ACIA_KBD_DATA = b;
+}
+
+/* Pause IKBD output and wait for bytes already in flight to drain
+ * through whichever handler is currently installed, so the vector
+ * can be swapped on a packet boundary. Taking over mid-packet
+ * misaligns the parser - IKBD bytes are ~1.3ms apart and a mouse
+ * packet is three of them, so launching from the desktop with the
+ * mouse still moving makes hitting the middle of one likely. The
+ * fallout is nasty: negative mouse deltas ($F8..$FF) then parse as
+ * packet headers, $FF as a joystick event whose "state" byte is
+ * really the next packet's header, latching phantom held directions
+ * and fire that mask the real transitions until the stick is
+ * waggled through a full cycle. */
+static void ikbd_quiesce(void)
+{
+    uint32_t settle;
+
+    ikbd_send(0x13);                        /* pause output */
+    settle = STDL_HZ200 + 4;                /* ~20ms: command transit
+                                               plus a packet in flight */
+    while ((int32_t)(STDL_HZ200 - settle) < 0) { }
+}
+
 void stdl_events_install(void)
 {
     kbdvecs_t *kv;
@@ -161,9 +191,17 @@ void stdl_events_install(void)
         return;
     }
     capture_keytabs();
+    ikbd_quiesce();
     kv = (kbdvecs_t *)Kbdvbase();
     old_ikbdsys = kv->ikbdsys;
     kv->ikbdsys = (long)stdl_ikbd_handler;
+    pkt_pending = 0;
+    mouse_buttons_isr = 0;
+    ikbd_send(0x11);                        /* resume output */
+    ikbd_send(0x16);                        /* interrogate joysticks:
+                                               the $FD reply seeds
+                                               joy_state with the true
+                                               held state */
     events_installed = 1;
 }
 
@@ -171,7 +209,9 @@ void stdl_events_remove(void)
 {
     if (events_installed) {
         kbdvecs_t *kv = (kbdvecs_t *)Kbdvbase();
+        ikbd_quiesce();
         kv->ikbdsys = old_ikbdsys;
+        ikbd_send(0x11);
         events_installed = 0;
     }
 }

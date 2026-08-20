@@ -71,9 +71,21 @@ warnings** with the Makefile's `-Wall -Wextra`.
   randomises fills/blits and compares the CPU and BLiTTER paths
   byte-for-byte on target. Both paths must stay identical;
   `STDL_UseBlitter(0)` forces CPU.
+- **Inline asm in a pixel path is paired with its C twin.** blit8.c
+  is the pattern: the hand-written 68000 gather sits under
+  `#ifdef __m68k__` with the identical loop in C as the `#else` -
+  the C build is what tests/host exercises, and an on-target run
+  comparing both against a per-pixel model gates the asm (gcc 4.6
+  earned this: it compiled the C loop at ~210 cycles/pixel by
+  spilling accumulators and calling __mulsi3 per group). Remember
+  the 68000's (d8,An,Xn) mode takes an 8-BIT displacement only.
 - **Audio/music**: record Hatari output (`hatari-shortcut recsound`,
   path from the `szYMCaptureFileName` config key) and verify
-  spectrally; PLAYMUS's DEMO.STM is note-exact by construction.
+  spectrally; PLAYMUS's DEMO.STM is note-exact by construction. The
+  voice mixer (voice.c) is host-tested end to end through the fake
+  TOS queue and DMA counter in tests/host/test_voice.c - steer
+  `stdl_host_dma_pos` and call the queue slot like the interrupt
+  would.
 - Verify on `--machine st` too: plain 8MHz ST is the correctness
   floor; the blitter and DMA audio are optional hardware.
 

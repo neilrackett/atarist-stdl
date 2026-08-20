@@ -16,6 +16,13 @@ is no chunky backbuffer and no c2p anywhere in the pipeline: ST interleaved
 planar is the native format, assets are converted offline, and spans, rects and
 blits are the primary verbs.
 
+For engines that decode byte-per-pixel sprite frames at runtime (the
+REminiscence/Flashback port drove this), `STDL_BlitIndexed8` draws chunky
+frames straight into the planes through a colour map - one pass, no
+backbuffer - `STDL_CreateSurfaceFrom` wraps engine-owned framebuffers as
+surfaces, and `STDL_Voice` hardware-mixes four sample voices from the VBL
+for module-style music. See `examples/chunky.c`.
+
 Anything that cannot be done cheaply in planar has been removed rather than
 emulated; see [docs/limits.md](docs/limits.md).
 
@@ -25,9 +32,9 @@ emulated; see [docs/limits.md](docs/limits.md).
 | ----------------- | ----------------------------------------------------------------------------------- |
 | `include/stdl/`   | public headers, one per module                                                      |
 | `include/compat/` | SDL.h and SDL_mixer.h - the SDL 1.2 compatibility shims                             |
-| `src/`            | video, surface, draw, blit, blitter, planes, palette, event, cursor, time, dirty,   |
-|                   | vbl, sprite, drawchar, indexed, asset, bmp, degas, audio, music, sfx, ym, compat,   |
-|                   | mixer                                                                               |
+| `src/`            | video, surface, surfacefrom, draw, blit, blit8, blitter, planes, palette, event,    |
+|                   | cursor, time, dirty, vbl, sprite, drawchar, indexed, asset, bmp, degas, audio,      |
+|                   | voice, music, sfx, ym, compat, mixer                                                |
 | `tools/stdlconv/` | asset converter: image quantise + planar, sprite/tile/font banks, Degas PI1,        |
 |                   | WAV (incl. MS ADPCM) to STE DMA rates, MIDI to YM music, C-array embedding          |
 | `examples/`       | ported SDL 1.2 test programs + original STDL demos and their assets (public domain) |

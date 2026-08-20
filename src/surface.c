@@ -78,11 +78,14 @@ void STDL_FreeSurface(STDL_Surface *s)
     if (s == NULL || (s->flags & STDL_SCREEN)) {
         return;
     }
-    if (s->pixels != NULL) {
-        free(s->pixels - GUARD);
-    }
-    if (s->mask != NULL) {
-        free(s->mask - GUARD);
+    /* borrowed blocks (STDL_CreateSurfaceFrom) stay the caller's */
+    if (!(s->flags & STDL_PREALLOC)) {
+        if (s->pixels != NULL) {
+            free(s->pixels - GUARD);
+        }
+        if (s->mask != NULL) {
+            free(s->mask - GUARD);
+        }
     }
     free(s);          /* format and palette share the same block */
 }
@@ -115,7 +118,14 @@ static int mask_alloc(STDL_Surface *s)
 
     if (s->mask == NULL) {
         uint32_t size = (uint32_t)groups * 2 * s->h;
-        uint8_t *block = malloc(size + 2 * GUARD);
+        uint8_t *block;
+        /* a borrowed surface brings its own mask or none: a library
+         * allocation here would leak when the header is freed */
+        if (s->flags & STDL_PREALLOC) {
+            STDL_SetError("borrowed surface has no mask");
+            return -1;
+        }
+        block = malloc(size + 2 * GUARD);
         if (block == NULL) {
             STDL_SetError("out of memory for mask");
             return -1;
@@ -135,7 +145,7 @@ int STDL_SetColourKey(STDL_Surface *s, int enable, uint8_t key)
         return -1;
     }
     if (!enable) {
-        if (s->mask != NULL) {
+        if (s->mask != NULL && !(s->flags & STDL_PREALLOC)) {
             free(s->mask - GUARD);
         }
         s->mask = NULL;

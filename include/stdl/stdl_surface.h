@@ -22,6 +22,30 @@ STDL_Surface *STDL_CreateSurface(int w, int h);
 STDL_Surface *STDL_DuplicateSurface(const STDL_Surface *s);
 void          STDL_FreeSurface(STDL_Surface *s);
 
+/*
+ * A surface over caller-owned planar memory: the caller keeps
+ * ownership (and lifetime responsibility) of `pixels` and the
+ * optional `mask`; STDL_FreeSurface releases only the header
+ * (STDL_PREALLOC). For engines whose framebuffers must stay plain
+ * blocks - pointer-swapped, memcpy'd, embedded in larger
+ * allocations - while still drawable by every STDL primitive.
+ *
+ * pixels: interleaved planar (docs/format.md), even address;
+ * stride: bytes per row, multiple of 8, >= ((w+15)>>4)*8;
+ * mask/maskstride: transparency+composition mask (bit set =
+ * destination preserved) or NULL/0. With a mask the surface is
+ * created colour-keyed (STDL_SRCKEY, key STDL_TRANSPARENT).
+ *
+ * Library surfaces carry one group of read slack either side of
+ * their blocks for the unaligned blit path; give borrowed blocks
+ * the same slack or keep edge-group operations 16-pixel aligned.
+ * A borrowed surface must bring its own mask: STDL_SetColourKey /
+ * STDL_CreateMask will not allocate one for it.
+ */
+STDL_Surface *STDL_CreateSurfaceFrom(void *pixels, int w, int h,
+                                     int stride, uint8_t *mask,
+                                     int maskstride);
+
 /* Build (or drop) the transparency mask from a palette index.
  * Pixels equal to `key` become transparent in masked blits.
  * A key >= STDL_TRANSPARENT means "no pixel value is the key":
@@ -58,6 +82,36 @@ STDL_Surface *STDL_SurfaceFrom1bpp(const uint8_t *bits, int w, int h,
 STDL_Surface *STDL_SurfaceFromIndexed8(const uint8_t *bytes, int w,
                                        int h, int stride,
                                        int keycolour);
+
+/*
+ * Draw byte-per-pixel (chunky) data at frame rate through a 16-entry
+ * colour map: source value 0 is transparent, any other value c draws
+ * as map[c & 15]. `pitch` is the source row (or, column-major,
+ * column) stride in bytes. This is the rendering-time counterpart of
+ * STDL_SurfaceFromIndexed8, for engines that decode sprite frames
+ * into chunky scratch on every draw - one pass, no allocation.
+ *
+ * Flags:
+ *   STDL_I8_XFLIP     mirror horizontally (source read backwards)
+ *   STDL_I8_COLMAJOR  source is stored column-major: a pixel's
+ *                     right-hand neighbour is `pitch` bytes on, and
+ *                     the next row starts one byte on
+ *   STDL_I8_UNDER     destination mask bits protect their pixels:
+ *                     the blit passes behind marked foreground
+ *   STDL_I8_MARK      set the destination mask under drawn pixels
+ *                     (default maintenance clears it there)
+ *
+ * The destination mask (if any) is consulted and/or maintained per
+ * the flags; without one, UNDER and MARK are ignored.
+ */
+#define STDL_I8_XFLIP    0x0001u
+#define STDL_I8_COLMAJOR 0x0002u
+#define STDL_I8_UNDER    0x0004u
+#define STDL_I8_MARK     0x0008u
+
+void STDL_BlitIndexed8(STDL_Surface *dst, const uint8_t *src,
+                       int pitch, int x, int y, int w, int h,
+                       const uint8_t *map, unsigned flags);
 
 /*
  * Recolour in place through a 16-entry map: a pixel of index c

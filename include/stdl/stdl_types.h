@@ -67,6 +67,7 @@ typedef struct STDL_PixelFormat {
 #define STDL_HWSURFACE  0x00000001u
 #define STDL_HWACCEL    0x00000100u
 #define STDL_SRCKEY     0x00001000u  /* colour-keyed: blit uses mask     */
+#define STDL_PREALLOC   0x01000000u  /* caller owns pixels (and mask)    */
 #define STDL_MONO_AUTO  0x00400000u  /* post-v1: SM124 2x2 emulation     */
 #define STDL_SCREEN     0x00800000u  /* this is the (or a) screen page   */
 #define STDL_ANYFORMAT  0x10000000u

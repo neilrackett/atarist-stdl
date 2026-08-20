@@ -30,6 +30,27 @@ extern "C" {
 int STDL_BlitSurface(STDL_Surface *src, const STDL_Rect *srcrect,
                      STDL_Surface *dst, STDL_Rect *dstrect);
 
+/*
+ * As STDL_BlitSurface, plus destination-mask semantics for engines
+ * that keep a foreground/priority plane in the mask:
+ *
+ *   STDL_BLIT_UNDER  destination mask bits protect their pixels, so
+ *                    the blit passes behind marked foreground
+ *   STDL_BLIT_MARK   set the destination mask under blitted pixels
+ *                    (default maintenance clears it there)
+ *
+ * The bit values match STDL_I8_UNDER / STDL_I8_MARK, so a caller
+ * composing the same scene from indexed and planar sources can use
+ * one set of flags. flags == 0 is exactly STDL_BlitSurface, down to
+ * the BLiTTER fast paths; UNDER and MARK take the CPU route.
+ */
+#define STDL_BLIT_UNDER  0x0004u
+#define STDL_BLIT_MARK   0x0008u
+
+int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
+                       STDL_Surface *dst, STDL_Rect *dstrect,
+                       unsigned flags);
+
 void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
                      int x, int y);
 void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,

@@ -239,6 +239,76 @@ int main(void)
         STDL_FreeSurface(pic);
     }
 
+    /* --- BlitSurfaceEx: UNDER and MARK -------------------------- */
+    {
+        /* dst carries a foreground plane in its mask; src is opaque */
+        STDL_Surface *src = STDL_CreateSurface(32, 4);
+        STDL_Surface *dst = STDL_CreateSurface(32, 4);
+        CHECK(src != NULL && dst != NULL, "ex surfaces");
+        if (src != NULL && dst != NULL) {
+            STDL_Rect r;
+            int x;
+            CHECK(STDL_CreateMask(dst, 0) == 0, "ex dst mask");
+            r.x = 0; r.y = 0; r.w = 32; r.h = 4;
+            STDL_FillRect(src, &r, 5);
+            STDL_FillRect(dst, &r, 2);
+
+            /* mark the left half of row 0 as foreground */
+            ((uint16_t *)dst->mask)[0] = 0xFFFFu;
+            ((uint16_t *)dst->mask)[1] = 0x0000u;
+
+            r.x = 0; r.y = 0;
+            STDL_BlitSurfaceEx(src, NULL, dst, &r, STDL_BLIT_UNDER);
+            for (x = 0; x < 16; x++) {
+                CHECK(STDL_GetPixel(dst, x, 0) == 2,
+                      "UNDER preserved x=%d", x);
+            }
+            for (x = 16; x < 32; x++) {
+                CHECK(STDL_GetPixel(dst, x, 0) == 5,
+                      "UNDER drew x=%d", x);
+            }
+
+            /* MARK sets the mask under what it draws; the default
+             * clears it, which is what plain BlitSurface does */
+            STDL_FillRect(dst, &r, 2);
+            memset(dst->mask, 0, (size_t)dst->maskstride * 4);
+            r.x = 0; r.y = 0;
+            STDL_BlitSurfaceEx(src, NULL, dst, &r, STDL_BLIT_MARK);
+            CHECK(((uint16_t *)dst->mask)[0] == 0xFFFFu, "MARK set");
+            CHECK(STDL_GetPixel(dst, 0, 0) == 5, "MARK drew");
+
+            memset(dst->mask, 0xFF, (size_t)dst->maskstride * 4);
+            r.x = 0; r.y = 0;
+            STDL_BlitSurfaceEx(src, NULL, dst, &r, 0);
+            CHECK(((uint16_t *)dst->mask)[0] == 0x0000u,
+                  "default clears");
+
+            /* flags == 0 must be indistinguishable from the old call */
+            {
+                STDL_Surface *a = STDL_CreateSurface(48, 5);
+                STDL_Surface *b = STDL_CreateSurface(48, 5);
+                STDL_Rect ra;
+                CHECK(a != NULL && b != NULL, "compat surfaces");
+                if (a != NULL && b != NULL) {
+                    ra.x = 0; ra.y = 0; ra.w = 48; ra.h = 5;
+                    STDL_FillRect(a, &ra, 9);
+                    STDL_FillRect(b, &ra, 9);
+                    ra.x = 3; ra.y = 1;      /* unaligned: shift chain */
+                    STDL_BlitSurface(src, NULL, a, &ra);
+                    ra.x = 3; ra.y = 1;
+                    STDL_BlitSurfaceEx(src, NULL, b, &ra, 0);
+                    CHECK(memcmp(a->pixels, b->pixels,
+                                 (size_t)a->stride * 5) == 0,
+                          "flags==0 matches BlitSurface");
+                }
+                STDL_FreeSurface(a);
+                STDL_FreeSurface(b);
+            }
+        }
+        STDL_FreeSurface(src);
+        STDL_FreeSurface(dst);
+    }
+
     if (!failures) printf("all composition tests passed\n");
     return failures != 0;
 }

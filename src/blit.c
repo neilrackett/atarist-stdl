@@ -24,8 +24,11 @@
  * instantiation, so the guarded plane writes vanish. */
 STDL_PLANE_INLINE void copy_group(const uint16_t *sg, uint16_t *dg,
                                   uint16_t vis, uint16_t *dm, int g,
-                                  const int np)
+                                  unsigned flags, const int np)
 {
+    if (dm != NULL && (flags & STDL_BLIT_UNDER) != 0) {
+        vis &= (uint16_t)~dm[g];    /* marked pixels protect themselves */
+    }
     if (vis == 0xFFFFu) {
         dg[0] = sg[0];
         if (np > 1) dg[1] = sg[1];
@@ -39,7 +42,11 @@ STDL_PLANE_INLINE void copy_group(const uint16_t *sg, uint16_t *dg,
         if (np > 3) dg[3] = (uint16_t)((dg[3] & keep) | (sg[3] & vis));
     }
     if (dm != NULL && vis != 0) {
-        dm[g] &= (uint16_t)~vis;   /* blitted pixels become opaque */
+        if ((flags & STDL_BLIT_MARK) != 0) {
+            dm[g] |= vis;          /* blitted pixels become foreground */
+        } else {
+            dm[g] &= (uint16_t)~vis;   /* blitted pixels become opaque */
+        }
     }
 }
 
@@ -56,7 +63,7 @@ STDL_PLANE_INLINE void blit_rows_aligned(const uint8_t *srow,
                               int smstride, int dmstride,
                               int ng, int h,
                               uint16_t lm, uint16_t rm, int masked,
-                              const int np)
+                              unsigned flags, const int np)
 {
     int y, g;
 
@@ -70,12 +77,18 @@ STDL_PLANE_INLINE void blit_rows_aligned(const uint8_t *srow,
         uint16_t *dm = (uint16_t *)dmrow;
 
         copy_group(sg, dg,
-                   masked ? (uint16_t)(lm & ~sm[0]) : lm, dm, 0, np);
+                   masked ? (uint16_t)(lm & ~sm[0]) : lm, dm, 0,
+                   flags, np);
         if (ng > 1) {
             if (masked) {
                 for (g = 1; g < ng - 1; g++) {
                     copy_group(sg + g * 4, dg + g * 4,
-                               (uint16_t)~sm[g], dm, g, np);
+                               (uint16_t)~sm[g], dm, g, flags, np);
+                }
+            } else if (ng > 2 && flags != 0) {
+                for (g = 1; g < ng - 1; g++) {
+                    copy_group(sg + g * 4, dg + g * 4, 0xFFFFu,
+                               dm, g, flags, np);
                 }
             } else if (ng > 2) {
                 if (np == 4) {
@@ -84,7 +97,7 @@ STDL_PLANE_INLINE void blit_rows_aligned(const uint8_t *srow,
                     const uint16_t *sp = sg + 4;
                     uint16_t *dp = dg + 4;
                     for (g = 1; g < ng - 1; g++) {
-                        copy_group(sp, dp, 0xFFFFu, NULL, 0, np);
+                        copy_group(sp, dp, 0xFFFFu, NULL, 0, flags, np);
                         sp += 4;
                         dp += 4;
                     }
@@ -95,7 +108,7 @@ STDL_PLANE_INLINE void blit_rows_aligned(const uint8_t *srow,
             }
             copy_group(sg + (ng - 1) * 4, dg + (ng - 1) * 4,
                        masked ? (uint16_t)(rm & ~sm[ng - 1]) : rm,
-                       dm, ng - 1, np);
+                       dm, ng - 1, flags, np);
         }
 
         srow += sstride;
@@ -127,7 +140,7 @@ STDL_PLANE_INLINE void blit_rows_shift(const uint8_t *srow,
                             int smstride, int dmstride,
                             int ng, int h,
                             uint16_t lm, uint16_t rm, int masked,
-                            int sw0, int r, const int np)
+                            unsigned flags, int sw0, int r, const int np)
 {
     int y, g, p;
     int rr = 16 - r;
@@ -157,6 +170,9 @@ STDL_PLANE_INLINE void blit_rows_shift(const uint8_t *srow,
                 bm = *mp++;
                 vis &= (uint16_t)~((uint16_t)((am << r) | (bm >> rr)));
             }
+            if (dm != NULL && (flags & STDL_BLIT_UNDER) != 0) {
+                vis &= (uint16_t)~dm[g];
+            }
             if (vis != 0) {
                 uint16_t keep = (uint16_t)~vis;
                 const uint16_t *s2 = sp + 4;
@@ -166,7 +182,11 @@ STDL_PLANE_INLINE void blit_rows_shift(const uint8_t *srow,
                     dg[p] = (uint16_t)((dg[p] & keep) | (v & vis));
                 }
                 if (dm != NULL) {
-                    dm[g] &= (uint16_t)~vis;
+                    if ((flags & STDL_BLIT_MARK) != 0) {
+                        dm[g] |= vis;
+                    } else {
+                        dm[g] &= (uint16_t)~vis;
+                    }
                 }
             }
             sp += 4;
@@ -185,6 +205,13 @@ STDL_PLANE_INLINE void blit_rows_shift(const uint8_t *srow,
 
 int STDL_BlitSurface(STDL_Surface *src, const STDL_Rect *srcrect,
                      STDL_Surface *dst, STDL_Rect *dstrect)
+{
+    return STDL_BlitSurfaceEx(src, srcrect, dst, dstrect, 0);
+}
+
+int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
+                       STDL_Surface *dst, STDL_Rect *dstrect,
+                       unsigned flags)
 {
     int sx, sy, w, h, dx, dy;
     int cx1, cy1, cx2, cy2;
@@ -282,6 +309,9 @@ int STDL_BlitSurface(STDL_Surface *src, const STDL_Rect *srcrect,
         }
 
         if (sphase == dphase
+            && flags == 0        /* the BLiTTER passes below fix the
+                                  * mask upkeep; UNDER/MARK go the CPU
+                                  * route */
             && stdl_blitter_active()
             && ng * h >= (masked ? STDL_BLIT_MASKED_MIN_CELLS
                                  : STDL_BLIT_COPY_MIN_CELLS)) {
@@ -350,7 +380,7 @@ int STDL_BlitSurface(STDL_Surface *src, const STDL_Rect *srcrect,
             /* fully aligned, unmasked, whole groups: straight rows,
              * but only while every plane of the group is in budget */
             if (!masked && lm == 0xFFFFu && rm == 0xFFFFu
-                && np == 4) {
+                && np == 4 && flags == 0) {
                 const uint8_t *sp = srow + sg0 * 8;
                 uint8_t *dp = drow;
                 int bytes = ng * 8;
@@ -371,7 +401,7 @@ int STDL_BlitSurface(STDL_Surface *src, const STDL_Rect *srcrect,
                                   dmrow, \
                                   src->stride, dst->stride, \
                                   smstride, dmstride, \
-                                  ng, h, lm, rm, masked, (np))
+                                  ng, h, lm, rm, masked, flags, (np))
                 STDL_PLANE_DISPATCH(np, BLIT_ALIGNED);
 #undef BLIT_ALIGNED
             }
@@ -396,7 +426,7 @@ int STDL_BlitSurface(STDL_Surface *src, const STDL_Rect *srcrect,
             blit_rows_shift(srow, drow, smrow, dmrow, \
                             src->stride, dst->stride, \
                             smstride, dmstride, \
-                            ng, h, lm, rm, masked, sw0, r, (np))
+                            ng, h, lm, rm, masked, flags, sw0, r, (np))
             STDL_PLANE_DISPATCH(np, BLIT_SHIFT);
 #undef BLIT_SHIFT
         }

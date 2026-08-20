@@ -26,6 +26,7 @@ extern "C" {
 #include <stdl/stdl_dirty.h>
 #include <stdl/stdl_asset.h>
 #include <stdl/stdl_audio.h>
+#include <stdl/stdl_voice.h>
 #include <stdl/stdl_cursor.h>
 #include <stdl/stdl_music.h>
 #include <stdl/stdl_sfx.h>

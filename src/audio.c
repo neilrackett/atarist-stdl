@@ -31,9 +31,10 @@
 #define MW_DATA    (*(volatile uint16_t *)0xFFFF8922UL)
 #define MW_MASK    (*(volatile uint16_t *)0xFFFF8924UL)
 
+#define DMA_PLAY_ONCE   0x01
 #define DMA_PLAY_REPEAT 0x03    /* enable + loop */
 
-static const int dma_rates[4] = { 6258, 12517, 25033, 50066 };
+const int stdl_dma_rates[4] = { 6258, 12517, 25033, 50066 };
 
 /* ring of RING_FRAMES sample frames, refilled by halves */
 #define RING_FRAMES 4096
@@ -125,15 +126,16 @@ static void audio_shutdown(void)
     stdl_audio_hook = NULL;
     au.open = 0;
     sample_active = 0;
+    stdl.dma_owner = STDL_DMA_FREE;
 }
 
 /* index of the DMA rate nearest `freq` */
-static int nearest_rate(int freq)
+int stdl_dma_nearest(int freq)
 {
     int i, best = 0, bestdiff = 0x7FFFFFFF;
 
     for (i = 0; i < 4; i++) {
-        int diff = dma_rates[i] - freq;
+        int diff = stdl_dma_rates[i] - freq;
         if (diff < 0) diff = -diff;
         if (diff < bestdiff) {
             bestdiff = diff;
@@ -141,6 +143,11 @@ static int nearest_rate(int freq)
         }
     }
     return best;
+}
+
+void stdl_dma_stop(void)
+{
+    DMA_CTRL = 0;
 }
 
 /* ---------------------------------------------------------------- */
@@ -166,7 +173,7 @@ static void microwire_write(uint16_t data)
         ;
 }
 
-static uint32_t dma_counter(void)
+uint32_t stdl_dma_counter(void)
 {
     uint8_t h, m, l, h2;
 
@@ -179,20 +186,28 @@ static uint32_t dma_counter(void)
     return ((uint32_t)h << 16) | ((uint32_t)m << 8) | l;
 }
 
-static void dma_program(void)
+/*
+ * Program and start playback. Programming order matters: stop
+ * first, because the address registers latch into the counter when
+ * playback starts, and writing them under a running DMA can be
+ * picked up mid-frame.
+ */
+void stdl_dma_start(const void *data, uint32_t bytes, uint8_t mode,
+                    int repeat)
 {
-    uint32_t start = (uint32_t)au.ring;
-    uint32_t end = start + au.ring_bytes;
+    uint32_t start = (uint32_t)data;
+    uint32_t end = start + bytes;
 
     DMA_CTRL = 0;
-    DMA_MODE = au.dma_mode;
+    DMA_MODE = mode;
     DMA_START_H = (uint8_t)(start >> 16);
     DMA_START_M = (uint8_t)(start >> 8);
     DMA_START_L = (uint8_t)start;
     DMA_END_H = (uint8_t)(end >> 16);
     DMA_END_M = (uint8_t)(end >> 8);
     DMA_END_L = (uint8_t)end;
-    DMA_CTRL = DMA_PLAY_REPEAT;
+    set_output_levels();
+    DMA_CTRL = repeat ? DMA_PLAY_REPEAT : DMA_PLAY_ONCE;
 }
 
 /* pull `frames` frames from the callback and write them as signed
@@ -250,7 +265,7 @@ static void stdl_audio_pump(void)
     if (!au.open || au.paused) {
         return;
     }
-    off = dma_counter() - (uint32_t)au.ring;
+    off = stdl_dma_counter() - (uint32_t)au.ring;
     if (off >= au.ring_bytes) {
         return;                 /* counter mid-reload; try next pump */
     }
@@ -275,8 +290,9 @@ int STDL_OpenAudio(STDL_AudioSpec *desired, STDL_AudioSpec *obtained)
         STDL_SetError("audio already open");
         return -1;
     }
-    if (STDL_SamplePlaying()) {
-        STDL_SetError("STDL_PlaySample owns the sound DMA");
+    STDL_SamplePlaying();       /* expire a finished one-shot */
+    if (stdl.dma_owner != STDL_DMA_FREE) {
+        STDL_SetError("sound DMA in use");
         return -1;
     }
     if (!stdl.initialised) {
@@ -308,8 +324,8 @@ int STDL_OpenAudio(STDL_AudioSpec *desired, STDL_AudioSpec *obtained)
         au.spec.samples = 1024;
     }
 
-    best = nearest_rate(au.spec.freq);
-    au.dma_freq = dma_rates[best];
+    best = stdl_dma_nearest(au.spec.freq);
+    au.dma_freq = stdl_dma_rates[best];
     au.dma_mode = (uint8_t)(best
                   | (au.spec.channels == 1 ? 0x80 : 0x00));
     au.frame_bytes_dma = au.spec.channels;
@@ -352,6 +368,7 @@ int STDL_OpenAudio(STDL_AudioSpec *desired, STDL_AudioSpec *obtained)
     au.filled_half = 1;
     au.open = 1;
     au.paused = 1;              /* SDL semantics: starts paused */
+    stdl.dma_owner = STDL_DMA_RING;
     stdl_audio_hook = stdl_audio_pump;
     stdl_shutdown_audio = audio_shutdown;
     return 0;
@@ -366,7 +383,7 @@ void STDL_PauseAudio(int pause_on)
         DMA_CTRL = 0;
         au.paused = 1;
     } else if (!pause_on && au.paused) {
-        dma_program();
+        stdl_dma_start(au.ring, au.ring_bytes, au.dma_mode, 1);
         au.filled_half = 1;
         au.paused = 0;
     }
@@ -383,10 +400,9 @@ STDL_audiostatus STDL_GetAudioStatus(void)
 /* ---------------------------------------------------------------- */
 /* one-shot playback: the DMA reads the caller's buffer once        */
 
-int STDL_PlaySample(const void *data, uint32_t bytes, int freq)
+static int sample_start(const void *data, uint32_t bytes, int freq,
+                        int repeat)
 {
-    uint32_t start, end;
-
     if (!stdl.initialised) {
         STDL_Init(STDL_INIT_AUDIO);
     }
@@ -394,37 +410,40 @@ int STDL_PlaySample(const void *data, uint32_t bytes, int freq)
         STDL_SetError("no DMA sound hardware (STE/Mega STE only)");
         return -1;
     }
-    if (au.open) {
-        STDL_SetError("STDL_Audio owns the sound DMA");
+    STDL_SamplePlaying();       /* expire a finished one-shot */
+    if (stdl.dma_owner != STDL_DMA_FREE
+        && stdl.dma_owner != STDL_DMA_SAMPLE) {
+        STDL_SetError("sound DMA in use");
         return -1;
     }
     bytes &= ~1UL;              /* the counter works in words */
-    start = (uint32_t)data;
-    if (data == NULL || bytes < 2 || (start & 1) != 0) {
+    if (data == NULL || bytes < 2 || ((uint32_t)data & 1) != 0) {
         STDL_SetError("bad sample buffer");
         return -1;
     }
-    end = start + bytes;
-
-    /*
-     * Programming order matters: stop first, because the address
-     * registers latch into the counter when playback starts, and
-     * writing them under a running DMA can be picked up mid-frame.
-     */
-    DMA_CTRL = 0;
-    DMA_MODE = (uint8_t)(nearest_rate(freq) | 0x80);    /* mono */
-    DMA_START_H = (uint8_t)(start >> 16);
-    DMA_START_M = (uint8_t)(start >> 8);
-    DMA_START_L = (uint8_t)start;
-    DMA_END_H = (uint8_t)(end >> 16);
-    DMA_END_M = (uint8_t)(end >> 8);
-    DMA_END_L = (uint8_t)end;
-    set_output_levels();
-    DMA_CTRL = 0x01;            /* enable, do not repeat */
-
+    stdl_dma_start(data, bytes,
+                   (uint8_t)(stdl_dma_nearest(freq) | 0x80), /* mono */
+                   repeat);
     sample_active = 1;
+    stdl.dma_owner = STDL_DMA_SAMPLE;
     stdl_shutdown_audio = audio_shutdown;
     return 0;
+}
+
+int STDL_PlaySample(const void *data, uint32_t bytes, int freq)
+{
+    return sample_start(data, bytes, freq, 0);
+}
+
+/*
+ * Looping variant: the DMA replays the buffer until STDL_StopSample
+ * (or another Play*) - ambient loops and simple music beds at zero
+ * per-frame CPU cost. As with STDL_PlaySample the hardware reads the
+ * buffer live: stop playback before freeing or rewriting it.
+ */
+int STDL_PlaySampleLoop(const void *data, uint32_t bytes, int freq)
+{
+    return sample_start(data, bytes, freq, 1);
 }
 
 void STDL_StopSample(void)
@@ -432,6 +451,9 @@ void STDL_StopSample(void)
     if (sample_active) {
         DMA_CTRL = 0;
         sample_active = 0;
+        if (stdl.dma_owner == STDL_DMA_SAMPLE) {
+            stdl.dma_owner = STDL_DMA_FREE;
+        }
     }
 }
 
@@ -441,9 +463,13 @@ int STDL_SamplePlaying(void)
         return 0;
     }
     /* in play-once mode the hardware clears the enable bit when it
-     * reaches the end address - no polling of our own required */
+     * reaches the end address - no polling of our own required (a
+     * looping sample keeps the bit set until STDL_StopSample) */
     if ((DMA_CTRL & 1) == 0) {
         sample_active = 0;
+        if (stdl.dma_owner == STDL_DMA_SAMPLE) {
+            stdl.dma_owner = STDL_DMA_FREE;
+        }
     }
     return sample_active;
 }
@@ -457,6 +483,9 @@ void STDL_CloseAudio(void)
     }
     DMA_CTRL = 0;
     stdl_audio_hook = NULL;
+    if (stdl.dma_owner == STDL_DMA_RING) {
+        stdl.dma_owner = STDL_DMA_FREE;
+    }
     free(au.userbuf);
     free(au.ring_alloc);
     memset(&au, 0, sizeof(au));

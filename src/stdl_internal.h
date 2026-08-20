@@ -148,6 +148,11 @@ typedef struct {
     int              video_set;
     STDL_MachineInfo mach;
 
+    /* who owns the sound DMA (see STDL_DMA_*): the ring device, a
+     * one-shot/looping sample, and the voice mixer are mutually
+     * exclusive users of the one channel */
+    uint8_t          dma_owner;
+
     /* screen pages: page[0] = TOS screen, page[1] = allocated */
     uint8_t         *page[2];
     void            *page1_alloc;
@@ -311,6 +316,22 @@ static __inline__ uint32_t stdl_le32(const uint8_t *p)
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8)
          | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
+
+/* sound DMA ownership states (stdl.dma_owner) */
+#define STDL_DMA_FREE   0
+#define STDL_DMA_RING   1   /* STDL_OpenAudio                        */
+#define STDL_DMA_SAMPLE 2   /* STDL_PlaySample / STDL_PlaySampleLoop */
+#define STDL_DMA_VOICES 3   /* STDL_OpenVoices                       */
+
+/* shared DMA plumbing (audio.c): rate table and nearest-rate pick,
+ * program+start (stops first; registers latch at start), stop, and
+ * the frame address counter. Host builds get stubs. */
+extern const int stdl_dma_rates[4];
+int      stdl_dma_nearest(int freq);
+void     stdl_dma_start(const void *data, uint32_t bytes,
+                        uint8_t mode, int repeat);
+void     stdl_dma_stop(void);
+uint32_t stdl_dma_counter(void);
 
 /* bulk sample conversion to signed 8-bit mono/stereo frames at a
  * new rate (audio.c); shared by the mixer's chunk loader */

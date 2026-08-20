@@ -85,9 +85,23 @@ void STDL_FreeWAV(uint8_t *audio_buf);
  * rounded down to even.
  *
  * Returns 0, or -1 with STDL_GetError set: no DMA hardware, or
- * STDL_OpenAudio currently owns the chip (the two cannot coexist).
+ * another device (STDL_OpenAudio ring, STDL_OpenVoices) currently
+ * owns the chip - the DMA has one channel and its users cannot
+ * coexist.
+ *
+ * Ownership sharp edge: the hardware reads the buffer live for the
+ * whole playback. Call STDL_StopSample (or start a replacement)
+ * BEFORE freeing or rewriting a buffer handed to either call - on
+ * real hardware a freed block may be reused and scribbled while the
+ * DMA is still fetching it.
  */
 int  STDL_PlaySample(const void *data, uint32_t bytes, int freq);
+
+/* Looping variant: replays the buffer until STDL_StopSample (or a
+ * replacement Play*). Ambient loops and simple music beds at zero
+ * per-frame CPU cost; STDL_SamplePlaying stays true while looping. */
+int  STDL_PlaySampleLoop(const void *data, uint32_t bytes, int freq);
+
 void STDL_StopSample(void);
 int  STDL_SamplePlaying(void);
 

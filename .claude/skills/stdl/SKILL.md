@@ -197,4 +197,7 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
 - `docs/limits.md` - non-goals; do not work around them, redesign
 - `examples/` - ported SDL 1.2 test programs; `testsprite.c` is the
   reference for the masked-blit + dirty-rect flow, `testpalette.c`
-  for the 16-colour palette budget technique
+  for the 16-colour palette budget technique, and `chunky.c` for the
+  engine-porting APIs (CreateSurfaceFrom's two-views-of-one-block
+  pattern, BlitIndexed8 with MARK/UNDER/flips, the STDL_Voice
+  sequencer tick, GetHz200)

@@ -29,6 +29,7 @@ LIBOBJS = $(LIBSRCS:.c=.o)
 # GEMDOS needs 8.3 filenames.
 EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
            dist/TSPRITE.TOS dist/TPALETTE.TOS dist/CHECKKEY.TOS \
+           dist/CHUNKY.TOS \
            dist/TTIMER.TOS dist/TBLITSPD.TOS dist/TVIDINFO.TOS \
            dist/TKEYS.TOS dist/TJOY.TOS dist/LOOPWAVE.TOS \
            dist/TCURSOR.TOS dist/PLAYMUS.TOS dist/SFXDEMO.TOS \
@@ -130,6 +131,9 @@ dist/SFXDEMO.TOS: examples/sfxdemo.c $(LIB)
 dist/BLITCHK.TOS: examples/blitchk.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
 dist/VBLCHK.TOS: examples/vblchk.c $(LIB)
+	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
+
+dist/CHUNKY.TOS: examples/chunky.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
 
 # host-side unit tests: native clang + ASan, no cross toolchain

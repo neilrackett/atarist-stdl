@@ -190,3 +190,32 @@ truncates colours to the low N bits rather than rejecting them. See
   `STDL_Dirty` restore or a back buffer for real games.
 * **Key repeat**: the IKBD sends no auto-repeats; STDL synthesises
   them only after `SDL_EnableKeyRepeat`, matching SDL.
+* **Slow frames swallow key presses**: when a frame takes longer
+  than the press, KEYDOWN and KEYUP arrive in the same event poll,
+  and game code that treats a flag as "held" sees nothing. Apply
+  releases at the *start of the next* poll instead of immediately,
+  so every press stays visible for at least one full frame
+  (REminiscence's cutscene-skip key was lost this way at 2fps).
+* **Old engine code vs gcc 4.6 at -O2**: build ported engines with
+  `-fno-strict-aliasing` before trusting any crash. REminiscence's
+  unmodified game logic was miscompiled under strict-aliasing rules
+  into layout-dependent heap corruption - address/bus errors far
+  from the real cause. (Map exception PCs to symbols with
+  `tests/hatari/map-crash.sh`.)
+* **libc memcpy in per-frame paths**: mintlib's memcpy overhead
+  dominates short copies. 160 small per-line memcpys cost
+  REminiscence ~13ms/frame on an 8MHz ST; inline word-copy loops
+  cut the same work to ~3ms. Reserve memcpy for bulk moves.
+* **Runtime-decoded chunky art**: engines that RLE-decode sprite
+  frames to byte-per-pixel scratch at draw time should draw them
+  with `STDL_BlitIndexed8` (one pass, per-call colour map, flip and
+  column-major variants, destination-mask composition) - never with
+  a per-frame `STDL_SurfaceFromIndexed8`, which allocates and
+  converts twice per draw.
+* **256-colour palette logic on 16 hardware colours**: quantise the
+  logical palette to 16 and remap at decode/draw time. Keep the
+  quantiser's hardware-slot assignment *sticky* across palette
+  changes (match new colours to the nearest previous slot), or
+  content baked under the old mapping displays in permuted colours.
+  Detect pure-brightness changes (fades) and rescale the registers
+  without rebuilding the mapping.

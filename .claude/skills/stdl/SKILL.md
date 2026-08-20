@@ -36,6 +36,7 @@ Full contract: `docs/format.md`. Never invent a different layout.
 | aligned blits (same `x & 15` phase) | `STDL_VLine`, `STDL_Line` | `STDL_Circle` outline |
 | `STDL_BlitTile` (16px aligned) | masked blits (colour key) | any per-pixel loop |
 | pre-shifted `STDL_BlitSprite` | `STDL_SetColourKey` (rebuilds mask) | `SDL_MapRGB` per frame |
+| `STDL_BlitIndexed8` (chunky frames at draw time) | | per-frame `STDL_SurfaceFromIndexed8` |
 | `STDL_DrawChar` (one glyph) | `STDL_SurfaceFromIndexed8` (load time) | `STDL_RemapSurface` per frame |
 
 **Check the colour count first.** If the game uses 4 or 8 colours,
@@ -128,9 +129,25 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   `STDL_PlaySfx` = step sequences (tone or noise) on auto voices.
   Both steal voices from STDL_Music and hand them back restored.
   These are free: they run off the 50Hz VBL sound tick.
+- Engine-owned framebuffers: `STDL_CreateSurfaceFrom(pixels, w, h,
+  stride, mask, maskstride)` wraps caller-owned planar blocks (and an
+  optional mask plane) as surfaces - pointer-swappable, memcpy-able,
+  still drawable by every primitive. `STDL_BlitIndexed8` draws
+  runtime-decoded chunky sprite frames straight into one, through a
+  per-call 16-entry colour map, with flip/column-major variants and
+  destination-mask composition (`STDL_I8_UNDER` = pass behind marked
+  foreground, `STDL_I8_MARK` = mark what you draw).
+- Sample music: `STDL_OpenVoices(rate)` is a fixed-function 4-voice
+  sample mixer (Paula-style loop/period/volume) driven from the VBL
+  with a 50Hz sequencer hook (`STDL_SetVoiceTick`) - module music
+  without the ring device's callback cost. STE only; voices, the
+  ring device and `STDL_PlaySample` are mutually exclusive DMA
+  owners.
 - Sample effects: `STDL_PlaySample(buf, bytes, rate)` points the STE
   DMA at your buffer and the hardware reads it once - no ring, no
-  refill, **no per-frame cost**. Monophonic, so arbitrate by
+  refill, **no per-frame cost** (`STDL_PlaySampleLoop` for ambient
+  loops). Stop before freeing a playing buffer - the DMA reads it
+  live. Monophonic, so arbitrate by
   priority yourself. Prefer it to `STDL_OpenAudio`/`Mix_PlayChannel`
   for game effects: those are mixing devices, and software-mixing
   four channels at 6258Hz measured **36-75% of an 8MHz STE** (still

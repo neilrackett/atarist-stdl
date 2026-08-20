@@ -89,6 +89,14 @@ bit per pixel, one word per group, same bit order as the planes:
 
 The mask is a snapshot of the pixels at the time the key is set.
 Modify the pixels and you must call `STDL_SetColourKey` again.
+
+Blits and draw primitives onto a masked surface *maintain* the
+destination's mask (drawn pixels clear their bits; masked blits AND
+the source mask in) - they do not *consult* it as protection. The
+one exception is `STDL_BlitIndexed8` with `STDL_I8_UNDER`, which
+treats set destination-mask bits as protected pixels (the "sprites
+pass behind marked foreground" idiom), and `STDL_I8_MARK`, which
+sets bits under drawn pixels instead of clearing them.
 A key of 16 or more is not a pixel value: it enables masked blits
 from whatever mask the surface already carries (built by
 `STDL_CreateMask`, `STDL_PutGroup`/`STDL_PutGroup8` or transparent

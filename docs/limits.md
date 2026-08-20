@@ -18,6 +18,7 @@ stop trying and redesign instead.
 | TrueType / SDL_ttf | bitmap fonts converted offline |
 | Gamma / gamma ramps | `SDL_SetGamma*` return -1 |
 | Chunky pixel access | there is no 8bpp buffer; see docs/porting.md |
+| General mixing streams as the default | the ring device costs 36-75% of an 8MHz STE for four callback-mixed channels; use `STDL_PlaySample` for effects and `STDL_Voice` for music, and reach for `STDL_OpenAudio` only when a continuous arbitrary stream is genuinely needed |
 | YUV overlays, OpenGL, CD-ROM | see section 8.2 of the design doc |
 
 ## Practical limits of v1
@@ -45,7 +46,10 @@ stop trying and redesign instead.
   offline with `stdlconv wav` for a bit-exact path).
   The ring device is not free: its callback, mixing and resampling
   are CPU work in the pump, measured at 36-75% of an 8MHz STE for
-  four SDL_mixer channels at 6258Hz. A game with no frame budget
+  four SDL_mixer channels at 6258Hz. Module-style sample music
+  belongs on `STDL_Voice` instead: a fixed-function four-voice
+  mixer driven from the VBL, table-driven volume, no callback in
+  the audio path (see stdl_voice.h). A game with no frame budget
   to spare wants `STDL_PlaySample` instead, which hands the DMA a
   buffer to read once and costs nothing per frame - at the price of
   being monophonic. Only one of the two may own the chip at a time;

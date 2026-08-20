@@ -11,6 +11,10 @@
 #ifndef STDL_PALETTE_H
 #define STDL_PALETTE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdl/stdl_types.h>
 
 /* Program hardware from a logical palette (screen surfaces only;
@@ -37,5 +41,9 @@ void    STDL_GetRGB(uint32_t index, const STDL_PixelFormat *fmt,
 
 /* Blocking VBL-driven fade to a target palette. */
 void STDL_FadeTo(const STDL_Palette *target, int frames);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_PALETTE_H */

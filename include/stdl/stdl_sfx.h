@@ -21,6 +21,10 @@
 #ifndef STDL_SFX_H
 #define STDL_SFX_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdl/stdl_types.h>
 
 /* YM tone period for a frequency in Hz (2MHz master / 16) */
@@ -49,5 +53,9 @@ int  STDL_SfxActive(int voice);        /* -1 counts active effects  */
  * until changed - the PC-speaker contract. Volume 0-15. */
 void STDL_SpeakerOn(int freq_hz, uint8_t volume);
 void STDL_SpeakerOff(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_SFX_H */

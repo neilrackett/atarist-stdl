@@ -11,6 +11,10 @@
 #ifndef STDL_DIRTY_H
 #define STDL_DIRTY_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdl/stdl_types.h>
 
 int  STDL_DirtyInit(STDL_Surface *background, int max_rects);
@@ -18,5 +22,9 @@ void STDL_DirtyQuit(void);
 void STDL_DirtyPush(const STDL_Rect *r);   /* mark for restore        */
 void STDL_DirtyRestore(STDL_Surface *dst); /* repaint from background */
 void STDL_DirtyReset(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_DIRTY_H */

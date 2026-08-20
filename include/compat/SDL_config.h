@@ -7,4 +7,12 @@
  * Nothing to configure; deliberately defines no HAVE_* macros. */
 #ifndef STDL_COMPAT_SDL_CONFIG_H
 #define STDL_COMPAT_SDL_CONFIG_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+#ifdef __cplusplus
+}
+#endif
+
 #endif

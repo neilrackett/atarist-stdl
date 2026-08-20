@@ -10,6 +10,10 @@
 #ifndef STDL_EVENT_H
 #define STDL_EVENT_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdl/stdl_types.h>
 #include <stdl/stdl_keys.h>
 
@@ -168,5 +172,9 @@ void STDL_JoyKeyEmulation(int enable);
  */
 int STDL_JoyKeyMapping(uint16_t up, uint16_t down, uint16_t left,
                        uint16_t right, uint16_t fire);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_EVENT_H */

@@ -15,6 +15,10 @@
 #ifndef STDL_COMPAT_SDL_MIXER_H
 #define STDL_COMPAT_SDL_MIXER_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "SDL.h"
 
 #define MIX_MAX_VOLUME     128
@@ -57,5 +61,9 @@ int  Mix_Volume(int channel, int volume);
 int  Mix_VolumeChunk(Mix_Chunk *chunk, int volume);
 
 #define Mix_GetError SDL_GetError
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_COMPAT_SDL_MIXER_H */

@@ -10,6 +10,10 @@
 #ifndef STDL_H
 #define STDL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdl/stdl_types.h>
 #include <stdl/stdl_video.h>
 #include <stdl/stdl_surface.h>
@@ -25,5 +29,9 @@
 #include <stdl/stdl_cursor.h>
 #include <stdl/stdl_music.h>
 #include <stdl/stdl_sfx.h>
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_H */

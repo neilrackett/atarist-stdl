@@ -10,6 +10,10 @@
 #ifndef STDL_DRAW_H
 #define STDL_DRAW_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdl/stdl_types.h>
 
 /*
@@ -107,5 +111,9 @@ void STDL_XorHSpans(STDL_Surface *dst, const STDL_Span *spans,
                     int count, uint8_t col);
 void STDL_XorVSpans(STDL_Surface *dst, const STDL_Span *spans,
                     int count, uint8_t col);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_DRAW_H */

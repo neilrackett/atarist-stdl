@@ -10,6 +10,10 @@
 #ifndef STDL_VBL_H
 #define STDL_VBL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Install `fn` in a free TOS VBL queue slot, so it is called once per
  * vertical blank - 50Hz in the colour low resolution STDL runs in.
@@ -60,5 +64,9 @@ int  STDL_AddVBL(void (*fn)(void));
 /* Remove a callback installed by STDL_AddVBL. Safe to call with a
  * function that is not installed, and safe from inside a callback. */
 void STDL_RemoveVBL(void (*fn)(void));
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_VBL_H */

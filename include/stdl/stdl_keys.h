@@ -10,6 +10,10 @@
 #ifndef STDL_KEYS_H
 #define STDL_KEYS_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef enum {
     STDLK_UNKNOWN    = 0,
     STDLK_BACKSPACE  = 8,
@@ -111,5 +115,9 @@ typedef enum {
 #define STDL_KMOD_CTRL  (STDL_KMOD_LCTRL | STDL_KMOD_RCTRL)
 #define STDL_KMOD_SHIFT (STDL_KMOD_LSHIFT | STDL_KMOD_RSHIFT)
 #define STDL_KMOD_ALT   (STDL_KMOD_LALT | STDL_KMOD_RALT)
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_KEYS_H */

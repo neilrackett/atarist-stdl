@@ -15,6 +15,10 @@
 #ifndef STDL_TYPES_H
 #define STDL_TYPES_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 
 typedef struct { int16_t x, y; }                STDL_Point;
@@ -107,5 +111,9 @@ typedef struct STDL_Surface {
 typedef struct STDL_Sprite  STDL_Sprite;
 typedef struct STDL_Tileset STDL_Tileset;
 typedef struct STDL_Font    STDL_Font;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_TYPES_H */

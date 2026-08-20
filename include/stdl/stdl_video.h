@@ -9,6 +9,10 @@
 #ifndef STDL_VIDEO_H
 #define STDL_VIDEO_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdl/stdl_types.h>
 
 /* values match SDL 1.2, like the surface flags and keysyms */
@@ -88,5 +92,9 @@ int STDL_SetPlaneBudget(int planes);
 
 const char *STDL_GetError(void);
 void        STDL_SetError(const char *msg);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_VIDEO_H */

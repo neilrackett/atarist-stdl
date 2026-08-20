@@ -10,6 +10,10 @@
 #ifndef STDL_ASSET_H
 #define STDL_ASSET_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdl/stdl_types.h>
 
 /*
@@ -99,5 +103,9 @@ int           STDL_ShowDegas(const char *file);
 STDL_Surface *STDL_LoadDegasTrailer(const char *file,
                                     STDL_Palette *pal_out);
 int           STDL_ShowDegasTrailer(const char *file);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_ASSET_H */

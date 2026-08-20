@@ -21,6 +21,10 @@
 #ifndef STDL_MUSIC_H
 #define STDL_MUSIC_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdl/stdl_types.h>
 
 typedef struct STDL_Music STDL_Music;
@@ -41,5 +45,9 @@ int  STDL_PlayingMusic(void);
 /* 0..128; -1 queries. Scales the YM volume registers on the fly
  * (envelope-driven channels are left at full). */
 int  STDL_VolumeMusic(int volume);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_MUSIC_H */

@@ -15,6 +15,10 @@
 #ifndef STDL_BLIT_H
 #define STDL_BLIT_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdl/stdl_types.h>
 
 /*
@@ -30,5 +34,9 @@ void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
                      int x, int y);
 void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,
                    int x, int y);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_BLIT_H */

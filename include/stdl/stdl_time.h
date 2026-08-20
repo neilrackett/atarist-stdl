@@ -9,10 +9,18 @@
 #ifndef STDL_TIME_H
 #define STDL_TIME_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 
 uint32_t STDL_GetTicks(void);        /* ms since STDL_Init            */
 void     STDL_Delay(uint32_t ms);
 void     STDL_FrameLimit(int fps);   /* VBL-aligned pacing            */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_TIME_H */

@@ -16,6 +16,10 @@
 #ifndef STDL_AUDIO_H
 #define STDL_AUDIO_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdl/stdl_types.h>
 
 /* format words match SDL 1.2 */
@@ -86,5 +90,9 @@ void STDL_FreeWAV(uint8_t *audio_buf);
 int  STDL_PlaySample(const void *data, uint32_t bytes, int freq);
 void STDL_StopSample(void);
 int  STDL_SamplePlaying(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_AUDIO_H */

@@ -12,6 +12,10 @@
 #ifndef STDL_COMPAT_SDL_H
 #define STDL_COMPAT_SDL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -423,5 +427,9 @@ int  SDL_SetTimer(Uint32 interval, SDL_TimerCallback callback);
 SDL_TimerID SDL_AddTimer(Uint32 interval, SDL_NewTimerCallback callback,
                          void *param);
 SDL_bool SDL_RemoveTimer(SDL_TimerID id);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_COMPAT_SDL_H */

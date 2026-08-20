@@ -10,6 +10,10 @@
 #ifndef STDL_SURFACE_H
 #define STDL_SURFACE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdl/stdl_types.h>
 
 /* Width is padded up to a multiple of 16 pixels internally; w keeps
@@ -100,5 +104,9 @@ void STDL_PutGroup(STDL_Surface *s, int x, int y,
  * so a decoder holding an opacity byte passes its complement. */
 void STDL_PutGroup8(STDL_Surface *s, int x, int y,
                     const uint8_t planes[4], uint8_t transmask);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_SURFACE_H */

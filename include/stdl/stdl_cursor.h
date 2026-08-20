@@ -17,6 +17,10 @@
 #ifndef STDL_CURSOR_H
 #define STDL_CURSOR_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdl/stdl_types.h>
 
 typedef struct STDL_Cursor STDL_Cursor;
@@ -36,5 +40,9 @@ void         STDL_FreeCursor(STDL_Cursor *cursor);
 
 /* 1 = show, 0 = hide, -1 = query; returns the previous state */
 int STDL_ShowCursorCtl(int toggle);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STDL_CURSOR_H */

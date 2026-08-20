@@ -26,6 +26,11 @@ uint32_t STDL_GetTicks(void)
     return (STDL_HZ200 - ticks_base) * 5;
 }
 
+uint32_t STDL_GetHz200(void)
+{
+    return STDL_HZ200;
+}
+
 /* run the cooperative services, at most once per 200Hz tick */
 static void idle_services(void)
 {

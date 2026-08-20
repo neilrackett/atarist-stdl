@@ -13,6 +13,9 @@
 #   sleep N       wait N seconds (fractions ok)
 #   waitfor STR   poll the console log for STR (stderr prints are
 #                 immediate; stdout is line-buffered)
+#   waitfile STR PATH  poll a file (e.g. a log the program writes on
+#                 the GEMDOS drive) for STR - deterministic sync for
+#                 programs whose output does not reach the console
 #   shot          screenshot -> tests/hatari/out/shots_NAME/
 #   key VAL       press+release an ST scancode (0x01 = ESC) or a
 #                 single alphanumeric character
@@ -28,6 +31,7 @@
 #           timed screenshots)
 #   MACHINE hatari machine type (default megaste; use st for the
 #           8MHz correctness floor)
+#   SOUND   on|off (default off; on for recsound verification)
 #   EXTRA   extra hatari options
 set -u
 NAME=$1
@@ -41,6 +45,7 @@ HATARI=${HATARI:-/Applications/Hatari.app/Contents/MacOS/hatari}
 TOS=${TOS:?set TOS to a TOS/EmuTOS image path}
 FF=${FF:-on}
 MACHINE=${MACHINE:-megaste}
+SOUND=${SOUND:-off}
 FIFO=$OUT/fifo_$NAME
 SHOTDIR=$OUT/shots_$NAME
 LOG=$OUT/$NAME.log
@@ -49,7 +54,7 @@ rm -rf "$SHOTDIR" "$FIFO" "$LOG"
 mkdir -p "$SHOTDIR"
 
 "$HATARI" --tos "$TOS" --machine "$MACHINE" --fast-forward "$FF" \
-  --fast-boot on ${EXTRA:-} --sound off --statusbar off \
+  --fast-boot on ${EXTRA:-} --sound "$SOUND" --statusbar off \
   --conout 2 --cmd-fifo "$FIFO" \
   --screenshot-dir "$SHOTDIR" --screenshot-format png \
   "$PROG" > "$LOG" 2>"$OUT/$NAME.err" &
@@ -76,6 +81,11 @@ for cmd in "${CMDS[@]}"; do
     waitfor)    shift
                 for i in $(seq 1 240); do
                   grep -q "$*" "$LOG" && break
+                  sleep 0.5
+                done ;;
+    waitfile)   str=$2; shift 2
+                for i in $(seq 1 240); do
+                  [ -f "$*" ] && grep -q "$str" "$*" && break
                   sleep 0.5
                 done ;;
     *)          echo "unknown cmd: $cmd" >&2 ;;

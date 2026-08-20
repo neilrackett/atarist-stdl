@@ -22,6 +22,10 @@
 #   keydown VAL / keyup VAL
 #   click         double left mouse click
 #   text STR      type a string
+#   fifo CMD...   send a raw command to Hatari's fifo (e.g.
+#                 'fifo hatari-shortcut recsound' to toggle sound
+#                 recording; the output file comes from Hatari's
+#                 SoundFileName config, ./hatari.wav by default)
 #
 # Console output lands in tests/hatari/out/NAME.log and is echoed
 # at the end. Environment overrides:
@@ -78,6 +82,7 @@ for cmd in "${CMDS[@]}"; do
     keyup)      echo "hatari-event keyup $2" > "$FIFO" ;;
     text)       shift; echo "hatari-event text $*" > "$FIFO" ;;
     click)      echo "hatari-event doubleclick" > "$FIFO" ;;
+    fifo)       shift; echo "$*" > "$FIFO" ;;
     waitfor)    shift
                 for i in $(seq 1 240); do
                   grep -q "$*" "$LOG" && break

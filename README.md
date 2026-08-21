@@ -15,10 +15,9 @@ is no chunky backbuffer and no c2p anywhere in the pipeline: ST interleaved
 planar is the native format, assets are converted offline, and spans, rects and
 blits are the primary verbs.
 
-For engines that decode byte-per-pixel sprite frames at runtime (the
-REminiscence/Flashback port drove this), `STDL_BlitIndexed8` draws chunky
-frames straight into the planes through a colour map - one pass, no
-backbuffer - `STDL_CreateSurfaceFrom` wraps engine-owned framebuffers as
+For engines that decode byte-per-pixel sprite frames at runtime, `STDL_BlitIndexed8` draws chunky
+frames straight into the planes through a colour map, (one pass, no
+backbuffer) `STDL_CreateSurfaceFrom` wraps engine-owned framebuffers as
 surfaces, `STDL_BlitSurfaceEx` composes planar frames against a
 foreground/priority plane, and `STDL_Voice` hardware-mixes four sample
 voices from the VBL for module-style music. See `examples/chunky.c`.

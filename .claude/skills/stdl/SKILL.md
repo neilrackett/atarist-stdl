@@ -41,17 +41,18 @@ Full contract: `docs/format.md`. Never invent a different layout.
 | `STDL_DrawChar` (one glyph) | `STDL_SurfaceFromIndexed8` (load time) | `STDL_RemapSurface` per frame |
 
 **Bake frames you redraw.** The same frame, colour bank and palette
-always produce the same plane words. Blit the chunky source once
-into a scratch surface with `STDL_BlitIndexed8` (its default mask
-maintenance leaves the mask in the source convention), then compose
-it with `STDL_BlitSurfaceEx`. Three things REminiscence measured the
-hard way: baking costs about what one chunky draw costs, so bake on
+always produce the same plane words. Clear a scratch mask to all
+ones, blit the chunky source into it with `STDL_BlitIndexed8` and no
+`STDL_I8_MARK` (the default maintenance clears a bit under each
+drawn pixel, leaving the source convention), then compose it with
+`STDL_BlitSurfaceEx`. Three things REminiscence measured the hard
+way: baking costs about what one chunky draw costs, so bake on
 *second* sighting or one-off frames pay for bakes they never reuse;
 key the cache on something stable, not on decoded-frame addresses
-that move every animation lap; and give the block the guard slack
-`stdl_surface.h` asks for, because the shift chain reads one group
-past the end of a row. Measure it - on Flashback the win was ~9%
-on a quiet screen and near zero on a busy one.
+that move every animation lap; and give the block a group of slack
+at both ends, because the unaligned path reads one group either
+side of a row. Measure it - on Flashback the win was ~9% on a quiet
+screen and near zero on a busy one.
 
 **Check the colour count first.** If the game uses 4 or 8 colours,
 call `STDL_SetPlaneBudget(2)` (or `3`) right after
@@ -155,9 +156,15 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   srcrect, dst, dstrect, flags)` is `STDL_BlitSurface` plus
   `STDL_BLIT_UNDER` / `STDL_BLIT_MARK`, the same two flags at the
   same bit values as the indexed path. Use it to compose frames you
-  baked once (see "Bake frames you redraw" below) without writing a
+  baked once (see "Bake frames you redraw" above) without writing a
   planar blit of your own. `flags == 0` is exactly
   `STDL_BlitSurface`, BLiTTER fast paths included.
+- Frame pacing and profiling: `STDL_GetHz200()` is the raw 200Hz
+  system counter, for finer grain than `STDL_GetTicks` and for
+  pacing in ticks. It counts from boot, so take differences - a
+  per-phase timer around the frame is how the Flashback port found
+  that an icon was being re-decoded every frame, 18ms of a 93ms
+  frame nobody would have guessed at.
 - Sample music: `STDL_OpenVoices(rate)` is a fixed-function 4-voice
   sample mixer (Paula-style loop/period/volume) driven from the VBL
   with a 50Hz sequencer hook (`STDL_SetVoiceTick`) - module music

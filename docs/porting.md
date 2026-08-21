@@ -214,18 +214,21 @@ truncates colours to the low N bits rather than rejecting them. See
   converts twice per draw.
 * **Frames drawn many times**: when the same frame, colour bank and
   palette recur (an animation cycle), bake it once into a planar
-  surface - blit the chunky source into a scratch surface with
-  `STDL_BlitIndexed8`, which leaves the mask in the source
-  convention - and afterwards compose it with `STDL_BlitSurfaceEx`,
-  whose `STDL_BLIT_UNDER`/`STDL_BLIT_MARK` give the same priority
-  semantics as the chunky path. Measure before committing to it:
-  baking costs about what one chunky draw costs, so a frame drawn
-  once pays for a bake it never reuses (bake on second sighting),
-  and the cache must key on something stable - REminiscence's first
-  attempt keyed on decoded-frame addresses that moved every
-  animation lap, so it never hit. Borrowed blocks need the guard
-  slack in `stdl_surface.h`: the shift chain reads one group past
-  the end of a row.
+  surface and afterwards compose it with `STDL_BlitSurfaceEx`, whose
+  `STDL_BLIT_UNDER`/`STDL_BLIT_MARK` give the same priority
+  semantics as the chunky path. To bake: clear the scratch mask to
+  all ones (every pixel transparent), then blit the chunky source
+  with `STDL_BlitIndexed8` and *no* `STDL_I8_MARK` - its default
+  maintenance clears a mask bit under each pixel it draws, which
+  leaves exactly the source convention (bit set = destination
+  preserved). Measure before committing to it: baking costs about
+  what one chunky draw costs, so a frame drawn once pays for a bake
+  it never reuses (bake on second sighting), and the cache must key
+  on something stable - REminiscence's first attempt keyed on
+  decoded-frame addresses that moved every animation lap, so it
+  never hit. Give the block a group of slack at *both* ends, as
+  `STDL_CreateSurfaceFrom` asks: the unaligned path reads one group
+  either side of a row.
 * **256-colour palette logic on 16 hardware colours**: quantise the
   logical palette to 16 and remap at decode/draw time. Keep the
   quantiser's hardware-slot assignment *sticky* across palette

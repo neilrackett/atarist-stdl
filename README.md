@@ -59,8 +59,6 @@ hatari --machine megaste dist/TSPRITE.TOS
 
 ## Status
 
-### v1.0
-
 320x200, 4 planes, 16 colours. The library and the SDL 1.2
 test-suite ports below all run under EmuTOS/TOS on Hatari:
 

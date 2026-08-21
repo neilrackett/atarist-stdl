@@ -67,6 +67,15 @@ warnings** with the Makefile's `-Wall -Wextra`.
   program links, and in with the other source-art converters made
   all three ported games *smaller* while the library gained three
   APIs. Measure it - rebuild the games and compare the .TOS sizes.
+- **A flag that changes mask handling has to reach the fast paths
+  too.** blit.c's shortcuts bypass the mask entirely: whole-group
+  `memcpy`, the `memset` that clears mask words, and every BLiTTER
+  pass (which does its own upkeep with HOP/OP). Adding
+  `STDL_BLIT_UNDER`/`MARK` meant *excluding* those routes when
+  either flag is set, not teaching them the flag. A new blit flag
+  wants the same audit, plus a host test asserting the zero-flag
+  call is byte-identical to the entry point it wraps - that is what
+  keeps "additive" honest.
 - **After touching blit/fill paths**: run `dist/BLITCHK.TOS` - it
   randomises fills/blits and compares the CPU and BLiTTER paths
   byte-for-byte on target. Both paths must stay identical;
@@ -96,6 +105,11 @@ warnings** with the Makefile's `-Wall -Wextra`.
   not the doc to match a bug. `docs/limits.md` lists deliberate
   non-goals - do not implement around them.
 - Mask convention everywhere: **bit set = destination preserved**.
+  The two flags that instead read a destination mask as a
+  foreground/priority plane - `UNDER` (protect marked pixels) and
+  `MARK` (set bits under drawn pixels) - share their bit values
+  between `STDL_BlitIndexed8` and `STDL_BlitSurfaceEx` so one flag
+  set serves a scene built from both. Keep new ones aligned.
 - YM2149: never touch registers 14/15 (TOS floppy select); all r7
   writes must preserve the port-direction bits (go through
   `stdl_ym_mix_update`). Effects/music share voices via

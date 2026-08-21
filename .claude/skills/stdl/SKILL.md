@@ -37,7 +37,21 @@ Full contract: `docs/format.md`. Never invent a different layout.
 | `STDL_BlitTile` (16px aligned) | masked blits (colour key) | any per-pixel loop |
 | pre-shifted `STDL_BlitSprite` | `STDL_SetColourKey` (rebuilds mask) | `SDL_MapRGB` per frame |
 | `STDL_BlitIndexed8` (chunky frames at draw time) | | per-frame `STDL_SurfaceFromIndexed8` |
+| `STDL_BlitSurfaceEx` (baked frame, priority plane) | | hand-rolled planar sprite loops |
 | `STDL_DrawChar` (one glyph) | `STDL_SurfaceFromIndexed8` (load time) | `STDL_RemapSurface` per frame |
+
+**Bake frames you redraw.** The same frame, colour bank and palette
+always produce the same plane words. Blit the chunky source once
+into a scratch surface with `STDL_BlitIndexed8` (its default mask
+maintenance leaves the mask in the source convention), then compose
+it with `STDL_BlitSurfaceEx`. Three things REminiscence measured the
+hard way: baking costs about what one chunky draw costs, so bake on
+*second* sighting or one-off frames pay for bakes they never reuse;
+key the cache on something stable, not on decoded-frame addresses
+that move every animation lap; and give the block the guard slack
+`stdl_surface.h` asks for, because the shift chain reads one group
+past the end of a row. Measure it - on Flashback the win was ~9%
+on a quiet screen and near zero on a busy one.
 
 **Check the colour count first.** If the game uses 4 or 8 colours,
 call `STDL_SetPlaneBudget(2)` (or `3`) right after
@@ -137,6 +151,13 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   per-call 16-entry colour map, with flip/column-major variants and
   destination-mask composition (`STDL_I8_UNDER` = pass behind marked
   foreground, `STDL_I8_MARK` = mark what you draw).
+- Priority planes for surface blits: `STDL_BlitSurfaceEx(src,
+  srcrect, dst, dstrect, flags)` is `STDL_BlitSurface` plus
+  `STDL_BLIT_UNDER` / `STDL_BLIT_MARK`, the same two flags at the
+  same bit values as the indexed path. Use it to compose frames you
+  baked once (see "Bake frames you redraw" below) without writing a
+  planar blit of your own. `flags == 0` is exactly
+  `STDL_BlitSurface`, BLiTTER fast paths included.
 - Sample music: `STDL_OpenVoices(rate)` is a fixed-function 4-voice
   sample mixer (Paula-style loop/period/volume) driven from the VBL
   with a 50Hz sequencer hook (`STDL_SetVoiceTick`) - module music

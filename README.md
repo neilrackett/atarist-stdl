@@ -20,8 +20,9 @@ For engines that decode byte-per-pixel sprite frames at runtime (the
 REminiscence/Flashback port drove this), `STDL_BlitIndexed8` draws chunky
 frames straight into the planes through a colour map - one pass, no
 backbuffer - `STDL_CreateSurfaceFrom` wraps engine-owned framebuffers as
-surfaces, and `STDL_Voice` hardware-mixes four sample voices from the VBL
-for module-style music. See `examples/chunky.c`.
+surfaces, `STDL_BlitSurfaceEx` composes planar frames against a
+foreground/priority plane, and `STDL_Voice` hardware-mixes four sample
+voices from the VBL for module-style music. See `examples/chunky.c`.
 
 Anything that cannot be done cheaply in planar has been removed rather than
 emulated; see [docs/limits.md](docs/limits.md).

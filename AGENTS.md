@@ -98,6 +98,29 @@ warnings** with the Makefile's `-Wall -Wextra`.
 - Verify on `--machine st` too: plain 8MHz ST is the correctness
   floor; the blitter and DMA audio are optional hardware.
 
+## Shipping a change
+
+- **A public API change is not done until the docs and the skill
+  say so.** Adding, changing or deprecating anything in
+  `include/stdl/` means updating, in the same change:
+  `docs/format.md` if it touches the byte-level contract or the
+  mask rules, `docs/porting.md` if a port would meet it,
+  `.claude/skills/stdl/SKILL.md` (the cost table, the API list, and
+  any pattern worth teaching), and `README.md` if it belongs in the
+  headline list. A header comment alone does not count - nobody
+  porting a game reads the headers first. Check it the cheap way
+  before committing: grep the new symbol across `docs/ README.md
+  .claude/` and see it come back.
+- **State the honest measured number, not the hoped-for one.** If a
+  pattern in the skill has a performance claim, it carries what was
+  measured, including when that is "near zero in a busy scene". An
+  agent reading the skill is deciding whether to spend a day on it.
+- **Do not name the game or project a lesson came from.** Ports are
+  the maintainer's to announce, and some are not public yet. Write
+  "one port", "a game conversion", "an engine that decodes frames
+  at runtime" - the lesson is the useful part, and the attribution
+  gets added later by the maintainer once a port is released.
+
 ## Non-negotiable constraints
 
 - `docs/format.md` is the frozen byte-level contract (surfaces,

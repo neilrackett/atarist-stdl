@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: CC0-1.0
  *
- * Demo of the engine-porting APIs added for the REminiscence port:
+ * Demo of the engine-porting APIs:
  *
  *  - STDL_CreateSurfaceFrom: the playfield is a plain caller-owned
  *    block (with a caller-owned mask plane), restored between

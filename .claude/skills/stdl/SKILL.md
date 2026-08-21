@@ -11,6 +11,14 @@ converted to ST interleaved planar offline, and spans/rects/blits
 are the primary verbs. The screen is always 320x200, 4 planes,
 16 colours.
 
+**Changing STDL itself?** A port often wants a primitive the
+library does not have yet, and adding it there beats hand-rolling
+one in the game. Read `AGENTS.md` in the STDL repo first: it
+carries the build and test loop, the size budget, the asm-with-a-
+C-twin rule, and what shipping a change means - a public API is not
+done until `docs/` and this skill describe it, and lessons are
+written without naming the port they came from.
+
 ## The format contract (memorise this)
 
 - Pixels group in 16s; a group = 4 consecutive plane words (8 bytes).
@@ -45,13 +53,13 @@ always produce the same plane words. Clear a scratch mask to all
 ones, blit the chunky source into it with `STDL_BlitIndexed8` and no
 `STDL_I8_MARK` (the default maintenance clears a bit under each
 drawn pixel, leaving the source convention), then compose it with
-`STDL_BlitSurfaceEx`. Three things REminiscence measured the hard
+`STDL_BlitSurfaceEx`. Three things a port measured the hard
 way: baking costs about what one chunky draw costs, so bake on
 *second* sighting or one-off frames pay for bakes they never reuse;
 key the cache on something stable, not on decoded-frame addresses
 that move every animation lap; and give the block a group of slack
 at both ends, because the unaligned path reads one group either
-side of a row. Measure it - on Flashback the win was ~9% on a quiet
+side of a row. Measure it - in one port the win was ~9% on a quiet
 screen and near zero on a busy one.
 
 **Check the colour count first.** If the game uses 4 or 8 colours,
@@ -162,7 +170,7 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
 - Frame pacing and profiling: `STDL_GetHz200()` is the raw 200Hz
   system counter, for finer grain than `STDL_GetTicks` and for
   pacing in ticks. It counts from boot, so take differences - a
-  per-phase timer around the frame is how the Flashback port found
+  per-phase timer around the frame is how one port found
   that an icon was being re-decoded every frame, 18ms of a 93ms
   frame nobody would have guessed at.
 - Sample music: `STDL_OpenVoices(rate)` is a fixed-function 4-voice

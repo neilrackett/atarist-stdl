@@ -16,7 +16,7 @@
  * as per-pixel protection (STDL_I8_UNDER - the "sprites pass behind
  * marked foreground" idiom).
  *
- * Ported from (and first proven in) the REminiscence conversion.
+ * Ported from (and first proven in) a game conversion.
  */
 
 #include "stdl_internal.h"

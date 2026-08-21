@@ -195,16 +195,16 @@ truncates colours to the low N bits rather than rejecting them. See
   and game code that treats a flag as "held" sees nothing. Apply
   releases at the *start of the next* poll instead of immediately,
   so every press stays visible for at least one full frame
-  (REminiscence's cutscene-skip key was lost this way at 2fps).
+  (a port lost its cutscene-skip key this way at 2fps).
 * **Old engine code vs gcc 4.6 at -O2**: build ported engines with
-  `-fno-strict-aliasing` before trusting any crash. REminiscence's
+  `-fno-strict-aliasing` before trusting any crash. One port's
   unmodified game logic was miscompiled under strict-aliasing rules
   into layout-dependent heap corruption - address/bus errors far
   from the real cause. (Map exception PCs to symbols with
   `tests/hatari/map-crash.sh`.)
 * **libc memcpy in per-frame paths**: mintlib's memcpy overhead
   dominates short copies. 160 small per-line memcpys cost
-  REminiscence ~13ms/frame on an 8MHz ST; inline word-copy loops
+  one port ~13ms/frame on an 8MHz ST; inline word-copy loops
   cut the same work to ~3ms. Reserve memcpy for bulk moves.
 * **Runtime-decoded chunky art**: engines that RLE-decode sprite
   frames to byte-per-pixel scratch at draw time should draw them
@@ -224,7 +224,7 @@ truncates colours to the low N bits rather than rejecting them. See
   preserved). Measure before committing to it: baking costs about
   what one chunky draw costs, so a frame drawn once pays for a bake
   it never reuses (bake on second sighting), and the cache must key
-  on something stable - REminiscence's first attempt keyed on
+  on something stable - one port's first attempt keyed on
   decoded-frame addresses that moved every animation lap, so it
   never hit. Give the block a group of slack at *both* ends, as
   `STDL_CreateSurfaceFrom` asks: the unaligned path reads one group

@@ -111,6 +111,17 @@ warnings** with the Makefile's `-Wall -Wextra`.
   porting a game reads the headers first. Check it the cheap way
   before committing: grep the new symbol across `docs/ README.md
   .claude/` and see it come back.
+- **New functionality needs an example that exercises it.** The
+  examples are how a port author sees an API working before
+  committing to it, and they ship as .TOS binaries on the release
+  page - so they are the API's real acceptance test on hardware.
+  Extend an existing example when the feature belongs to a demo
+  that already runs (a new blit flag joins the one drawing
+  sprites); add a new one when it does not fit, remembering the
+  Makefile rule and the `EXAMPLES` list, or it never gets built or
+  shipped. Keep them small and CC0, show the intended usage rather
+  than every parameter, and say in a comment why the pattern is the
+  right one - `examples/chunky.c` is the shape to copy.
 - **State the honest measured number, not the hoped-for one.** If a
   pattern in the skill has a performance claim, it carries what was
   measured, including when that is "near zero in a busy scene". An

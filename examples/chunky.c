@@ -8,6 +8,10 @@
  *    block (with a caller-owned mask plane), restored between
  *    frames with one memcpy from a pristine copy - the pattern an
  *    engine with its own framebuffers uses
+ *  - STDL_BlitSurfaceEx: the third ball is baked into planar words
+ *    once at startup and then composed every frame, the pattern for
+ *    a frame you redraw often - STDL_BLIT_UNDER gives it the same
+ *    "pass behind the pillars" behaviour the chunky blits get
  *  - STDL_BlitIndexed8: all the art here is byte-per-pixel (chunky)
  *    data generated at startup and drawn at frame rate through a
  *    16-entry colour map; the pillars are drawn once with
@@ -40,6 +44,18 @@ static uint8_t pf_mask[PF_MASKBYTES];
 static uint8_t bg_pixels[PF_BYTES];
 static uint8_t bg_mask[PF_MASKBYTES];
 
+/*
+ * The baked ball: 24 pixels spans two 16-pixel groups, so a row is
+ * 2*4 plane words plus 2 mask words. One group of slack sits at each
+ * end because the unaligned blit path reads one group either side of
+ * a row (see STDL_CreateSurfaceFrom).
+ */
+#define BALL_G 2
+#define BALL_H 24
+#define BALL_GUARD 4
+static uint16_t baked[BALL_GUARD + BALL_G * 4 * BALL_H + BALL_GUARD];
+static uint16_t baked_mask[BALL_GUARD + BALL_G * BALL_H + BALL_GUARD];
+
 /* chunky art, generated at startup */
 static uint8_t ball[24 * 24];
 static uint8_t arrow[32 * 16];      /* stored column-major: 16 cols */
@@ -47,6 +63,10 @@ static uint8_t pillar[24 * 160];
 
 static const uint8_t map_id[16] =
     { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+/* the baked ball wears greys and yellow so it is obvious which
+ * sprite came from the pre-baked path */
+static const uint8_t map_baked[16] =
+    { 0, 1, 2, 3, 12, 13, 15, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
 static const uint8_t map_warm[16] =
     { 0, 9, 10, 11, 9, 10, 11, 9, 10, 11, 9, 10, 11, 9, 10, 11 };
 
@@ -110,9 +130,10 @@ static void music_tick(void *ud)
 
 int main(void)
 {
-    STDL_Surface *pf, *pf_bare, *screen;
+    STDL_Surface *pf, *pf_bare, *screen, *ballspr;
     STDL_Rect r;
     int bx = 40, by = 30, bdx = 2, bdy = 2;
+    int cx = 96, cy = 20, cdx = 3, cdy = 2;
     int ax = 240, ay = 150, adx = -2;
     int music, i;
     uint32_t fps_t0;
@@ -179,6 +200,25 @@ int main(void)
         STDL_SetColours(screen, cols, 0, 16);
     }
 
+    /*
+     * Bake the ball once. The mask starts all ones (every pixel
+     * transparent) and STDL_BlitIndexed8's default maintenance
+     * clears a bit under each pixel it draws, which leaves exactly
+     * the source convention: bit set = destination preserved.
+     * Baking costs about what one chunky draw costs, so it only
+     * pays for frames drawn more than once - which is this one.
+     */
+    ballspr = STDL_CreateSurfaceFrom(baked + BALL_GUARD, BALL_G * 16,
+                                     BALL_H, BALL_G * 8,
+                                     (uint8_t *)(baked_mask + BALL_GUARD),
+                                     BALL_G * 2);
+    if (ballspr == NULL) {
+        fprintf(stderr, "bake: %s\n", STDL_GetError());
+        return 1;
+    }
+    memset(baked_mask, 0xFF, sizeof(baked_mask));
+    STDL_BlitIndexed8(ballspr, ball, 24, 0, 0, 24, 24, map_baked, 0);
+
     /* STE only; a plain ST just stays silent */
     music = (STDL_OpenVoices(12517) == 0);
     if (music) {
@@ -219,6 +259,35 @@ int main(void)
         STDL_BlitIndexed8(pf, ball + 23, 24, PF_W - 24 - bx, by,
                           24, 24, map_warm,
                           STDL_I8_UNDER | STDL_I8_XFLIP);
+        /*
+         * The baked ball: no per-pixel work left, just plane words
+         * moved into place. STDL_BLIT_UNDER reads the playfield mask
+         * as foreground, so it passes behind the pillars exactly as
+         * the chunky blits above do.
+         */
+        cx += cdx;
+        cy += cdy;
+        if (cx < 0 || cx > PF_W - 24) {
+            cdx = -cdx;
+            cx += cdx;
+        }
+        if (cy < 0 || cy > PF_H - BALL_H) {
+            cdy = -cdy;
+            cy += cdy;
+        }
+        r.x = (int16_t)cx;
+        r.y = (int16_t)cy;
+        r.w = 24;
+        r.h = BALL_H;
+        {
+            STDL_Rect sr;
+            sr.x = 0;
+            sr.y = 0;
+            sr.w = 24;
+            sr.h = BALL_H;
+            STDL_BlitSurfaceEx(ballspr, &sr, pf, &r, STDL_BLIT_UNDER);
+        }
+
         /* the arrow is stored column-major */
         STDL_BlitIndexed8(pf, adx < 0 ? arrow : arrow + 31 * 16, 16,
                           ax, ay, 32, 16, map_id,
@@ -259,6 +328,7 @@ int main(void)
     }
     STDL_FreeSurface(pf);       /* headers only: the memory is ours */
     STDL_FreeSurface(pf_bare);
+    STDL_FreeSurface(ballspr);
     STDL_Quit();
     return 0;
 }

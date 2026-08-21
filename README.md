@@ -4,12 +4,11 @@
 
 # STDL - Atari ST DirectMedia Layer
 
-An easier way to port SDL 1.x games to the Atari ST, by [Neil Rackett](https://neilrackett.com/atarist).
+An easier way to port SDL 1.2 games to the Atari ST, by [Neil Rackett](https://neilrackett.com/atarist).
 
 ## Introduction
 
-STDL is a planar-native subset of SDL 1.2 that makes SDL 1.x game ports to the
-Atari ST / STE / Mega STE mostly mechanical.
+STDL is a planar-native library for porting SDL 1.2 games to the Atari ST.
 
 To avoid all of the performance issues associated with SDL on Atari ST, there
 is no chunky backbuffer and no c2p anywhere in the pipeline: ST interleaved

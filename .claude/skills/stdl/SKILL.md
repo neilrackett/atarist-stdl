@@ -11,6 +11,14 @@ converted to ST interleaved planar offline, and spans/rects/blits
 are the primary verbs. The screen is always 320x200, 4 planes,
 16 colours.
 
+**Targeting a TT or Falcon rather than an ST?** Use Atari SDL 1.2 instead
+(runs on plain TOS, no MiNT): those machines are chunky at 256 colours,
+and TT line-doubles 320x240 so one binary covers both. STDL exists for
+the ST, where there is no chunky mode at all: SDL degrades to
+greyscale derived from luminance and c2ps every frame, which is
+unusably slow past the basics. A 68030 also has hardware 32-bit multiply
+and divide, so most of the cost notes below do not apply there.
+
 **Changing STDL itself?** A port often wants a primitive the
 library does not have yet, and adding it there beats hand-rolling
 one in the game. Read `AGENTS.md` in the STDL repo first: it

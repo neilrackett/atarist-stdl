@@ -10,17 +10,28 @@ An easier way to port SDL 1.2 games to the Atari ST, by [Neil Rackett](https://n
 
 STDL is a planar-native library for porting SDL 1.2 games to the Atari ST.
 
-To avoid all of the performance issues associated with SDL on Atari ST, there
-is no chunky backbuffer and no c2p anywhere in the pipeline: ST interleaved
-planar is the native format, assets are converted offline, and spans, rects and
-blits are the primary verbs.
+### Why not just use SDL?
 
-For engines that decode byte-per-pixel sprite frames at runtime, `STDL_BlitIndexed8` draws chunky
-frames straight into the planes through a colour map, (one pass, no
-backbuffer) `STDL_CreateSurfaceFrom` wraps engine-owned framebuffers as
-surfaces, `STDL_BlitSurfaceEx` composes planar frames against a
-foreground/priority plane, and `STDL_Voice` hardware-mixes four sample
-voices from the VBL for module-style music. See `examples/chunky.c`.
+SDL 1.2 is great for TT and Falcon, which both support chunky at 256 colours,
+but on a stock ST there is no chunky mode, SDL falls back to greyscale and
+the c2p on every frame mean it's painfully slow past the basics.
+
+That gap is what STDL is for: 16 colours, four bitplanes, and no conversion
+step in the frame loop.
+
+### What STDL does differently
+
+There is no chunky backbuffer and no c2p anywhere in the pipeline: ST
+interleaved planar is the native format, assets are converted offline, and
+spans, rects and blits are the primary verbs.
+
+For engines that decode byte-per-pixel sprite frames at runtime,
+`STDL_BlitIndexed8` draws chunky frames straight into the planes through a
+colour map, (one pass, no backbuffer) `STDL_CreateSurfaceFrom` wraps
+engine-owned framebuffers as surfaces, `STDL_BlitSurfaceEx` composes planar
+frames against a foreground/priority plane, and `STDL_Voice` hardware-mixes
+four sample voices from the VBL for module-style music.
+See `examples/chunky.c`.
 
 Anything that cannot be done cheaply in planar has been removed rather than
 emulated; see [docs/limits.md](docs/limits.md).

@@ -168,7 +168,8 @@ STDL_PLANE_INLINE void blit_rows_shift(const uint8_t *srow,
             if (masked) {
                 uint16_t am = bm;
                 bm = *mp++;
-                vis &= (uint16_t)~((uint16_t)((am << r) | (bm >> rr)));
+                vis &= (uint16_t)~(uint16_t)
+                    ((((uint32_t)am << 16) | bm) >> rr);
             }
             if (dm != NULL && (flags & STDL_BLIT_UNDER) != 0) {
                 vis &= (uint16_t)~dm[g];
@@ -177,8 +178,8 @@ STDL_PLANE_INLINE void blit_rows_shift(const uint8_t *srow,
                 uint16_t keep = (uint16_t)~vis;
                 const uint16_t *s2 = sp + 4;
                 for (p = 0; p < np; p++) {
-                    uint16_t v =
-                        (uint16_t)((sp[p] << r) | (s2[p] >> rr));
+                    uint16_t v = (uint16_t)
+                        ((((uint32_t)sp[p] << 16) | s2[p]) >> rr);
                     dg[p] = (uint16_t)((dg[p] & keep) | (v & vis));
                 }
                 if (dm != NULL) {

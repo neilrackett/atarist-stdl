@@ -177,6 +177,14 @@ warnings** with the Makefile's `-Wall -Wextra`.
 - 32-bit multiply/divide are library calls; keep them out of inner
   loops (use error-accumulator resampling, strided pointers, `&15`
   and `>>4` instead of `%`/`/`).
+- Variable shifts cost 8+2n cycles each, so two of them per word is
+  a fixed tax whatever the shift amount. Building the value from a
+  32-bit window needs one: `(((uint32_t)hi << 16) | lo) >> n` rather
+  than `(hi << r) | (lo >> n)`, because the `<< 16` half compiles to
+  a free `swap`. Worth 1ms/frame in the unaligned blit path.
+- Do not hand-unroll a four-iteration plane loop hoping to save the
+  loop overhead: four live plane words spill, and it measured slower
+  than the rolled version.
 - Carrying loop values in **arrays** spills to the stack and is
   slower than refetching from RAM; use scalars or walking pointers
   (measured: the blit shift chain regressed 18->13fps with carried

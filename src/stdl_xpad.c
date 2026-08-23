@@ -157,23 +157,44 @@ uint8_t stdl_xpad_hat(void)
     return hat;
 }
 
-int16_t stdl_xpad_axis_merged(int axis, uint8_t state, uint8_t neg,
-                              uint8_t pos)
+int16_t stdl_xpad_axis_merged(int axis, uint8_t ikbd)
 {
-    if (stdl_xpad_present()) {
-        int16_t v = stdl_xpad_axis(axis);
+    /* IKBD bits per axis: 0 is left/right, 1 is up/down. */
+    static const uint8_t bits[2][2] = { {0x04, 0x08}, {0x01, 0x02} };
+    int16_t stick = 0;
+    int16_t pad = 0;
+    long a, b;
 
-        if (v != 0) {
-            return v;
-        }
+    if (axis < 0 || axis > 1) {
+        return 0;
     }
-    if (state & neg) {
-        return -32768;
+
+    if (ikbd & bits[axis][0]) {
+        stick = -32768;
+    } else if (ikbd & bits[axis][1]) {
+        stick = 32767;
     }
-    if (state & pos) {
-        return 32767;
+
+    if (stdl_xpad_present()) {
+        pad = stdl_xpad_axis(axis);
     }
-    return 0;
+
+    /*
+     * Whichever is pushed further wins, which is what makes this a
+     * merge rather than a priority: a stick on the port and a pad both
+     * work, and neither can mask the other by sitting still. Taking the
+     * pad whenever it was off centre - the obvious rule, and what this
+     * used to do - meant a pad resting off centre, or one with a worn
+     * stick that never quite reads zero, silently swallowed the
+     * joystick entirely.
+     *
+     * Compared as magnitudes in long arithmetic, because -32768 has no
+     * positive counterpart in an int16_t.
+     */
+    a = stick < 0 ? -(long)stick : (long)stick;
+    b = pad < 0 ? -(long)pad : (long)pad;
+
+    return (b > a) ? pad : stick;
 }
 
 static void push_axis(uint8_t axis, int16_t value)

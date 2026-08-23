@@ -45,11 +45,17 @@ int stdl_xpad_button(int button);
 uint8_t stdl_xpad_hat(void);
 
 /*
- * The value to report for axis 0 or 1: the pad's analogue reading when
- * it is off centre, otherwise full deflection from the digital bits,
- * otherwise nothing. neg and pos are the IKBD bits for that axis.
+ * The value to report for axis 0 or 1, given the joystick port's own
+ * byte. Whichever source is pushed further wins.
+ *
+ * `ikbd` must be the port byte alone, never STDL_GetJoyState(): that
+ * one already has the pad folded into it, so passing it would have the
+ * pad competing with itself, and its digital rendering would beat its
+ * own analogue reading every time.
  */
-int16_t stdl_xpad_axis_merged(int axis, uint8_t state, uint8_t neg,
-                              uint8_t pos);
+int16_t stdl_xpad_axis_merged(int axis, uint8_t ikbd);
+
+/* The joystick port's byte without the pad merged in. event.c owns it. */
+uint8_t stdl_joy_ikbd(void);
 
 #endif /* STDL_XPAD_H */

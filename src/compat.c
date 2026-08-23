@@ -219,8 +219,6 @@ int SDL_JoystickNumButtons(SDL_Joystick *joystick)
 
 Sint16 SDL_JoystickGetAxis(SDL_Joystick *joystick, int axis)
 {
-    uint8_t js = STDL_GetJoyState();
-
     (void)joystick;
 
     /* Axes 2 to 5 exist only on a pad. */
@@ -229,28 +227,11 @@ Sint16 SDL_JoystickGetAxis(SDL_Joystick *joystick, int axis)
     }
 
     /*
-     * Axes 0 and 1 have two possible sources, and they merge rather
-     * than one winning: analogue if the stick is off centre, otherwise
-     * whatever the digital directions say. That way a real joystick
-     * still reads full deflection, a pad reads its true position, and
-     * a pad resting at centre does not cancel a held stick.
+     * Axes 0 and 1 have two possible sources. The same helper the event
+     * path uses decides between them, so a poll and an event can never
+     * disagree about the same stick.
      */
-    if (stdl_xpad_present()) {
-        Sint16 v = stdl_xpad_axis(axis);
-
-        if (v != 0) {
-            return v;
-        }
-    }
-
-    if (axis == 0) {
-        if (js & 0x04) return -32768;      /* left  */
-        if (js & 0x08) return 32767;       /* right */
-    } else {
-        if (js & 0x01) return -32768;      /* up    */
-        if (js & 0x02) return 32767;       /* down  */
-    }
-    return 0;
+    return stdl_xpad_axis_merged(axis, stdl_joy_ikbd());
 }
 
 Uint8 SDL_JoystickGetButton(SDL_Joystick *joystick, int button)

@@ -12,6 +12,7 @@
 #include <SDL.h>
 #include <stdio.h>
 
+#include "stdl_xpad.h"
 #include "stdl_event.h"
 #include "stdl_keys.h"
 
@@ -87,6 +88,20 @@ int main(void)
                 keys[STDLK_RETURN] ? 1 : 0,
                 keys[STDLK_ESCAPE] ? 1 : 0);
     }
+
+    /*
+     * The axis merge, driven with fabricated joystick bytes. Hatari's
+     * emulated joystick cannot be moved from this harness, so the case
+     * that matters - both sources active at once - is unreachable any
+     * other way. The stub holds lx +25800 and ly -12900.
+     */
+    fprintf(stderr, "merge x idle=%d right=%d left=%d\r\n",
+            (int)stdl_xpad_axis_merged(0, 0x00),
+            (int)stdl_xpad_axis_merged(0, 0x08),
+            (int)stdl_xpad_axis_merged(0, 0x04));
+    fprintf(stderr, "merge y idle=%d down=%d\r\n",
+            (int)stdl_xpad_axis_merged(1, 0x00),
+            (int)stdl_xpad_axis_merged(1, 0x02));
 
     fprintf(stderr, "PROBE-DONE\r\n");
 

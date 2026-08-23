@@ -609,6 +609,11 @@ void STDL_JoyKeyEmulation(int enable)
     }
 }
 
+uint8_t stdl_joy_ikbd(void)
+{
+    return joy_ikbd;
+}
+
 int STDL_HavePad(void)
 {
     return stdl_xpad_present();
@@ -709,7 +714,7 @@ static void handle_joy(uint8_t state)
             /* Analogue when a pad is supplying it, so an event and
              * SDL_JoystickGetAxis() never disagree about the same
              * stick. A digital joystick still reads full deflection. */
-            ev.jaxis.value = stdl_xpad_axis_merged(axis, state, neg, pos);
+            ev.jaxis.value = stdl_xpad_axis_merged(axis, joy_ikbd);
             STDL_PushEvent(&ev);
         }
     }

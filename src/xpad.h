@@ -314,9 +314,9 @@ extern "C"
     void xpad_fold_stick(XPAD_PAD *pad, int8_t x, int8_t y, uint8_t threshold);
 
     /*
-     * Install or remove the XPAD cookie. Returns 1 on success. Installing
-     * enlarges the jar if required, so call from a TSR before it goes
-     * resident. Uses Supexec internally.
+     * Install or remove the XPAD cookie. Returns 1 on success, and 0 if
+     * the jar is full: enlarging it is the caller's job, and has to
+     * happen before a TSR goes resident. Uses Supexec internally.
      */
     int xpad_publish(XPAD *x);
     int xpad_unpublish(void);

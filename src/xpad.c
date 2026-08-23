@@ -2,7 +2,12 @@
 /* SPDX-FileCopyrightText: 2026 Neil Rackett */
 
 /*
- * Xpad - reference implementation of the consumer and provider helpers.
+ * Xpad - the consumer half: finding a published block and reading it.
+ *
+ * All a game needs. A provider links xpad_provider.c as well; the two
+ * are separate objects because there is no section garbage collection
+ * on m68k-atari-mint, so a consumer that linked both would carry the
+ * publishing helpers into every binary without ever calling them.
  *
  * Free of dependencies beyond osbind.h so it drops into a game loop, a
  * TSR or a device driver unchanged.
@@ -25,11 +30,8 @@
 /* ------------------------------------------------------------------ */
 
 /*
- * The slot holding the XPAD cookie, or the terminator when the cookie is
- * absent. Shared with the provider half, which is why it is not static;
- * xpad.h documents the supervisor mode requirement. Returns 0 only when there is no jar at all. Callers tell a hit
- * from a miss by testing slot[0]; reporting a miss as 0 would cost the
- * appending caller the terminator it needs.
+ * Shared with the provider half, which is why it is not static. See
+ * xpad.h for the contract, including the supervisor mode requirement.
  */
 uint32_t *xpad_jar_seek(void)
 {

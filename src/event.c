@@ -466,11 +466,6 @@ static const uint8_t joykey_bits[5] = {
 };
 static uint8_t joykey_scan[5] = { 0x48, 0x50, 0x4B, 0x4D, 0x38 };
 
-void STDL_JoyKeyEmulation(int enable)
-{
-    joykey_enabled = (uint8_t)(enable != 0);
-}
-
 /* synthesise mapped key traffic from joystick changes, going
  * through handle_scancode so key state, repeats and modifiers all
  * behave exactly like real keys */
@@ -504,6 +499,35 @@ static uint8_t sym_to_scan(uint16_t sym)
         }
     }
     return 0;
+}
+
+void STDL_JoyKeyEmulation(int enable)
+{
+    uint8_t want = (uint8_t)(enable != 0);
+
+    if (want == joykey_enabled) {
+        return;
+    }
+    /*
+     * Emulation is driven from changes, so switching it on while a
+     * direction is already held would emulate nothing until the player
+     * let go: turning it on mid-game, or turning it on at all with a
+     * pad resting against a corner, would silently do nothing. Latch
+     * what is held now, and release it again on the way out so a
+     * synthetic key cannot be left stuck down. STDL_JoyKeyMapping
+     * already does exactly this across a remap.
+     */
+    if (want) {
+        joykey_enabled = 1;
+        if (joy_state != 0) {
+            joykey_emulate(joy_state, joy_state, STDL_GetTicks());
+        }
+    } else {
+        if (joy_state != 0) {
+            joykey_emulate(0, joy_state, STDL_GetTicks());
+        }
+        joykey_enabled = 0;
+    }
 }
 
 int STDL_JoyKeyMapping(uint16_t up, uint16_t down, uint16_t left,

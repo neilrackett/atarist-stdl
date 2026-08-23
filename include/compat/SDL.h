@@ -358,6 +358,7 @@ int  SDL_JoystickNumHats(SDL_Joystick *joystick);
 int  SDL_JoystickNumButtons(SDL_Joystick *joystick);
 Sint16 SDL_JoystickGetAxis(SDL_Joystick *joystick, int axis);
 Uint8  SDL_JoystickGetButton(SDL_Joystick *joystick, int button);
+Uint8  SDL_JoystickGetHat(SDL_Joystick *joystick, int hat);
 void SDL_JoystickUpdate(void);
 int  SDL_JoystickEventState(int state);
 

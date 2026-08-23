@@ -211,6 +211,13 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   in `include/stdl/stdl_vbl.h`.
 - Splash: `STDL_ShowDegas("SPLASH.PI1")` (make with `stdlconv pi1`).
 - Keyboard games + joystick: `STDL_JoyKeyEmulation(1)`, rebindable
+- Modern controllers work through the same API, with no port
+  changes: when an XPad provider is present, joystick 0 grows to 6
+  axes (both sticks, both triggers), 13 buttons and a hat, and the
+  axes report real analogue values. Button 0 stays fire and axes 0/1
+  stay the left stick, so a port written for a plain ST joystick
+  keeps working and a port that asks `SDL_JoystickNumButtons()`
+  gets more. Key emulation picks a pad up too.
   with `STDL_JoyKeyMapping(up, down, left, right, fire)` keysyms
   (default arrows + left Alt; `STDL_KMOD_JOYSTICK` tagged; check
   the return value = keys resolved).

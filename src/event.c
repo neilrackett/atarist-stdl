@@ -17,7 +17,9 @@
 
 #include <mint/osbind.h>
 #include <string.h>
+
 #include "stdl_internal.h"
+#include "stdl_xpad.h"
 
 #define ACIA_KBD_CTRL (*(volatile uint8_t *)0xFFFFFC00UL)
 #define ACIA_KBD_DATA (*(volatile uint8_t *)0xFFFFFC02UL)
@@ -130,6 +132,12 @@ typedef struct {
 static long old_ikbdsys;
 static int  events_installed;
 
+/* The joystick has two possible sources and they merge: a stick on the
+ * port, and a controller published through XPad. Kept apart so one
+ * releasing cannot clear a direction the other is holding. */
+static uint8_t  joy_ikbd;           /* from the packet parser        */
+static uint8_t  joy_xpad;           /* from an XPad provider         */
+
 /* TOS keyboard translation tables, captured before takeover */
 static const uint8_t *keytab_unshift;
 static const uint8_t *keytab_shift;
@@ -202,6 +210,12 @@ void stdl_events_install(void)
                                                the $FD reply seeds
                                                joy_state with the true
                                                held state */
+    /* A controller published through the cookie jar, if anything is
+     * offering one. Nothing above reaches it: we have just taken the
+     * IKBD, so TOS will not be dispatching joyvec to anyone. */
+    joy_ikbd = 0;
+    joy_xpad = 0;
+    stdl_xpad_open();
     events_installed = 1;
 }
 
@@ -236,7 +250,7 @@ static uint32_t repeat_next;
 static int16_t  mouse_x = STDL_SCREEN_W / 2;
 static int16_t  mouse_y = STDL_SCREEN_H / 2;
 static uint8_t  mouse_state;        /* STDL button bitmask */
-static uint8_t  joy_state;
+static uint8_t  joy_state;          /* joy_ikbd | joy_xpad          */
 static uint8_t  joy1_fire;          /* 0x80 while the right mouse
                                        button - which the IKBD makes
                                        of joystick 1's fire button
@@ -539,8 +553,10 @@ static void handle_joy(uint8_t state)
             ev.jaxis.type = STDL_JOYAXISMOTION;
             ev.jaxis.which = 0;
             ev.jaxis.axis = (uint8_t)axis;
-            ev.jaxis.value = (state & neg) ? -32768
-                           : (state & pos) ? 32767 : 0;
+            /* Analogue when a pad is supplying it, so an event and
+             * SDL_JoystickGetAxis() never disagree about the same
+             * stick. A digital joystick still reads full deflection. */
+            ev.jaxis.value = stdl_xpad_axis_merged(axis, state, neg, pos);
             STDL_PushEvent(&ev);
         }
     }
@@ -629,6 +645,24 @@ void STDL_PumpEvents(void)
 {
     uint32_t now = STDL_GetTicks();
 
+    /*
+     * An XPad provider has no packets to deliver, so it is polled here
+     * rather than arriving through the ring. The classic five inputs
+     * are merged with the real joystick and pushed through handle_joy,
+     * which means axes 0 and 1, button 0 and the key emulation all
+     * behave exactly as they do for a stick in port 1. Everything a
+     * 1980 joystick cannot express is reported separately below.
+     *
+     * Merged rather than either winning: they are different physical
+     * devices, so a stick in the port and a pad both work, and either
+     * on its own works.
+     */
+    if (stdl_xpad_present()) {
+        joy_xpad = stdl_xpad_poll();
+        handle_joy((uint8_t)(joy_ikbd | joy_xpad));
+        stdl_xpad_events();
+    }
+
     /* drain the interrupt-side ring */
     for (;;) {
         uint16_t item;
@@ -659,13 +693,15 @@ void STDL_PumpEvents(void)
                  * (keeping the mouse event above) so fire works
                  * whether or not a game also uses the mouse. */
                 joy1_fire = (uint8_t)((item & 0x01) ? 0x80 : 0);
-                handle_joy((uint8_t)((joy_state & 0x0F) | joy1_fire));
+                joy_ikbd = (uint8_t)((joy_ikbd & 0x0F) | joy1_fire);
+                handle_joy((uint8_t)(joy_ikbd | joy_xpad));
                 break;
             case TAG_JOY:
                 /* OR rather than overwrite: a direction change in
                  * this packet must not release a fire button that
                  * is being held down over on the mouse side */
-                handle_joy((uint8_t)((item & 0xFF) | joy1_fire));
+                joy_ikbd = (uint8_t)((item & 0xFF) | joy1_fire);
+                handle_joy((uint8_t)(joy_ikbd | joy_xpad));
                 break;
             default:
                 break;

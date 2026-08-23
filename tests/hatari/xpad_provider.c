@@ -2,7 +2,7 @@
 /* SPDX-FileCopyrightText: 2026 Neil Rackett */
 
 /*
- * XPad - the provider half: owning a block and publishing it.
+ * Xpad - the provider half: owning a block and publishing it.
  *
  * Additive to xpad.c, not a replacement for it. A provider links both,
  * and wants to anyway: xpad_find() is how it checks whether something

@@ -169,10 +169,10 @@ warnings** with the Makefile's `-Wall -Wextra`.
   line.
 - **Joystick input has two sources and they merge, never override.**
   A stick on port 1 arrives as IKBD packets; a modern controller
-  arrives as an XPad block found through the cookie jar
+  arrives as an Xpad block found through the cookie jar
   (`src/stdl_xpad.c`). `event.c` keeps `joy_ikbd` and `joy_xpad`
   apart and ORs them, so one releasing cannot clear what the other
-  holds, and either alone works. XPad matters here specifically
+  holds, and either alone works. Xpad matters here specifically
   because STDL replaces `ikbdsys`: TOS never dispatches `joyvec`
   while a game runs, so a provider that injects there cannot reach
   us, and one that publishes a block can.

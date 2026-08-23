@@ -212,7 +212,7 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
 - Splash: `STDL_ShowDegas("SPLASH.PI1")` (make with `stdlconv pi1`).
 - Keyboard games + joystick: `STDL_JoyKeyEmulation(1)`, rebindable
 - Modern controllers work through the same API, with no port
-  changes: when an XPad provider is present, joystick 0 grows to 6
+  changes: when an Xpad provider is present, joystick 0 grows to 6
   axes (both sticks, both triggers), 13 buttons and a hat, and the
   axes report real analogue values. Button 0 stays fire and axes 0/1
   stay the left stick, so a port written for a plain ST joystick

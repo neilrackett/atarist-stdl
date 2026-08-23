@@ -3,9 +3,9 @@
  * Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: LGPL-2.1-or-later
  *
- * XPad consumer.
+ * Xpad consumer.
  *
- * XPad (github.com/neilrackett/atarist-xpad) is a shared state block
+ * Xpad (github.com/neilrackett/atarist-xpad) is a shared state block
  * published through the cookie jar by whatever owns the controller: a
  * cartridge-port device, a MIDI adapter, a driver synthesising one from
  * the IKBD. Reading it needs no vector and no hook, which matters here
@@ -103,7 +103,7 @@ uint8_t stdl_xpad_poll(void)
 }
 
 /*
- * XPad axes are -127..127; SDL wants -32768..32767. 258 is the scale
+ * Xpad axes are -127..127; SDL wants -32768..32767. 258 is the scale
  * that puts full deflection at 32766, and it is a shift and two adds
  * rather than a __mulsi3 libcall, which a 68000 has no instruction for.
  */

@@ -52,7 +52,7 @@ int main(void)
     /*
      * Key emulation is driven from the merged joystick byte, so a pad
      * should synthesise keys exactly as a stick does. That is the whole
-     * point of merging there rather than bolting XPad on beside it:
+     * point of merging there rather than bolting Xpad on beside it:
      * keyboard-driven ports get a controller without knowing.
      */
     {

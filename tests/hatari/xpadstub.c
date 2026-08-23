@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: LGPL-2.1-or-later
  *
- * Test fixture: publishes a static XPad block and stays resident, so
+ * Test fixture: publishes a static Xpad block and stays resident, so
  * the consumer path can be exercised under Hatari.
  *
  * A real provider is not usable here. The IKBD example drivers in
@@ -57,7 +57,7 @@ int main(void)
         return 1;
     }
 
-    printf("xpadstub: XPad provider installed\r\n");
+    printf("xpadstub: Xpad provider installed\r\n");
 
     Ptermres(_base->p_tlen + _base->p_dlen + _base->p_blen + 256, 0);
 

@@ -3,11 +3,11 @@
  * Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: LGPL-2.1-or-later
  *
- * XPad consumer: a modern controller, when a provider is present.
+ * Xpad consumer: a modern controller, when a provider is present.
  *
  * Internal to the library. Games reach this through the SDL joystick
  * API in compat.c, which is the point: a port gains sticks, triggers
- * and a full button set without knowing XPad exists.
+ * and a full button set without knowing Xpad exists.
  */
 
 #ifndef STDL_XPAD_H

@@ -133,10 +133,10 @@ static long old_ikbdsys;
 static int  events_installed;
 
 /* The joystick has two possible sources and they merge: a stick on the
- * port, and a controller published through XPad. Kept apart so one
+ * port, and a controller published through Xpad. Kept apart so one
  * releasing cannot clear a direction the other is holding. */
 static uint8_t  joy_ikbd;           /* from the packet parser        */
-static uint8_t  joy_xpad;           /* from an XPad provider         */
+static uint8_t  joy_xpad;           /* from an Xpad provider         */
 
 /* TOS keyboard translation tables, captured before takeover */
 static const uint8_t *keytab_unshift;
@@ -799,7 +799,7 @@ void STDL_PumpEvents(void)
     uint32_t now = STDL_GetTicks();
 
     /*
-     * An XPad provider has no packets to deliver, so it is polled here
+     * An Xpad provider has no packets to deliver, so it is polled here
      * rather than arriving through the ring. The classic five inputs
      * are merged with the real joystick and pushed through handle_joy,
      * which means axes 0 and 1, button 0 and the key emulation all

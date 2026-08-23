@@ -192,6 +192,24 @@ void STDL_JoyKeyEmulation(int enable);
 #define STDL_JOYKEY_COUNT   17
 
 /*
+ * Whether a controller richer than an ST joystick is present, i.e.
+ * whether the inputs above beyond STDL_JOYKEY_FIRE can ever be held.
+ */
+int STDL_HavePad(void);
+
+/*
+ * Whether an input is held right now. Takes the same STDL_JOYKEY_*
+ * identifiers, which do double duty: bind them to keys for a game that
+ * reads the keyboard, or poll them for a game that has its own notion
+ * of buttons and wants them directly.
+ *
+ * The four directions and fire come from the joystick or the pad,
+ * whichever is driving. The rest exist only on a pad and read 0
+ * without one, so a game can poll them unconditionally.
+ */
+int STDL_JoyInputHeld(int input);
+
+/*
  * Bind one input to a key, or to 0 to unbind it. Returns non-zero when
  * the key resolved to something the ST keyboard actually has.
  *

@@ -609,6 +609,27 @@ void STDL_JoyKeyEmulation(int enable)
     }
 }
 
+int STDL_HavePad(void)
+{
+    return stdl_xpad_present();
+}
+
+int STDL_JoyInputHeld(int input)
+{
+    if (input < 0 || input >= STDL_JOYKEY_COUNT) {
+        return 0;
+    }
+    if (input < 5) {
+        /* joy_state is already the merged byte, so a stick on the port
+         * and a pad both reach these five. */
+        return (joy_state & joykey_bits[input]) != 0;
+    }
+    if (!stdl_xpad_present()) {
+        return 0;
+    }
+    return stdl_xpad_button(input - STDL_JOYKEY_FIRE);
+}
+
 int STDL_JoyKeyBind(int input, uint16_t sym)
 {
     uint32_t now = STDL_GetTicks();

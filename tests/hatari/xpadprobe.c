@@ -75,6 +75,14 @@ int main(void)
                 keys[STDLK_RIGHT] ? 1 : 0,
                 keys[STDLK_SPACE] ? 1 : 0,
                 keys[STDLK_UP] ? 1 : 0);
+        /* The native poll path, which a game with its own notion of
+         * buttons uses instead of binding keys. */
+        fprintf(stderr, "native pad=%d south=%d tr=%d start=%d right=%d\r\n",
+                STDL_HavePad() ? 1 : 0,
+                STDL_JoyInputHeld(STDL_JOYKEY_SOUTH),
+                STDL_JoyInputHeld(STDL_JOYKEY_TR),
+                STDL_JoyInputHeld(STDL_JOYKEY_START),
+                STDL_JoyInputHeld(STDL_JOYKEY_RIGHT));
         fprintf(stderr, "joykey return=%d escape=%d\r\n",
                 keys[STDLK_RETURN] ? 1 : 0,
                 keys[STDLK_ESCAPE] ? 1 : 0);

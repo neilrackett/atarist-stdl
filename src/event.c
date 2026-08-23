@@ -137,6 +137,7 @@ static int  events_installed;
  * releasing cannot clear a direction the other is holding. */
 static uint8_t  joy_ikbd;           /* from the packet parser        */
 static uint8_t  joy_xpad;           /* from an Xpad provider         */
+static int16_t  joy_axis[2];        /* last value reported per axis  */
 
 /* TOS keyboard translation tables, captured before takeover */
 static const uint8_t *keytab_unshift;
@@ -691,32 +692,37 @@ int STDL_JoyKeyMapping(uint16_t up, uint16_t down, uint16_t left,
 
 static void handle_joy(uint8_t state)
 {
-    static const uint8_t axes[2][2] = {
-        /* axis 0 (x): left bit 2, right bit 3 */
-        { 0x04, 0x08 },
-        /* axis 1 (y): up bit 0, down bit 1 */
-        { 0x01, 0x02 },
-    };
     uint8_t changed = (uint8_t)(state ^ joy_state);
     STDL_Event ev;
     int axis;
 
+    /*
+     * Axes report on a change of value, not of direction bits. The two
+     * are not the same thing once a pad is involved: a stick moving
+     * inside the provider's deadzone changes no bit, and a joystick
+     * pushed the way a pad is already held changes no bit either, yet
+     * both change what SDL_JoystickGetAxis() returns. Diffing the value
+     * is the only version where an event and a poll cannot disagree.
+     */
+    for (axis = 0; axis < 2; axis++) {
+        int16_t value = stdl_xpad_axis_merged(axis, joy_ikbd);
+
+        if (value == joy_axis[axis]) {
+            continue;
+        }
+        joy_axis[axis] = value;
+
+        memset(&ev, 0, sizeof(ev));
+        ev.jaxis.type = STDL_JOYAXISMOTION;
+        ev.jaxis.which = 0;
+        ev.jaxis.axis = (uint8_t)axis;
+        ev.jaxis.value = value;
+        STDL_PushEvent(&ev);
+    }
+
+    /* Buttons and key emulation are digital, so a bit has to move. */
     if (changed == 0) {
         return;
-    }
-    for (axis = 0; axis < 2; axis++) {
-        uint8_t neg = axes[axis][0], pos = axes[axis][1];
-        if (changed & (neg | pos)) {
-            memset(&ev, 0, sizeof(ev));
-            ev.jaxis.type = STDL_JOYAXISMOTION;
-            ev.jaxis.which = 0;
-            ev.jaxis.axis = (uint8_t)axis;
-            /* Analogue when a pad is supplying it, so an event and
-             * SDL_JoystickGetAxis() never disagree about the same
-             * stick. A digital joystick still reads full deflection. */
-            ev.jaxis.value = stdl_xpad_axis_merged(axis, joy_ikbd);
-            STDL_PushEvent(&ev);
-        }
     }
     if (changed & 0x80) {
         memset(&ev, 0, sizeof(ev));

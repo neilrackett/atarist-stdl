@@ -211,8 +211,10 @@ static void push_axis(uint8_t axis, int16_t value)
 
 /*
  * Events for everything the classic five cannot carry. Axes 0 and 1 and
- * button 0 are left to event.c, which drives them from the merged
- * joystick byte: emitting them here as well would double every fire.
+ * button 0 belong to event.c, which now diffs the reported axis value
+ * rather than the direction bits, so it catches stick movement too
+ * small to move a d-pad bit. Emitting them here as well would double
+ * every one.
  */
 void stdl_xpad_events(void)
 {
@@ -235,24 +237,6 @@ void stdl_xpad_events(void)
     if (pad.ry != prev.ry) push_axis(3, axis_scale(pad.ry));
     if (pad.lt != prev.lt) push_axis(4, trigger_scale(pad.lt));
     if (pad.rt != prev.rt) push_axis(5, trigger_scale(pad.rt));
-
-    /*
-     * The left stick reaches event.c as d-pad bits, so it only reports
-     * axes 0 and 1 when a direction crosses the provider's deadzone.
-     * Movement inside the deadzone, and movement between two points on
-     * the same side of it, still has to be reported: hence these two,
-     * which fire on any change the digital byte cannot express.
-     */
-    if (pad.lx != prev.lx &&
-        (pad.buttons & (XPAD_LEFT | XPAD_RIGHT)) ==
-            (prev.buttons & (XPAD_LEFT | XPAD_RIGHT))) {
-        push_axis(0, axis_scale(pad.lx));
-    }
-    if (pad.ly != prev.ly &&
-        (pad.buttons & (XPAD_UP | XPAD_DOWN)) ==
-            (prev.buttons & (XPAD_UP | XPAD_DOWN))) {
-        push_axis(1, axis_scale(pad.ly));
-    }
 
     /* Button 0 is the fire button, and event.c already reports it from
      * the merged byte, so start at 1. */

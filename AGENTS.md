@@ -167,6 +167,22 @@ warnings** with the Makefile's `-Wall -Wextra`.
   no GEMDOS calls, no heap, no leaving supervisor mode. Keep new
   shutdown work in `release_hardware()` on the right side of that
   line.
+- **Joystick input has two sources and they merge, never override.**
+  A stick on port 1 arrives as IKBD packets; a modern controller
+  arrives as an XPad block found through the cookie jar
+  (`src/stdl_xpad.c`). `event.c` keeps `joy_ikbd` and `joy_xpad`
+  apart and ORs them, so one releasing cannot clear what the other
+  holds, and either alone works. XPad matters here specifically
+  because STDL replaces `ikbdsys`: TOS never dispatches `joyvec`
+  while a game runs, so a provider that injects there cannot reach
+  us, and one that publishes a block can.
+- `src/xpad.c` is vendored from atarist-xpad unmodified under
+  BSD-2-Clause. Do not edit it; update it from upstream. It is the
+  consumer half only: upstream keeps the provider helpers in a
+  separate `xpad_provider.c` precisely so a library like this does not
+  carry them, there being no section garbage collection on
+  m68k-atari-mint to drop them for us. Only the test fixture in
+  `tests/hatari/` needs that file, because it publishes a block.
 - Cooperative model: no interrupts except the VBL sound tick
   (ym.c), the public `STDL_AddVBL` callbacks (vbl.c) and the IKBD
   handler (event.c). Services (audio refill, compat timers, cursor)

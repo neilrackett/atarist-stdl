@@ -7,6 +7,7 @@
  */
 
 #include "stdl_internal.h"
+#include "stdl_xpad.h"
 #include <SDL.h>
 
 /* ---------------------------------------------------------------- */
@@ -188,7 +189,12 @@ int SDL_JoystickOpened(int index)
 int SDL_JoystickNumAxes(SDL_Joystick *joystick)
 {
     (void)joystick;
-    return 2;
+    /* Two for a plain stick, six when a pad is there: both sticks and
+     * the two triggers. Reported only when a provider is present, so a
+     * port sees the geometry it would have seen before unless the
+     * hardware is actually richer, which is how desktop SDL behaves
+     * when a pad is plugged in. */
+    return stdl_xpad_present() ? STDL_XPAD_AXES : 2;
 }
 
 int SDL_JoystickNumBalls(SDL_Joystick *joystick)
@@ -200,13 +206,15 @@ int SDL_JoystickNumBalls(SDL_Joystick *joystick)
 int SDL_JoystickNumHats(SDL_Joystick *joystick)
 {
     (void)joystick;
-    return 0;
+    /* A d-pad is a hat. An ST joystick is not: its directions are the
+     * axes, and reporting a hat as well would double every press. */
+    return stdl_xpad_present() ? 1 : 0;
 }
 
 int SDL_JoystickNumButtons(SDL_Joystick *joystick)
 {
     (void)joystick;
-    return 1;
+    return stdl_xpad_present() ? STDL_XPAD_BUTTONS : 1;
 }
 
 Sint16 SDL_JoystickGetAxis(SDL_Joystick *joystick, int axis)
@@ -214,10 +222,31 @@ Sint16 SDL_JoystickGetAxis(SDL_Joystick *joystick, int axis)
     uint8_t js = STDL_GetJoyState();
 
     (void)joystick;
+
+    /* Axes 2 to 5 exist only on a pad. */
+    if (axis >= 2) {
+        return stdl_xpad_present() ? stdl_xpad_axis(axis) : 0;
+    }
+
+    /*
+     * Axes 0 and 1 have two possible sources, and they merge rather
+     * than one winning: analogue if the stick is off centre, otherwise
+     * whatever the digital directions say. That way a real joystick
+     * still reads full deflection, a pad reads its true position, and
+     * a pad resting at centre does not cancel a held stick.
+     */
+    if (stdl_xpad_present()) {
+        Sint16 v = stdl_xpad_axis(axis);
+
+        if (v != 0) {
+            return v;
+        }
+    }
+
     if (axis == 0) {
         if (js & 0x04) return -32768;      /* left  */
         if (js & 0x08) return 32767;       /* right */
-    } else if (axis == 1) {
+    } else {
         if (js & 0x01) return -32768;      /* up    */
         if (js & 0x02) return 32767;       /* down  */
     }
@@ -227,10 +256,25 @@ Sint16 SDL_JoystickGetAxis(SDL_Joystick *joystick, int axis)
 Uint8 SDL_JoystickGetButton(SDL_Joystick *joystick, int button)
 {
     (void)joystick;
+
+    /* Button 0 is fire from either source: STDL_GetJoyState() is
+     * already the merged byte, so a stick and a pad both reach it. */
     if (button == 0 && (STDL_GetJoyState() & 0x80)) {
         return SDL_PRESSED;
     }
+    if (button > 0 && stdl_xpad_present() && stdl_xpad_button(button)) {
+        return SDL_PRESSED;
+    }
     return SDL_RELEASED;
+}
+
+Uint8 SDL_JoystickGetHat(SDL_Joystick *joystick, int hat)
+{
+    (void)joystick;
+    if (hat != 0 || !stdl_xpad_present()) {
+        return 0;
+    }
+    return stdl_xpad_hat();
 }
 
 void SDL_JoystickUpdate(void)

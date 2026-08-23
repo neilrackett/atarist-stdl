@@ -22,7 +22,8 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/audio.c src/cursor.c src/music.c src/mixer.c \
           src/sfx.c src/degas.c src/ym.c src/blitter.c \
           src/planes.c src/vbl.c src/indexed.c src/drawchar.c \
-          src/surfacefrom.c src/blit8.c src/voice.c
+          src/surfacefrom.c src/blit8.c src/voice.c \
+          src/xpad.c src/stdl_xpad.c
 LIBOBJS = $(LIBSRCS:.c=.o)
 
 # Examples: ported SDL 1.2 test programs (public domain).

@@ -464,7 +464,14 @@ static uint8_t joykey_enabled;
 static const uint8_t joykey_bits[5] = {
     0x01, 0x02, 0x04, 0x08, 0x80
 };
-static uint8_t joykey_scan[5] = { 0x48, 0x50, 0x4B, 0x4D, 0x38 };
+static uint8_t joykey_scan[STDL_JOYKEY_COUNT] = {
+    0x48, 0x50, 0x4B, 0x4D, 0x38
+};
+
+/* Which pad-only buttons were held last time, so their key traffic can
+ * be diffed the way the joystick byte is. Bit n is button n, and bit 0
+ * is unused: button 0 is fire, and arrives through joykey_bits. */
+static uint16_t joykey_held;
 
 /* synthesise mapped key traffic from joystick changes, going
  * through handle_scancode so key state, repeats and modifiers all
@@ -481,6 +488,74 @@ static void joykey_emulate(uint8_t state, uint8_t changed,
                 STDL_KMOD_JOYSTICK);
         }
     }
+}
+
+/*
+ * The same, for the buttons an ST joystick does not have. They come
+ * from a pad rather than the packet parser, so they are polled and
+ * diffed here rather than arriving as a changed mask.
+ *
+ * Button 0 is skipped: it is fire, and joykey_emulate already reports
+ * it from the merged joystick byte, where a real stick reaches it too.
+ */
+static void joykey_emulate_buttons(uint32_t now)
+{
+    uint16_t now_held = 0;
+    uint16_t changed;
+    int i;
+
+    if (stdl_xpad_present()) {
+        for (i = 1; i < STDL_XPAD_BUTTONS; i++) {
+            if (stdl_xpad_button(i)) {
+                now_held = (uint16_t)(now_held | (1u << i));
+            }
+        }
+    }
+
+    changed = (uint16_t)(now_held ^ joykey_held);
+    if (changed == 0) {
+        return;
+    }
+
+    for (i = 1; i < STDL_XPAD_BUTTONS; i++) {
+        int input = STDL_JOYKEY_FIRE + i;
+
+        if (!(changed & (1u << i)) || joykey_scan[input] == 0) {
+            continue;
+        }
+        handle_scancode((uint8_t)(joykey_scan[input]
+            | ((now_held & (1u << i)) ? 0 : 0x80)), now,
+            STDL_KMOD_JOYSTICK);
+    }
+
+    joykey_held = now_held;
+}
+
+/* Send break codes for every pad button we are currently holding a key
+ * down for, so switching emulation off cannot strand one. */
+static void joykey_release_buttons(uint32_t now)
+{
+    int i;
+
+    for (i = 1; i < STDL_XPAD_BUTTONS; i++) {
+        int input = STDL_JOYKEY_FIRE + i;
+
+        if ((joykey_held & (1u << i)) && joykey_scan[input] != 0) {
+            handle_scancode((uint8_t)(joykey_scan[input] | 0x80), now,
+                            STDL_KMOD_JOYSTICK);
+        }
+    }
+    joykey_held = 0;
+}
+
+/* Whether the input behind a binding is being held right now, wherever
+ * it comes from. */
+static int joykey_input_held(int input)
+{
+    if (input < 5) {
+        return (joy_state & joykey_bits[input]) != 0;
+    }
+    return (joykey_held & (1u << (input - STDL_JOYKEY_FIRE))) != 0;
 }
 
 /* find the ST scancode producing a keysym; 0 if the key doesn't
@@ -522,12 +597,45 @@ void STDL_JoyKeyEmulation(int enable)
         if (joy_state != 0) {
             joykey_emulate(joy_state, joy_state, STDL_GetTicks());
         }
+        /* joykey_held is already zero here, so this presses whatever
+         * the pad is holding rather than diffing against stale state. */
+        joykey_emulate_buttons(STDL_GetTicks());
     } else {
         if (joy_state != 0) {
             joykey_emulate(0, joy_state, STDL_GetTicks());
         }
+        joykey_release_buttons(STDL_GetTicks());
         joykey_enabled = 0;
     }
+}
+
+int STDL_JoyKeyBind(int input, uint16_t sym)
+{
+    uint32_t now = STDL_GetTicks();
+    uint8_t scan;
+    int held;
+
+    if (input < 0 || input >= STDL_JOYKEY_COUNT) {
+        return 0;
+    }
+
+    scan = sym_to_scan(sym);
+    held = joykey_enabled && joykey_input_held(input);
+
+    /* Move a held input across cleanly: up on the old key, down on the
+     * new one, so a rebind mid-press cannot strand either. */
+    if (held && joykey_scan[input] != 0) {
+        handle_scancode((uint8_t)(joykey_scan[input] | 0x80), now,
+                        STDL_KMOD_JOYSTICK);
+    }
+
+    joykey_scan[input] = scan;
+
+    if (held && scan != 0) {
+        handle_scancode(scan, now, STDL_KMOD_JOYSTICK);
+    }
+
+    return (sym != 0 && scan != 0);
 }
 
 int STDL_JoyKeyMapping(uint16_t up, uint16_t down, uint16_t left,
@@ -685,6 +793,9 @@ void STDL_PumpEvents(void)
         joy_xpad = stdl_xpad_poll();
         handle_joy((uint8_t)(joy_ikbd | joy_xpad));
         stdl_xpad_events();
+        if (joykey_enabled) {
+            joykey_emulate_buttons(now);
+        }
     }
 
     /* drain the interrupt-side ring */

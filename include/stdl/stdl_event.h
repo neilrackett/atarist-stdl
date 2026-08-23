@@ -163,12 +163,55 @@ uint8_t STDL_GetJoyState(void);
 void STDL_JoyKeyEmulation(int enable);
 
 /*
+ * Inputs that can be bound to a key. The four directions and fire are
+ * everything an ST joystick has; the rest exist only when a modern
+ * controller is present, and stay unbound and silent otherwise, so a
+ * game may bind them unconditionally.
+ *
+ * STDL_JOYKEY_FIRE and STDL_JOYKEY_SOUTH are the same input: the fire
+ * button and a pad's lower face button are one thing.
+ */
+#define STDL_JOYKEY_UP      0
+#define STDL_JOYKEY_DOWN    1
+#define STDL_JOYKEY_LEFT    2
+#define STDL_JOYKEY_RIGHT   3
+#define STDL_JOYKEY_FIRE    4
+#define STDL_JOYKEY_SOUTH   4
+#define STDL_JOYKEY_EAST    5
+#define STDL_JOYKEY_WEST    6
+#define STDL_JOYKEY_NORTH   7
+#define STDL_JOYKEY_TL      8   /* left shoulder                     */
+#define STDL_JOYKEY_TR      9   /* right shoulder                    */
+#define STDL_JOYKEY_TL2     10  /* left trigger, past halfway        */
+#define STDL_JOYKEY_TR2     11  /* right trigger, past halfway       */
+#define STDL_JOYKEY_SELECT  12
+#define STDL_JOYKEY_START   13
+#define STDL_JOYKEY_MODE    14  /* the Xbox/Home/PS button           */
+#define STDL_JOYKEY_THUMBL  15
+#define STDL_JOYKEY_THUMBR  16
+#define STDL_JOYKEY_COUNT   17
+
+/*
+ * Bind one input to a key, or to 0 to unbind it. Returns non-zero when
+ * the key resolved to something the ST keyboard actually has.
+ *
+ * This is how a keyboard-driven game becomes playable on a controller
+ * without touching its input code: bind the pad's buttons to the keys
+ * the game already reads. Safe to call while emulation is enabled; a
+ * held input is released on its old key first, so nothing sticks.
+ */
+int STDL_JoyKeyBind(int input, uint16_t sym);
+
+/*
  * Change which keys the joystick emulates. Each argument is an
  * STDL_Key (e.g. STDLK_SPACE); 0 leaves that input unmapped. Only
  * keys that exist on the ST keyboard can be emulated - the return
  * value is the number of arguments successfully resolved to a key,
  * so a game can verify its bindings. Safe to call while enabled
  * (held directions are released on the old keys first).
+ *
+ * Shorthand for binding the five an ST joystick has; the pad-only
+ * inputs above are left alone, so the two can be mixed.
  */
 int STDL_JoyKeyMapping(uint16_t up, uint16_t down, uint16_t left,
                        uint16_t right, uint16_t fire);

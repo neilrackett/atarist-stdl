@@ -64,6 +64,10 @@ int main(void)
          * the case that used to synthesise nothing at all. */
         STDL_JoyKeyMapping(STDLK_UP, STDLK_DOWN, STDLK_LEFT,
                            STDLK_RIGHT, STDLK_SPACE);
+        /* A pad-only button: the stub holds the right shoulder, which
+         * an ST joystick has no way to express. */
+        STDL_JoyKeyBind(STDL_JOYKEY_TR, STDLK_RETURN);
+        STDL_JoyKeyBind(STDL_JOYKEY_START, STDLK_ESCAPE);
         STDL_JoyKeyEmulation(1);
 
         keys = STDL_GetKeyState(&nkeys);
@@ -71,6 +75,9 @@ int main(void)
                 keys[STDLK_RIGHT] ? 1 : 0,
                 keys[STDLK_SPACE] ? 1 : 0,
                 keys[STDLK_UP] ? 1 : 0);
+        fprintf(stderr, "joykey return=%d escape=%d\r\n",
+                keys[STDLK_RETURN] ? 1 : 0,
+                keys[STDLK_ESCAPE] ? 1 : 0);
     }
 
     fprintf(stderr, "PROBE-DONE\r\n");

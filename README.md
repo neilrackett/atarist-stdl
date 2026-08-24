@@ -17,7 +17,7 @@ but on a stock ST there's no chunky mode and SDL needs c2p on every frame.
 The framework overhead therefore means you'll maybe get 5-6fps if you're lucky,
 and even then there's no colour support and everything's greyscale.
 
-STDL is 16 colours, four bitplanes, and no conversion step. 50-60fps is truely
+STDL is 16 colours, four bitplanes, and no conversion step. 50-60fps is truly
 achievable.
 
 ### What STDL does differently

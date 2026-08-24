@@ -4,7 +4,7 @@
 
 # STDL - Atari ST DirectMedia Layer
 
-An easier way to port SDL 1.2 games to the Atari ST, by [Neil Rackett](https://neilrackett.com/atarist).
+An easier way to port SDL games to the Atari ST, by [Neil Rackett](https://neilrackett.com/atarist).
 
 ## Introduction
 
@@ -13,11 +13,12 @@ STDL is a planar-native library for porting SDL 1.2 games to the Atari ST.
 ### Why not just use SDL?
 
 SDL 1.2 is great for TT and Falcon, which both support chunky at 256 colours,
-but on a stock ST there is no chunky mode, SDL falls back to greyscale and
-the c2p on every frame mean it's painfully slow past the basics.
+but on a stock ST there's no chunky mode and SDL needs c2p on every frame.
+The framework overhead therefore means you'll maybe get 5-6fps if you're lucky,
+and even then there's no colour support and everything's greyscale.
 
-That gap is what STDL is for: 16 colours, four bitplanes, and no conversion
-step in the frame loop.
+STDL is 16 colours, four bitplanes, and no conversion step. 50-60fps is truely
+achievable.
 
 ### What STDL does differently
 
@@ -32,6 +33,14 @@ engine-owned framebuffers as surfaces, `STDL_BlitSurfaceEx` composes planar
 frames against a foreground/priority plane, and `STDL_Voice` hardware-mixes
 four sample voices from the VBL for module-style music.
 See `examples/chunky.c`.
+
+Modern controllers work through the ordinary SDL joystick API: when an
+[Xpad](https://github.com/neilrackett/atarist-xpad) provider is present
+(a SidecarTridge running MD/Sidepad, for example), joystick 0 grows to
+six axes, thirteen buttons and a hat with real analogue values, and the
+joystick key emulation picks the pad up too. Ports need no changes:
+button 0 stays fire, axes 0 and 1 stay the left stick, and with no
+provider everything reads exactly as a plain ST joystick.
 
 Anything that cannot be done cheaply in planar has been removed rather than
 emulated; see [docs/limits.md](docs/limits.md).
@@ -85,7 +94,7 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | TBLITSPD.TOS | blit throughput baseline                                                         |
 | TVIDINFO.TOS | capability report + fill/blit/flip benchmarks                                    |
 | TKEYS.TOS    | keysym name table dump                                                           |
-| TJOY.TOS     | joystick port 1 as SDL joystick 0                                                |
+| TJOY.TOS     | joystick port 1 as SDL joystick 0; 6 axes/13 buttons when an Xpad pad is present |
 | LOOPWAVE.TOS | STE/Mega STE DMA sample playback (STDL_Audio)                                    |
 | TCURSOR.TOS  | software mouse cursor with save-under                                            |
 | PLAYMUS.TOS  | YM music (stdlconv midi -> STDL_Music) + DMA chunks via the SDL_mixer shim       |

@@ -42,6 +42,18 @@ joystick key emulation picks the pad up too. Ports need no changes:
 button 0 stays fire, axes 0 and 1 stay the left stick, and with no
 provider everything reads exactly as a plain ST joystick.
 
+`STDL_OpenTopBorder` trades the top border for 27 extra lines - 227
+visible instead of 200 on any ST, one timer interrupt per frame and
+no cycle counting - so a game whose world is taller than 200 lines shows
+it whole instead of cropping or squashing. `STDL_OpenBottomBorder` opens
+the other end (245 lines, with one border-coloured seam at line 200 to
+put a HUD split on), and opening both combines them automatically into a
+272-row screen filling the display edge to edge. While any border is
+open, BLiTTER operations switch to shared mode by themselves so a long
+blit cannot stall the CPU past the border's timing window, and palette
+writes are staged to the vertical blanking so they can never flash
+mid-frame. See `examples/overscan.c`.
+
 Anything that cannot be done cheaply in planar has been removed rather than
 emulated; see [docs/limits.md](docs/limits.md).
 
@@ -101,6 +113,7 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | SFXDEMO.TOS  | Degas splash, YM effects stealing/restoring music voices, joystick key emulation |
 | BLITCHK.TOS  | BLiTTER vs CPU byte-identical verification at two plane budgets + timing         |
 | VBLCHK.TOS   | 50Hz VBL callbacks, then an abnormal exit - the desktop coming back is the pass  |
+| OVERSCAN.TOS | border overscan: T top (227), B bottom (245), both combine (272), SPACE closes   |
 
 Large same-phase fills and blits are BLiTTER-accelerated where the
 hardware has one (fills 16.7 -> 50 FPS, aligned blits 8.3 -> 25 FPS

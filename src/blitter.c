@@ -88,7 +88,16 @@ void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
     b->hop = hop;
     b->op = op;
     b->skew = 0;
-    b->ctrl = 0xC0;                 /* start, hog mode */
+    /* Hog mode stalls the CPU for the whole operation, which is
+     * fine until something needs an interrupt serviced on time: the
+     * border overscan trick must take Timer A/B inside a scanline
+     * window, and a multi-millisecond hog blit across it drops the
+     * border for that frame. While a border is open the library
+     * starts blits in shared mode instead - the bus alternates
+     * 64 cycles blitter / 64 CPU, the operation takes about twice
+     * the wall time, and interrupt latency stays in the
+     * microseconds. */
+    b->ctrl = stdl_no_hog ? 0x80 : 0xC0;    /* start */
     while (b->ctrl & 0x80)
         ;
 }

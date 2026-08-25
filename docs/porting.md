@@ -102,6 +102,31 @@ time, not at runtime.
 * **Filenames**: loaders retry with an uppercased name, so
   `"icon.bmp"` works on GEMDOS.
 
+### A world taller than 200 lines
+
+A game designed for 224 or 240 lines has three ways onto the ST's
+200: drop lines (artefacts), crop (hides play area), or open the
+top border with `STDL_OpenTopBorder()` - 227 native lines on any
+50Hz machine for one timer interrupt per frame; a 60Hz base screen
+is switched to 50Hz while a border is open and restored on close.
+It fails cleanly (returns 0) only where the hardware has no GLUE
+borders (TT/Falcon), so keep one of the other two mappings as the
+fallback and choose at init. `examples/overscan.c`
+is the pattern, including the toggle for A/B comparison.
+`STDL_OpenBottomBorder()` gains 45 lines at the other end instead,
+with one border-coloured seam at picture line 200 - useful when the
+extra height is a status panel with its own split anyway. Opening
+both borders combines them automatically (272 rows, edge to edge);
+closing one falls back to the other alone. While any border is
+open, BLiTTER blits run in shared mode (about twice the wall time
+for a full-page copy) so they cannot stall the CPU past the
+border's timing window, and palette writes land in the blanking via
+a VBL callback; `STDL_OverscanMisses()` says whether anything else
+stalls the CPU. Full-page screen updates should start at the VBL
+(`STDL_WaitVBL`) so the copy stays ahead of the beam - the display
+starts 29 lines earlier with the top border open, and an unsynced
+full-page copy tears intermittently.
+
 ## Rewrite patterns
 
 **Direct pixel access.** There is no chunky buffer; `memset` rows

@@ -209,6 +209,48 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   memory panics the machine. The callback contract (no GEMDOS, no
   allocation, no drawing, no YM writes while STDL owns the chip) is
   in `include/stdl/stdl_vbl.h`.
+- Taller than 200 lines: `STDL_OpenTopBorder()` removes the top
+  border on any 50Hz ST - 227 visible lines instead of 200, added
+  above the normal picture. The screen surface is updated in place
+  (pixels, h, clip), so drawing code that reads `screen->h` needs no
+  changes; check the return (227, or 0 under STDL_DOUBLEBUF or on
+  TT/Falcon) and keep the 200-line mapping as the fallback. A 60Hz
+  base screen is switched to 50Hz while a border is open and
+  restored on close - opening a border is an active choice and it
+  always takes effect on ST-class hardware. Cost is one Timer A interrupt plus a
+  bounded two-line poll per frame - measured +2.1ms/frame on an
+  8MHz ST in one port, and that was the full-screen blit of the 24
+  extra content lines, not the trick itself. No cycle counting, so
+  it holds at any CPU speed. A missed window (a long interrupts-off
+  section) shows one normal-bordered frame and self-recovers, and
+  the ISR skips the sync flip entirely when it wakes up late, so a
+  miss can never glitch mid-frame; `STDL_OverscanMisses()` counts
+  them - steady increments mean something stalls the CPU every
+  frame. The classic culprit is a hog-mode BLiTTER blit (one port's
+  cutscenes missed 191 frames of one sequence exactly this way),
+  which is why STDL starts blits in shared mode while a border is
+  open - a full-page blit takes about twice the wall time there,
+  budget accordingly. Claims MFP Timer A and Timer B's counter;
+  `STDL_CloseTopBorder()` gives everything back. On a CRT the
+  picture sits ~27 lines higher than stock - geometry, not a bug.
+  `STDL_OpenBottomBorder()` is the same trade at the other end: 245
+  lines, one border-coloured seam at picture line 200 (the GLUE
+  evaluates its display window per line, and the line that runs at
+  60Hz falls outside it - align a HUD split or dark band there).
+  Opening both combines automatically into 272 rows (seam at row
+  227, content rows 0..226 seamless), and closing one drops back to
+  the other alone; every Open returns the height the screen ended
+  up with, so repaint after any transition.
+  Two things change under the hood while any border is open, both
+  because display fetch starts at line 34 instead of 63: palette
+  writes are staged and drained inside the blanking by a VBL
+  callback (never a mid-frame colour flash; latency one frame), and
+  the port should VBL-sync its full-page copies - the CPU loop
+  writes rows faster than the beam displays them, so a copy started
+  at the VBL stays ahead and cannot tear, where an unsynced one
+  races the beam and loses intermittently (measured: constant
+  ghosting in one port's cutscenes until synced).
+  See `examples/overscan.c`.
 - Splash: `STDL_ShowDegas("SPLASH.PI1")` (make with `stdlconv pi1`).
 - Keyboard games + joystick: `STDL_JoyKeyEmulation(1)`, rebindable
 - Modern controllers work through the same API, with no port

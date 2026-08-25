@@ -17,6 +17,8 @@ STDL_Surface stdl_screen;
 void (*stdl_shutdown_audio)(void);
 void (*stdl_shutdown_music)(void);
 void (*stdl_shutdown_vbl)(void);
+void (*stdl_shutdown_overscan)(void);
+uint8_t stdl_no_hog;
 
 static STDL_Palette screen_palette;
 static STDL_PixelFormat screen_format;
@@ -126,6 +128,12 @@ static void release_hardware(void)
     if (stdl_shutdown_vbl != NULL) {
         stdl_shutdown_vbl();
         stdl_shutdown_vbl = NULL;
+    }
+    if (stdl_shutdown_overscan != NULL) {
+        /* border, timers and vectors back before the Setscreen
+         * below repoints the display at page[0] */
+        stdl_shutdown_overscan();
+        stdl_shutdown_overscan = NULL;
     }
     stdl_events_remove();
     if (stdl.video_set) {

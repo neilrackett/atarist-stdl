@@ -193,6 +193,20 @@ extern void (*stdl_cursor_hook)(int x, int y);
 extern void (*stdl_shutdown_audio)(void);
 extern void (*stdl_shutdown_music)(void);
 extern void (*stdl_shutdown_vbl)(void);
+extern void (*stdl_shutdown_overscan)(void);
+
+/* while set, blitter.c starts operations in shared mode instead of
+ * hog: the overscan border tricks need Timer A/B interrupts taken
+ * inside a scanline window, and a hog blit stalls the CPU past it.
+ * Set/cleared by overscan.c; defined in video.c (always linked). */
+extern uint8_t stdl_no_hog;
+
+/* palette staging while a border overscan is open: apply_hw stages
+ * into a pending set instead of writing the registers, and the
+ * overscan VBL callback drains it inside the blanking (palette.c) */
+extern uint8_t stdl_pal_defer;
+extern volatile uint8_t stdl_pal_pending_dirty;
+void stdl_palette_flush(void);
 
 /* brief interrupt masking (supervisor mode) for state shared with
  * interrupt context; no-ops when built for host-side unit tests */

@@ -208,6 +208,14 @@ warnings** with the Makefile's `-Wall -Wextra`.
 - gcc 4.6 does not unswitch loops: hoist loop-invariant branches
   (edge masks, format dispatch) manually; peel first/last
   iterations.
+- **Mega STE benchmark numbers are code-layout-sensitive.** Its
+  16MHz mode leans on a small cache, so an unrelated rebuild can
+  move a frame-time figure ~10% either way (measured: one port's
+  squash-mode frame went 34.8 -> 43.1ms from added code that never
+  executes in that mode, while a plain ST timed both builds
+  identical to 0.01ms). Before believing a Mega STE regression,
+  re-measure on `--machine st`: no cache, no layout luck. Compare
+  A-vs-B features within one binary where possible.
 
 ## Conventions
 

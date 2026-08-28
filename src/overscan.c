@@ -93,7 +93,6 @@ static uint8_t  old_sync;        /* sync rate before the first open */
 static uint8_t  old_ier;         /* previous IERA/IMRA state of both */
 static uint8_t  old_imr;         /* timer bits (0x21 mask)           */
 static int      mode;            /* MODE_TOP | MODE_BOT */
-static int      pal_vbl_ok;      /* palette VBL callback installed */
 
 #define MFP_IERA (*(volatile uint8_t *)0xFFFFFA07UL)
 #define MFP_IPRA (*(volatile uint8_t *)0xFFFFFA0BUL)
@@ -110,19 +109,22 @@ __asm__(
 "    .text\n"
 "    .even\n"
 
-/* -- top border ---------------------------------------------------- */
-/* VBL prefix: 50Hz safety, arm Timer A (~1.83ms -> line ~29),
- * continue into the original handler. Touches no registers. */
+/* -- top border (and combined) ------------------------------------ */
+/* VBL prefix: 50Hz safety, both timers stopped, Timer A armed
+ * (~1.83ms -> line ~29), continue into the original handler.
+ * Touches no registers. */
 "_stdl_ovsc_vbl_top:\n"
 "    move.b #2,0xffff820a.w\n"
 "    clr.b  0xfffffa19.w\n"
+"    clr.b  0xfffffa1b.w\n"
 "    move.b #90,0xfffffa1f.w\n"
 "    move.b #4,0xfffffa19.w\n"
 "    move.l _stdl_ovsc_old70,-(%sp)\n"
 "    rts\n"
 "\n"
-/* Timer A ISR. Two lateness guards decide whether the window is
- * still open before anything touches the sync rate:
+/* Timer A ISR, serving top-only and combined modes alike. Two
+ * lateness guards decide whether the window is still open before
+ * anything touches the sync rate:
  *
  * 1. The timer itself is the clock. In delay mode it reloads and
  *    keeps counting after firing, so its data register reads as
@@ -136,10 +138,14 @@ __asm__(
  *    would glitch it. This also catches a delivery so late the
  *    timer count has wrapped back into range.
  *
- * Either guard failing skips the flip, counts the miss and shows
- * one normal-bordered frame. On time, 60Hz starts the picture at
- * line 34 and Timer B, silent in event-count mode, pins the 50Hz
- * restore into the blanking gap after line 35. */
+ * On time, 60Hz starts the picture at line 34 and Timer B, silent
+ * in event-count mode, pins the 50Hz restore into the blanking gap
+ * after line 35; it is then re-armed to fire at the end of frame
+ * line 260, which chains into the bottom ISR when the combined
+ * mode has its interrupt enabled (top-only leaves it masked, so
+ * the count quietly expires). A late delivery or a timed-out pin
+ * skips the flip AND leaves Timer B stopped - a missed frame
+ * degrades to plain borders as a whole, counted once. */
 "    .even\n"
 "_stdl_ovsc_ta:\n"
 "    movem.l %d0-%d2/%a0,-(%sp)\n"
@@ -161,74 +167,22 @@ __asm__(
 "    move.b #200,(%a0)\n"
 "    move.b #8,0xfffffa1b.w\n"
 "    bsr    stdl_ovsc_wait_de\n"
-"    bsr    stdl_ovsc_wait_de\n"
-"    move.b #2,0xffff820a.w\n"
-"    clr.b  0xfffffa1b.w\n"
-"ovsc_ta_out:\n"
-"    bclr   #5,0xfffffa0f.w\n"
-"    movem.l (%sp)+,%d0-%d2/%a0\n"
-"    rte\n"
-"ovsc_ta_late:\n"
-"    addq.l #1,_stdl_ovsc_missed\n"
-"    bra.s  ovsc_ta_out\n"
-"\n"
-
-/* -- both borders -------------------------------------------------- */
-/* VBL prefix: 50Hz safety, both timers stopped, Timer A armed for
- * the top window; the top ISR re-arms Timer B for the bottom. */
-"    .even\n"
-"_stdl_ovsc_vbl_both:\n"
-"    move.b #2,0xffff820a.w\n"
-"    clr.b  0xfffffa19.w\n"
-"    clr.b  0xfffffa1b.w\n"
-"    move.b #90,0xfffffa1f.w\n"
-"    move.b #4,0xfffffa19.w\n"
-"    move.l _stdl_ovsc_old70,-(%sp)\n"
-"    rts\n"
-"\n"
-/* Combined Timer A ISR: the top trick exactly as above, then Timer
- * B is re-armed to interrupt at the end of frame line 260 - 225
- * displayed lines from the pin - chaining into the bottom ISR. A
- * late delivery or a timed-out pin skips the bottom too (Timer B
- * stays stopped), so a missed frame degrades to plain borders as a
- * whole rather than half a trick. */
-"    .even\n"
-"_stdl_ovsc_ta_both:\n"
-"    movem.l %d0-%d2/%a0,-(%sp)\n"
-"    move.b 0xfffffa1f.w,%d0\n"
-"    clr.b  0xfffffa19.w\n"
-"    cmp.b  #78,%d0\n"
-"    blo.s  ovsc_tab_late\n"
-"    move.b 0xffff8205.w,%d0\n"
-"    cmp.b  _stdl_ovsc_bhi,%d0\n"
-"    bne.s  ovsc_tab_late\n"
-"    move.b 0xffff8207.w,%d0\n"
-"    cmp.b  _stdl_ovsc_bmid,%d0\n"
-"    bne.s  ovsc_tab_late\n"
-"    tst.b  0xffff8209.w\n"
-"    bne.s  ovsc_tab_late\n"
-"    clr.b  0xffff820a.w\n"
-"    lea    0xfffffa21.w,%a0\n"
-"    clr.b  0xfffffa1b.w\n"
-"    move.b #200,(%a0)\n"
-"    move.b #8,0xfffffa1b.w\n"
-"    bsr    stdl_ovsc_wait_de\n"
-"    bmi.s  ovsc_tab_fail\n"
+"    bmi.s  ovsc_ta_fail\n"
 "    bsr    stdl_ovsc_wait_de\n"
 "    move.b #2,0xffff820a.w\n"
 "    clr.b  0xfffffa1b.w\n"
 "    move.b #225,(%a0)\n"
 "    move.b #8,0xfffffa1b.w\n"
-"ovsc_tab_out:\n"
-"    bclr   #5,0xfffffa0f.w\n"
+"ovsc_ta_out:\n"
+"    move.b #0xDF,0xfffffa0f.w\n"
 "    movem.l (%sp)+,%d0-%d2/%a0\n"
 "    rte\n"
-"ovsc_tab_fail:\n"
+"ovsc_ta_fail:\n"
 "    move.b #2,0xffff820a.w\n"
-"ovsc_tab_late:\n"
+"ovsc_ta_late:\n"
 "    clr.b  0xfffffa1b.w\n"
 "    addq.l #1,_stdl_ovsc_missed\n"
-"    bra.s  ovsc_tab_out\n"
+"    bra.s  ovsc_ta_out\n"
 "\n"
 
 /* -- bottom border ------------------------------------------------- */
@@ -244,11 +198,12 @@ __asm__(
 "    rts\n"
 "\n"
 /* Timer B ISR, two lines before the end of the picture. Step to
- * the end of line 200 on the timer's own count, flick to 60Hz
- * across the GLUE's bottom border test, back one line later. Both
- * sync writes land in the blanking gap right after a line ends, so
- * no line runs at two rates. A timed-out wait means a stall pushed
- * us past the picture: skip the flip and count the miss. */
+ * the end of frame line 262 on the timer's own count, flick to
+ * 60Hz across the GLUE's bottom border test, back one line later.
+ * Both sync writes land in the blanking gap right after a line
+ * ends, so no line runs at two rates. A timed-out wait means a
+ * stall pushed us past the picture: skip the flip and count the
+ * miss. */
 "    .even\n"
 "_stdl_ovsc_tb:\n"
 "    movem.l %d1/%d2/%a0,-(%sp)\n"
@@ -262,7 +217,7 @@ __asm__(
 "    move.b #2,0xffff820a.w\n"
 "ovsc_tb_out:\n"
 "    clr.b  0xfffffa1b.w\n"
-"    bclr   #0,0xfffffa0f.w\n"
+"    move.b #0xFE,0xfffffa0f.w\n"
 "    movem.l (%sp)+,%d1/%d2/%a0\n"
 "    rte\n"
 "ovsc_tb_late:\n"
@@ -285,16 +240,42 @@ __asm__(
 
 extern void stdl_ovsc_vbl_top(void);
 extern void stdl_ovsc_vbl_bot(void);
-extern void stdl_ovsc_vbl_both(void);
 extern void stdl_ovsc_ta(void);
-extern void stdl_ovsc_ta_both(void);
 extern void stdl_ovsc_tb(void);
 
-/* drains the palette staged by stdl_palette_apply_hw inside the
- * blanking - see stdl_pal_defer in palette.c */
-static void ovsc_pal_vbl(void)
+/*
+ * Palette staging. With a border open the display starts fetching
+ * at line 34 instead of 63, so a palette write from the main loop
+ * is far more likely to land mid-display and flash wrong colours
+ * for part of a frame. While open, stdl_pal_apply_hook points here:
+ * writes are staged and a VBL callback drains them inside the
+ * blanking. The hook lives in always-linked video.c so palette.o
+ * carries only a pointer test for programs that never open a
+ * border.
+ */
+static uint16_t pal_pending[16];
+static volatile uint8_t pal_dirty;
+
+static void ovsc_pal_stage(void)
 {
-    stdl_palette_flush();
+    int i;
+    for (i = 0; i < 16; i++) {
+        pal_pending[i] = STDL_HWColour(stdl.colours[i].r,
+                                       stdl.colours[i].g,
+                                       stdl.colours[i].b);
+    }
+    pal_dirty = 1;
+}
+
+static void ovsc_pal_flush(void)
+{
+    int i;
+    if (pal_dirty) {
+        pal_dirty = 0;
+        for (i = 0; i < 16; i++) {
+            STDL_HWPAL[i] = pal_pending[i];
+        }
+    }
 }
 
 /* Hardware-only teardown, shared with the terminate path: vectors,
@@ -321,7 +302,7 @@ static void ovsc_release(void)
     stdl_int_restore(sr);
     mode = 0;
     stdl_no_hog = 0;
-    stdl_pal_defer = 0;
+    stdl_pal_apply_hook = NULL;
     stdl_shutdown_overscan = NULL;
 }
 
@@ -347,9 +328,7 @@ static void ovsc_program(int m)
     MFP_TBCR = 0;
     MFP_IPRA &= (uint8_t)~0x21;
     MFP_ISRA &= (uint8_t)~0x21;
-    VEC_TA = (uint32_t)(uintptr_t)
-        ((m == (MODE_TOP | MODE_BOT)) ? stdl_ovsc_ta_both
-                                      : stdl_ovsc_ta);
+    VEC_TA = (uint32_t)(uintptr_t)stdl_ovsc_ta;
     VEC_TB = (uint32_t)(uintptr_t)stdl_ovsc_tb;
     MFP_IERA = (uint8_t)((MFP_IERA & ~0x21) | bits);
     MFP_IMRA = (uint8_t)((MFP_IMRA & ~0x21) | bits);
@@ -357,9 +336,7 @@ static void ovsc_program(int m)
     stdl_ovsc_bmid = (uint8_t)((uintptr_t)buf >> 8);
     stdl_ovsc_missed = 0;
     VEC_VBL = (uint32_t)(uintptr_t)
-        ((m == (MODE_TOP | MODE_BOT)) ? stdl_ovsc_vbl_both
-         : (m & MODE_TOP)             ? stdl_ovsc_vbl_top
-                                      : stdl_ovsc_vbl_bot);
+        ((m & MODE_TOP) ? stdl_ovsc_vbl_top : stdl_ovsc_vbl_bot);
     stdl_int_restore(sr);
 
     mode = m;
@@ -450,8 +427,9 @@ static int ovsc_open(int which)
         STDL_WaitVBL();
         /* palette writes land in the blanking from here on; if no
          * VBL slot is free they stay immediate, as before */
-        pal_vbl_ok = (STDL_AddVBL(ovsc_pal_vbl) == 0);
-        stdl_pal_defer = (uint8_t)pal_vbl_ok;
+        if (STDL_AddVBL(ovsc_pal_flush) == 0) {
+            stdl_pal_apply_hook = ovsc_pal_stage;
+        }
     }
     ovsc_program(m);
     ovsc_surface();
@@ -471,12 +449,11 @@ static int ovsc_close(int which)
         ovsc_surface();
         return stdl_screen.h;
     }
-    ovsc_release();
-    if (pal_vbl_ok) {
-        STDL_RemoveVBL(ovsc_pal_vbl);
-        pal_vbl_ok = 0;
+    if (stdl_pal_apply_hook != NULL) {
+        STDL_RemoveVBL(ovsc_pal_flush);
     }
-    stdl_palette_flush();
+    ovsc_release();                     /* clears the hook */
+    stdl_palette_apply_hw();            /* immediate, no staging */
     (void)Setscreen(stdl.page[0], stdl.page[0], -1);
     STDL_WaitVBL();
     ovsc_surface();

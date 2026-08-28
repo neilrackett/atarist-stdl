@@ -132,8 +132,7 @@ dist/SFXDEMO.TOS: examples/sfxdemo.c $(LIB)
 dist/BLITCHK.TOS: examples/blitchk.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
 dist/OVERSCAN.TOS: examples/overscan.c $(LIB)
-	$(CC) $(CFLAGS) -o $@ $^ && $(STRIP) $@
-
+	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
 dist/VBLCHK.TOS: examples/vblchk.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
 

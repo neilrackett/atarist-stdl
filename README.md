@@ -49,10 +49,10 @@ it whole instead of cropping or squashing. `STDL_OpenBottomBorder` opens
 the other end (245 lines, with one border-coloured seam at line 200 to
 put a HUD split on), and opening both combines them automatically into a
 272-row screen filling the display edge to edge. While any border is
-open, BLiTTER operations switch to shared mode by themselves so a long
-blit cannot stall the CPU past the border's timing window, and palette
-writes are staged to the vertical blanking so they can never flash
-mid-frame. See `examples/overscan.c`.
+open, BLiTTER operations switch to non-hog mode by themselves (the
+restart idiom keeps them near hog speed) so a long blit cannot stall
+the CPU past the border's timing window, and palette writes are staged
+to the vertical blanking so they can never flash mid-frame. See `examples/overscan.c`.
 
 Anything that cannot be done cheaply in planar has been removed rather than
 emulated; see [docs/limits.md](docs/limits.md).

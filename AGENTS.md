@@ -76,6 +76,19 @@ warnings** with the Makefile's `-Wall -Wextra`.
   wants the same audit, plus a host test asserting the zero-flag
   call is byte-identical to the entry point it wraps - that is what
   keeps "additive" honest.
+- **A blit-timing change needs a live scene, not just BLITCHK.**
+  Re-setting the BLiTTER's busy bit inside the completion poll (the
+  demo "restart idiom") passes BLITCHK byte-identical at every plane
+  budget with a border open, and measures 30% faster - and corrupts
+  palette fades into wrong colours on screen. BLITCHK compares CPU
+  and BLiTTER output one operation at a time; it cannot see a
+  read-modify-write on the control register racing the hardware's
+  own state across a frame, nor a blit re-armed with a spent line
+  count. So: in non-hog mode start the blit once and poll, the
+  hardware resumes itself between bus slices - and anything that
+  changes *how* a blit is driven (mode, restart, interleaving with
+  interrupts) gets watched in a real scene with fades before it
+  ships, not just measured.
 - **After touching blit/fill paths**: run `dist/BLITCHK.TOS` - it
   randomises fills/blits and compares the CPU and BLiTTER paths
   byte-for-byte on target. Both paths must stay identical;

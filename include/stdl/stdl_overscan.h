@@ -39,9 +39,9 @@ extern "C" {
  * with its interrupt masked; both are returned by Close. A frame
  * that misses its timing window (a long interrupts-off section)
  * shows one frame with a normal top border and recovers by itself;
- * while a border is open STDL starts BLiTTER operations in shared
- * mode so its own blits cannot cause this. See
- * STDL_OverscanMisses() below.
+ * while a border is open STDL starts BLiTTER operations in non-hog
+ * mode (restart idiom, near-hog speed) so its own blits cannot
+ * cause this. See STDL_OverscanMisses() below.
  */
 int  STDL_OpenTopBorder(void);
 
@@ -87,12 +87,10 @@ void STDL_CloseBottomBorder(void);
  * usual culprit. */
 uint32_t STDL_OverscanMisses(void);
 
-/* Visible lines while a border is open, and the extra ones gained
- * over the normal screen. */
+/* Surface heights while a border is open (27, 45 or 72 lines over
+ * the normal 200). */
 #define STDL_OVERSCAN_TOP_H       227
-#define STDL_OVERSCAN_TOP_EXTRA    27
 #define STDL_OVERSCAN_BOTTOM_H    245
-#define STDL_OVERSCAN_BOTTOM_EXTRA 45
 #define STDL_OVERSCAN_BOTH_H      272
 
 #ifdef __cplusplus

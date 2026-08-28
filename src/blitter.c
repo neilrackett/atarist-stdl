@@ -93,10 +93,13 @@ void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
      * border overscan trick must take Timer A/B inside a scanline
      * window, and a multi-millisecond hog blit across it drops the
      * border for that frame. While a border is open the library
-     * starts blits in shared mode instead - the bus alternates
-     * 64 cycles blitter / 64 CPU, the operation takes about twice
-     * the wall time, and interrupt latency stays in the
-     * microseconds. */
+     * starts blits in non-hog mode instead: the bus alternates
+     * 64 cycles blitter / 64 CPU, so interrupts are taken between
+     * slices. Do NOT "help" by re-setting the busy bit inside the
+     * poll loop: that read-modify-write races the blitter's own
+     * control state and re-arms a finished blit with a spent line
+     * count. It measures faster and passes BLITCHK, and it turns
+     * palette fades into wrong colours on screen. */
     b->ctrl = stdl_no_hog ? 0x80 : 0xC0;    /* start */
     while (b->ctrl & 0x80)
         ;

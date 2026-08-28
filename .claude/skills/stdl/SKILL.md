@@ -228,9 +228,10 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   them - steady increments mean something stalls the CPU every
   frame. The classic culprit is a hog-mode BLiTTER blit (one port's
   cutscenes missed 191 frames of one sequence exactly this way),
-  which is why STDL starts blits in shared mode while a border is
-  open - a full-page blit takes about twice the wall time there,
-  budget accordingly. Claims MFP Timer A and Timer B's counter;
+  which is why STDL starts blits in non-hog mode with the restart
+  idiom while a border is open - near-hog throughput, interrupts
+  taken between bus slices (measured: ~30% slower than hog, not
+  the 2x of plain shared mode). Claims MFP Timer A and Timer B's counter;
   `STDL_CloseTopBorder()` gives everything back. On a CRT the
   picture sits ~27 lines higher than stock - geometry, not a bug.
   `STDL_OpenBottomBorder()` is the same trade at the other end: 245

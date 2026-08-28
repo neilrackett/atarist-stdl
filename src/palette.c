@@ -31,36 +31,13 @@ void STDL_SetColour(int index, uint16_t stColour)
     }
 }
 
-/* While a border overscan is open the display starts fetching at
- * line 34 instead of 63, so a palette write from the main loop is
- * far more likely to land mid-display and flash wrong colours for
- * part of a frame. overscan.c sets stdl_pal_defer and drains the
- * staged palette from a VBL callback instead, inside the blanking. */
-uint8_t  stdl_pal_defer;
-volatile uint8_t stdl_pal_pending_dirty;
-static uint16_t pal_pending[16];
-
-void stdl_palette_flush(void)
-{
-    int i;
-    if (stdl_pal_pending_dirty) {
-        stdl_pal_pending_dirty = 0;
-        for (i = 0; i < 16; i++) {
-            STDL_HWPAL[i] = pal_pending[i];
-        }
-    }
-}
-
 void stdl_palette_apply_hw(void)
 {
     int i;
-    if (stdl_pal_defer) {
-        for (i = 0; i < 16; i++) {
-            pal_pending[i] = STDL_HWColour(stdl.colours[i].r,
-                                           stdl.colours[i].g,
-                                           stdl.colours[i].b);
-        }
-        stdl_pal_pending_dirty = 1;
+    if (stdl_pal_apply_hook != NULL) {
+        /* a border overscan is open: writes are staged and drained
+         * inside the blanking, where they cannot flash mid-frame */
+        stdl_pal_apply_hook();
         return;
     }
     for (i = 0; i < 16; i++) {

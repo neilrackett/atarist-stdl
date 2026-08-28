@@ -201,12 +201,10 @@ extern void (*stdl_shutdown_overscan)(void);
  * Set/cleared by overscan.c; defined in video.c (always linked). */
 extern uint8_t stdl_no_hog;
 
-/* palette staging while a border overscan is open: apply_hw stages
- * into a pending set instead of writing the registers, and the
- * overscan VBL callback drains it inside the blanking (palette.c) */
-extern uint8_t stdl_pal_defer;
-extern volatile uint8_t stdl_pal_pending_dirty;
-void stdl_palette_flush(void);
+/* while set, stdl_palette_apply_hw routes through this instead of
+ * writing the registers - overscan.c stages writes into the
+ * vertical blanking with it. Defined in video.c (always linked). */
+extern void (*stdl_pal_apply_hook)(void);
 
 /* brief interrupt masking (supervisor mode) for state shared with
  * interrupt context; no-ops when built for host-side unit tests */

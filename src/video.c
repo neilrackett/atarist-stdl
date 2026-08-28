@@ -19,6 +19,7 @@ void (*stdl_shutdown_music)(void);
 void (*stdl_shutdown_vbl)(void);
 void (*stdl_shutdown_overscan)(void);
 uint8_t stdl_no_hog;
+void (*stdl_pal_apply_hook)(void);
 
 static STDL_Palette screen_palette;
 static STDL_PixelFormat screen_format;

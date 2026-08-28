@@ -21,7 +21,7 @@
 #include <stddef.h>
 #include <stdl/stdl.h>
 
-static void paint(STDL_Surface *screen, int open)
+static void paint(STDL_Surface *screen)
 {
     STDL_Rect r;
     int y;
@@ -83,7 +83,7 @@ int main(int argc, char *argv[])
     }
 
     top = STDL_OpenTopBorder() != 0;
-    paint(screen, top || bot);
+    paint(screen);
 
     for (;;) {
         STDL_Event ev;
@@ -116,7 +116,7 @@ int main(int argc, char *argv[])
                 } else {
                     continue;
                 }
-                paint(screen, top || bot);
+                paint(screen);
             }
         }
         STDL_WaitVBL();

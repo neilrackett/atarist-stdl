@@ -16,7 +16,6 @@
 #include <stdl/stdl.h>
 
 static int failures;
-#define CHECK(c, ...) do { if (!(c)) { failures++; printf("FAIL %d: ", __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
 
 int main(void)
 {
@@ -72,9 +71,10 @@ int main(void)
                     const int want = (y >= 10 && y < 14) ? 7 : 5;
                     const int got = STDL_GetPixel(dst, x, y);
                     if (got != want) {
-                        CHECK(0, "flags %d phase %d: leak at %d,%d "
-                              "(got %d want %d)", flags, phase, x, y,
-                              got, want);
+                        ++failures;
+                        printf("FAIL: flags %d phase %d: leak at "
+                               "%d,%d (got %d want %d)\n",
+                               flags, phase, x, y, got, want);
                         y = 32;
                         break;
                     }

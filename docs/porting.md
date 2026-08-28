@@ -118,10 +118,10 @@ with one border-coloured seam at picture line 200 - useful when the
 extra height is a status panel with its own split anyway. Opening
 both borders combines them automatically (272 rows, edge to edge);
 closing one falls back to the other alone. While any border is
-open, BLiTTER blits run in shared mode (about twice the wall time
-for a full-page copy) so they cannot stall the CPU past the
-border's timing window, and palette writes land in the blanking via
-a VBL callback; `STDL_OverscanMisses()` says whether anything else
+open, BLiTTER blits run in non-hog mode with the restart idiom
+(near-hog speed, interrupts taken between bus slices) so they
+cannot stall the CPU past the border's timing window, and palette
+writes land in the blanking via a VBL callback; `STDL_OverscanMisses()` says whether anything else
 stalls the CPU. Full-page screen updates should start at the VBL
 (`STDL_WaitVBL`) so the copy stays ahead of the beam - the display
 starts 29 lines earlier with the top border open, and an unsynced

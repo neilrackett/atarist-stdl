@@ -133,6 +133,80 @@ STDL_PLANE_INLINE void blit_rows_aligned(const uint8_t *srow,
  * RAM reads plus copies.)
  */
 
+/*
+ * The shifted blit's inner merge: four plane words of one 16-pixel
+ * group, each built from a 32-bit window across two source groups,
+ * shifted into phase and merged through the visibility mask.
+ *
+ * This is the port-critical loop - game sprites land on arbitrary x,
+ * so every sprite pixel comes through here. gcc 4.6 compiles the C
+ * twin below to ~13 instructions per plane including a stack
+ * round-trip per plane (it spills the merged word and reloads it to
+ * OR in the kept bits). The hand-written version keeps everything in
+ * registers: build the window with move.w/swap/move.w (no
+ * clear-and-or), one variable long shift, mask, merge, store.
+ */
+static __inline__ void blit_merge4(uint16_t *dg, const uint16_t *sp,
+                                   uint16_t vis, int rr)
+{
+#ifdef __m68k__
+    uint16_t keep = (uint16_t)~vis;
+    __asm__ volatile(
+        "move.w (%1),%%d0\n\t"
+        "swap   %%d0\n\t"
+        "move.w 8(%1),%%d0\n\t"
+        "lsr.l  %4,%%d0\n\t"
+        "and.w  %2,%%d0\n\t"
+        "move.w (%0),%%d1\n\t"
+        "and.w  %3,%%d1\n\t"
+        "or.w   %%d1,%%d0\n\t"
+        "move.w %%d0,(%0)\n\t"
+
+        "move.w 2(%1),%%d0\n\t"
+        "swap   %%d0\n\t"
+        "move.w 10(%1),%%d0\n\t"
+        "lsr.l  %4,%%d0\n\t"
+        "and.w  %2,%%d0\n\t"
+        "move.w 2(%0),%%d1\n\t"
+        "and.w  %3,%%d1\n\t"
+        "or.w   %%d1,%%d0\n\t"
+        "move.w %%d0,2(%0)\n\t"
+
+        "move.w 4(%1),%%d0\n\t"
+        "swap   %%d0\n\t"
+        "move.w 12(%1),%%d0\n\t"
+        "lsr.l  %4,%%d0\n\t"
+        "and.w  %2,%%d0\n\t"
+        "move.w 4(%0),%%d1\n\t"
+        "and.w  %3,%%d1\n\t"
+        "or.w   %%d1,%%d0\n\t"
+        "move.w %%d0,4(%0)\n\t"
+
+        "move.w 6(%1),%%d0\n\t"
+        "swap   %%d0\n\t"
+        "move.w 14(%1),%%d0\n\t"
+        "lsr.l  %4,%%d0\n\t"
+        "and.w  %2,%%d0\n\t"
+        "move.w 6(%0),%%d1\n\t"
+        "and.w  %3,%%d1\n\t"
+        "or.w   %%d1,%%d0\n\t"
+        "move.w %%d0,6(%0)"
+        :
+        : "a"(dg), "a"(sp), "d"(vis), "d"(keep), "d"(rr)
+        : "d0", "d1", "memory", "cc");
+#else
+    /* C twin - what tests/host exercises and the asm must match */
+    const uint16_t keep = (uint16_t)~vis;
+    const uint16_t *s2 = sp + 4;
+    int p;
+    for (p = 0; p < 4; p++) {
+        uint16_t v = (uint16_t)
+            ((((uint32_t)sp[p] << 16) | s2[p]) >> rr);
+        dg[p] = (uint16_t)((dg[p] & keep) | (v & vis));
+    }
+#endif
+}
+
 STDL_PLANE_INLINE void blit_rows_shift(const uint8_t *srow,
                             uint8_t *drow,
                             const uint8_t *smrow, uint8_t *dmrow,
@@ -175,12 +249,16 @@ STDL_PLANE_INLINE void blit_rows_shift(const uint8_t *srow,
                 vis &= (uint16_t)~dm[g];
             }
             if (vis != 0) {
-                uint16_t keep = (uint16_t)~vis;
-                const uint16_t *s2 = sp + 4;
-                for (p = 0; p < np; p++) {
-                    uint16_t v = (uint16_t)
-                        ((((uint32_t)sp[p] << 16) | s2[p]) >> rr);
-                    dg[p] = (uint16_t)((dg[p] & keep) | (v & vis));
+                if (np == 4) {
+                    blit_merge4(dg, sp, vis, rr);
+                } else {
+                    uint16_t keep = (uint16_t)~vis;
+                    const uint16_t *s2 = sp + 4;
+                    for (p = 0; p < np; p++) {
+                        uint16_t v = (uint16_t)
+                            ((((uint32_t)sp[p] << 16) | s2[p]) >> rr);
+                        dg[p] = (uint16_t)((dg[p] & keep) | (v & vis));
+                    }
                 }
                 if (dm != NULL) {
                     if ((flags & STDL_BLIT_MARK) != 0) {

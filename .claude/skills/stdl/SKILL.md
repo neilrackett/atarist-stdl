@@ -252,6 +252,17 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   races the beam and loses intermittently (measured: constant
   ghosting in one port's cutscenes until synced).
   See `examples/overscan.c`.
+- Unaligned blits carry the port: a sprite that lands on arbitrary
+  x goes through the shift chain, and its four-plane merge is
+  hand-written 68000 in blit.c (`blit_merge4`, C twin under the
+  `#else`). gcc 4.6 spilled the merged word to the stack once per
+  plane; the asm keeps it in registers. Worth 0.9ms/frame in one
+  port's gameplay (28.7 -> 29.5 fps on a Mega STE) with output
+  verified pixel-identical. Do not expect a bulk `movem` copier to
+  help the small stuff: the same port's dirty-block restore and
+  screen update move 8-24 bytes per line, where saving and
+  restoring twelve registers costs more than the move (measured
+  slower on both an STE and a Mega STE, reverted).
 - Splash: `STDL_ShowDegas("SPLASH.PI1")` (make with `stdlconv pi1`).
 - Keyboard games + joystick: `STDL_JoyKeyEmulation(1)`, rebindable
 - Modern controllers work through the same API, with no port

@@ -189,13 +189,19 @@ warnings** with the Makefile's `-Wall -Wextra`.
   because STDL replaces `ikbdsys`: TOS never dispatches `joyvec`
   while a game runs, so a provider that injects there cannot reach
   us, and one that publishes a block can.
-- `src/xpad.c` is vendored from atarist-xpad unmodified under
-  BSD-2-Clause. Do not edit it; update it from upstream. It is the
-  consumer half only: upstream keeps the provider helpers in a
-  separate `xpad_provider.c` precisely so a library like this does not
-  carry them, there being no section garbage collection on
+- **Xpad is a submodule at `lib/xpad`**, not a vendored copy, and the
+  Makefile compiles `$(XPAD)/xpad.c` straight out of it. It used to be
+  a copy in `src/`; that stopped being safe once the ABI started
+  moving, because a stale `xpad.h` still compiles and gives you a
+  struct layout nobody agrees with. Update it deliberately, with
+  `git submodule update --remote lib/xpad`, and read the diff. Never
+  edit anything under `lib/`: change it upstream and bump.
+  It is the consumer half only. Upstream keeps the provider helpers in
+  a separate `xpad_provider.c` precisely so a library like this does
+  not carry them, there being no section garbage collection on
   m68k-atari-mint to drop them for us. Only the test fixture in
-  `tests/hatari/` needs that file, because it publishes a block.
+  `tests/hatari/` needs that file, and it now takes it from the
+  submodule too rather than keeping its own copy.
 - Cooperative model: no interrupts except the VBL sound tick
   (ym.c), the public `STDL_AddVBL` callbacks (vbl.c) and the IKBD
   handler (event.c). Services (audio refill, compat timers, cursor)

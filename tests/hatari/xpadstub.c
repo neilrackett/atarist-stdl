@@ -16,13 +16,19 @@
  * Values are fixed and deliberately asymmetric, so a wrong axis or a
  * wrong button index shows up as a wrong number rather than a plausible
  * one. Drop it in AUTO\ on the test drive.
+ *
+ * Built by hand, against the xpad submodule:
+ *
+ *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -m68000 -Ilib/xpad/src \
+ *       tests/hatari/xpadstub.c lib/xpad/src/xpad.c \
+ *       lib/xpad/src/xpad_provider.c -o dist/XPADSTUB.PRG
  */
 
 #include <mint/basepage.h>
 #include <mint/osbind.h>
 #include <stdio.h>
 
-#include "../../src/xpad.h"
+#include "xpad.h"
 
 static XPAD block;
 

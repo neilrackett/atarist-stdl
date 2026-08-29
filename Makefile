@@ -11,8 +11,14 @@ CC      = $(CROSS)gcc
 AR      = $(CROSS)ar
 STRIP   = $(CROSS)strip
 
+# Xpad is a submodule, not a vendored copy: the ABI is still moving and
+# a stale xpad.h still compiles, so drift would be silent. Update it
+# deliberately with `git submodule update --remote lib/xpad` and read
+# the diff.
+XPAD    = lib/xpad/src
+
 CFLAGS  = -O2 -fomit-frame-pointer -std=gnu99 -Wall -Wextra \
-          -Wno-unused-parameter -Iinclude -Iinclude/compat
+          -Wno-unused-parameter -Iinclude -Iinclude/compat -I$(XPAD)
 
 LIB     = libstdl.a
 
@@ -23,8 +29,14 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/sfx.c src/degas.c src/ym.c src/blitter.c \
           src/planes.c src/vbl.c src/indexed.c src/drawchar.c \
           src/surfacefrom.c src/blit8.c src/voice.c \
-          src/xpad.c src/stdl_xpad.c src/overscan.c
-LIBOBJS = $(LIBSRCS:.c=.o)
+          $(XPAD)/xpad.c src/stdl_xpad.c src/overscan.c
+# Objects live under obj/, mirroring each source's own path. Sources
+# now come from two places, this repo and the xpad submodule, and
+# building beside the source would drop .o files inside lib/xpad. The
+# path is mirrored rather than flattened so two sources with the same
+# basename cannot collide.
+OBJDIR  = obj
+LIBOBJS = $(patsubst %.c,$(OBJDIR)/%.o,$(LIBSRCS))
 
 # Examples: ported SDL 1.2 test programs (public domain).
 # GEMDOS needs 8.3 filenames.
@@ -49,7 +61,7 @@ all: $(LIB) sizecheck $(EXAMPLES) assets
 # Nothing in tests/host can see that - it is native code there - so
 # the build measures it instead. Raise the ceiling deliberately,
 # with a number, or not at all.
-PIXEL_OBJS = src/draw.o src/blit.o src/sprite.o src/surface.o
+PIXEL_OBJS = $(addprefix $(OBJDIR)/src/,draw.o blit.o sprite.o surface.o)
 PIXEL_MAX  = 26000
 
 sizecheck: $(PIXEL_OBJS)
@@ -72,7 +84,8 @@ dist:
 $(LIB): $(LIBOBJS)
 	$(AR) rcs $@ $(LIBOBJS)
 
-%.o: %.c
+$(OBJDIR)/%.o: %.c
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # libcmini variant. Games that have to fit a stock 520ST link with
@@ -89,14 +102,15 @@ $(LIB): $(LIBOBJS)
 # in the program, and its malloc comes from Mxalloc.
 CMINI       ?= /freemint/libcmini
 CMINILIB     = libstdl-cmini.a
-CMINIOBJS    = $(LIBSRCS:.c=.cmini.o)
+CMINIOBJS    = $(patsubst %.c,$(OBJDIR)/%.cmini.o,$(LIBSRCS))
 
 cmini: $(CMINILIB)
 
 $(CMINILIB): $(CMINIOBJS)
 	$(AR) rcs $@ $(CMINIOBJS)
 
-%.cmini.o: %.c
+$(OBJDIR)/%.cmini.o: %.c
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -I$(CMINI)/include -c -o $@ $<
 
 dist/TBITMAP.TOS: examples/testbitmap.c $(LIB)
@@ -145,8 +159,8 @@ test:
 	$(MAKE) -C tests/host run
 
 clean:
-	rm -f $(CMINIOBJS) $(CMINILIB)
-	rm -f $(LIBOBJS) $(LIB) $(EXAMPLES)
+	rm -rf $(OBJDIR)
+	rm -f $(CMINILIB) $(LIB) $(EXAMPLES)
 	$(MAKE) -C tests/host clean
 
 # Run an example in Hatari (host-side): make run-TSPRITE

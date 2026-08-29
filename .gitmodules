@@ -1,0 +1,3 @@
+[submodule "lib/xpad"]
+	path = lib/xpad
+	url = https://github.com/neilrackett/atarist-xpad

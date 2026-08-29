@@ -46,7 +46,6 @@ SCRIPT=$4
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT=$HERE/out
 HATARI=${HATARI:-/Applications/Hatari.app/Contents/MacOS/hatari}
-TOS=${TOS:?set TOS to a TOS/EmuTOS image path}
 FF=${FF:-on}
 MACHINE=${MACHINE:-megaste}
 SOUND=${SOUND:-off}
@@ -54,8 +53,27 @@ FIFO=$OUT/fifo_$NAME
 SHOTDIR=$OUT/shots_$NAME
 LOG=$OUT/$NAME.log
 
+# Clear last run's output BEFORE anything can exit, so a run that
+# never starts cannot leave a previous log looking like its result.
+# (A missing $TOS used to bail here through ${TOS:?...}; under an
+# output redirection that is silent, and on a case-insensitive
+# filesystem a differently-cased NAME then resolved to a month-old
+# log that read as a pass.)
 rm -rf "$SHOTDIR" "$FIFO" "$LOG"
 mkdir -p "$SHOTDIR"
+
+if [ -z "${TOS:-}" ]; then
+    echo "$0: set TOS to a TOS/EmuTOS image path" >&2
+    exit 2
+fi
+if [ ! -f "$TOS" ]; then
+    echo "$0: TOS image not found: $TOS" >&2
+    exit 2
+fi
+if [ ! -f "$PROG" ]; then
+    echo "$0: program not found: $PROG" >&2
+    exit 2
+fi
 
 "$HATARI" --tos "$TOS" --machine "$MACHINE" --fast-forward "$FF" \
   --fast-boot on ${EXTRA:-} --sound "$SOUND" --statusbar off \

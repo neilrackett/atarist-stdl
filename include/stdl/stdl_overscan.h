@@ -40,8 +40,8 @@ extern "C" {
  * that misses its timing window (a long interrupts-off section)
  * shows one frame with a normal top border and recovers by itself;
  * while a border is open STDL starts BLiTTER operations in non-hog
- * mode (restart idiom, near-hog speed) so its own blits cannot
- * cause this. See STDL_OverscanMisses() below.
+ * mode so its own blits cannot cause this. See
+ * STDL_OverscanMisses() below.
  */
 int  STDL_OpenTopBorder(void);
 
@@ -83,7 +83,7 @@ void STDL_CloseBottomBorder(void);
  * timer past its window, and that frame showed a normal border
  * instead of glitching mid-frame. Steady increments mean something
  * in the program stalls the CPU every frame; while a border is
- * open STDL already starts BLiTTER operations in shared mode, the
+ * open STDL already starts BLiTTER operations in non-hog mode, the
  * usual culprit. */
 uint32_t STDL_OverscanMisses(void);
 

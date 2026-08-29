@@ -202,6 +202,15 @@ warnings** with the Makefile's `-Wall -Wextra`.
   m68k-atari-mint to drop them for us. Only the test fixture in
   `tests/hatari/` needs that file, and it now takes it from the
   submodule too rather than keeping its own copy.
+  Two consequences worth knowing when a consumer reports something odd
+  after a bump. A game Makefile that globs `$(STDL)/src/*.c` to decide
+  whether to rebuild `libstdl.a` no longer sees xpad, so a submodule
+  bump goes unnoticed and links an archive built against the previous
+  ABI; it needs `$(STDL)/lib/xpad/src/*.c` in the glob too. And objects
+  now build into `obj/`, mirroring each source's path, so nothing lands
+  inside the submodule: anything looking for `src/*.o` wants
+  `obj/src/*.o`, and orphaned objects from before the move are not
+  removed by `make clean`, which is now `rm -rf obj`.
 - Cooperative model: no interrupts except the VBL sound tick
   (ym.c), the public `STDL_AddVBL` callbacks (vbl.c) and the IKBD
   handler (event.c). Services (audio refill, compat timers, cursor)

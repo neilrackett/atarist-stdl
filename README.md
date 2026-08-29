@@ -89,6 +89,24 @@ in `dist/`, which doubles as a Hatari GEMDOS drive for testing:
 hatari --machine megaste dist/TSPRITE.TOS
 ```
 
+Clone with `--recursive`, or run `git submodule update --init`: Xpad is
+a submodule at `lib/xpad`, and the library does not build without it.
+
+**If your game's Makefile decides when to rebuild `libstdl.a` by
+globbing STDL's sources, glob both directories.** Not every source is
+under `src/` any more:
+
+```make
+STDL_SRCS = $(wildcard $(STDL)/src/*.c) $(wildcard $(STDL)/lib/xpad/src/*.c)
+```
+
+A glob that only sees `src/` will not notice an Xpad submodule bump, so
+it will happily link an archive built against the previous ABI. Objects
+also build into `$(STDL)/obj/` now rather than beside the sources, so
+anything looking for `$(STDL)/src/*.o` wants `$(STDL)/obj/src/*.o`.
+An earlier build may have left orphaned `.o` files next to the sources;
+`make clean` no longer removes those, so delete them once by hand.
+
 ## Status
 
 320x200, 4 planes, 16 colours. The library and the SDL 1.2

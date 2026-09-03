@@ -45,9 +45,9 @@ extern "C" {
  * and spin); all of it is returned by Close. A frame
  * that misses its timing window (a long interrupts-off section)
  * shows one frame with a normal top border and recovers by itself;
- * while a border is open STDL starts BLiTTER operations in non-hog
- * mode so its own blits cannot cause this. See
- * STDL_OverscanMisses() below.
+ * while a border is open STDL places its own BLiTTER operations
+ * around the timing windows (see STDL_OverscanMisses() below) so
+ * they cannot cause this.
  */
 int  STDL_OpenTopBorder(void);
 
@@ -94,16 +94,21 @@ void STDL_CloseBottomBorder(void);
  * opened - a long interrupts-off stretch or bus stall pushed the
  * timer past its window, and that frame showed a normal border
  * instead of glitching mid-frame. Steady increments mean something
- * in the program stalls the CPU every frame; while a border is
- * open STDL already starts BLiTTER operations in non-hog mode, the
- * usual culprit. A BLiTTER operation still in flight when a flick
- * runs stretches it past its window - that frame shows the border,
- * or its first extra line displays at 60Hz timing - and under
- * continuous blitting that is most frames for the bottom border
- * and about a quarter for the top, so blit in bursts from the VBL
- * and keep large blits away from the end of the picture. Shared
- * mode itself makes BLiTTER operations take about 2.1x as long
- * while a border is open. */
+ * in the program stalls the CPU every frame. STDL's own BLiTTER
+ * operations are not that something: while a border is open each
+ * one is placed from the beam's position (the video counter in the
+ * picture, a Timer B stopwatch in the blanking) so that it ends a
+ * few lines before the next timing window, split around the window
+ * when it would not, and run in hog mode - the ISR is never held
+ * off by a blit. Measured in Hatari (STE, cycle-exact, back-to-back
+ * full-screen fills): throughput 14% below the no-border figure
+ * with the bottom border open, 18% with the top, 28% with both,
+ * against 2.1x slower in shared mode; small blits (64x32) pay
+ * 35-47% for the per-operation decision; the border is lost in
+ * about one frame in 1600 beyond the frame in which it opens (none
+ * on a plain ST, which has no BLiTTER). Programs that drive the
+ * BLiTTER themselves must use non-hog mode, or keep hog blits
+ * short and away from lines 30-36, 259-265 and 310-1. */
 uint32_t STDL_OverscanMisses(void);
 
 /* Surface heights while a border is open (28, 45 or 73 lines over

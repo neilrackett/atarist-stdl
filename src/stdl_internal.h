@@ -195,11 +195,17 @@ extern void (*stdl_shutdown_music)(void);
 extern void (*stdl_shutdown_vbl)(void);
 extern void (*stdl_shutdown_overscan)(void);
 
-/* while set, blitter.c starts operations in shared mode instead of
- * hog: the overscan border tricks need Timer A/B interrupts taken
- * inside a scanline window, and a hog blit stalls the CPU past it.
- * Set/cleared by overscan.c; defined in video.c (always linked). */
-extern uint8_t stdl_no_hog;
+/* while set, blitter.c asks this before starting an operation of
+ * nlines lines costing cpl bus cycles each: the answer is how many
+ * of them may run now in hog mode - all of them, or the ones that
+ * end before the next border ISR window, or none, in which case the
+ * driver runs the operation in shared mode. The policy may wait
+ * for a window to pass before answering; the driver splits the
+ * operation and asks again for the rest. The overscan border
+ * tricks need Timer A/B interrupts taken inside a scanline window,
+ * and a hog blit stalls the CPU past it. Set and cleared by
+ * overscan.c; defined in video.c (always linked). */
+extern uint16_t (*stdl_blit_policy)(uint16_t nlines, uint32_t cpl);
 
 /* while set, stdl_palette_apply_hw routes through this instead of
  * writing the registers - overscan.c stages writes into the

@@ -126,18 +126,25 @@ for over two scanlines at a time, and without that the ISRs would
 have to fire lines early and spin. Opening both borders combines
 them automatically (273 rows,
 edge to edge); closing one falls back to the other alone. While
-any border is open, BLiTTER blits run in non-hog mode (interrupts
-taken between bus slices) so they cannot stall the CPU past the
-border's timing window, and palette writes land in the blanking
-via a VBL callback; `STDL_OverscanMisses()` says whether anything
-else stalls the CPU. Shared mode makes BLiTTER operations take
-about 2.1x as long while a border is open (measured on an STE),
-and a blit still in flight when a flick runs stretches it past
-its window and costs that frame (a border, or one line at 60Hz
-timing): under continuous blitting that is most frames for the
-bottom border and about a quarter for the top. Blit in bursts
-from the VBL and keep the big ones off the last lines of the
-picture. The ISRs themselves cost under 1% of an 8MHz frame each.
+any border is open, every BLiTTER operation STDL starts is placed
+from where the beam is - the video counter says during the
+picture, a Timer B stopwatch through the blanking - so that it
+ends a few lines before the next timing window; one that would
+not is split around the window, the part before it runs, the
+policy waits the few lines the window lasts (the ISR runs
+meanwhile) and the rest follows. Blits stay in hog mode, so the
+CPU never waits on bus slices and an ISR is never held off by a
+blit. Measured on an emulated STE with back-to-back full-screen
+fills: 14% below the no-border throughput with the bottom border
+open, 18% with the top, 28% with both (it was 2.1x slower in
+shared mode); 64x32 blits pay 35-47% for the per-operation
+decision. The border is then lost in about one frame in 1600
+beyond the frame in which it opens; `STDL_OverscanMisses()` says
+whether anything else stalls the CPU. Palette writes land in the
+blanking via a VBL callback. The ISRs themselves cost under 1% of
+an 8MHz frame each. A program driving the BLiTTER on its own must
+use non-hog mode or keep its hog blits short and clear of frame
+lines 30-36, 259-265 and 310-1.
 Full-page screen updates should start at the VBL
 (`STDL_WaitVBL`) so the copy stays ahead of the beam - the display
 starts 29 lines earlier with the top border open, and an unsynced

@@ -227,22 +227,26 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   miss can never glitch mid-frame; `STDL_OverscanMisses()` counts
   them - steady increments mean something stalls the CPU every
   frame. The classic culprit is a hog-mode BLiTTER blit (one port's
-  cutscenes missed 191 frames of one sequence exactly this way),
-  which is why STDL starts blits in non-hog (shared) mode while a
-  border is open - interrupts are taken between 64-cycle bus
-  slices, and the price is that BLiTTER operations take about
-  2.1x as long (measured on an STE: 100 full-screen fills 900ms
-  with no border, 1885ms with one). The ISRs themselves cost under
-  1% of an 8MHz frame each (measured 0.9% top, 1.0% bottom; a
-  CPU-bound loop ran 1.4% slower with one border open, 2.5% with
-  both). What shared mode does not buy is immunity: a blit still
-  in flight when the flick runs stretches its timing past the
-  window, and under continuous blitting that is most frames for
-  the bottom border and about a quarter for the top (measured:
-  180 and 43 misses over ~190 frames of back-to-back fills). Blit
-  in bursts from the VBL, keep the big ones off the last lines of
-  the picture, or accept a border that flickers while the BLiTTER
-  runs flat out. Claims MFP Timer A and Timer B's counter;
+  cutscenes missed 191 frames of one sequence exactly this way).
+  STDL's own blits cannot do it: while a border is open every
+  BLiTTER operation is placed from the beam's position - the video
+  counter in the picture, a Timer B stopwatch in the blanking - so
+  it ends a few lines before the next timing window, is split
+  around the window when it would not (the part before runs, the
+  policy waits out the window while the ISR runs, the rest
+  follows), and stays in hog mode. Measured on an emulated STE,
+  100 back-to-back full-screen fills: 940ms with no border, 1070ms
+  with the bottom open, 1110ms top, 1200ms both - 14-28% slower,
+  where shared mode was 2.1x (1885ms); 2000 64x32 blits 3600ms ->
+  4845-5300ms, the per-operation decision costing 35-47% on blits
+  that small, so batch sprite work where you can. The border is
+  then lost in about one frame in 1600 beyond the one in which it
+  opens (none on a plain ST). The ISRs themselves cost under 1% of
+  an 8MHz frame each (measured 0.9% top, 1.0% bottom; a CPU-bound
+  loop ran 1.4% slower with one border open, 2.5% with both). A
+  game driving the BLiTTER itself must use non-hog mode or keep
+  hog blits short and off frame lines 30-36, 259-265 and 310-1.
+  Claims MFP Timer A and Timer B's counter;
   `STDL_CloseTopBorder()` gives everything back. On a CRT the
   picture sits ~27 lines higher than stock - geometry, not a bug.
   `STDL_OpenBottomBorder()` is the same trade at the other end: 245
@@ -268,10 +272,10 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   Opening both combines automatically into 273 seamless rows, and
   closing one drops back to the other alone; every Open returns
   the height the screen ended up with, so repaint after any
-  transition. A BLiTTER operation in flight across the flick can
-  stretch it past its window - that frame shows a border, or its
-  first extra line at 60Hz timing - so keep large blits away from
-  the end of the picture, or VBL-sync them.
+  transition. STDL's blits are kept clear of the flicks by the
+  placement above; a program's own hog-mode BLiTTER operation in
+  flight across one stretches it past its window - that frame
+  shows a border, or its first extra line at 60Hz timing.
   Two things change under the hood while any border is open, both
   because display fetch starts at line 34 instead of 63: palette
   writes are staged and drained inside the blanking by a VBL

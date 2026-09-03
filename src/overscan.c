@@ -96,8 +96,11 @@
  *
  * Each ISR still guards against being late (a long interrupts-off
  * section, a keyboard byte's handler in progress, or a BLiTTER hog
- * blit - though blits started while a border is open run in shared
- * mode for exactly this reason, see stdl_no_hog in blitter.c).
+ * blit - though while a border is open blitter.c asks
+ * ovsc_blit_policy() below before every operation, which places
+ * it from the beam's position so that no hog blit of STDL's runs
+ * into an ISR's window or across the VBL; see there for the
+ * estimate, the reserve and the measured cost).
  * The top ISR reads the Shifter's video counter, and if fetching
  * has started the window is gone, so it skips the sync flip
  * entirely rather than glitch mid-frame, counts the miss and shows
@@ -198,6 +201,12 @@ uint8_t  stdl_ovsc_tbseen;   /* last stopwatch reading (diagnostic) */
 uint8_t  stdl_ovsc_tacnt;    /* the count the prefix armed Timer A
                               * with, which its ISR's lateness guard
                               * is relative to                    */
+uint8_t  stdl_ovsc_blit;     /* the machine has a BLiTTER: the ISRs
+                              * may pause it across a flick      */
+uint8_t  stdl_ovsc_bpaused;  /* ...and did, so resume it on exit  */
+uint8_t  stdl_ovsc_topok;    /* this frame's top border opened:    */
+uint8_t  stdl_ovsc_botok;    /* ...and bottom; the beam estimate   */
+                             /* reads them (each ISR sets its own) */
 uint8_t  stdl_ovsc_bhi;      /* screen base bytes the top ISR      */
 uint8_t  stdl_ovsc_bmid;     /* compares the video counter against */
 uint32_t stdl_ovsc_missed;   /* frames whose flip was skipped      */
@@ -241,6 +250,27 @@ static int      c16;             /* calibrated dbra turn, x16, or 0 */
 #define VEC_TA   (*(volatile uint32_t *)0x134UL)
 #define VEC_TB   (*(volatile uint32_t *)0x120UL)
 #define VEC_TC   (*(volatile uint32_t *)0x114UL)
+#define VC_HI    (*(volatile uint8_t *)0xFFFF8205UL)
+#define VC_MID   (*(volatile uint8_t *)0xFFFF8207UL)
+#define VC_LO    (*(volatile uint8_t *)0xFFFF8209UL)
+
+/* 16x16 multiply and 32/16 divide on the 68000's own instructions:
+ * promoted to int, gcc 4.6 calls __mulsi3 and __udivsi3 for these,
+ * 300-700 cycles a time, and the blit policy runs them per
+ * operation. The divide's quotient has to fit a word. */
+static __inline__ uint32_t ovsc_mulu(uint16_t a, uint16_t b)
+{
+    uint32_t r = a;
+
+    __asm__("mulu.w %1,%0" : "+d"(r) : "d"(b));
+    return r;
+}
+
+static __inline__ uint16_t ovsc_divu(uint32_t a, uint16_t b)
+{
+    __asm__("divu.w %1,%0" : "+d"(a) : "d"(b));
+    return (uint16_t)a;
+}
 
 __asm__(
 "    .text\n"
@@ -259,15 +289,20 @@ __asm__(
  * late: each late tick is 1.28 of Timer A's, so the count drops by
  * the lateness plus a quarter. Readings out of range (the previous
  * frame skipped, the first frame after opening) count as on time.
- * Both timers are then stopped and Timer A restarted - with the
- * mask at 7 from the reading to the restart, or Timer C could
- * still slip in between them and delay the restart by its whole
- * handler, uncompensated; the VBL's own level 4 is put back for
- * TOS's handler. */
+ * Both timers are then stopped, Timer A restarted, and Timer B set
+ * running as a stopwatch again, so the blit policy can place the
+ * beam through the blank before the picture. That restart is
+ * compensated the same way: it starts from 253 less the lateness,
+ * which reads as a stopwatch started at the frame's first line
+ * whether this prefix ran on time or two lines late (mask at 7
+ * from the reading to the restart, or Timer C could still slip in
+ * between them and delay the restart by its whole handler,
+ * uncompensated); the VBL's own level 4 is put back for TOS's
+ * handler. */
 "_stdl_ovsc_vbl_top:\n"
 "    move.w #0x2700,%sr\n"
 "    move.b #2,0xffff820a.w\n"
-"    movem.l %d0-%d1,-(%sp)\n"
+"    movem.l %d0-%d2,-(%sp)\n"
 "    move.b 0xfffffa21.w,%d1\n"
 "    move.b %d1,_stdl_ovsc_tbseen\n"
 "    move.b _stdl_ovsc_tbref,%d0\n"
@@ -276,7 +311,8 @@ __asm__(
 "    cmp.b  #12,%d0\n"
 "    bls.s  2f\n"
 "1:  moveq  #0,%d0\n"
-"2:  move.b %d0,%d1\n"
+"2:  move.b %d0,%d2\n"
+"    move.b %d0,%d1\n"
 "    lsr.b  #2,%d1\n"
 "    add.b  %d1,%d0\n"
 "    moveq  #100,%d1\n"
@@ -286,7 +322,11 @@ __asm__(
 "    clr.b  0xfffffa1b.w\n"
 "    move.b %d1,0xfffffa1f.w\n"
 "    move.b #4,0xfffffa19.w\n"
-"    movem.l (%sp)+,%d0-%d1\n"
+"    not.b  %d2\n"
+"    subq.b #2,%d2\n"
+"    move.b %d2,0xfffffa21.w\n"
+"    move.b #5,0xfffffa1b.w\n"
+"    movem.l (%sp)+,%d0-%d2\n"
 "    move.w #0x2400,%sr\n"
 "    move.l _stdl_ovsc_old70,-(%sp)\n"
 "    rts\n"
@@ -326,6 +366,7 @@ __asm__(
 "    .even\n"
 "_stdl_ovsc_ta:\n"
 "    movem.l %d0-%d2/%a0,-(%sp)\n"
+"    bsr    stdl_ovsc_bpause\n"
 "    move.b 0xfffffa1f.w,%d0\n"
 "    clr.b  0xfffffa19.w\n"
 "    move.b _stdl_ovsc_tacnt,%d1\n"
@@ -348,6 +389,7 @@ __asm__(
 "    bsr    stdl_ovsc_wait_de\n"
 "    bmi.s  ovsc_ta_fail\n"
 "    move.b #2,0xffff820a.w\n"
+"    st     _stdl_ovsc_topok\n"
 "    clr.b  0xfffffa1b.w\n"
 "    move.b _stdl_ovsc_tbarm,%d1\n"
 "    beq.s  1f\n"
@@ -357,6 +399,7 @@ __asm__(
 "1:  move.b #255,(%a0)\n"
 "    move.b #5,0xfffffa1b.w\n"
 "ovsc_ta_out:\n"
+"    bsr    stdl_ovsc_bresume\n"
 "    move.b #0xDF,0xfffffa0f.w\n"
 "    movem.l (%sp)+,%d0-%d2/%a0\n"
 "    rte\n"
@@ -364,12 +407,15 @@ __asm__(
 "    move.b #2,0xffff820a.w\n"
 "ovsc_ta_late:\n"
 "    addq.l #1,_stdl_ovsc_missed\n"
+"    clr.b  _stdl_ovsc_topok\n"
 "    clr.b  0xfffffa1b.w\n"
-"    clr.b  0xfffffa21.w\n"
-"    tst.b  _stdl_ovsc_tbarm\n"
-"    beq.s  ovsc_ta_out\n"
+"    move.b _stdl_ovsc_tbarm,%d1\n"
+"    beq.s  1f\n"
 "    move.b #198,0xfffffa21.w\n"
 "    move.b #8,0xfffffa1b.w\n"
+"    bra.s  ovsc_ta_out\n"
+"1:  move.b #255,0xfffffa21.w\n"
+"    move.b #5,0xfffffa1b.w\n"
 "    bra.s  ovsc_ta_out\n"
 "\n"
 
@@ -438,6 +484,7 @@ __asm__(
 "    .even\n"
 "_stdl_ovsc_tb:\n"
 "    movem.l %d0-%d4/%a0-%a3,-(%sp)\n"
+"    bsr    stdl_ovsc_bpause\n"
 "    lea    0xfffffa21.w,%a0\n"
 "    lea    0xffff8209.w,%a1\n"
 "    move.b _stdl_ovsc_l262lo,%d0\n"
@@ -503,7 +550,9 @@ __asm__(
 "    move.w _stdl_ovsc_postn,%d2\n"
 "    bsr    stdl_ovsc_wait_de_n\n"
 "    bmi.s  ovsc_tb_late\n"
+"    st     _stdl_ovsc_botok\n"
 "ovsc_tb_out:\n"
+"    bsr    stdl_ovsc_bresume\n"
 "    clr.b  0xfffffa1b.w\n"
 "    move.b #255,0xfffffa21.w\n"
 "    move.b #5,0xfffffa1b.w\n"
@@ -512,9 +561,36 @@ __asm__(
 "    rte\n"
 "ovsc_tb_late:\n"
 "    addq.l #1,_stdl_ovsc_missed\n"
+"    clr.b  _stdl_ovsc_botok\n"
 "    bra.s  ovsc_tb_out\n"
 "\n"
 
+/* Pause a shared-mode BLiTTER operation for the length of a flick,
+ * and resume it afterwards. Only on a machine that has one (the
+ * registers bus-error otherwise). Writing 0 to the busy bit stops
+ * the transfer where it is without ending it - busy still reads 1,
+ * so the driver's poll keeps waiting - and writing 1 continues it.
+ * Resume only what was running, and only while its line count says
+ * it has not finished: a finished blit restarted with a count of
+ * zero runs 65536 lines. Uses d1 and the flags. */
+"stdl_ovsc_bpause:\n"
+"    tst.b  _stdl_ovsc_blit\n"
+"    beq.s  1f\n"
+"    move.b 0xffff8a3c.w,%d1\n"
+"    bpl.s  1f\n"
+"    bclr   #7,0xffff8a3c.w\n"
+"    st     _stdl_ovsc_bpaused\n"
+"1:  rts\n"
+"\n"
+"stdl_ovsc_bresume:\n"
+"    tst.b  _stdl_ovsc_bpaused\n"
+"    beq.s  1f\n"
+"    clr.b  _stdl_ovsc_bpaused\n"
+"    tst.w  0xffff8a38.w\n"
+"    beq.s  1f\n"
+"    bset   #7,0xffff8a3c.w\n"
+"1:  rts\n"
+"\n"
 /* Wait for Timer B to tick: the end of the next displayed line.
  * Bounded (about eight lines, see stdl_ovsc_waitn) so a missed
  * window can never hang the machine or hold off the VBL; returns N
@@ -707,6 +783,269 @@ static int ovsc_counter_live(int c)
     return live >= 2;
 }
 
+/*
+ * Where is the beam? A frame line, 0..312, good to about a line.
+ * During the picture the video counter says: it walks the tall
+ * buffer a row per line, and parks at the next row's start between
+ * lines. Parked at the buffer's start or end it says only "in the
+ * blank", and Timer B fills that in: while a border is open it runs
+ * as a stopwatch (delay mode, 209 cycles a tick, 0.408 lines) from
+ * the point that ended the picture - restarted at the VBL prefix in
+ * the top modes, so the blank splits at the VBL into an "after"
+ * segment counted from the last ISR and a "before" one counted
+ * from the prefix, told apart by the reading (a fresh restart reads
+ * above 160, the after-picture segment never does). Bottom-only
+ * mode keeps Timer B counting lines instead, and there the blank
+ * is answered with its worst case; the only window is at the end
+ * of the picture, so that costs nothing.
+ */
+/* the ISR windows, frame lines, wrapping at the frame */
+#define OVSC_WIN_TOP_S   30
+#define OVSC_WIN_TOP_E   36
+#define OVSC_WIN_BOT_S   259
+#define OVSC_WIN_BOT_E   265
+#define OVSC_WIN_VBL_S   310
+#define OVSC_WIN_VBL_E   1
+#define OVSC_FRAME_LINES 313
+/* lines kept clear before a window: the estimate's grain, two to
+ * three lines from the decision to the blit's first bus cycle (the
+ * driver's register writes, the poll, the next plane's call) and a
+ * Timer C tick landing in between, over two lines on its heavy
+ * beat. Measured in the emulator under continuous full-screen
+ * blitting: pieces placed with two lines to spare started inside
+ * the window once every few hundred frames, four lines left a few
+ * frames in two thousand, six left the opening frame alone. Each
+ * line costs the blitter one idle line per window it is asked
+ * across, about 2% of fill throughput between four and six. */
+#define OVSC_RESERVE     6
+
+/* This frame's picture is what its borders made it: a border that
+ * failed to open leaves the counter parked at row 200 or 245, and
+ * read against the open layout that is a line in the picture when
+ * the beam is anywhere in the blank. */
+static __inline__ int pic_first(void)
+{
+    return ((mode & MODE_TOP) && stdl_ovsc_topok) ? 34 : 63;
+}
+
+static __inline__ uintptr_t pic_end(void)
+{
+    int rows = 200;
+
+    if ((mode & MODE_TOP) && stdl_ovsc_topok) {
+        rows = 229;
+    }
+    if ((mode & MODE_BOT) && stdl_ovsc_botok) {
+        rows += 45;
+    }
+    return (uintptr_t)buf + ((uintptr_t)rows << 7) + ((uintptr_t)rows << 5);
+}
+
+/* the counter address at which the reserve before the next window
+ * begins, for a beam at `addr` in the picture: the bottom window
+ * while the beam is above it, else the VBL's (top modes) or the
+ * frame's end (bottom-only: nothing to protect after the bottom) */
+static uintptr_t pic_win_addr(uintptr_t addr)
+{
+    /* rows from row 0 to the reserve's start, times 160, for a
+     * picture starting at line 34 or 63 */
+    static const uint16_t bot_open = (OVSC_WIN_BOT_S - OVSC_RESERVE - 34)
+                                     * STDL_SCREEN_STRIDE;
+    static const uint16_t bot_closed = (OVSC_WIN_BOT_S - OVSC_RESERVE - 63)
+                                       * STDL_SCREEN_STRIDE;
+    static const uint16_t vbl_open = (OVSC_WIN_VBL_S - OVSC_RESERVE - 34)
+                                     * STDL_SCREEN_STRIDE;
+    static const uint16_t vbl_closed = (OVSC_WIN_VBL_S - OVSC_RESERVE - 63)
+                                       * STDL_SCREEN_STRIDE;
+    const int open = pic_first() == 34;
+    uintptr_t w;
+
+    if (mode & MODE_BOT) {
+        w = (uintptr_t)buf + (open ? bot_open : bot_closed);
+        if (addr < w) {
+            return w;
+        }
+        /* in the reserve or the window itself: nothing fits, the
+         * slow path waits it out */
+        if (addr < w + (OVSC_WIN_BOT_E - OVSC_WIN_BOT_S + 1 + OVSC_RESERVE)
+                       * STDL_SCREEN_STRIDE) {
+            return 0;
+        }
+        if (!(mode & MODE_TOP)) {
+            return (uintptr_t)buf + (OVSC_FRAME_LINES - 63)
+                                    * STDL_SCREEN_STRIDE;
+        }
+    }
+    return (uintptr_t)buf + (open ? vbl_open : vbl_closed);
+}
+
+static int ovsc_beam(void)
+{
+    uintptr_t addr, end;
+    uint32_t off;
+    int tb, r, first;
+
+    first = pic_first();
+    end = pic_end();
+    addr = ((uintptr_t)VC_HI << 16) | ((uintptr_t)VC_MID << 8) | VC_LO;
+    if (addr > (uintptr_t)buf && addr < end) {
+        /* the row: a 32-bit dividend for divu.w, whose quotient
+         * comes back in the low word */
+        off = (uint32_t)(addr - (uintptr_t)buf);
+        __asm__("divu.w #160,%0" : "+d"(off));
+        r = first + (int)(off & 0xFFFFU);
+        return r;
+    }
+    tb = MFP_TBDR;
+    if (!(mode & MODE_TOP)) {
+        r = (addr == (uintptr_t)buf) ? 62 : 312;
+        return r;
+    }
+    if (addr == (uintptr_t)buf) {
+        /* before the picture: restarted at the prefix, or not yet */
+        r = (tb >= 160) ? (int)(ovsc_mulu((uint16_t)(255 - tb), 209) >> 9) : 312;
+        return r;
+    }
+    /* after the picture: combined mode counts from the bottom
+     * ISR at ~263.9 whether or not it opened; top-only from the
+     * top ISR at ~35 with two wraps taken by line 263 (the reading
+     * is 206 there). A failed top restarts it too, from the fail
+     * itself, up to eight lines later: the estimate then reads late
+     * by as much, which errs towards the window, never past it */
+    if (mode & MODE_BOT) {
+        r = 264 + (int)(ovsc_mulu((uint16_t)(255 - tb), 209) >> 9);
+        return r;
+    }
+    r = (tb <= 206) ? 263 + (int)(ovsc_mulu((uint16_t)(206 - tb), 209) >> 9) : 263;
+    return r;
+}
+
+/*
+ * The blitter driver's question: how many lines of this operation
+ * may run now in hog mode? The ISRs own the CPU on frame lines
+ * 30-36 (top) and 259-265 (bottom), padded for the beam estimate,
+ * and in the top modes the VBL prefix must run near line 0 (310 to
+ * 1 is kept clear); a hog blit running into any of them makes the
+ * interrupt late and costs the frame. The answer is what ends a line before
+ * the next window - all of it, usually - and the driver runs that,
+ * then asks again for the rest. Asked at or just before a window,
+ * the policy waits for it to pass (six lines at most, the ISR
+ * running meanwhile) and answers from beyond it. Zero means the
+ * operation cannot be placed at all and runs in shared mode, with
+ * the ISRs pausing it across their flick.
+ */
+
+/* lines from `line` to the next window start, and that window's
+ * end; the windows the mode has, wrapping at the frame */
+static int ovsc_next_window(int line, int *end)
+{
+    int best = OVSC_FRAME_LINES, e = 0, d;
+
+    if (line < 0) {
+        line = 0;
+    } else if (line >= OVSC_FRAME_LINES) {
+        line = OVSC_FRAME_LINES - 1;
+    }
+    if (mode & MODE_TOP) {
+        d = OVSC_WIN_TOP_S - line;
+        if (line >= OVSC_WIN_TOP_S && line <= OVSC_WIN_TOP_E) {
+            d = 0;
+        } else if (d < 0) {
+            d += OVSC_FRAME_LINES;
+        }
+        if (d < best) {
+            best = d;
+            e = OVSC_WIN_TOP_E;
+        }
+    }
+    if (mode & MODE_BOT) {
+        d = OVSC_WIN_BOT_S - line;
+        if (line >= OVSC_WIN_BOT_S && line <= OVSC_WIN_BOT_E) {
+            d = 0;
+        } else if (d < 0) {
+            d += OVSC_FRAME_LINES;
+        }
+        if (d < best) {
+            best = d;
+            e = OVSC_WIN_BOT_E;
+        }
+    }
+    if (mode & MODE_TOP) {
+        /* the VBL too: its prefix arms Timer A, and a hog blit
+         * across the frame boundary delays it by the blit's whole
+         * remaining length, past what the stopwatch can put back */
+        d = OVSC_WIN_VBL_S - line;
+        if (line >= OVSC_WIN_VBL_S || line <= OVSC_WIN_VBL_E) {
+            d = 0;
+        }
+        if (d < best) {
+            best = d;
+            e = OVSC_WIN_VBL_E;
+        }
+    }
+    *end = e;
+    return best;
+}
+
+
+static uint16_t ovsc_blit_policy(uint16_t nlines, uint32_t cpl)
+{
+    uintptr_t addr, w;
+    int32_t room;
+    uint32_t cost;
+    int line, gap, end, i;
+    uint16_t fit;
+
+    /* Fast path, the common case: the beam is in the picture, so
+     * the video counter places it exactly, and the whole operation
+     * ends the reserve short of the next window. Bytes of picture
+     * left before the window against the operation's bus time in
+     * lines: (room / 160) * 512 >= nlines * cpl, cross-multiplied
+     * so that no divide is needed - two 16x16 multiplies and shifts. */
+    addr = ((uintptr_t)VC_HI << 16) | ((uintptr_t)VC_MID << 8) | VC_LO;
+    if (addr > (uintptr_t)buf && addr < pic_end()) {
+        w = pic_win_addr(addr);
+        room = (int32_t)(w - addr);
+        if (w != 0 && room > 0) {
+            cost = ovsc_mulu(nlines, (uint16_t)cpl);
+            if ((uint32_t)room << 9 >= (cost << 7) + (cost << 5)) {
+                return nlines;
+            }
+        }
+    }
+    line = ovsc_beam();
+    gap = ovsc_next_window(line, &end);
+    if (gap > OVSC_RESERVE) {
+        /* what ends before the window with the reserve to spare,
+         * in the estimate's own grain of a line */
+        fit = ovsc_divu((uint32_t)(gap - OVSC_RESERVE) << 9,
+                        (uint16_t)cpl);
+        if (fit >= nlines) {
+            return nlines;
+        }
+        if (fit != 0) {
+            return fit;
+        }
+    }
+    /* at or just before a window: let it pass (it lasts six lines
+     * at most, the ISR runs meanwhile), then place the rest */
+    for (i = 0; i < 400; i++) {
+        line = ovsc_beam();
+        gap = ovsc_next_window(line, &end);
+        if (gap > OVSC_RESERVE) {
+            break;
+        }
+    }
+    if (gap <= OVSC_RESERVE) {
+        return 0;                           /* shared, and paused */
+    }
+    fit = ovsc_divu((uint32_t)(gap - OVSC_RESERVE) << 9, (uint16_t)cpl);
+    if (fit >= nlines) {
+        return nlines;
+    }
+    return fit;                             /* 0 falls back to shared */
+}
+
 /* Hardware-only teardown, shared with the terminate path: vectors,
  * timers and sync rate back, both timer bits released. No GEMDOS,
  * no heap - release_hardware() repoints the screen afterwards. */
@@ -731,7 +1070,7 @@ static void ovsc_release(void)
     SYNC_REG = old_sync;
     stdl_int_restore(sr);
     mode = 0;
-    stdl_no_hog = 0;
+    stdl_blit_policy = NULL;
     stdl_pal_apply_hook = NULL;
     stdl_shutdown_overscan = NULL;
 }
@@ -788,7 +1127,11 @@ static void ovsc_program(int m)
     stdl_int_restore(sr);
 
     mode = m;
-    stdl_no_hog = 1;
+    stdl_ovsc_topok = 0;
+    stdl_ovsc_botok = 0;
+    stdl_ovsc_blit = (uint8_t)stdl.mach.has_blitter;
+    stdl_ovsc_bpaused = 0;
+    stdl_blit_policy = ovsc_blit_policy;
     stdl_shutdown_overscan = ovsc_release;
 }
 

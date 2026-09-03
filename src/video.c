@@ -18,7 +18,7 @@ void (*stdl_shutdown_audio)(void);
 void (*stdl_shutdown_music)(void);
 void (*stdl_shutdown_vbl)(void);
 void (*stdl_shutdown_overscan)(void);
-uint8_t stdl_no_hog;
+uint16_t (*stdl_blit_policy)(uint16_t nlines, uint32_t cpl);
 void (*stdl_pal_apply_hook)(void);
 
 static STDL_Palette screen_palette;

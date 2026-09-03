@@ -50,11 +50,12 @@ the other end (245 lines, seamless: the flick that fools the GLUE is
 placed from the Shifter's video counter with loops calibrated against
 real scanlines when the border opens, so it lands on any CPU speed),
 and opening both combines them automatically into a 273-row screen
-filling the display edge to edge. While any border is open, BLiTTER
-operations switch to non-hog mode by themselves so a long blit cannot
-stall the CPU past the border's timing window, and palette writes are
-staged to the vertical blanking so they can never flash mid-frame. See
-`examples/overscan.c`.
+filling the display edge to edge. While any border is open, each
+BLiTTER operation is placed from the beam's position so it ends before
+the border's timing window, or is split around it, so a blit never
+holds the CPU off the border and throughput stays within 14-28% of
+the no-border figure; palette writes are staged to the vertical
+blanking so they can never flash mid-frame. See `examples/overscan.c`.
 
 Anything that cannot be done cheaply in planar has been removed rather than
 emulated; see [docs/limits.md](docs/limits.md).

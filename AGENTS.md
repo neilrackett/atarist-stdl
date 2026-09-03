@@ -117,6 +117,25 @@ warnings** with the Makefile's `-Wall -Wextra`.
   verified with `--machine st` or `ste`, and real 16MHz hardware
   is expected to take the counter path. `tests/hatari/ovprobe.c`
   prints which path a run took and the calibration behind it.
+- **A blit placed "before the window" starts lines later than the
+  decision.** overscan.c's blit policy decides from the beam's
+  position, but the decision-to-first-bus-cycle latency (register
+  writes, the completion poll, the next plane's call) is two to
+  three scanlines, and a Timer C tick can land in between; pieces
+  placed with two lines to spare started inside the ISR window once
+  every few hundred frames, and a wrong estimate is self-sustaining
+  (a missed border parks the video counter at row 200, which read
+  against the open layout is a line in the picture while the beam
+  is in the blank - so the estimator has to know which borders
+  opened this frame). Measure that latency with a write to a traced
+  MFP register (`--trace mfp_write` shows the position) rather than
+  inferring it, and keep the reserve a measured number. Also: the
+  blitter-trace lines with a ROM `pc` are EmuTOS's own console
+  blits, not the library's.
+- **Hatari's GEMDOS drive maps names to 8.3.** A scratch binary
+  named `BLITCOST2.TOS` beside `BLITCOST.TOS` silently runs
+  `BLITCOST.TOS`; four runs of "the fix" measured the old binary.
+  Keep test program stems to eight characters.
 - **After touching blit/fill paths**: run `dist/BLITCHK.TOS` - it
   randomises fills/blits and compares the CPU and BLiTTER paths
   byte-for-byte on target. Both paths must stay identical;

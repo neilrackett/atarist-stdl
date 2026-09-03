@@ -35,7 +35,7 @@
 extern uint16_t stdl_ovsc_n1[16];
 extern uint16_t stdl_ovsc_n2, stdl_ovsc_n2t, stdl_ovsc_postn;
 extern uint8_t  stdl_ovsc_tick;
-extern uint8_t  stdl_ovsc_l262lo, stdl_ovsc_l262mid;
+extern uint8_t  stdl_ovsc_l262lo, stdl_ovsc_l262mid, stdl_ovsc_tbseen;
 
 static void paint(STDL_Surface *s)
 {
@@ -64,12 +64,13 @@ int main(int argc, char *argv[])
 {
     STDL_Surface *screen;
     FILE *f;
-    int i, h, top = 0, zero = 0, tick = 0;
+    int i, h, top = 0, zero = 0, tick = 0, toponly = 0;
     uint32_t frames, m_open, m_paint;
 
     (void)argc; (void)argv;
     if ((f = fopen("OVTOP.FLG", "r")) != NULL) { top = 1; fclose(f); }
     if ((f = fopen("OVZERO.FLG", "r")) != NULL) { zero = 1; fclose(f); }
+    if ((f = fopen("OVTOPONLY.FLG", "r")) != NULL) { toponly = 1; top = 1; fclose(f); }
     if ((f = fopen("OVTICK.FLG", "r")) != NULL) { tick = 1; fclose(f); }
 
     if (STDL_Init(STDL_INIT_VIDEO) < 0) {
@@ -83,7 +84,7 @@ int main(int argc, char *argv[])
     if (top) {
         STDL_OpenTopBorder();
     }
-    h = STDL_OpenBottomBorder();
+    h = toponly ? STDL_GetVideoSurface()->h : STDL_OpenBottomBorder();
     fprintf(stderr, "OVPROBE h=%d err=%s\n", h, h ? "" : STDL_GetError());
     fprintf(stderr, "OVPROBE l262=%02x%02x tick=%u n2=%u n2t=%u postn=%u n1=",
             stdl_ovsc_l262mid, stdl_ovsc_l262lo, stdl_ovsc_tick,
@@ -111,9 +112,9 @@ int main(int argc, char *argv[])
         }
         STDL_WaitVBL();
     }
-    fprintf(stderr, "OVPROBE END misses open=%lu paint=%lu run=%lu\n",
+    fprintf(stderr, "OVPROBE END misses open=%lu paint=%lu run=%lu tbseen=%u\n",
             (unsigned long)m_open, (unsigned long)m_paint,
-            (unsigned long)STDL_OverscanMisses());
+            (unsigned long)STDL_OverscanMisses(), stdl_ovsc_tbseen);
     STDL_CloseBottomBorder();
     STDL_CloseTopBorder();
     STDL_Quit();

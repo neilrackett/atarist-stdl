@@ -210,10 +210,10 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   allocation, no drawing, no YM writes while STDL owns the chip) is
   in `include/stdl/stdl_vbl.h`.
 - Taller than 200 lines: `STDL_OpenTopBorder()` removes the top
-  border on any 50Hz ST - 227 visible lines instead of 200, added
+  border on any 50Hz ST - 228 visible lines instead of 200, added
   above the normal picture. The screen surface is updated in place
   (pixels, h, clip), so drawing code that reads `screen->h` needs no
-  changes; check the return (227, or 0 under STDL_DOUBLEBUF or on
+  changes; check the return (228, or 0 under STDL_DOUBLEBUF or on
   TT/Falcon) and keep the 200-line mapping as the fallback. A 60Hz
   base screen is switched to 50Hz while a border is open and
   restored on close - opening a border is an active choice and it
@@ -244,11 +244,17 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   (one frame with interrupts masked, once per process). Measured
   in Hatari: the restore lands within ~8 cycles of the window's
   centre on a plain ST, an STE and a 16MHz Mega STE, and the
-  border held for 1500 consecutive frames with no miss. Costs an
-  interrupt plus ~5 lines of polling per frame, ~1.7% of an 8MHz
-  frame. Two lines of that are grace for TOS's 200Hz handler, which
-  holds the interrupt off for over two lines under EmuTOS.
-  Opening both combines automatically into 272 seamless rows, and
+  border held for 1500 consecutive frames with no miss. Each
+  border costs an interrupt plus two to three lines of polling per
+  frame, under 1% of an 8MHz frame. TOS's 200Hz Timer C handler would hold
+  either interrupt off for over two lines at a time (EmuTOS
+  measured at ~1140 cycles), so while a border is open its vector
+  carries a prefix that lowers the CPU mask to 5 inside the
+  handler, letting the border timers nest into it instead of
+  firing lines early and spinning; the VBL, which that cannot
+  help, is read against a Timer B stopwatch so a late VBL still
+  arms Timer A on time.
+  Opening both combines automatically into 273 seamless rows, and
   closing one drops back to the other alone; every Open returns
   the height the screen ended up with, so repaint after any
   transition. A BLiTTER operation in flight across the flick can

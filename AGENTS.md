@@ -95,9 +95,14 @@ warnings** with the Makefile's `-Wall -Wextra`.
   for over two scanlines at a time (EmuTOS measured at ~1140
   cycles), drifting across any fixed frame position by 165 cycles a
   frame - so an ISR that fires on the line it needs loses a run of
-  consecutive frames every twenty seconds. The bottom-border ISR
-  fires two lines early and finds its line from the video counter;
-  the top one carries four lines of grace on Timer A. And a poll
+  consecutive frames every twenty seconds. overscan.c answers it
+  with a prefix on the Timer C vector that lowers the CPU mask to 5
+  inside TOS's handler, so the border timers (MFP channels 13 and
+  8) nest into it; the VBL (level 4) still cannot, so the ISR that
+  ends a frame leaves Timer B running as a stopwatch and the VBL
+  prefix shortens Timer A's count by however late it finds itself.
+  Anything new that must land on a line wants the same two
+  measures, or lines of grace and a poll. And a poll
   that waits for a Display Enable event which is not coming (the
   border failed to open, so there are none until the next frame)
   must give up within a few lines: an 8ms wait at MFP priority
@@ -236,8 +241,11 @@ warnings** with the Makefile's `-Wall -Wextra`.
   removed by `make clean`, which is now `rm -rf obj`.
 - Cooperative model: no interrupts except the VBL sound tick
   (ym.c), the public `STDL_AddVBL` callbacks (vbl.c) and the IKBD
-  handler (event.c). Services (audio refill, compat timers, cursor)
-  run from the pump and the native delays.
+  handler (event.c) - plus, while a border is open, overscan.c's
+  timer ISRs and its register-free prefixes on the VBL and Timer C
+  vectors (the latter only lowers the CPU mask to 5 inside TOS's
+  handler). Services (audio refill, compat timers, cursor) run from
+  the pump and the native delays.
 
 ## 68000 / gcc 4.6.4 performance notes
 

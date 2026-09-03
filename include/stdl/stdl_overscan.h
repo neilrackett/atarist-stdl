@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: LGPL-2.1-or-later
  *
- * Border overscan: 227, 245 or 272 visible lines instead of 200.
+ * Border overscan: 228, 245 or 273 visible lines instead of 200.
  */
 
 #ifndef STDL_OVERSCAN_H
@@ -14,21 +14,23 @@ extern "C" {
 #endif
 
 /*
- * Open the top border. The picture grows upward from 200 to 227
+ * Open the top border. The picture grows upward from 200 to 228
  * visible lines; the bottom and side borders are untouched. Works on
  * any 50Hz colour screen - STF, STE, Mega STE - with no cycle-exact
  * code: one Timer A interrupt per frame flips the sync rate inside
  * the GLUE's nine-line top-border test window, and Timer B (silently
- * counting Display Enable events) pins the flip back two lines
- * later. Costs about 0.2% of an 8MHz frame.
+ * counting Display Enable events) pins the flip back once the first
+ * line has been fetched. Costs under 1% of an 8MHz frame, two to
+ * three lines of polling.
  *
  * On success the screen surface is updated in place: pixels points
- * at the first visible line, h and clip.h become 227, the stride
- * stays 160. All 227 lines are seamless; the display fetches from a
- * dedicated buffer whose two hidden lead rows and the tail beyond
- * line 226 read as colour 0, i.e. border.
+ * at the first visible line, h and clip.h become 228, the stride
+ * stays 160. All 228 lines are seamless; the display fetches from a
+ * dedicated buffer whose one hidden lead row (the line fetched at
+ * 60Hz timing while the rate is being put back) and the tail beyond
+ * line 228 read as colour 0, i.e. border.
  *
- * Returns the new visible height (227), or 0 with STDL_GetError()
+ * Returns the new visible height (228), or 0 with STDL_GetError()
  * set when unavailable: no video mode yet, or STDL_DOUBLEBUF, which
  * this version does not combine with. The tricks run on a 50Hz
  * frame, so a 60Hz base screen is switched to 50Hz while a border
@@ -36,7 +38,11 @@ extern "C" {
  * active choice, and it always takes effect on ST-class hardware.
  *
  * Uses MFP Timer A (vector, IERA/IMRA bit 5) and Timer B's counter
- * with its interrupt masked; both are returned by Close. A frame
+ * with its interrupt masked, and puts a prefix on TOS's Timer C
+ * vector that lowers the CPU mask inside the 200Hz handler so the
+ * border timers can interrupt it (it runs for over two scanlines at
+ * a time, and without that the ISRs would have to fire lines early
+ * and spin); all of it is returned by Close. A frame
  * that misses its timing window (a long interrupts-off section)
  * shows one frame with a normal top border and recovers by itself;
  * while a border is open STDL starts BLiTTER operations in non-hog
@@ -67,15 +73,15 @@ void STDL_CloseTopBorder(void);
  * an emulator's 16MHz mode) the ISR times from Timer B instead;
  * the check is part of the calibration.
  *
- * Costs an interrupt and about five lines of polling per frame,
- * ~1.7% of an 8MHz frame, most of it waiting on the beam. Same
+ * Costs an interrupt and two to three lines of polling per frame,
+ * under 1% of an 8MHz frame, most of it waiting on the beam. Same
  * requirements and behaviour as the top border otherwise (no
  * STDL_DOUBLEBUF, ST-class machine; the screen surface is updated
  * in place). Returns the resulting surface height, or 0 with
  * STDL_GetError() set.
  *
  * The two variants combine automatically: opening the second while
- * the first is open switches to the combined mode (272 seamless
+ * the first is open switches to the combined mode (273 seamless
  * surface rows), and closing one of the pair drops back to the
  * other alone. Each Open returns the height the screen ended up
  * with, and closing reshapes the surface the same way, so redraw
@@ -97,11 +103,11 @@ void STDL_CloseBottomBorder(void);
  * where the frame is timing-critical, or VBL-sync them. */
 uint32_t STDL_OverscanMisses(void);
 
-/* Surface heights while a border is open (27, 45 or 72 lines over
+/* Surface heights while a border is open (28, 45 or 73 lines over
  * the normal 200). */
-#define STDL_OVERSCAN_TOP_H       227
+#define STDL_OVERSCAN_TOP_H       228
 #define STDL_OVERSCAN_BOTTOM_H    245
-#define STDL_OVERSCAN_BOTH_H      272
+#define STDL_OVERSCAN_BOTH_H      273
 
 #ifdef __cplusplus
 }

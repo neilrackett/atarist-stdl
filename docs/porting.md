@@ -106,7 +106,7 @@ time, not at runtime.
 
 A game designed for 224 or 240 lines has three ways onto the ST's
 200: drop lines (artefacts), crop (hides play area), or open the
-top border with `STDL_OpenTopBorder()` - 227 native lines on any
+top border with `STDL_OpenTopBorder()` - 228 native lines on any
 50Hz machine for one timer interrupt per frame; a 60Hz base screen
 is switched to 50Hz while a border is open and restored on close.
 It fails cleanly (returns 0) only where the hardware has no GLUE
@@ -115,11 +115,16 @@ fallback and choose at init. `examples/overscan.c`
 is the pattern, including the toggle for A/B comparison.
 `STDL_OpenBottomBorder()` gains 45 lines at the other end instead,
 seamlessly: content goes at rows 200..244 with nothing to align
-around. It costs an interrupt and about five lines of polling per
-frame (~1.7% of an 8MHz frame) and, the first time it opens, one
-frame with interrupts masked to calibrate its delay loops against
-the machine's own scanlines - the 200Hz tick loses a few counts,
-once. Opening both borders combines them automatically (272 rows,
+around. Each border costs an interrupt and two to three lines of
+polling per frame (under 1% of an 8MHz frame), and the bottom, the
+first time it opens, one frame with interrupts masked to calibrate
+its delay loops against the machine's own scanlines - the 200Hz
+tick loses a few counts, once. While any border is open TOS's
+200Hz Timer C vector carries a prefix that lowers the CPU mask
+inside the handler so the border timers can interrupt it; it runs
+for over two scanlines at a time, and without that the ISRs would
+have to fire lines early and spin. Opening both borders combines
+them automatically (273 rows,
 edge to edge); closing one falls back to the other alone. While
 any border is open, BLiTTER blits run in non-hog mode (interrupts
 taken between bus slices) so they cannot stall the CPU past the

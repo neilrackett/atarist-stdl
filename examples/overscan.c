@@ -2,15 +2,15 @@
  * Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: CC0-1.0
  *
- * Border overscan demo: 227, 245 or 272 visible lines on any 50Hz
+ * Border overscan demo: 228, 245 or 273 visible lines on any 50Hz
  * ST.
  *
  * The intended pattern: set the normal video mode, then ask for
  * borders and use whatever height comes back. The screen surface
  * is updated in place, so all drawing code just reads screen->h -
- * the same loop paints 200, 227, 245 or 272 lines. T toggles the
+ * the same loop paints 200, 228, 245 or 273 lines. T toggles the
  * top border, B the bottom one; opening both combines them
- * automatically (272 rows) and closing one drops back to the other
+ * automatically (273 rows) and closing one drops back to the other
  * alone. SPACE closes everything. The ruler makes the extra lines
  * countable, the one-pixel frame proves the first and last lines
  * are really displayed, and the chequered band across the old
@@ -39,14 +39,14 @@ static void paint(STDL_Surface *screen)
 
     /* where the stock 200-line screen's top edge sits when the top
      * border is open: everything above is ex-border territory */
-    if (screen->h == 227 || screen->h == 272) {
-        r.x = 0; r.y = 27;
+    if (screen->h == 228 || screen->h == 273) {
+        r.x = 0; r.y = 28;
         r.w = (uint16_t)screen->w; r.h = 2;
         STDL_FillRect(screen, &r, 12);
     }
     /* a chequer across the old picture's last line and its
      * neighbours: every row of it must line up with the next */
-    if (screen->h == 245 || screen->h == 272) {
+    if (screen->h == 245 || screen->h == 273) {
         int x, band = (screen->h == 245) ? 198 : 225;
         for (y = band; y < band + 5; y++) {
             for (x = 0; x < screen->w; x += 4) {

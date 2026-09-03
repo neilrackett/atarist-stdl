@@ -3,15 +3,16 @@
  * Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: LGPL-2.1-or-later
  *
- * STDL_Overscan: border overscan. Top: 227 seamless visible lines.
- * Bottom: 245 seamless visible lines. Both: 272.
+ * STDL_Overscan: border overscan. Top: 228 seamless visible lines.
+ * Bottom: 245 seamless visible lines. Both: 273.
  *
  * The GLUE decides between border and picture per scanline by
  * looking at the sync rate. Top: during scanlines 25-33 a 60Hz
  * screen starts its picture at line 34 where a 50Hz one waits for
  * line 63 - show it 60Hz inside that nine-line window, restore
- * 50Hz two lines later, and 229 rows fetch, the first two (still
- * at 60Hz while the restore is pinned) showing border colour.
+ * 50Hz once the first line has been fetched, and 229 rows fetch,
+ * the first (the one fetched at 60Hz while the restore is pinned)
+ * showing border colour.
  * Bottom: flick to 60Hz across the border test at the end of
  * picture line 200 and the border never turns on - lines continue
  * to 244.
@@ -62,9 +63,9 @@
  * MFP's own clock, Timer B counting Display Enable events fires on
  * an exact line for the bottom, and every sub-line wait is pinned
  * to hardware events (bounded polls). Cost is one interrupt plus
- * a two-to-three line poll per frame for the top, ~0.2% of an
- * 8MHz frame, and one interrupt plus five lines of polling for the
- * bottom, ~1.7% - nearly all of it spent waiting on the beam.
+ * two to three lines of polling per frame for each border, under
+ * 1% of an 8MHz frame each - nearly all of it spent waiting on the
+ * beam.
  *
  * Cooperative by design, where the classic demo versions of these
  * tricks own the machine: the VBL hook is a register-free prefix
@@ -77,17 +78,34 @@
  * 5, plus Timer B's counter with its interrupt left masked;
  * bottom: Timer B, vector $120, IERA/IMRA bit 0).
  *
- * The top ISR guards against firing late (a long interrupts-off
- * section, or a BLiTTER hog blit - though blits started while a
- * border is open run in shared mode for exactly this reason, see
- * stdl_no_hog in blitter.c): it reads the Shifter's video counter,
- * and if fetching has started the window is gone, so it skips the
- * sync flip entirely rather than glitch mid-frame, counts the miss
- * and shows one normal-bordered frame. The bottom ISR's guard is
- * the same register: it must read line 262's start address when
- * the ISR gets there, and the flick is skipped and counted when it
- * does not, when the counter's phase was lost to a stall, or when
- * line 263 then fails to display.
+ * One more vector is borrowed while a border is open: TOS's 200Hz
+ * Timer C handler ($114) gets a register-free prefix that lowers
+ * the CPU mask to 5 before falling through to it. TOS runs that
+ * handler at mask 6 for over two scanlines at a time (EmuTOS
+ * measured at ~1140 cycles, once per frame when its fourth-tick
+ * work runs), and its phase drifts across the frame by 165 cycles
+ * a frame, so any interrupt that has to land on a given line loses
+ * a run of frames every twenty seconds - unless it fires two or
+ * three lines early and spins, which is what earlier versions did.
+ * At mask 5 the MFP delivers the channels above Timer C (Timer A
+ * is 13, Timer B 8, the ACIA 6) into the handler instead, so each
+ * ISR fires on the line it wants and spends nothing waiting for it.
+ * The handler itself does not mind: our ISRs touch only their own
+ * state, and under STDL the keyboard path TOS's key-repeat code
+ * shares with the ACIA is idle, ikbdsys being ours.
+ *
+ * Each ISR still guards against being late (a long interrupts-off
+ * section, a keyboard byte's handler in progress, or a BLiTTER hog
+ * blit - though blits started while a border is open run in shared
+ * mode for exactly this reason, see stdl_no_hog in blitter.c).
+ * The top ISR reads the Shifter's video counter, and if fetching
+ * has started the window is gone, so it skips the sync flip
+ * entirely rather than glitch mid-frame, counts the miss and shows
+ * one normal-bordered frame. The bottom ISR's guard is the same
+ * register: it must read line 262's start address when the ISR
+ * gets there, and the flick is skipped and counted when it does
+ * not, when the counter's phase was lost to a stall, or when line
+ * 263 then fails to display.
  *
  * While an ISR runs (including the bounded polls) its in-service
  * bit blocks lower-priority MFP interrupts - the ACIA/IKBD among
@@ -106,12 +124,12 @@
 
 #include <mint/osbind.h>
 
-/* top: 229 rows fetched (frame lines 34-262), the first two show
- * border colour, visible picture is rows 2..228.
+/* top: 229 rows fetched (frame lines 34-262), the first shows
+ * border colour, visible picture is rows 1..228.
  * bottom: 245 rows fetched and visible (picture lines 0-244).
- * both: 274 rows fetched (frame lines 34-307); rows 0-1 hidden,
- * rows 2-273 display - the surface exposes rows 2..273. */
-#define TOP_HIDDEN_ROWS   2
+ * both: 274 rows fetched (frame lines 34-307); row 0 hidden,
+ * rows 1-273 display - the surface exposes rows 1..273. */
+#define TOP_HIDDEN_ROWS   1
 #define BOTH_FETCH_ROWS   274
 #define MAX_FETCH_BYTES   (BOTH_FETCH_ROWS * STDL_SCREEN_STRIDE)
 
@@ -158,8 +176,28 @@
 #define OVSC_C16_8MHZ   192     /* dbra turn on a plain ST, x16: 10
                                  * cycles rounded up to the 4-cycle
                                  * bus slot                         */
+/* the stopwatch: Timer B in delay mode at 26us a tick from 255,
+ * started at ~34/500 by the top ISR (top only) or at ~262/560 by
+ * the bottom ISR (combined), read by a VBL prefix that ran on
+ * time. Measured in Hatari at 83 and 135 (the same on ST, STE and
+ * Mega STE - it is MFP time, not CPU cycles), and set one higher
+ * so a tick of start phase never reads as early and disables the
+ * correction: an on-time frame then arms Timer A a tick early at
+ * most, a third of a line of extra spin. */
+#define OVSC_TBREF_TOP  84
+#define OVSC_TBREF_BOTH 136
 
 uint32_t stdl_ovsc_old70;    /* original $70 vector, read by asm  */
+uint32_t stdl_ovsc_oldtc;    /* original $114 vector, read by asm */
+uint8_t  stdl_ovsc_tbref;    /* Timer B stopwatch reading the VBL
+                              * prefix expects when it ran on time */
+uint8_t  stdl_ovsc_tbarm;    /* what the top ISR arms Timer B with:
+                              * a DE count for the bottom ISR, or 0
+                              * for the stopwatch                  */
+uint8_t  stdl_ovsc_tbseen;   /* last stopwatch reading (diagnostic) */
+uint8_t  stdl_ovsc_tacnt;    /* the count the prefix armed Timer A
+                              * with, which its ISR's lateness guard
+                              * is relative to                    */
 uint8_t  stdl_ovsc_bhi;      /* screen base bytes the top ISR      */
 uint8_t  stdl_ovsc_bmid;     /* compares the video counter against */
 uint32_t stdl_ovsc_missed;   /* frames whose flip was skipped      */
@@ -184,6 +222,7 @@ static void *buf_alloc;
 static uint8_t *buf;
 static uint32_t old_ta_vec;      /* original $134 and $120 vectors */
 static uint32_t old_tb_vec;
+static uint32_t old_tc_vec;      /* original $114 (Timer C) vector   */
 static uint8_t  old_sync;        /* sync rate before the first open */
 static uint8_t  old_ier;         /* previous IERA/IMRA state of both */
 static uint8_t  old_imr;         /* timer bits (0x21 mask)           */
@@ -201,21 +240,54 @@ static int      c16;             /* calibrated dbra turn, x16, or 0 */
 #define VEC_VBL  (*(volatile uint32_t *)0x70UL)
 #define VEC_TA   (*(volatile uint32_t *)0x134UL)
 #define VEC_TB   (*(volatile uint32_t *)0x120UL)
+#define VEC_TC   (*(volatile uint32_t *)0x114UL)
 
 __asm__(
 "    .text\n"
 "    .even\n"
 
 /* -- top border (and combined) ------------------------------------ */
-/* VBL prefix: 50Hz safety, both timers stopped, Timer A armed
- * (~1.83ms -> line ~29), continue into the original handler.
- * Touches no registers. */
+/* VBL prefix: 50Hz safety, then Timer A armed to fire at line
+ * ~32.2 - 100 ticks of 20.3us from a VBL taken on time, fewer
+ * from one taken late. The VBL is level 4 and TOS's Timer C
+ * handler, even opened up (see the prefix below), still runs above
+ * it for over two lines at a time, so a few frames in every
+ * thousand see this prefix up to two lines late, which a fixed
+ * count would pass straight on to Timer A. The ISR that closed the
+ * previous frame left Timer B running as a stopwatch (delay mode,
+ * 26us ticks), and its reading against the on-time value says how
+ * late: each late tick is 1.28 of Timer A's, so the count drops by
+ * the lateness plus a quarter. Readings out of range (the previous
+ * frame skipped, the first frame after opening) count as on time.
+ * Both timers are then stopped and Timer A restarted - with the
+ * mask at 7 from the reading to the restart, or Timer C could
+ * still slip in between them and delay the restart by its whole
+ * handler, uncompensated; the VBL's own level 4 is put back for
+ * TOS's handler. */
 "_stdl_ovsc_vbl_top:\n"
+"    move.w #0x2700,%sr\n"
 "    move.b #2,0xffff820a.w\n"
+"    movem.l %d0-%d1,-(%sp)\n"
+"    move.b 0xfffffa21.w,%d1\n"
+"    move.b %d1,_stdl_ovsc_tbseen\n"
+"    move.b _stdl_ovsc_tbref,%d0\n"
+"    sub.b  %d1,%d0\n"
+"    bmi.s  1f\n"
+"    cmp.b  #12,%d0\n"
+"    bls.s  2f\n"
+"1:  moveq  #0,%d0\n"
+"2:  move.b %d0,%d1\n"
+"    lsr.b  #2,%d1\n"
+"    add.b  %d1,%d0\n"
+"    moveq  #100,%d1\n"
+"    sub.b  %d0,%d1\n"
+"    move.b %d1,_stdl_ovsc_tacnt\n"
 "    clr.b  0xfffffa19.w\n"
 "    clr.b  0xfffffa1b.w\n"
-"    move.b #90,0xfffffa1f.w\n"
+"    move.b %d1,0xfffffa1f.w\n"
 "    move.b #4,0xfffffa19.w\n"
+"    movem.l (%sp)+,%d0-%d1\n"
+"    move.w #0x2400,%sr\n"
 "    move.l _stdl_ovsc_old70,-(%sp)\n"
 "    rts\n"
 "\n"
@@ -225,11 +297,13 @@ __asm__(
  *
  * 1. The timer itself is the clock. In delay mode it reloads and
  *    keeps counting after firing, so its data register reads as
- *    90 minus the ticks since the scheduled fire at line ~29 - a
- *    delivery delayed past the end of the window (a blit that
- *    could not be interrupted, an interrupts-off stretch) shows as
- *    a low count. 12 ticks = four lines of grace keeps us inside
- *    the test window.
+ *    the armed count minus the ticks since the scheduled fire at
+ *    line ~32.2 - a delivery delayed past what the window can
+ *    absorb (a blit that could not be interrupted, an
+ *    interrupts-off stretch) shows as a low count. 4 ticks = a
+ *    line and a quarter of grace keeps the 60Hz write ahead of the
+ *    test at line 33. The count is whatever the prefix armed,
+ *    fewer than 100 after a late VBL, so the guard is relative.
  * 2. The video counter must still sit at the base - if fetching
  *    has started the frame is displaying, and a sync flip now
  *    would glitch it. This also catches a delivery so late the
@@ -237,18 +311,26 @@ __asm__(
  *
  * On time, 60Hz starts the picture at line 34 and Timer B, silent
  * in event-count mode, pins the 50Hz restore into the blanking gap
- * after line 35; it is then re-armed to fire at the end of frame
- * line 258, which chains into the bottom ISR when the combined
- * mode has its interrupt enabled (top-only leaves it masked, so
- * the count quietly expires). A late delivery or a timed-out pin
- * skips the flip AND leaves Timer B stopped - a missed frame
- * degrades to plain borders as a whole, counted once. */
+ * after line 34 - anywhere between that line's display end and
+ * line 35's start at 60Hz, a 184-cycle window the poll cannot
+ * miss, so line 34 is the only row fetched at 60Hz timing and the
+ * surface starts at row 1. Timer B is then re-armed: in the
+ * combined mode to count DE ends up to the end of frame line 260,
+ * which chains into the bottom ISR; top-only, as the stopwatch the
+ * VBL prefix reads. A late delivery or a timed-out pin skips the
+ * flip and counts the miss; the top border is then closed for the
+ * frame, so in the combined mode Timer B is armed to count DE ends
+ * from line 63 instead (198 of them reach line 260, and the
+ * bottom still opens), and top-only it is left cleared so the next
+ * prefix reads no stopwatch and arms Timer A plainly. */
 "    .even\n"
 "_stdl_ovsc_ta:\n"
 "    movem.l %d0-%d2/%a0,-(%sp)\n"
 "    move.b 0xfffffa1f.w,%d0\n"
 "    clr.b  0xfffffa19.w\n"
-"    cmp.b  #78,%d0\n"
+"    move.b _stdl_ovsc_tacnt,%d1\n"
+"    subq.b #4,%d1\n"
+"    cmp.b  %d1,%d0\n"
 "    blo.s  ovsc_ta_late\n"
 "    move.b 0xffff8205.w,%d0\n"
 "    cmp.b  _stdl_ovsc_bhi,%d0\n"
@@ -265,11 +347,15 @@ __asm__(
 "    move.b #8,0xfffffa1b.w\n"
 "    bsr    stdl_ovsc_wait_de\n"
 "    bmi.s  ovsc_ta_fail\n"
-"    bsr    stdl_ovsc_wait_de\n"
 "    move.b #2,0xffff820a.w\n"
 "    clr.b  0xfffffa1b.w\n"
-"    move.b #223,(%a0)\n"
+"    move.b _stdl_ovsc_tbarm,%d1\n"
+"    beq.s  1f\n"
+"    move.b %d1,(%a0)\n"
 "    move.b #8,0xfffffa1b.w\n"
+"    bra.s  ovsc_ta_out\n"
+"1:  move.b #255,(%a0)\n"
+"    move.b #5,0xfffffa1b.w\n"
 "ovsc_ta_out:\n"
 "    move.b #0xDF,0xfffffa0f.w\n"
 "    movem.l (%sp)+,%d0-%d2/%a0\n"
@@ -277,34 +363,48 @@ __asm__(
 "ovsc_ta_fail:\n"
 "    move.b #2,0xffff820a.w\n"
 "ovsc_ta_late:\n"
-"    clr.b  0xfffffa1b.w\n"
 "    addq.l #1,_stdl_ovsc_missed\n"
+"    clr.b  0xfffffa1b.w\n"
+"    clr.b  0xfffffa21.w\n"
+"    tst.b  _stdl_ovsc_tbarm\n"
+"    beq.s  ovsc_ta_out\n"
+"    move.b #198,0xfffffa21.w\n"
+"    move.b #8,0xfffffa1b.w\n"
 "    bra.s  ovsc_ta_out\n"
 "\n"
 
+/* -- Timer C prefix ------------------------------------------------ */
+/* Lower the CPU mask inside TOS's 200Hz handler so the border
+ * timers (MFP channels 13 and 8, above Timer C's 5) are taken while
+ * it runs. The handler's own rte restores the interrupted mask.
+ * Touches no registers. */
+"    .even\n"
+"_stdl_ovsc_tc:\n"
+"    move.w #0x2500,%sr\n"
+"    move.l _stdl_ovsc_oldtc,-(%sp)\n"
+"    rts\n"
+"\n"
+
 /* -- bottom border ------------------------------------------------- */
-/* VBL prefix: 50Hz safety, re-arm Timer B to fire after 196
- * displayed lines - four lines before the end of the picture. */
+/* VBL prefix: 50Hz safety, re-arm Timer B to fire after 198
+ * displayed lines - two lines before the end of the picture. */
 "    .even\n"
 "_stdl_ovsc_vbl_bot:\n"
 "    move.b #2,0xffff820a.w\n"
 "    clr.b  0xfffffa1b.w\n"
-"    move.b #196,0xfffffa21.w\n"
+"    move.b #198,0xfffffa21.w\n"
 "    move.b #8,0xfffffa1b.w\n"
 "    move.l _stdl_ovsc_old70,-(%sp)\n"
 "    rts\n"
 "\n"
-/* Timer B ISR, at the end of picture line 195 (frame line 258).
- * That is two lines earlier than it needs to be, on purpose: the
- * interrupt is taken only once the CPU drops below MFP priority,
- * and TOS's 200Hz Timer C handler holds it there for over two
- * lines at a time (EmuTOS measured at ~1140 cycles), drifting
- * across any fixed frame position at 165 cycles a frame - a few
- * consecutive lost frames every twenty seconds if the ISR cannot
- * afford to be that late. From line 258 it can be three lines
- * late and still find the counter parked at line 262's start
- * address, which is what it polls for first (both bytes: the low
- * one alone recurs a line earlier). Not finding it within the
+/* Timer B ISR, at the end of picture line 197 (frame line 260).
+ * That is a line earlier than it needs to be: with Timer C's
+ * handler opened up (see the prefix above) the interrupt is taken
+ * within a long instruction or a keyboard byte's handler, a few
+ * hundred cycles at most, and from line 260 the ISR can be more
+ * than a line late and still find the counter parked at line 262's
+ * start address, which is what it polls for first (both bytes: the
+ * low one alone recurs a line earlier). Not finding it within the
  * bound means the ISR is later still, and the frame is skipped.
  * Then the flick path runs once against a scratch byte (the
  * warm-up: a cached CPU fetches it cold otherwise, and
@@ -326,7 +426,9 @@ __asm__(
  * jitter - still inside the window, with less to spare.
  *
  * Afterwards line 263 has to end with a DE event, or the border
- * did not open and the frame is counted.
+ * did not open and the frame is counted; Timer B is then restarted
+ * as the stopwatch the top's VBL prefix reads (harmless in
+ * bottom-only mode, whose prefix re-arms it anyway).
  *
  * From the poll's last read to the writes the paths are
  * sub/bmi/and/move/dbra-exit/clr, bne/clr, and move/dbra-exit/move
@@ -403,6 +505,8 @@ __asm__(
 "    bmi.s  ovsc_tb_late\n"
 "ovsc_tb_out:\n"
 "    clr.b  0xfffffa1b.w\n"
+"    move.b #255,0xfffffa21.w\n"
+"    move.b #5,0xfffffa1b.w\n"
 "    move.b #0xFE,0xfffffa0f.w\n"
 "    movem.l (%sp)+,%d0-%d4/%a0-%a3\n"
 "    rte\n"
@@ -441,6 +545,7 @@ extern void stdl_ovsc_vbl_top(void);
 extern void stdl_ovsc_vbl_bot(void);
 extern void stdl_ovsc_ta(void);
 extern void stdl_ovsc_tb(void);
+extern void stdl_ovsc_tc(void);
 extern void stdl_ovsc_spin(int turns);
 
 /*
@@ -622,6 +727,7 @@ static void ovsc_release(void)
     MFP_IMRA = (uint8_t)((MFP_IMRA & ~0x21) | old_imr);
     VEC_TA = old_ta_vec;
     VEC_TB = old_tb_vec;
+    VEC_TC = old_tc_vec;
     SYNC_REG = old_sync;
     stdl_int_restore(sr);
     mode = 0;
@@ -646,6 +752,8 @@ static void ovsc_program(int m)
         /* first open: save both timers' state and hook the VBL */
         old_ta_vec = VEC_TA;
         old_tb_vec = VEC_TB;
+        old_tc_vec = VEC_TC;
+        stdl_ovsc_oldtc = old_tc_vec;
         old_ier = (uint8_t)(MFP_IERA & 0x21);
         old_imr = (uint8_t)(MFP_IMRA & 0x21);
         stdl_ovsc_old70 = VEC_VBL;
@@ -658,6 +766,7 @@ static void ovsc_program(int m)
     MFP_ISRA &= (uint8_t)~0x21;
     VEC_TA = (uint32_t)(uintptr_t)stdl_ovsc_ta;
     VEC_TB = (uint32_t)(uintptr_t)stdl_ovsc_tb;
+    VEC_TC = (uint32_t)(uintptr_t)stdl_ovsc_tc;
     MFP_IERA = (uint8_t)((MFP_IERA & ~0x21) | bits);
     MFP_IMRA = (uint8_t)((MFP_IMRA & ~0x21) | bits);
     stdl_ovsc_bhi = (uint8_t)((uintptr_t)buf >> 16);
@@ -671,6 +780,8 @@ static void ovsc_program(int m)
      * the next frame miss too - a cascade that was measured at a
      * dozen frames before this bound existed */
     stdl_ovsc_waitn = (uint16_t)((128 * 192) / (c16 ? c16 : OVSC_C16_8MHZ));
+    stdl_ovsc_tbref = (m & MODE_BOT) ? OVSC_TBREF_BOTH : OVSC_TBREF_TOP;
+    stdl_ovsc_tbarm = (m & MODE_BOT) ? 226 : 0;
     stdl_ovsc_missed = 0;
     VEC_VBL = (uint32_t)(uintptr_t)
         ((m & MODE_TOP) ? stdl_ovsc_vbl_top : stdl_ovsc_vbl_bot);

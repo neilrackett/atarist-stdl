@@ -130,10 +130,14 @@ any border is open, BLiTTER blits run in non-hog mode (interrupts
 taken between bus slices) so they cannot stall the CPU past the
 border's timing window, and palette writes land in the blanking
 via a VBL callback; `STDL_OverscanMisses()` says whether anything
-else stalls the CPU. A blit still in flight when the bottom flick
-runs can stretch it past its window and cost that frame (a border
-or one line at 60Hz timing), so keep big blits away from the end
-of the picture or VBL-sync them.
+else stalls the CPU. Shared mode makes BLiTTER operations take
+about 2.1x as long while a border is open (measured on an STE),
+and a blit still in flight when a flick runs stretches it past
+its window and costs that frame (a border, or one line at 60Hz
+timing): under continuous blitting that is most frames for the
+bottom border and about a quarter for the top. Blit in bursts
+from the VBL and keep the big ones off the last lines of the
+picture. The ISRs themselves cost under 1% of an 8MHz frame each.
 Full-page screen updates should start at the VBL
 (`STDL_WaitVBL`) so the copy stays ahead of the beam - the display
 starts 29 lines earlier with the top border open, and an unsynced

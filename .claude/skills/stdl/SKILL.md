@@ -228,10 +228,21 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   them - steady increments mean something stalls the CPU every
   frame. The classic culprit is a hog-mode BLiTTER blit (one port's
   cutscenes missed 191 frames of one sequence exactly this way),
-  which is why STDL starts blits in non-hog mode with the restart
-  idiom while a border is open - near-hog throughput, interrupts
-  taken between bus slices (measured: ~30% slower than hog, not
-  the 2x of plain shared mode). Claims MFP Timer A and Timer B's counter;
+  which is why STDL starts blits in non-hog (shared) mode while a
+  border is open - interrupts are taken between 64-cycle bus
+  slices, and the price is that BLiTTER operations take about
+  2.1x as long (measured on an STE: 100 full-screen fills 900ms
+  with no border, 1885ms with one). The ISRs themselves cost under
+  1% of an 8MHz frame each (measured 0.9% top, 1.0% bottom; a
+  CPU-bound loop ran 1.4% slower with one border open, 2.5% with
+  both). What shared mode does not buy is immunity: a blit still
+  in flight when the flick runs stretches its timing past the
+  window, and under continuous blitting that is most frames for
+  the bottom border and about a quarter for the top (measured:
+  180 and 43 misses over ~190 frames of back-to-back fills). Blit
+  in bursts from the VBL, keep the big ones off the last lines of
+  the picture, or accept a border that flickers while the BLiTTER
+  runs flat out. Claims MFP Timer A and Timer B's counter;
   `STDL_CloseTopBorder()` gives everything back. On a CRT the
   picture sits ~27 lines higher than stock - geometry, not a bug.
   `STDL_OpenBottomBorder()` is the same trade at the other end: 245

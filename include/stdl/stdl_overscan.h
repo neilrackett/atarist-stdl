@@ -96,11 +96,14 @@ void STDL_CloseBottomBorder(void);
  * instead of glitching mid-frame. Steady increments mean something
  * in the program stalls the CPU every frame; while a border is
  * open STDL already starts BLiTTER operations in non-hog mode, the
- * usual culprit. A BLiTTER operation still in flight when the
- * bottom flick runs can stretch it past its window - that frame
- * shows the border, or its first extra line displays at 60Hz
- * timing - so keep large blits away from the end of the picture
- * where the frame is timing-critical, or VBL-sync them. */
+ * usual culprit. A BLiTTER operation still in flight when a flick
+ * runs stretches it past its window - that frame shows the border,
+ * or its first extra line displays at 60Hz timing - and under
+ * continuous blitting that is most frames for the bottom border
+ * and about a quarter for the top, so blit in bursts from the VBL
+ * and keep large blits away from the end of the picture. Shared
+ * mode itself makes BLiTTER operations take about 2.1x as long
+ * while a border is open. */
 uint32_t STDL_OverscanMisses(void);
 
 /* Surface heights while a border is open (28, 45 or 73 lines over

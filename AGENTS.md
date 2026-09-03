@@ -136,6 +136,19 @@ warnings** with the Makefile's `-Wall -Wextra`.
   named `BLITCOST2.TOS` beside `BLITCOST.TOS` silently runs
   `BLITCOST.TOS`; four runs of "the fix" measured the old binary.
   Keep test program stems to eight characters.
+- **Possible future improvement: the blit policy's per-operation
+  cost.** With a border open, BLiTTER throughput is 1.14-1.28x the
+  no-border time for full-width operations (mostly the split and
+  wait around each window, one to three per mode) but 1.35-1.47x
+  for 64x32 blits, because the placement decision costs 500-1400
+  cycles against a blit of about 1000. The no-divide fast path
+  only covers the beam in the picture; the blanking (a quarter to a
+  third of the frame) still goes through the general estimate. A
+  second fast path there, or a per-frame "safe until" stamp that
+  skips the estimate altogether while far from any window, would
+  take most of that off sprite-heavy scenes. Measured in Hatari
+  only - parked 2026-09-03 with the numbers above, worth revisiting
+  when a port with a border open shows it.
 - **After touching blit/fill paths**: run `dist/BLITCHK.TOS` - it
   randomises fills/blits and compares the CPU and BLiTTER paths
   byte-for-byte on target. Both paths must stay identical;

@@ -235,13 +235,26 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   `STDL_CloseTopBorder()` gives everything back. On a CRT the
   picture sits ~27 lines higher than stock - geometry, not a bug.
   `STDL_OpenBottomBorder()` is the same trade at the other end: 245
-  lines, one border-coloured seam at picture line 200 (the GLUE
-  evaluates its display window per line, and the line that runs at
-  60Hz falls outside it - align a HUD split or dark band there).
-  Opening both combines automatically into 272 rows (seam at row
-  227, content rows 0..226 seamless), and closing one drops back to
-  the other alone; every Open returns the height the screen ended
-  up with, so repaint after any transition.
+  seamless lines, content at rows 200..244. The GLUE only leaves a
+  62-cycle window for the sync flick that fools its border test
+  without also starting the next line at 60Hz timing, so the ISR
+  reads the Shifter's video counter mid-line to know where the beam
+  is and runs out the distance with dbra loops calibrated, the
+  first time the border opens, against the machine's own scanlines
+  (one frame with interrupts masked, once per process). Measured
+  in Hatari: the restore lands within ~8 cycles of the window's
+  centre on a plain ST, an STE and a 16MHz Mega STE, and the
+  border held for 1500 consecutive frames with no miss. Costs an
+  interrupt plus ~5 lines of polling per frame, ~1.7% of an 8MHz
+  frame. Two lines of that are grace for TOS's 200Hz handler, which
+  holds the interrupt off for over two lines under EmuTOS.
+  Opening both combines automatically into 272 seamless rows, and
+  closing one drops back to the other alone; every Open returns
+  the height the screen ended up with, so repaint after any
+  transition. A BLiTTER operation in flight across the flick can
+  stretch it past its window - that frame shows a border, or its
+  first extra line at 60Hz timing - so keep large blits away from
+  the end of the picture, or VBL-sync them.
   Two things change under the hood while any border is open, both
   because display fetch starts at line 34 instead of 63: palette
   writes are staged and drained inside the blanking by a VBL

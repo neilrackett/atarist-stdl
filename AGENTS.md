@@ -89,6 +89,29 @@ warnings** with the Makefile's `-Wall -Wextra`.
   changes *how* a blit is driven (mode, restart, interleaving with
   interrupts) gets watched in a real scene with fades before it
   ships, not just measured.
+- **A line-locked MFP interrupt needs lines of grace, and its waits
+  need short bounds.** The CPU takes an MFP interrupt only once it
+  is below level 6, and TOS's 200Hz Timer C handler keeps it there
+  for over two scanlines at a time (EmuTOS measured at ~1140
+  cycles), drifting across any fixed frame position by 165 cycles a
+  frame - so an ISR that fires on the line it needs loses a run of
+  consecutive frames every twenty seconds. The bottom-border ISR
+  fires two lines early and finds its line from the video counter;
+  the top one carries four lines of grace on Timer A. And a poll
+  that waits for a Display Enable event which is not coming (the
+  border failed to open, so there are none until the next frame)
+  must give up within a few lines: an 8ms wait at MFP priority
+  holds off the VBL, which arms the timer late, which repeats the
+  failure - measured at a dozen frames before the bound existed.
+- **Hatari's video counter reads are not cycle-correct at 16MHz.**
+  `Video_CalculateAddress` compares CPU cycles against 8MHz line
+  positions, so under `--machine megaste` (or `--cpuclock 16`)
+  $ff8209 runs at double speed and parks at the line end from cycle
+  ~192. The bottom-border code checks for this at open time and
+  times from Timer B instead; its video-counter path can only be
+  verified with `--machine st` or `ste`, and real 16MHz hardware
+  is expected to take the counter path. `tests/hatari/ovprobe.c`
+  prints which path a run took and the calibration behind it.
 - **After touching blit/fill paths**: run `dist/BLITCHK.TOS` - it
   randomises fills/blits and compares the CPU and BLiTTER paths
   byte-for-byte on target. Both paths must stay identical;

@@ -46,13 +46,15 @@ provider everything reads exactly as a plain ST joystick.
 visible instead of 200 on any ST, one timer interrupt per frame and
 no cycle counting - so a game whose world is taller than 200 lines shows
 it whole instead of cropping or squashing. `STDL_OpenBottomBorder` opens
-the other end (245 lines, with one border-coloured seam at line 200 to
-put a HUD split on), and opening both combines them automatically into a
-272-row screen filling the display edge to edge. While any border is
-open, BLiTTER operations switch to non-hog mode by themselves (the
-restart idiom keeps them near hog speed) so a long blit cannot stall
-the CPU past the border's timing window, and palette writes are staged
-to the vertical blanking so they can never flash mid-frame. See `examples/overscan.c`.
+the other end (245 lines, seamless: the flick that fools the GLUE is
+placed from the Shifter's video counter with loops calibrated against
+real scanlines when the border opens, so it lands on any CPU speed),
+and opening both combines them automatically into a 272-row screen
+filling the display edge to edge. While any border is open, BLiTTER
+operations switch to non-hog mode by themselves so a long blit cannot
+stall the CPU past the border's timing window, and palette writes are
+staged to the vertical blanking so they can never flash mid-frame. See
+`examples/overscan.c`.
 
 Anything that cannot be done cheaply in planar has been removed rather than
 emulated; see [docs/limits.md](docs/limits.md).

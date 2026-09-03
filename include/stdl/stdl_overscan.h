@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: LGPL-2.1-or-later
  *
- * Top-border overscan: 227 visible lines instead of 200.
+ * Border overscan: 227, 245 or 272 visible lines instead of 200.
  */
 
 #ifndef STDL_OVERSCAN_H
@@ -51,29 +51,35 @@ void STDL_CloseTopBorder(void);
 
 /*
  * Open the bottom border instead: 245 visible lines, added BELOW
- * the normal picture (Timer B fires near the end of the picture
- * and flicks 60Hz across the GLUE's border test). One caveat the
- * top variant does not have: picture line 200 - the line that runs
- * at 60Hz while the test is fooled - displays as a single line of
- * border colour. Interrupt-driven code cannot dodge that at every
- * CPU speed (the cycle-counted escape is a ~60-cycle window), so
- * align a HUD split or a dark band with it, or prefer the seamless
- * top variant. Content below the seam goes at surface rows
- * 201..244.
+ * the normal picture, all of them seamless - content below the
+ * old picture goes at surface rows 200..244. Timer B (counting
+ * Display Enable events) gets the ISR near the end of the picture,
+ * and the Shifter's video counter, read while line 262 is being
+ * fetched, places the sync flick to within a few cycles of where
+ * the GLUE tests for the border and where the next line would
+ * start: 60Hz on for ~80 cycles across the test, off again before
+ * line 263 can start early. The dbra loops that run out that
+ * distance are calibrated the first time the bottom border opens,
+ * by timing the same loop against displayed scanlines - about one
+ * frame with interrupts masked (the 200Hz system tick loses a few
+ * counts, once) - so the placement holds on any CPU speed. On a
+ * machine whose video counter cannot be read mid-line (no ST, but
+ * an emulator's 16MHz mode) the ISR times from Timer B instead;
+ * the check is part of the calibration.
  *
- * Same requirements and behaviour as the top border otherwise
- * (no STDL_DOUBLEBUF, ST-class machine; the screen surface is
- * updated in place). Returns the resulting
- * surface height, or 0 with STDL_GetError() set.
+ * Costs an interrupt and about five lines of polling per frame,
+ * ~1.7% of an 8MHz frame, most of it waiting on the beam. Same
+ * requirements and behaviour as the top border otherwise (no
+ * STDL_DOUBLEBUF, ST-class machine; the screen surface is updated
+ * in place). Returns the resulting surface height, or 0 with
+ * STDL_GetError() set.
  *
  * The two variants combine automatically: opening the second while
- * the first is open switches to the combined mode (272 surface
- * rows - 227 seamless lines, the hidden seam at row 227, then 44
- * more), and closing one of the pair drops back to the other
- * alone. Each Open returns the height the screen ended up with,
- * and closing reshapes the surface the same way, so redraw after
- * any transition. The game-window sweet spot is unchanged: content
- * at rows 0..226 of a top or combined surface never meets a seam.
+ * the first is open switches to the combined mode (272 seamless
+ * surface rows), and closing one of the pair drops back to the
+ * other alone. Each Open returns the height the screen ended up
+ * with, and closing reshapes the surface the same way, so redraw
+ * after any transition.
  */
 int  STDL_OpenBottomBorder(void);
 void STDL_CloseBottomBorder(void);
@@ -84,7 +90,11 @@ void STDL_CloseBottomBorder(void);
  * instead of glitching mid-frame. Steady increments mean something
  * in the program stalls the CPU every frame; while a border is
  * open STDL already starts BLiTTER operations in non-hog mode, the
- * usual culprit. */
+ * usual culprit. A BLiTTER operation still in flight when the
+ * bottom flick runs can stretch it past its window - that frame
+ * shows the border, or its first extra line displays at 60Hz
+ * timing - so keep large blits away from the end of the picture
+ * where the frame is timing-critical, or VBL-sync them. */
 uint32_t STDL_OverscanMisses(void);
 
 /* Surface heights while a border is open (27, 45 or 72 lines over

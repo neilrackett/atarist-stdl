@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * STDL_Overscan: border overscan. Top: 227 seamless visible lines.
- * Bottom: 245 visible lines with one border-coloured seam at
- * picture line 200.
+ * Bottom: 245 seamless visible lines. Both: 272.
  *
  * The GLUE decides between border and picture per scanline by
  * looking at the sync rate. Top: during scanlines 25-33 a 60Hz
@@ -15,19 +14,57 @@
  * at 60Hz while the restore is pinned) showing border colour.
  * Bottom: flick to 60Hz across the border test at the end of
  * picture line 200 and the border never turns on - lines continue
- * to 244. The line that runs at 60Hz falls outside the 60Hz
- * display window, so picture line 200 shows as one line of border
- * colour; cycle-counted routines dodge that by hitting a ~60-cycle
- * window, which interrupt-driven code cannot do reliably at every
- * CPU speed. Align a HUD split or dark band with it, or use the
- * seamless top variant.
+ * to 244.
  *
- * Nothing is cycle-counted: Timer A in delay mode hits the top
+ * The bottom flick has to fit a window the top one does not. A
+ * line whose display starts while the sync rate is 60Hz starts
+ * four cycles early and fetches its planes one word out of step
+ * (the "+2/-2 line" of the overscan literature), which is what an
+ * earlier version of this code showed as a seam at picture line
+ * 200: it left 60Hz on until the next line had ended. The GLUE
+ * tests for the bottom border at cycle ~502 of frame line 262 and
+ * for the start of a 60Hz line at cycle 52 of the next, so 60Hz
+ * has to be on across 502 and off again by 564 (line 263's cycle
+ * 52) - a 62-cycle window, ~7.7us, which an interrupt cannot hit
+ * at every CPU speed and which cycle-counted code hits only on the
+ * machine it was counted for.
+ *
+ * What hits it here is the Shifter's video counter. During the
+ * fetch of a line ($ff8209 increments by two every four cycles) it
+ * is a position sensor readable to four cycles, and it parks at the
+ * next line's start address in between - the ISR reads it to know
+ * both which line it is on and where the beam is. From the moment
+ * line 262's fetch passes byte 130 (cycle ~326) a short dbra loop
+ * runs out the rest of the distance; the counter value picked up by
+ * that read selects the loop count from a small table, so the poll
+ * loop's own period is not an error. The loop counts come from a
+ * calibration at open time that times 7680 iterations of the same
+ * dbra against displayed scanlines (Timer B counting Display Enable
+ * ends), i.e. against the clock the GLUE itself runs on - a plain
+ * ST measures ten cycles a turn, a 16MHz Mega STE five, an
+ * accelerator whatever it is. Fixed costs between the read and the
+ * writes are the 68000's own instruction times scaled by the same
+ * ratio, with the bus cycles of the register writes held at their
+ * 8MHz width. The 60Hz write lands at cycle ~456, the 50Hz one at
+ * ~533: about thirty cycles clear of each edge of the window, which
+ * is what the calibration's residual (under one percent of a
+ * 200-cycle delay), the counter's four-cycle grain and a couple of
+ * cycles of bus phase add up to with room to spare.
+ *
+ * A cached CPU (the Mega STE) would run that path cold once a
+ * frame, and the difference between cold and warm instruction
+ * fetches is bigger than the window; the ISR therefore runs the
+ * path once against a scratch byte before it polls, which is the
+ * classic demo answer and costs ~250 cycles a frame.
+ *
+ * Nothing else is cycle-counted: Timer A in delay mode hits the top
  * window from the VBL at any CPU speed because it runs off the
  * MFP's own clock, Timer B counting Display Enable events fires on
  * an exact line for the bottom, and every sub-line wait is pinned
  * to hardware events (bounded polls). Cost is one interrupt plus
- * a two-to-three line poll per frame, ~0.2% of an 8MHz frame.
+ * a two-to-three line poll per frame for the top, ~0.2% of an
+ * 8MHz frame, and one interrupt plus five lines of polling for the
+ * bottom, ~1.7% - nearly all of it spent waiting on the beam.
  *
  * Cooperative by design, where the classic demo versions of these
  * tricks own the machine: the VBL hook is a register-free prefix
@@ -46,8 +83,11 @@
  * stdl_no_hog in blitter.c): it reads the Shifter's video counter,
  * and if fetching has started the window is gone, so it skips the
  * sync flip entirely rather than glitch mid-frame, counts the miss
- * and shows one normal-bordered frame. The bottom ISR's bounded
- * line-waits give it the same failure mode.
+ * and shows one normal-bordered frame. The bottom ISR's guard is
+ * the same register: it must read line 262's start address when
+ * the ISR gets there, and the flick is skipped and counted when it
+ * does not, when the counter's phase was lost to a stall, or when
+ * line 263 then fails to display.
  *
  * While an ISR runs (including the bounded polls) its in-service
  * bit blocks lower-priority MFP interrupts - the ACIA/IKBD among
@@ -68,11 +108,9 @@
 
 /* top: 229 rows fetched (frame lines 34-262), the first two show
  * border colour, visible picture is rows 2..228.
- * bottom: 245 rows fetched and visible (picture lines 0-244), row
- * 200 displays as border.
+ * bottom: 245 rows fetched and visible (picture lines 0-244).
  * both: 274 rows fetched (frame lines 34-307); rows 0-1 hidden,
- * rows 2-228 display, row 229 is the hidden seam line, rows
- * 230-273 display - the surface exposes rows 2..273. */
+ * rows 2-273 display - the surface exposes rows 2..273. */
 #define TOP_HIDDEN_ROWS   2
 #define BOTH_FETCH_ROWS   274
 #define MAX_FETCH_BYTES   (BOTH_FETCH_ROWS * STDL_SCREEN_STRIDE)
@@ -80,10 +118,67 @@
 #define MODE_TOP 1
 #define MODE_BOT 2
 
+/* Bottom flick placement, in cycles from the start of frame line
+ * 262 as the GLUE counts them (512 per 50Hz line). The line's
+ * fetch runs 56..376; the GLUE samples the sync rate for its
+ * bottom-border test at ~502 (STF) / ~500 (STE) and for a 60Hz
+ * display start at cycle 52 of line 263, i.e. 564. */
+#define OVSC_HIT_READ   326     /* the read that first sees fetch
+                                 * byte 130 lands here, +4 per table
+                                 * slot (two bytes), mid-grain      */
+#define OVSC_PARK_READ  384     /* byte 160 (parked) shows from here */
+#define OVSC_TICK_READ  400     /* Timer B's count steps here       */
+#define OVSC_T1         456     /* 60Hz write: inside 377..500      */
+#define OVSC_T2         533     /* 50Hz write: inside 503..564      */
+/* Fixed costs, x16: from the poll's last read to the 60Hz write in
+ * counter mode (TB) and tick mode (TT), between the writes (TM),
+ * and half a poll period for the reads that catch an edge rather
+ * than a value (PARK: the counter's parking, TICK: Timer B's step).
+ * Each has a CPU part in plain-ST cycles, scaled by the measured
+ * turn / 192, and a bus part the register accesses spend at 8MHz
+ * whatever the CPU does. Measured in Hatari with zeroed tables at
+ * 8 and 16MHz, see the ISR comment. */
+#define OVSC_TB_CPU     (68 * 16)
+#define OVSC_TB_BUS     (8 * 16)
+#define OVSC_TT_CPU     (29 * 16)
+#define OVSC_TT_BUS     (3 * 16)
+#define OVSC_TM_CPU     (26 * 16)
+#define OVSC_TM_BUS     (2 * 16)
+#define OVSC_PARK_CPU   (15 * 16)
+#define OVSC_PARK_BUS   (1 * 16)
+#define OVSC_TICK_CPU   (15 * 16)
+#define OVSC_TICK_BUS   (1 * 16)
+/* a loop's first turn follows the table read in bus phase and
+ * costs four cycles less than the rest; the first loop only, the
+ * second's count load is a register move */
+#define OVSC_FIRST_TURN (4 * 16)
+#define OVSC_SPIN       7680    /* calibration turns: 150 lines on
+                                 * a plain ST, the slowest case, so
+                                 * it always ends inside the picture */
+#define OVSC_C16_8MHZ   192     /* dbra turn on a plain ST, x16: 10
+                                 * cycles rounded up to the 4-cycle
+                                 * bus slot                         */
+
 uint32_t stdl_ovsc_old70;    /* original $70 vector, read by asm  */
 uint8_t  stdl_ovsc_bhi;      /* screen base bytes the top ISR      */
 uint8_t  stdl_ovsc_bmid;     /* compares the video counter against */
 uint32_t stdl_ovsc_missed;   /* frames whose flip was skipped      */
+
+/* bottom ISR data: dbra turns before the 60Hz write, indexed by
+ * the fetch byte the poll caught line 262 at (slot 0 = byte 130,
+ * one slot per two bytes, slot 15 = parked at 160); turns between
+ * the writes; the address bytes of frame line 262's first word,
+ * which the counter shows while parked after line 261; and the
+ * byte the warm-up pass writes to */
+uint16_t stdl_ovsc_n1[16];
+uint16_t stdl_ovsc_n2;
+uint16_t stdl_ovsc_n2t;      /* tick mode: turns between the writes */
+uint16_t stdl_ovsc_postn;    /* poll bound for line 263's DE end     */
+uint16_t stdl_ovsc_waitn;    /* poll bound of ~8 lines, any wait     */
+uint8_t  stdl_ovsc_tick;     /* 1 = time from Timer B, not the counter */
+uint8_t  stdl_ovsc_l262lo;
+uint8_t  stdl_ovsc_l262mid;
+uint8_t  stdl_ovsc_scratch;
 
 static void *buf_alloc;
 static uint8_t *buf;
@@ -93,6 +188,7 @@ static uint8_t  old_sync;        /* sync rate before the first open */
 static uint8_t  old_ier;         /* previous IERA/IMRA state of both */
 static uint8_t  old_imr;         /* timer bits (0x21 mask)           */
 static int      mode;            /* MODE_TOP | MODE_BOT */
+static int      c16;             /* calibrated dbra turn, x16, or 0 */
 
 #define MFP_IERA (*(volatile uint8_t *)0xFFFFFA07UL)
 #define MFP_IPRA (*(volatile uint8_t *)0xFFFFFA0BUL)
@@ -100,6 +196,7 @@ static int      mode;            /* MODE_TOP | MODE_BOT */
 #define MFP_IMRA (*(volatile uint8_t *)0xFFFFFA13UL)
 #define MFP_TACR (*(volatile uint8_t *)0xFFFFFA19UL)
 #define MFP_TBCR (*(volatile uint8_t *)0xFFFFFA1BUL)
+#define MFP_TBDR (*(volatile uint8_t *)0xFFFFFA21UL)
 #define SYNC_REG (*(volatile uint8_t *)0xFFFF820AUL)
 #define VEC_VBL  (*(volatile uint32_t *)0x70UL)
 #define VEC_TA   (*(volatile uint32_t *)0x134UL)
@@ -141,7 +238,7 @@ __asm__(
  * On time, 60Hz starts the picture at line 34 and Timer B, silent
  * in event-count mode, pins the 50Hz restore into the blanking gap
  * after line 35; it is then re-armed to fire at the end of frame
- * line 260, which chains into the bottom ISR when the combined
+ * line 258, which chains into the bottom ISR when the combined
  * mode has its interrupt enabled (top-only leaves it masked, so
  * the count quietly expires). A late delivery or a timed-out pin
  * skips the flip AND leaves Timer B stopped - a missed frame
@@ -171,7 +268,7 @@ __asm__(
 "    bsr    stdl_ovsc_wait_de\n"
 "    move.b #2,0xffff820a.w\n"
 "    clr.b  0xfffffa1b.w\n"
-"    move.b #225,(%a0)\n"
+"    move.b #223,(%a0)\n"
 "    move.b #8,0xfffffa1b.w\n"
 "ovsc_ta_out:\n"
 "    move.b #0xDF,0xfffffa0f.w\n"
@@ -186,39 +283,128 @@ __asm__(
 "\n"
 
 /* -- bottom border ------------------------------------------------- */
-/* VBL prefix: 50Hz safety, re-arm Timer B to fire after 198
- * displayed lines - near the end of the picture. */
+/* VBL prefix: 50Hz safety, re-arm Timer B to fire after 196
+ * displayed lines - four lines before the end of the picture. */
 "    .even\n"
 "_stdl_ovsc_vbl_bot:\n"
 "    move.b #2,0xffff820a.w\n"
 "    clr.b  0xfffffa1b.w\n"
-"    move.b #198,0xfffffa21.w\n"
+"    move.b #196,0xfffffa21.w\n"
 "    move.b #8,0xfffffa1b.w\n"
 "    move.l _stdl_ovsc_old70,-(%sp)\n"
 "    rts\n"
 "\n"
-/* Timer B ISR, two lines before the end of the picture. Step to
- * the end of frame line 262 on the timer's own count, flick to
- * 60Hz across the GLUE's bottom border test, back one line later.
- * Both sync writes land in the blanking gap right after a line
- * ends, so no line runs at two rates. A timed-out wait means a
- * stall pushed us past the picture: skip the flip and count the
- * miss. */
+/* Timer B ISR, at the end of picture line 195 (frame line 258).
+ * That is two lines earlier than it needs to be, on purpose: the
+ * interrupt is taken only once the CPU drops below MFP priority,
+ * and TOS's 200Hz Timer C handler holds it there for over two
+ * lines at a time (EmuTOS measured at ~1140 cycles), drifting
+ * across any fixed frame position at 165 cycles a frame - a few
+ * consecutive lost frames every twenty seconds if the ISR cannot
+ * afford to be that late. From line 258 it can be three lines
+ * late and still find the counter parked at line 262's start
+ * address, which is what it polls for first (both bytes: the low
+ * one alone recurs a line earlier). Not finding it within the
+ * bound means the ISR is later still, and the frame is skipped.
+ * Then the flick path runs once against a scratch byte (the
+ * warm-up: a cached CPU fetches it cold otherwise, and
+ * cold-versus-warm is wider than the window), and the polls
+ * begin.
+ *
+ * Counter mode: wait for the counter to leave its parked value,
+ * then for line 262's fetch to pass byte 130 - the cheapest loop
+ * there is, the counter minus base-plus-2 goes negative exactly
+ * there - and hand the byte offset to the flick as the table
+ * index. Byte 160 is the counter parked again at the end of the
+ * line: a stall ate the moving phase, and that slot of the table
+ * is timed from the parking edge instead.
+ *
+ * Tick mode (the open-time check found the counter does not move
+ * mid-line, which no ST does but an emulator's 16MHz mode may):
+ * wait for line 262's own Display Enable end on Timer B and time
+ * both writes from that read, at the cost of the poll period as
+ * jitter - still inside the window, with less to spare.
+ *
+ * Afterwards line 263 has to end with a DE event, or the border
+ * did not open and the frame is counted.
+ *
+ * From the poll's last read to the writes the paths are
+ * sub/bmi/and/move/dbra-exit/clr, bne/clr, and move/dbra-exit/move
+ * between the writes: the fixed costs ovsc_table() scales. Change
+ * an instruction and re-measure them (zeroed tables and the
+ * sync-write trace). */
 "    .even\n"
 "_stdl_ovsc_tb:\n"
-"    movem.l %d1/%d2/%a0,-(%sp)\n"
+"    movem.l %d0-%d4/%a0-%a3,-(%sp)\n"
 "    lea    0xfffffa21.w,%a0\n"
-"    bsr    stdl_ovsc_wait_de\n"
+"    lea    0xffff8209.w,%a1\n"
+"    move.b _stdl_ovsc_l262lo,%d0\n"
+"    move.b _stdl_ovsc_l262mid,%d1\n"
+"    move.w _stdl_ovsc_waitn,%d2\n"
+"1:  cmp.b  (%a1),%d0\n"
+"    bne.s  2f\n"
+"    cmp.b  0xffff8207.w,%d1\n"
+"    beq.s  3f\n"
+"2:  dbra   %d2,1b\n"
+"    bra    ovsc_tb_late\n"
+"3:  lea    _stdl_ovsc_n1,%a3\n"
+"    move.w _stdl_ovsc_n2,%d3\n"
+"    move.w _stdl_ovsc_n2t,%d4\n"
+"    lea    _stdl_ovsc_scratch,%a2\n"
+"    tst.b  _stdl_ovsc_tick\n"
+"    bne    ovsc_tb_tick_warm\n"
+"    moveq  #30,%d1\n"
+"    bra.s  ovsc_tb_flick\n"
+"ovsc_tb_poll:\n"
+"    move.w #127,%d2\n"
+"1:  cmp.b  (%a1),%d0\n"
+"    bne.s  2f\n"
+"    dbra   %d2,1b\n"
+"    bra    ovsc_tb_late\n"
+"2:  addq.b #2,%d0\n"
+"    move.w #63,%d2\n"
+"3:  move.b (%a1),%d1\n"
+"    sub.b  %d0,%d1\n"
+"    bmi.s  4f\n"
+"    dbra   %d2,3b\n"
+"    bra    ovsc_tb_late\n"
+"4:  and.w  #0x3e,%d1\n"
+"ovsc_tb_flick:\n"
+"    move.w 0(%a3,%d1.w),%d2\n"
+"5:  dbra   %d2,5b\n"
+"    clr.b  (%a2)\n"
+"    move.w %d3,%d2\n"
+"6:  dbra   %d2,6b\n"
+"    move.b #2,(%a2)\n"
+"    cmp.l  #0xffff820a,%a2\n"
+"    beq.s  ovsc_tb_check\n"
+"    lea    0xffff820a.w,%a2\n"
+"    bra.s  ovsc_tb_poll\n"
+"ovsc_tb_tick_warm:\n"
+"    bra.s  9f\n"
+"ovsc_tb_tick:\n"
+"    move.w #63,%d2\n"
+"    move.b (%a0),%d1\n"
+"8:  cmp.b  (%a0),%d1\n"
+"    bne.s  9f\n"
+"    dbra   %d2,8b\n"
+"    bra.s  ovsc_tb_late\n"
+"9:  clr.b  (%a2)\n"
+"    move.w %d4,%d2\n"
+"10: dbra   %d2,10b\n"
+"    move.b #2,(%a2)\n"
+"    cmp.l  #0xffff820a,%a2\n"
+"    beq.s  ovsc_tb_check\n"
+"    lea    0xffff820a.w,%a2\n"
+"    bra.s  ovsc_tb_tick\n"
+"ovsc_tb_check:\n"
+"    move.w _stdl_ovsc_postn,%d2\n"
+"    bsr    stdl_ovsc_wait_de_n\n"
 "    bmi.s  ovsc_tb_late\n"
-"    bsr    stdl_ovsc_wait_de\n"
-"    bmi.s  ovsc_tb_late\n"
-"    clr.b  0xffff820a.w\n"
-"    bsr    stdl_ovsc_wait_de\n"
-"    move.b #2,0xffff820a.w\n"
 "ovsc_tb_out:\n"
 "    clr.b  0xfffffa1b.w\n"
 "    move.b #0xFE,0xfffffa0f.w\n"
-"    movem.l (%sp)+,%d1/%d2/%a0\n"
+"    movem.l (%sp)+,%d0-%d4/%a0-%a3\n"
 "    rte\n"
 "ovsc_tb_late:\n"
 "    addq.l #1,_stdl_ovsc_missed\n"
@@ -226,15 +412,28 @@ __asm__(
 "\n"
 
 /* Wait for Timer B to tick: the end of the next displayed line.
- * Bounded so a missed window can never hang the machine; returns N
- * set on timeout, N clear on success. */
+ * Bounded (about eight lines, see stdl_ovsc_waitn) so a missed
+ * window can never hang the machine or hold off the VBL; returns N
+ * set on timeout, N clear on success. The _n entry takes the bound
+ * in d2 for waits that know how soon the tick is due. */
 "stdl_ovsc_wait_de:\n"
-"    move.w #2000,%d2\n"
+"    move.w _stdl_ovsc_waitn,%d2\n"
+"stdl_ovsc_wait_de_n:\n"
 "    move.b (%a0),%d1\n"
 "1:  cmp.b  (%a0),%d1\n"
 "    bne.s  2f\n"
 "    dbra   %d2,1b\n"
 "2:  tst.w  %d2\n"
+"    rts\n"
+"\n"
+
+/* Calibration loop: the flick's dbra, run for the count on the
+ * stack. Same instruction, same two-word self-loop, so it takes the
+ * same time per turn in the ISR's cache state as here. */
+"    .even\n"
+"_stdl_ovsc_spin:\n"
+"    move.l 4(%sp),%d0\n"
+"1:  dbra   %d0,1b\n"
 "    rts\n"
 );
 
@@ -242,6 +441,7 @@ extern void stdl_ovsc_vbl_top(void);
 extern void stdl_ovsc_vbl_bot(void);
 extern void stdl_ovsc_ta(void);
 extern void stdl_ovsc_tb(void);
+extern void stdl_ovsc_spin(int turns);
 
 /*
  * Palette staging. With a border open the display starts fetching
@@ -278,6 +478,130 @@ static void ovsc_pal_flush(void)
     }
 }
 
+/*
+ * Time the flick's dbra against displayed scanlines. Timer B counts
+ * Display Enable ends, one per picture line of exactly 512 cycles
+ * while the sync rate is 50Hz and no border trick is running -
+ * interrupts are off, so none is. From the VBL the first event is
+ * line 63's; the spin then runs 150 lines on a plain ST (the
+ * slowest machine there is) and fewer on anything faster, ending
+ * inside the 200-line picture, and the events it spanned bound its
+ * length to one line either way. The middle of that bound is the
+ * estimate: a third of a percent at 8MHz, two thirds at 16MHz, on
+ * a delay of ~200 cycles - well under the window's margins. Costs
+ * about a frame with interrupts masked, once per open. Returns the
+ * cycles per turn x16, or 0 when no displayed line was seen.
+ */
+static int ovsc_counter_live(int c);
+
+static int ovsc_calibrate(int *live)
+{
+    uint16_t sr;
+    int i, v0, v1, lines;
+    uint32_t r;
+
+    STDL_WaitVBL();
+    sr = stdl_int_off();
+    MFP_TBCR = 0;
+    MFP_TBDR = 255;
+    MFP_TBCR = 8;
+    v0 = MFP_TBDR;
+    for (i = 0; i < 8000 && MFP_TBDR == v0; i++) {
+        /* wait for the first event, up to ~2 frames */
+    }
+    v0 = MFP_TBDR;
+    stdl_ovsc_spin(OVSC_SPIN);
+    v1 = MFP_TBDR;
+    lines = (v0 - v1) & 0xFF;
+    if (i >= 8000 || lines < 2) {
+        r = 0;
+        *live = 1;
+    } else {
+        /* the spin took between lines*512 and (lines+1)*512 cycles */
+        r = ((uint32_t)(2 * lines + 1) * 256UL * 16UL) / OVSC_SPIN;
+        *live = ovsc_counter_live((int)r);
+    }
+    MFP_TBCR = 0;
+    MFP_IPRA = (uint8_t)~0x01;              /* drop the pending B */
+    stdl_int_restore(sr);
+    return (int)r;
+}
+
+/*
+ * Fill the flick's tables for a dbra turn of c/16 cycles. Costs
+ * between the poll's last read and the writes are the flick path's
+ * instruction times on an 8MHz 68000 (see the asm) scaled by
+ * c/160, plus the register writes' bus cycles at their fixed width.
+ * The poll's read that first sees fetch byte 136+2i lands at cycle
+ * 338+4i (mid-grain); the 60Hz write is aimed at OVSC_T1 and the
+ * 50Hz one at OVSC_T2 from there, rounding to the nearest turn and
+ * never below zero - a late catch (a stall lengthened the poll)
+ * just gets both writes proportionally later, still inside the
+ * windows up to byte 158.
+ */
+static void ovsc_table(int c)
+{
+    const int tb = (OVSC_TB_CPU * c) / 192 + OVSC_TB_BUS;
+    const int tt = (OVSC_TT_CPU * c) / 192 + OVSC_TT_BUS;
+    const int tm = (OVSC_TM_CPU * c) / 192 + OVSC_TM_BUS;
+    const int first = (OVSC_FIRST_TURN * c) / 192;
+    int i, n, hit;
+
+    for (i = 0; i < 16; i++) {
+        hit = (i < 15) ? (OVSC_HIT_READ + 4 * i) * 16
+                       : OVSC_PARK_READ * 16
+                         + (OVSC_PARK_CPU * c) / 192 + OVSC_PARK_BUS;
+        n = (OVSC_T1 * 16 - hit - tb + c / 2) / c;
+        if (n >= 1) {
+            n = (OVSC_T1 * 16 - hit - tb + first + c / 2) / c;
+        }
+        stdl_ovsc_n1[i] = (uint16_t)((n < 0) ? 0 : n);
+    }
+    n = ((OVSC_T2 - OVSC_T1) * 16 - tm + c / 2) / c;
+    stdl_ovsc_n2 = (uint16_t)((n < 0) ? 0 : n);
+    /* tick mode: no turns before the 60Hz write, it lands where the
+     * fixed path puts it; the turns between the writes make up the
+     * rest of the way to OVSC_T2 */
+    hit = OVSC_TICK_READ * 16 + (OVSC_TICK_CPU * c) / 192 + OVSC_TICK_BUS;
+    n = (OVSC_T2 * 16 - hit - tt - tm + c / 2) / c;
+    stdl_ovsc_n2t = (uint16_t)((n < 0) ? 0 : n);
+    /* the check that line 263 displayed: ~1300 plain-ST cycles of
+     * polling, a line and a half, in this CPU's turns */
+    stdl_ovsc_postn = (uint16_t)((40 * 192) / c);
+}
+
+/*
+ * Is the video counter readable as a position while a line is
+ * being fetched? On every ST it is: $ff8209 advances two bytes per
+ * four cycles from cycle 56 to 376. An emulator's 16MHz mode may
+ * only model the parked values, and the ISR then has to time from
+ * Timer B instead. Wait for a line end, then for the next fetch to
+ * begin, run ~180 plain-ST cycles into it and read: a live counter
+ * is still moving, mid-line. Three lines, majority. Interrupts are
+ * off and Timer B counts DE ends, as left by the calibration.
+ */
+static int ovsc_counter_live(int c)
+{
+    volatile uint8_t *vc = (volatile uint8_t *)0xFFFF8209UL;
+    int k, i, live = 0;
+    uint8_t v, p, off;
+
+    for (k = 0; k < 3; k++) {
+        v = MFP_TBDR;
+        for (i = 0; i < 8000 && MFP_TBDR == v; i++) {
+        }
+        p = *vc;
+        for (i = 0; i < 200 && *vc == p; i++) {
+        }
+        stdl_ovsc_spin((180 * 16) / c);
+        off = (uint8_t)(*vc - p);
+        if (off > 8 && off < 156) {
+            live++;
+        }
+    }
+    return live >= 2;
+}
+
 /* Hardware-only teardown, shared with the terminate path: vectors,
  * timers and sync rate back, both timer bits released. No GEMDOS,
  * no heap - release_hardware() repoints the screen afterwards. */
@@ -312,6 +636,10 @@ static void ovsc_program(int m)
 {
     const uint8_t bits = (uint8_t)(((m & MODE_TOP) ? 0x20 : 0)
                                  | ((m & MODE_BOT) ? 0x01 : 0));
+    /* frame line 262 is the last picture line: row 199 of a bottom
+     * screen, row 228 of a combined one (rows count from line 34) */
+    const uintptr_t l262 = (uintptr_t)buf
+        + (uintptr_t)((m & MODE_TOP) ? 228 : 199) * STDL_SCREEN_STRIDE;
     uint16_t sr = stdl_int_off();
 
     if (!mode) {
@@ -334,6 +662,15 @@ static void ovsc_program(int m)
     MFP_IMRA = (uint8_t)((MFP_IMRA & ~0x21) | bits);
     stdl_ovsc_bhi = (uint8_t)((uintptr_t)buf >> 16);
     stdl_ovsc_bmid = (uint8_t)((uintptr_t)buf >> 8);
+    stdl_ovsc_l262lo = (uint8_t)l262;
+    stdl_ovsc_l262mid = (uint8_t)(l262 >> 8);
+    /* every bounded wait gives up after ~8 lines (4096 plain-ST
+     * cycles of ~32-cycle polls): a border that failed to open has
+     * no more DE events this frame, and a longer wait at MFP
+     * priority would hold off the VBL, arm Timer B late and make
+     * the next frame miss too - a cascade that was measured at a
+     * dozen frames before this bound existed */
+    stdl_ovsc_waitn = (uint16_t)((128 * 192) / (c16 ? c16 : OVSC_C16_8MHZ));
     stdl_ovsc_missed = 0;
     VEC_VBL = (uint32_t)(uintptr_t)
         ((m & MODE_TOP) ? stdl_ovsc_vbl_top : stdl_ovsc_vbl_bot);
@@ -430,6 +767,19 @@ static int ovsc_open(int which)
         if (STDL_AddVBL(ovsc_pal_flush) == 0) {
             stdl_pal_apply_hook = ovsc_pal_stage;
         }
+    }
+    if ((which & MODE_BOT) && c16 == 0) {
+        /* once per process: the CPU speed does not change under a
+         * running program. A failed measurement (no displayed line
+         * seen) falls back to the plain ST's numbers rather than
+         * refuse the border. */
+        int live;
+        c16 = ovsc_calibrate(&live);
+        if (c16 == 0) {
+            c16 = OVSC_C16_8MHZ;
+        }
+        stdl_ovsc_tick = (uint8_t)!live;
+        ovsc_table(c16);
     }
     ovsc_program(m);
     ovsc_surface();

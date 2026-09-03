@@ -2,20 +2,22 @@
  * Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: CC0-1.0
  *
- * Top-border overscan demo: 227 visible lines on any 50Hz ST.
+ * Border overscan demo: 227, 245 or 272 visible lines on any 50Hz
+ * ST.
  *
  * The intended pattern: set the normal video mode, then ask for
  * borders and use whatever height comes back. The screen surface
  * is updated in place, so all drawing code just reads screen->h -
  * the same loop paints 200, 227, 245 or 272 lines. T toggles the
- * seamless top border, B the bottom one; opening both combines
- * them automatically (272 rows) and closing one drops back to the
- * other alone. SPACE closes everything. The bottom variant's one
- * border-coloured seam (surface row 200 alone, row 227 combined)
- * is left visible on purpose - real programs align a HUD split or
- * dark band with it. The ruler makes the extra lines countable,
- * and the one-pixel frame proves the first and last lines are
- * really displayed. ESC quits.
+ * top border, B the bottom one; opening both combines them
+ * automatically (272 rows) and closing one drops back to the other
+ * alone. SPACE closes everything. The ruler makes the extra lines
+ * countable, the one-pixel frame proves the first and last lines
+ * are really displayed, and the chequered band across the old
+ * picture's last line (surface row 200 alone, 227 combined) is
+ * there to be looked at closely: the bottom variant once showed a
+ * seam there, and a row displayed a cycle early or fetched a word
+ * out of step would break the pattern. ESC quits.
  */
 
 #include <stddef.h>
@@ -42,12 +44,16 @@ static void paint(STDL_Surface *screen)
         r.w = (uint16_t)screen->w; r.h = 2;
         STDL_FillRect(screen, &r, 12);
     }
-    /* bracket the bottom variant's hidden seam line */
+    /* a chequer across the old picture's last line and its
+     * neighbours: every row of it must line up with the next */
     if (screen->h == 245 || screen->h == 272) {
-        r.x = 0;
-        r.y = (int16_t)((screen->h == 245) ? 199 : 226);
-        r.w = (uint16_t)screen->w; r.h = 3;
-        STDL_FillRect(screen, &r, 14);
+        int x, band = (screen->h == 245) ? 198 : 225;
+        for (y = band; y < band + 5; y++) {
+            for (x = 0; x < screen->w; x += 4) {
+                r.x = (int16_t)x; r.y = (int16_t)y; r.w = 4; r.h = 1;
+                STDL_FillRect(screen, &r, (uint8_t)(((x >> 2) + y) & 1 ? 14 : 15));
+            }
+        }
     }
 
     /* one-pixel frame on the true first and last lines */

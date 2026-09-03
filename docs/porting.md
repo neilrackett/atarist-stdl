@@ -114,15 +114,22 @@ borders (TT/Falcon), so keep one of the other two mappings as the
 fallback and choose at init. `examples/overscan.c`
 is the pattern, including the toggle for A/B comparison.
 `STDL_OpenBottomBorder()` gains 45 lines at the other end instead,
-with one border-coloured seam at picture line 200 - useful when the
-extra height is a status panel with its own split anyway. Opening
-both borders combines them automatically (272 rows, edge to edge);
-closing one falls back to the other alone. While any border is
-open, BLiTTER blits run in non-hog mode with the restart idiom
-(near-hog speed, interrupts taken between bus slices) so they
-cannot stall the CPU past the border's timing window, and palette
-writes land in the blanking via a VBL callback; `STDL_OverscanMisses()` says whether anything else
-stalls the CPU. Full-page screen updates should start at the VBL
+seamlessly: content goes at rows 200..244 with nothing to align
+around. It costs an interrupt and about five lines of polling per
+frame (~1.7% of an 8MHz frame) and, the first time it opens, one
+frame with interrupts masked to calibrate its delay loops against
+the machine's own scanlines - the 200Hz tick loses a few counts,
+once. Opening both borders combines them automatically (272 rows,
+edge to edge); closing one falls back to the other alone. While
+any border is open, BLiTTER blits run in non-hog mode (interrupts
+taken between bus slices) so they cannot stall the CPU past the
+border's timing window, and palette writes land in the blanking
+via a VBL callback; `STDL_OverscanMisses()` says whether anything
+else stalls the CPU. A blit still in flight when the bottom flick
+runs can stretch it past its window and cost that frame (a border
+or one line at 60Hz timing), so keep big blits away from the end
+of the picture or VBL-sync them.
+Full-page screen updates should start at the VBL
 (`STDL_WaitVBL`) so the copy stays ahead of the beam - the display
 starts 29 lines earlier with the top border open, and an unsynced
 full-page copy tears intermittently.

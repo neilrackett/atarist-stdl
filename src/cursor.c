@@ -53,7 +53,7 @@ static void cursor_undraw(void)
         if (py < 0 || py >= stdl_screen.h) {
             continue;
         }
-        line = stdl_screen.pixels + (uint32_t)py * stdl_screen.stride;
+        line = stdl_screen.pixels + stdl_row_off(py, stdl_screen.stride);
         for (g = 0; g < CUR_GROUPS; g++) {
             uint16_t *grp;
             if (gx + g < 0 || gx + g >= screen_groups) {
@@ -91,7 +91,7 @@ static void cursor_draw(int mx, int my)
         if (py < 0 || py >= stdl_screen.h) {
             continue;
         }
-        line = stdl_screen.pixels + (uint32_t)py * stdl_screen.stride;
+        line = stdl_screen.pixels + stdl_row_off(py, stdl_screen.stride);
 
         /* place the 32 cursor bits in a 48-bit window whose top bit
          * is the first pixel of group gx */
@@ -158,8 +158,8 @@ STDL_Cursor *STDL_CreateCursor(const uint8_t *data, const uint8_t *mask,
     for (row = 0; row < h; row++) {
         uint32_t d = 0, m = 0;
         for (b = 0; b < bpr; b++) {
-            d |= (uint32_t)data[row * bpr + b] << (24 - b * 8);
-            m |= (uint32_t)mask[row * bpr + b] << (24 - b * 8);
+            d |= (uint32_t)data[stdl_row_off(row, (uint16_t)bpr) + b] << (24 - b * 8);
+            m |= (uint32_t)mask[stdl_row_off(row, (uint16_t)bpr) + b] << (24 - b * 8);
         }
         c->data[row] = d;
         c->mask[row] = m;

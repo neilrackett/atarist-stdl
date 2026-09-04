@@ -65,7 +65,7 @@ static void mix_callback(void *userdata, uint8_t *stream, int len)
             }
             s = abuf[pos++];
             if (!full) {
-                s = (s * gain) >> 14;
+                s = stdl_mul16(s, gain) >> 14;    /* muls.w, not __mulsi3 */
             }
             v = out[i] + s;
             if (v > 127) v = 127;

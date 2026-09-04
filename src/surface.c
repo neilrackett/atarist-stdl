@@ -180,9 +180,9 @@ int STDL_SetColourKey(STDL_Surface *s, int enable, uint8_t key)
      * with the key's bit for that plane. */
     for (y = 0; y < s->h; y++) {
         const uint16_t *grp =
-            (const uint16_t *)(s->pixels + (uint32_t)y * s->stride);
+            (const uint16_t *)(s->pixels + stdl_row_off(y, s->stride));
         uint16_t *mrow =
-            (uint16_t *)(s->mask + (uint32_t)y * s->maskstride);
+            (uint16_t *)(s->mask + stdl_row_off(y, s->maskstride));
         for (g = 0; g < groups; g++) {
             uint16_t m;
             m  = (key & 1) ? grp[0] : (uint16_t)~grp[0];
@@ -254,14 +254,14 @@ void STDL_PutGroup(STDL_Surface *s, int x, int y,
     if (g < 0 || g >= s->stride / 8) {
         return;
     }
-    grp = (uint16_t *)(s->pixels + (uint32_t)y * s->stride + g * 8);
+    grp = (uint16_t *)(s->pixels + stdl_row_off(y, s->stride) + g * 8);
     /* words above the plane budget are dropped, not stored: no
      * public entry point may break the "high planes are zero"
      * invariant the budget rests on */
     stdl_put_planes(grp, planes[0], planes[1], planes[2], planes[3],
                     stdl_planes);
     if (s->mask != NULL) {
-        ((uint16_t *)(s->mask + (uint32_t)y * s->maskstride))[g] = mask;
+        ((uint16_t *)(s->mask + stdl_row_off(y, s->maskstride)))[g] = mask;
         s->opaque_state = 0;
     }
 }
@@ -287,13 +287,13 @@ void STDL_PutGroup8(STDL_Surface *s, int x, int y,
         return;
     }
     half = STDL_WORD_BYTE((x >> 3) & 1);
-    grp = s->pixels + (uint32_t)y * s->stride + g * 8 + half;
+    grp = s->pixels + stdl_row_off(y, s->stride) + g * 8 + half;
     grp[0] = planes[0];                     /* budget-truncated, as */
     if (stdl_planes > 1) grp[2] = planes[1];    /* STDL_PutGroup is */
     if (stdl_planes > 2) grp[4] = planes[2];
     if (stdl_planes > 3) grp[6] = planes[3];
     if (s->mask != NULL) {
-        s->mask[(uint32_t)y * s->maskstride + g * 2 + half] = transmask;
+        s->mask[stdl_row_off(y, s->maskstride) + g * 2 + half] = transmask;
         s->opaque_state = 0;
     }
 }

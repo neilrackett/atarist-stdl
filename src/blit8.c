@@ -98,12 +98,12 @@ void STDL_BlitIndexed8(STDL_Surface *dst, const uint8_t *src,
     cx2 = dst->clip.x + dst->clip.w;
     cy2 = dst->clip.y + dst->clip.h;
     if (x < cx1) {
-        src += (cx1 - x) * step;
+        src += stdl_mul16(cx1 - x, step);
         w -= cx1 - x;
         x = cx1;
     }
     if (y < cy1) {
-        src += (cy1 - y) * rowadv;
+        src += stdl_mul16(cy1 - y, rowadv);
         h -= cy1 - y;
         y = cy1;
     }

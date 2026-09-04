@@ -303,9 +303,49 @@ static __inline__ void stdl_blitter_go(uintptr_t src, int16_t sxinc,
  * to the surface, stride is a uint16_t), and a 16x16->32 mulu.w is
  * a single instruction. Only valid for a clipped, non-negative y.
  */
+#ifdef __m68k__
+static __inline__ uint32_t stdl_row_off(int y, uint16_t stride)
+{
+    /* spelled out: the cast form `(uint32_t)(uint16_t)y * stride`
+     * usually compiles to mulu.w, but gcc 4.6 still reached for
+     * __mulsi3 when the stride was a selected constant or came from
+     * an inlined argument (blitter.c's cost per line, the tile
+     * blit's row advance) - measured, not assumed */
+    uint32_t r = (uint16_t)y;
+
+    __asm__("mulu.w %1,%0" : "+d"(r) : "d"(stride));
+    return r;
+}
+
+/* The signed twin, for products whose operands are known to fit
+ * sixteen bits (a clipped count times a pitch, a sample times a
+ * gain). */
+static __inline__ int32_t stdl_mul16(int a, int b)
+{
+    int32_t r = (int16_t)a;
+
+    __asm__("muls.w %1,%0" : "+d"(r) : "d"((int16_t)b));
+    return r;
+}
+#else
 static __inline__ uint32_t stdl_row_off(int y, uint16_t stride)
 {
     return (uint32_t)(uint16_t)y * stride;
+}
+
+static __inline__ int32_t stdl_mul16(int a, int b)
+{
+    return (int32_t)(int16_t)a * (int16_t)b;
+}
+#endif
+
+/* A 32-bit value times a 16-bit one in two mulu.w, for the frame
+ * and variant offsets into sprite data, whose frame size can pass
+ * sixteen bits: about 150 cycles against __mulsi3's 270-plus. */
+static __inline__ uint32_t stdl_mul32x16(uint32_t a, uint16_t b)
+{
+    return (stdl_row_off((int)(a >> 16), b) << 16)
+         + stdl_row_off((int)(a & 0xFFFFu), b);
 }
 
 /* case-normalising fopen for GEMDOS: retries with an uppercased

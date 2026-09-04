@@ -89,8 +89,8 @@ void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
      * plus a little per line (measured on an STE, and the same on
      * a Mega STE - the blitter runs on the 8MHz bus whatever the
      * CPU does) */
-    const uint32_t cpl = (uint32_t)nwords
-                       * (uint16_t)(hop == STDL_BLIT_HOP_ONES ? 5 : 10) + 16;
+    const uint32_t cpl = (hop == STDL_BLIT_HOP_ONES)
+                       ? (uint32_t)nwords * 5u + 16 : (uint32_t)nwords * 10u + 16;
 
     b->src_xinc = sxinc;
     b->src_yinc = syinc;

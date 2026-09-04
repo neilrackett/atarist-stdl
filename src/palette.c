@@ -97,7 +97,8 @@ uint8_t STDL_MapRGB(const STDL_PixelFormat *fmt,
         int32_t dr = (int32_t)r - cols[i].r;
         int32_t dg = (int32_t)g - cols[i].g;
         int32_t db = (int32_t)b - cols[i].b;
-        int32_t dist = dr * dr + dg * dg + db * db;
+        int32_t dist = stdl_mul16(dr, dr) + stdl_mul16(dg, dg)
+                     + stdl_mul16(db, db);
         if (dist < bestdist) {
             bestdist = dist;
             best = (uint8_t)i;

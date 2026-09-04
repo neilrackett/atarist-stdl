@@ -91,8 +91,8 @@ static uint16_t *preshift_expand(const uint16_t *v0, int groups,
     int pg = groups + 1;                 /* padded groups per row */
     int srcrow = groups * SPR_WORDS;     /* words per input row      */
     uint32_t rowsz = (uint32_t)pg * SPR_WORDS;
-    uint32_t vsize = rowsz * (uint32_t)rows_total;
-    uint16_t *data = malloc(vsize * 16 * 2);
+    uint32_t vsize = stdl_row_off(rows_total, (uint16_t)rowsz);
+    uint16_t *data = malloc(vsize << 5);
     uint16_t *dst = data;
     int v, y, g, p;
 
@@ -332,14 +332,15 @@ void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
 
     if (spr->nvariants == 16) {
         fdata = spr->data
-              + (uint32_t)phase * spr->framesize * spr->nframes
-              + (uint32_t)frame * spr->framesize;
+              + stdl_mul32x16(stdl_mul32x16(spr->framesize, spr->nframes),
+                              (uint16_t)phase)
+              + stdl_mul32x16(spr->framesize, (uint16_t)frame);
         ng = spr->groups;
     } else if (phase == 0) {
-        fdata = spr->data + (uint32_t)frame * spr->framesize;
+        fdata = spr->data + stdl_mul32x16(spr->framesize, (uint16_t)frame);
         ng = spr->groups;
     } else {
-        fdata = spr->data + (uint32_t)frame * spr->framesize;
+        fdata = spr->data + stdl_mul32x16(spr->framesize, (uint16_t)frame);
         ng = spr->groups + 1;       /* output covers one extra group */
         runtime_shift = 1;
         r = phase;
@@ -380,9 +381,9 @@ void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
         int xb0 = (x - phase) + g0 * 16;
         int xb1 = (x - phase) + (g1 - 1) * 16;
         uint16_t cover0 = 0xFFFFu, cover1 = 0xFFFFu;
-        const uint16_t *srow = fdata + (uint32_t)row0 * rowwords;
+        const uint16_t *srow = fdata + stdl_row_off(row0, (uint16_t)rowwords);
         uint8_t *drow = dst->pixels
-            + (uint32_t)(y + row0) * dst->stride + (gx0 + g0) * 8;
+            + stdl_row_off(y + row0, dst->stride) + (gx0 + g0) * 8;
 
         if (xb0 < cx1) {
             cover0 &= (uint16_t)(0xFFFFu >> (cx1 - xb0));
@@ -507,12 +508,17 @@ STDL_PLANE_INLINE void blit_tile_rows(const uint16_t *src,
                               int gx0, int g0, int g1, int tsgroups,
                               int words, int masked, const int np)
 {
+    /* every product here is 16x16 (groups, words per group): as
+     * plain int arithmetic gcc 4.6 makes each a __mulsi3 call, per
+     * group per row */
+    const uint32_t srcadv = stdl_row_off(tsgroups, (uint16_t)words);
+    const uint16_t *sg0 = src + stdl_row_off(g0, (uint16_t)words);
     int yy, g;
 
     for (yy = 0; yy < rows; yy++) {
-        for (g = g0; g < g1; g++) {
-            uint16_t *dgrp = (uint16_t *)(drow + (gx0 + g) * 8);
-            const uint16_t *sg = src + g * words;
+        const uint16_t *sg = sg0;
+        uint16_t *dgrp = (uint16_t *)(drow + (gx0 + g0) * 8);
+        for (g = g0; g < g1; g++, sg += words, dgrp += 4) {
             if (masked) {
                 uint16_t m = sg[0];
                 dgrp[0] = (uint16_t)((dgrp[0] & m) | sg[1]);
@@ -526,7 +532,7 @@ STDL_PLANE_INLINE void blit_tile_rows(const uint16_t *src,
                 if (np > 3) dgrp[3] = sg[3];
             }
         }
-        src += tsgroups * words;
+        sg0 += srcadv;
         drow += dstride;
     }
 }
@@ -563,12 +569,12 @@ void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,
         return;
     }
 
-    tdata = ts->data + ts->tilesize * (uint32_t)index;
+    tdata = ts->data + stdl_row_off(index, (uint16_t)ts->tilesize);
     {
     const uint16_t *src =
-        tdata + (uint32_t)row0 * ts->groups * words;
+        tdata + stdl_row_off(row0, (uint16_t)stdl_row_off(ts->groups, (uint16_t)words));
     uint8_t *drow =
-        dst->pixels + (uint32_t)(y + row0) * dst->stride;
+        dst->pixels + stdl_row_off(y + row0, dst->stride);
 
     np = stdl_planes;
 #define TILE_ROWS(np) \
@@ -630,7 +636,7 @@ STDL_PLANE_INLINE void draw_text_glyphs(uint8_t *pixels, int stride,
      * c - first at most 255, so both operands fit 16 bits.
      */
     glyphsize = (uint16_t)(bpr * ch);
-    bits0 = font->bits + (uint32_t)row0 * bpr;
+    bits0 = font->bits + stdl_row_off(row0, (uint16_t)bpr);
     rowbase = pixels + (uint32_t)(y + row0) * stride;
 
     for (i = 0; text[i] != '\0'; i++, x += cw) {
@@ -657,7 +663,7 @@ STDL_PLANE_INLINE void draw_text_glyphs(uint8_t *pixels, int stride,
 
         shift = x & 15;
         gx = x >> 4;
-        glyph = bits0 + (uint16_t)(c - font->first) * glyphsize;
+        glyph = bits0 + stdl_row_off(c - font->first, glyphsize);
         g1w = (uint16_t *)(rowbase + gx * 8);
         g2w = g1w + 4;
 

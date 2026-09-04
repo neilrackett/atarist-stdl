@@ -371,14 +371,14 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
         uint16_t rm =
             (uint16_t)(0xFFFFu << (15 - ((dphase + w - 1) & 15)));
         const uint8_t *srow =
-            src->pixels + (uint32_t)sy * src->stride;
+            src->pixels + stdl_row_off(sy, src->stride);
         uint8_t *drow =
-            dst->pixels + (uint32_t)dy * dst->stride + dg0 * 8;
+            dst->pixels + stdl_row_off(dy, dst->stride) + dg0 * 8;
         const uint8_t *smrow = masked
-            ? src->mask + (uint32_t)sy * src->maskstride
+            ? src->mask + stdl_row_off(sy, src->maskstride)
             : NULL;
         uint8_t *dmrow = (dst->mask != NULL)
-            ? dst->mask + (uint32_t)dy * dst->maskstride + dg0 * 2
+            ? dst->mask + stdl_row_off(dy, dst->maskstride) + dg0 * 2
             : NULL;
         int smstride = masked ? src->maskstride : 0;
         int dmstride = (dst->mask != NULL) ? dst->maskstride : 0;
@@ -392,7 +392,8 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                                   * mask upkeep; UNDER/MARK go the CPU
                                   * route */
             && stdl_blitter_active()
-            && ng * h >= (masked ? STDL_BLIT_MASKED_MIN_CELLS
+            && stdl_row_off(ng, (uint16_t)h)
+               >= (masked ? STDL_BLIT_MASKED_MIN_CELLS
                                  : STDL_BLIT_COPY_MIN_CELLS)) {
             /*
              * BLiTTER path, one plane rectangle per pass. Masked

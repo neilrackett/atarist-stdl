@@ -4,10 +4,14 @@
  * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * Bottom-border probe: opens the bottom border (and the top too if
- * a file called OVTOP.FLG sits beside the program), prints the
+ * a file called OVTOP.FLG sits beside the program; the top alone
+ * with OVTONLY.FLG), prints the mode it selected and the
  * calibration src/overscan.c arrived at, holds the border open for
  * 250 frames and prints the miss counter three times - after
- * opening, after painting, and at the end. Not built by the
+ * opening, after painting, and at the end. The flag names are 8.3
+ * on purpose: GEMDOS truncates a longer name in fopen and a FAT
+ * disk written elsewhere shortens it differently, so a nine-letter
+ * flag silently selects the wrong mode. Not built by the
  * Makefile; it reads the library's internal tables, so it links
  * against the objects of the tree it is measuring:
  *
@@ -70,8 +74,11 @@ int main(int argc, char *argv[])
     (void)argc; (void)argv;
     if ((f = fopen("OVTOP.FLG", "r")) != NULL) { top = 1; fclose(f); }
     if ((f = fopen("OVZERO.FLG", "r")) != NULL) { zero = 1; fclose(f); }
-    if ((f = fopen("OVTOPONLY.FLG", "r")) != NULL) { toponly = 1; top = 1; fclose(f); }
+    if ((f = fopen("OVTONLY.FLG", "r")) != NULL) { toponly = 1; top = 1; fclose(f); }
     if ((f = fopen("OVTICK.FLG", "r")) != NULL) { tick = 1; fclose(f); }
+    fprintf(stderr, "OVPROBE mode=%s%s%s\n",
+            toponly ? "top-only" : top ? "top+bottom" : "bottom",
+            zero ? " zeroed-tables" : "", tick ? " forced-tick" : "");
 
     if (STDL_Init(STDL_INIT_VIDEO) < 0) {
         return 1;

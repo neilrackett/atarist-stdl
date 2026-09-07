@@ -66,8 +66,8 @@ void STDL_CloseTopBorder(void);
  * start: 60Hz on for ~80 cycles across the test, off again before
  * line 263 can start early. The dbra loops that run out that
  * distance are calibrated the first time the bottom border opens,
- * by timing the same loop against displayed scanlines - about one
- * frame with interrupts masked (the 200Hz system tick loses a few
+ * by timing the same loop against displayed scanlines - one to two
+ * frames with interrupts masked (the 200Hz system tick loses a few
  * counts, once) - so the placement holds on any CPU speed. On a
  * machine whose video counter cannot be read mid-line (no ST, but
  * an emulator's 16MHz mode) the ISR times from Timer B instead;

@@ -256,7 +256,9 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   reads the Shifter's video counter mid-line to know where the beam
   is and runs out the distance with dbra loops calibrated, the
   first time the border opens, against the machine's own scanlines
-  (one frame with interrupts masked, once per process). Measured
+  (one to two frames with interrupts masked, once per process; it
+  finds the picture start from the Display Enable events themselves
+  and re-measures anything no ST could produce). Measured
   in Hatari: the restore lands within ~8 cycles of the window's
   centre on a plain ST, an STE and a 16MHz Mega STE, and the
   border held for 1500 consecutive frames with no miss. Each

@@ -226,6 +226,16 @@ uint8_t  stdl_ovsc_tick;     /* 1 = time from Timer B, not the counter */
 uint8_t  stdl_ovsc_l262lo;
 uint8_t  stdl_ovsc_l262mid;
 uint8_t  stdl_ovsc_scratch;
+/* the calibration's raw measurement, kept for the hardware probe
+ * (tests/hatari/ovprobe.c): the polls spent finding the vertical
+ * blank and then the first Display Enable event after it, the
+ * event counter before and after the spin, the displayed lines
+ * that gives, the turn cost x16 it became, the counter-liveness
+ * verdict and how many measurements it took */
+uint16_t stdl_ovsc_cal_gap, stdl_ovsc_cal_wait;
+uint16_t stdl_ovsc_cal_v0, stdl_ovsc_cal_v1;
+uint16_t stdl_ovsc_cal_lines, stdl_ovsc_cal_c;
+uint8_t  stdl_ovsc_cal_live, stdl_ovsc_cal_try;
 
 static void *buf_alloc;
 static uint8_t *buf;
@@ -663,38 +673,80 @@ static void ovsc_pal_flush(void)
  * Time the flick's dbra against displayed scanlines. Timer B counts
  * Display Enable ends, one per picture line of exactly 512 cycles
  * while the sync rate is 50Hz and no border trick is running -
- * interrupts are off, so none is. From the VBL the first event is
- * line 63's; the spin then runs 150 lines on a plain ST (the
- * slowest machine there is) and fewer on anything faster, ending
- * inside the 200-line picture, and the events it spanned bound its
- * length to one line either way. The middle of that bound is the
- * estimate: a third of a percent at 8MHz, two thirds at 16MHz, on
- * a delay of ~200 cycles - well under the window's margins. Costs
- * about a frame with interrupts masked, once per open. Returns the
- * cycles per turn x16, or 0 when no displayed line was seen.
+ * interrupts are off, so none is. The picture's start is found
+ * from the events themselves rather than from the VBL: the counter
+ * stands still through the 113-line vertical blank and nowhere
+ * else, so a run of polls without an event is the blank, and the
+ * event that ends it is line 63's. (The first version took TOS's
+ * frame counter for the frame start and the first event after it
+ * for line 63, and on one machine that put the spin at the end of
+ * the picture: seven lines counted for seventy-five, every table
+ * ten times too long.) The spin then runs 150 lines on a plain ST
+ * (the slowest machine there is) and fewer on anything faster,
+ * ending inside the 200-line picture, and the events it spanned
+ * bound its length to one line either way. The middle of that
+ * bound is the estimate: a third of a percent at 8MHz, two thirds
+ * at 16MHz, on a delay of ~200 cycles - well under the window's
+ * margins. A count outside what any ST can produce (fewer than 20
+ * lines, or more than the picture holds) is measured again, up to
+ * three times, before the plain ST's numbers are used instead.
+ * Costs one to two frames with interrupts masked, once per open.
+ * Returns the cycles per turn x16, or 0 when no displayed line was
+ * seen.
  */
 static int ovsc_counter_live(int c);
+
+#define OVSC_CAL_GAP     300     /* polls without an event = the blank
+                                  * (a line is 25-70 polls, the blank
+                                  * 113 lines)                       */
+#define OVSC_CAL_LIMIT   60000L  /* polls before giving up: frames    */
 
 static int ovsc_calibrate(int *live)
 {
     uint16_t sr;
-    int i, v0, v1, lines;
-    uint32_t r;
+    int try, v0, v1, lines = 0, gap;
+    long i;
+    uint32_t r = 0;
 
-    STDL_WaitVBL();
     sr = stdl_int_off();
     MFP_TBCR = 0;
     MFP_TBDR = 255;
     MFP_TBCR = 8;
-    v0 = MFP_TBDR;
-    for (i = 0; i < 8000 && MFP_TBDR == v0; i++) {
-        /* wait for the first event, up to ~2 frames */
+    for (try = 0; try < 3; try++) {
+        /* the blank: no event for OVSC_CAL_GAP polls */
+        v0 = MFP_TBDR;
+        gap = 0;
+        for (i = 0; i < OVSC_CAL_LIMIT; i++) {
+            v1 = MFP_TBDR;
+            if (v1 != v0) {
+                v0 = v1;
+                gap = 0;
+            } else if (++gap >= OVSC_CAL_GAP) {
+                break;
+            }
+        }
+        stdl_ovsc_cal_gap = (uint16_t)((i > 65535L) ? 65535L : i);
+        /* line 63's end: the first event after it */
+        for (i = 0; i < OVSC_CAL_LIMIT && MFP_TBDR == v0; i++) {
+        }
+        stdl_ovsc_cal_wait = (uint16_t)((i > 65535L) ? 65535L : i);
+        stdl_ovsc_cal_try = (uint8_t)(try + 1);
+        if (i >= OVSC_CAL_LIMIT) {
+            lines = 0;
+            break;
+        }
+        v0 = MFP_TBDR;
+        stdl_ovsc_spin(OVSC_SPIN);
+        v1 = MFP_TBDR;
+        lines = (v0 - v1) & 0xFF;
+        stdl_ovsc_cal_v0 = (uint16_t)v0;
+        stdl_ovsc_cal_v1 = (uint16_t)v1;
+        stdl_ovsc_cal_lines = (uint16_t)lines;
+        if (lines >= 20 && lines <= 199) {
+            break;
+        }
     }
-    v0 = MFP_TBDR;
-    stdl_ovsc_spin(OVSC_SPIN);
-    v1 = MFP_TBDR;
-    lines = (v0 - v1) & 0xFF;
-    if (i >= 8000 || lines < 2) {
+    if (lines < 20 || lines > 199) {
         r = 0;
         *live = 1;
     } else {
@@ -702,6 +754,8 @@ static int ovsc_calibrate(int *live)
         r = ((uint32_t)(2 * lines + 1) * 256UL * 16UL) / OVSC_SPIN;
         *live = ovsc_counter_live((int)r);
     }
+    stdl_ovsc_cal_c = (uint16_t)r;
+    stdl_ovsc_cal_live = (uint8_t)*live;
     MFP_TBCR = 0;
     MFP_IPRA = (uint8_t)~0x01;              /* drop the pending B */
     stdl_int_restore(sr);

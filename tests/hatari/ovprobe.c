@@ -40,6 +40,10 @@ extern uint16_t stdl_ovsc_n1[16];
 extern uint16_t stdl_ovsc_n2, stdl_ovsc_n2t, stdl_ovsc_postn;
 extern uint8_t  stdl_ovsc_tick;
 extern uint8_t  stdl_ovsc_l262lo, stdl_ovsc_l262mid, stdl_ovsc_tbseen;
+extern uint16_t stdl_ovsc_cal_gap, stdl_ovsc_cal_wait;
+extern uint16_t stdl_ovsc_cal_v0, stdl_ovsc_cal_v1;
+extern uint16_t stdl_ovsc_cal_lines, stdl_ovsc_cal_c;
+extern uint8_t  stdl_ovsc_cal_live, stdl_ovsc_cal_try;
 
 static void paint(STDL_Surface *s)
 {
@@ -124,6 +128,47 @@ int main(int argc, char *argv[])
             (unsigned long)STDL_OverscanMisses(), stdl_ovsc_tbseen);
     STDL_CloseBottomBorder();
     STDL_CloseTopBorder();
+    /* on hardware the console text lands over the pattern: clear
+     * the screen, print everything again one item a line, and hold
+     * until a key so it can be read or photographed */
+    {
+        STDL_Rect all = { 0, 0, 320, 200 };
+        STDL_Surface *scr = STDL_GetVideoSurface();
+        STDL_FillRect(scr, &all, 0);
+        fprintf(stderr, "\033H\033J");
+        fprintf(stderr, "OVPROBE %s h=%d\r\n",
+                toponly ? "top-only" : top ? "top+bottom" : "bottom", h);
+        fprintf(stderr, "cal gap=%u wait=%u v0=%u v1=%u lines=%u\r\n",
+                stdl_ovsc_cal_gap, stdl_ovsc_cal_wait, stdl_ovsc_cal_v0,
+                stdl_ovsc_cal_v1, stdl_ovsc_cal_lines);
+        fprintf(stderr, "cal c16=%u live=%u tick=%u tries=%u\r\n",
+                stdl_ovsc_cal_c, stdl_ovsc_cal_live, stdl_ovsc_tick,
+                stdl_ovsc_cal_try);
+        fprintf(stderr, "l262=%02x%02x n2=%u n2t=%u postn=%u\r\n",
+                stdl_ovsc_l262mid, stdl_ovsc_l262lo,
+                stdl_ovsc_n2, stdl_ovsc_n2t, stdl_ovsc_postn);
+        fprintf(stderr, "n1=");
+        for (i = 0; i < 16; i++) {
+            fprintf(stderr, "%u ", stdl_ovsc_n1[i]);
+        }
+        fprintf(stderr, "\r\nmisses open=%lu paint=%lu run=%lu tbseen=%u\r\n",
+                (unsigned long)m_open, (unsigned long)m_paint,
+                (unsigned long)STDL_OverscanMisses(), stdl_ovsc_tbseen);
+        fprintf(stderr, "press a key\r\n");
+        for (;;) {
+            STDL_Event ev;
+            int key = 0;
+            while (STDL_PollEvent(&ev)) {
+                if (ev.type == STDL_KEYDOWN) {
+                    key = 1;
+                }
+            }
+            if (key) {
+                break;
+            }
+            STDL_WaitVBL();
+        }
+    }
     STDL_Quit();
     return 0;
 }

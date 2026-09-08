@@ -149,8 +149,26 @@
                                  * slot (two bytes), mid-grain      */
 #define OVSC_PARK_READ  384     /* byte 160 (parked) shows from here */
 #define OVSC_TICK_READ  400     /* Timer B's count steps here       */
-#define OVSC_T1         456     /* 60Hz write: inside 377..500      */
-#define OVSC_T2         533     /* 50Hz write: inside 503..564      */
+#define OVSC_TEST       500     /* the GLUE's bottom-border test:
+                                 * 500 on an STE, 502 on an STF. The
+                                 * 60Hz pulse is centred a cycle
+                                 * before it, so the 60Hz write is
+                                 * at ~491 on a plain ST and ~495 at
+                                 * 16MHz, the 50Hz one at ~507/503:
+                                 * past the test, and before line
+                                 * 263 begins - the real GLUE fixes
+                                 * the line's length and the frame's
+                                 * end at the boundary, not at cycle
+                                 * 52 as emulated, and a 50Hz write
+                                 * into line 263 leaves the Shifter's
+                                 * plane phase a word out for the
+                                 * rest of the frame                */
+#define OVSC_NOP_CPU    (4 * 16) /* ladder step: one nop            */
+#define OVSC_PAIR_CPU   (28 * 16) /* 60Hz write to 50Hz write: the
+                                 * move, a dbra falling through, the
+                                 * move - measured 28 on a plain ST */
+#define OVSC_AFTER      6       /* the 50Hz write's target past the
+                                 * test: inside (test, boundary)    */
 /* Fixed costs, x16: from the poll's last read to the 60Hz write in
  * counter mode (TB) and tick mode (TT), between the writes (TM),
  * and half a poll period for the reads that catch an edge rather
@@ -159,14 +177,12 @@
  * turn / 192, and a bus part the register accesses spend at 8MHz
  * whatever the CPU does. Measured in Hatari with zeroed tables at
  * 8 and 16MHz, see the ISR comment. */
-#define OVSC_TB_CPU     (68 * 16)
+#define OVSC_TB_CPU     (90 * 16)
 #define OVSC_TB_BUS     (8 * 16)
-#define OVSC_TT_CPU     (29 * 16)
-#define OVSC_TT_BUS     (3 * 16)
-#define OVSC_TM_CPU     (26 * 16)
-#define OVSC_TM_BUS     (2 * 16)
-#define OVSC_PARK_CPU   (15 * 16)
-#define OVSC_PARK_BUS   (1 * 16)
+#define OVSC_TT_CPU     (7 * 16)
+#define OVSC_TT_BUS     (25 * 16)
+#define OVSC_PARK_CPU   (0 * 16)
+#define OVSC_PARK_BUS   (0 * 16)
 #define OVSC_TICK_CPU   (15 * 16)
 #define OVSC_TICK_BUS   (1 * 16)
 /* a loop's first turn follows the table read in bus phase and
@@ -217,7 +233,24 @@ uint32_t stdl_ovsc_missed;   /* frames whose flip was skipped      */
  * the writes; the address bytes of frame line 262's first word,
  * which the counter shows while parked after line 261; and the
  * byte the warm-up pass writes to */
-uint16_t stdl_ovsc_n1[16];
+uint16_t stdl_ovsc_n1[32];     /* [0..15] turns, [16..31] ladder   */
+uint16_t stdl_ovsc_test = OVSC_TEST;
+uint8_t  stdl_ovsc_wide;       /* probe only: the first version's
+                                * shape, 60Hz at test-44, 50Hz at
+                                * test+33 via a dbra between the
+                                * writes - the known-bad reference
+                                * for the slip metric              */ /* the GLUE test cycle the pulse is
+                                * centred on; a probe may move it   */
+/* line-length diagnostic for the hardware probe: with stdl_ovsc_diag
+ * set, the ISR reads the counter's low byte at the same CPU-timed
+ * offset into lines 263, 264 and 265 right after the flick; the
+ * probe turns the three into two line lengths, and a line 263 cut
+ * to 508 cycles shows as one counter step (two bytes) against the
+ * normal line after it. dspin1/2 are the turns for ~60 and ~512
+ * plain-ST cycles */
+uint8_t  stdl_ovsc_diag;
+uint8_t  stdl_ovsc_dlo[3];
+uint16_t stdl_ovsc_dspin1, stdl_ovsc_dspin2;
 uint16_t stdl_ovsc_n2;
 uint16_t stdl_ovsc_n2t;      /* tick mode: turns between the writes */
 uint16_t stdl_ovsc_postn;    /* poll bound for line 263's DE end     */
@@ -236,6 +269,17 @@ uint16_t stdl_ovsc_cal_gap, stdl_ovsc_cal_wait;
 uint16_t stdl_ovsc_cal_v0, stdl_ovsc_cal_v1;
 uint16_t stdl_ovsc_cal_lines, stdl_ovsc_cal_c;
 uint8_t  stdl_ovsc_cal_live, stdl_ovsc_cal_try;
+uint8_t  stdl_ovsc_cal_off[5];  /* the liveness check's five samples */
+/* the flick path measured on this machine, in counter bytes x16
+ * (a byte is two cycles): the fixed cost from the poll's read to
+ * the counter read after the 50Hz write, a dbra turn, the first
+ * turn's discount (signed), a nop; how many samples went in; and
+ * whether the tables were built from them or from the plain ST's
+ * scaled constants */
+uint16_t stdl_ovsc_mF, stdl_ovsc_mTURN, stdl_ovsc_mNOP;
+int16_t  stdl_ovsc_mFIRST;
+uint16_t stdl_ovsc_msamples;
+uint8_t  stdl_ovsc_measured;
 
 static void *buf_alloc;
 static uint8_t *buf;
@@ -467,34 +511,57 @@ __asm__(
  * cold-versus-warm is wider than the window), and the polls
  * begin.
  *
+ * The flick itself is a short 60Hz pulse: a register write, two
+ * nops, a register write - 16 cycles on a plain ST, 8 at 16MHz -
+ * placed so the GLUE's bottom-border test (cycle 500 on an STE,
+ * 502 on an STF) falls inside it and the 50Hz write still lands
+ * before line 262 ends. It has to: real hardware fixes the next
+ * line's length and the frame's end at the line boundary, and a
+ * 50Hz write that arrives in line 263 leaves the Shifter's plane
+ * phase a word out for the rest of the frame - every colour wrong,
+ * every shape in place - which Hatari, rendering from the counter,
+ * cannot show. (The first version restored 50Hz 21 cycles into
+ * line 263, clean in the emulator, and did exactly that on a Mega
+ * STE.) The window is a few cycles wide, so the placement is
+ * exact to the bus slot.
+ *
  * Counter mode: wait for the counter to leave its parked value,
  * then for line 262's fetch to pass byte 130 - the cheapest loop
  * there is, the counter minus base-plus-2 goes negative exactly
  * there - and hand the byte offset to the flick as the table
- * index. Byte 160 is the counter parked again at the end of the
- * line: a stall ate the moving phase, and that slot of the table
- * is timed from the parking edge instead.
+ * index: a dbra count for the bulk of the distance and a ladder
+ * entry, a jump into zero to three nops, for the residual, so the
+ * write lands within four cycles of its target from any of the
+ * sixteen read positions (measured in Hatari: 492 on every frame,
+ * ST and STE alike). Byte 160 is the counter parked again at the
+ * end of the line: a stall ate the moving phase, and that slot of
+ * the table is timed from the parking edge instead.
  *
  * Tick mode (the open-time check found the counter does not move
- * mid-line, which no ST does but an emulator's 16MHz mode may):
- * wait for line 262's own Display Enable end on Timer B and time
- * both writes from that read, at the cost of the poll period as
- * jitter - still inside the window, with less to spare.
+ * mid-line, which no ST should do but an emulator's 16MHz mode
+ * does): wait for line 262's own Display Enable end on Timer B and
+ * time the pulse from that read, at the cost of the poll period as
+ * jitter - a 14-cycle spread at 16MHz, wider than the window, so
+ * this path loses the border on some frames and exists so an
+ * emulator still shows one.
  *
  * Afterwards line 263 has to end with a DE event, or the border
  * did not open and the frame is counted; Timer B is then restarted
  * as the stopwatch the top's VBL prefix reads (harmless in
  * bottom-only mode, whose prefix re-arms it anyway).
  *
- * From the poll's last read to the writes the paths are
- * sub/bmi/and/move/dbra-exit/clr, bne/clr, and move/dbra-exit/move
- * between the writes: the fixed costs ovsc_table() scales. Change
- * an instruction and re-measure them (zeroed tables and the
- * sync-write trace). */
+ * From the poll's last read to the 60Hz write the paths are
+ * sub/bmi/and/move/move/dbra-exit/jmp/nops/move (counter mode) and
+ * bne/move/dbra-exit/move (tick mode): the fixed costs
+ * ovsc_table() scales. Change an instruction and re-measure them:
+ * OVZERO.FLG beside the probe zeroes the tables, and the sync-write
+ * trace then shows each read position's own cost. */
 "    .even\n"
 "_stdl_ovsc_tb:\n"
-"    movem.l %d0-%d4/%a0-%a3,-(%sp)\n"
+"    movem.l %d0-%d7/%a0-%a3,-(%sp)\n"
 "    bsr    stdl_ovsc_bpause\n"
+"    moveq  #0,%d6\n"
+"    moveq  #2,%d7\n"
 "    lea    0xfffffa21.w,%a0\n"
 "    lea    0xffff8209.w,%a1\n"
 "    move.b _stdl_ovsc_l262lo,%d0\n"
@@ -513,32 +580,18 @@ __asm__(
 "    tst.b  _stdl_ovsc_tick\n"
 "    bne    ovsc_tb_tick_warm\n"
 "    moveq  #30,%d1\n"
-"    bra.s  ovsc_tb_flick\n"
-"ovsc_tb_poll:\n"
+"    bsr    ovsc_flick_tail\n"
+"    lea    0xffff820a.w,%a2\n"
 "    move.w #127,%d2\n"
 "1:  cmp.b  (%a1),%d0\n"
 "    bne.s  2f\n"
 "    dbra   %d2,1b\n"
 "    bra    ovsc_tb_late\n"
 "2:  addq.b #2,%d0\n"
-"    move.w #63,%d2\n"
-"3:  move.b (%a1),%d1\n"
-"    sub.b  %d0,%d1\n"
-"    bmi.s  4f\n"
-"    dbra   %d2,3b\n"
-"    bra    ovsc_tb_late\n"
-"4:  and.w  #0x3e,%d1\n"
-"ovsc_tb_flick:\n"
-"    move.w 0(%a3,%d1.w),%d2\n"
-"5:  dbra   %d2,5b\n"
-"    clr.b  (%a2)\n"
-"    move.w %d3,%d2\n"
-"6:  dbra   %d2,6b\n"
-"    move.b #2,(%a2)\n"
-"    cmp.l  #0xffff820a,%a2\n"
-"    beq.s  ovsc_tb_check\n"
-"    lea    0xffff820a.w,%a2\n"
-"    bra.s  ovsc_tb_poll\n"
+"    bsr    _stdl_ovsc_flick\n"
+"    tst.w  %d1\n"
+"    bmi    ovsc_tb_late\n"
+"    bra    ovsc_tb_check\n"
 "ovsc_tb_tick_warm:\n"
 "    bra.s  9f\n"
 "ovsc_tb_tick:\n"
@@ -547,19 +600,32 @@ __asm__(
 "8:  cmp.b  (%a0),%d1\n"
 "    bne.s  9f\n"
 "    dbra   %d2,8b\n"
-"    bra.s  ovsc_tb_late\n"
-"9:  clr.b  (%a2)\n"
-"    move.w %d4,%d2\n"
+"    bra    ovsc_tb_late\n"
+"9:  move.w %d4,%d2\n"
 "10: dbra   %d2,10b\n"
-"    move.b #2,(%a2)\n"
+"    move.b %d6,(%a2)\n"
+"    move.w %d3,%d2\n"
+"6:  dbra   %d2,6b\n"
+"    move.b %d7,(%a2)\n"
 "    cmp.l  #0xffff820a,%a2\n"
-"    beq.s  ovsc_tb_check\n"
+"    beq    ovsc_tb_check\n"
 "    lea    0xffff820a.w,%a2\n"
-"    bra.s  ovsc_tb_tick\n"
+"    bra    ovsc_tb_tick\n"
 "ovsc_tb_check:\n"
-"    move.w _stdl_ovsc_postn,%d2\n"
+"    tst.b  _stdl_ovsc_diag\n"
+"    beq.s  11f\n"
+"    move.w _stdl_ovsc_dspin1,%d2\n"
+"12: dbra   %d2,12b\n"
+"    move.b (%a1),_stdl_ovsc_dlo\n"
+"    move.w _stdl_ovsc_dspin2,%d2\n"
+"13: dbra   %d2,13b\n"
+"    move.b (%a1),_stdl_ovsc_dlo+1\n"
+"    move.w _stdl_ovsc_dspin2,%d2\n"
+"14: dbra   %d2,14b\n"
+"    move.b (%a1),_stdl_ovsc_dlo+2\n"
+"11: move.w _stdl_ovsc_postn,%d2\n"
 "    bsr    stdl_ovsc_wait_de_n\n"
-"    bmi.s  ovsc_tb_late\n"
+"    bmi    ovsc_tb_late\n"
 "    st     _stdl_ovsc_botok\n"
 "ovsc_tb_out:\n"
 "    bsr    stdl_ovsc_bresume\n"
@@ -567,12 +633,96 @@ __asm__(
 "    move.b #255,0xfffffa21.w\n"
 "    move.b #5,0xfffffa1b.w\n"
 "    move.b #0xFE,0xfffffa0f.w\n"
-"    movem.l (%sp)+,%d0-%d4/%a0-%a3\n"
+"    movem.l (%sp)+,%d0-%d7/%a0-%a3\n"
 "    rte\n"
 "ovsc_tb_late:\n"
 "    addq.l #1,_stdl_ovsc_missed\n"
 "    clr.b  _stdl_ovsc_botok\n"
-"    bra.s  ovsc_tb_out\n"
+"    bra    ovsc_tb_out\n"
+"\n"
+/* The poll and the flick, shared by the ISR and the calibration
+ * that measures it. In: d0 = the byte the counter's low byte is
+ * compared against (the ISR: line 262's start plus 2, so the loop
+ * ends when the fetch passes byte 130; the calibration: 100 less,
+ * so it ends at byte 30 with the same arithmetic), a1 = $ff8209,
+ * a2 = where the two writes go, a3 = the tables, d3 = turns
+ * between the writes, d6 = 0, d7 = 2. Out: d1 = the table slot
+ * times 2, or negative when the counter never got there, and d2 =
+ * the counter's low byte read straight after the 50Hz write - the
+ * calibration's clock; in the ISR the counter is parked by then
+ * and the read is harmless. Registers d1, d2, d5 are clobbered.
+ * The tail entry runs everything after the poll, for the ISR's
+ * warm-up pass. */
+"_stdl_ovsc_flick:\n"
+"    move.w #63,%d2\n"
+"3:  move.b (%a1),%d1\n"
+"    sub.b  %d0,%d1\n"
+"    bmi.s  4f\n"
+"    dbra   %d2,3b\n"
+"    moveq  #-1,%d1\n"
+"    rts\n"
+"4:  and.w  #0x3e,%d1\n"
+"ovsc_flick_tail:\n"
+"    move.w 0(%a3,%d1.w),%d2\n"
+"    move.w 32(%a3,%d1.w),%d5\n"
+"5:  dbra   %d2,5b\n"
+"    jmp    7f(%pc,%d5.w)\n"
+"7:  nop\n"
+"    nop\n"
+"    nop\n"
+"    move.b %d6,(%a2)\n"
+"    move.w %d3,%d2\n"
+"6:  dbra   %d2,6b\n"
+"    move.b %d7,(%a2)\n"
+"    move.b (%a1),%d2\n"
+"    rts\n"
+"\n"
+/* long stdl_ovsc_sample(const uint16_t *table, int n2): one
+ * calibration sample of the flick path. Waits for the counter to
+ * park (two reads a few cycles apart equal: the end of a line, or
+ * the blank), then to move (the next fetch's start), then runs the
+ * poll and the flick against the scratch byte with the given
+ * tables and turns. Returns the slot times 2 in bits 16-20, the
+ * threshold byte in bits 8-15 and the counter byte after the write
+ * in bits 0-7, or -1. Interrupts must be off. */
+"_stdl_ovsc_sample:\n"
+"    movem.l %d2-%d7/%a2-%a3,-(%sp)\n"
+"    move.l 36(%sp),%a3\n"
+"    move.w 42(%sp),%d3\n"
+"    lea    0xffff8209.w,%a1\n"
+"    lea    _stdl_ovsc_scratch,%a2\n"
+"    moveq  #0,%d6\n"
+"    moveq  #2,%d7\n"
+"    move.w #4000,%d4\n"
+"1:  move.b (%a1),%d0\n"
+"    nop\n"
+"    nop\n"
+"    nop\n"
+"    nop\n"
+"    cmp.b  (%a1),%d0\n"
+"    beq.s  2f\n"
+"    dbra   %d4,1b\n"
+"    bra.s  9f\n"
+"2:  move.w #-1,%d4\n"
+"3:  cmp.b  (%a1),%d0\n"
+"    bne.s  4f\n"
+"    dbra   %d4,3b\n"
+"    bra.s  9f\n"
+"4:  sub.b  #98,%d0\n"
+"    bsr    _stdl_ovsc_flick\n"
+"    tst.w  %d1\n"
+"    bmi.s  9f\n"
+"    and.l  #0xff,%d2\n"
+"    and.l  #0xff,%d0\n"
+"    lsl.l  #8,%d0\n"
+"    or.l   %d2,%d0\n"
+"    and.l  #0x3e,%d1\n"
+"    swap   %d1\n"
+"    or.l   %d1,%d0\n"
+"    bra.s  10f\n"
+"9:  moveq  #-1,%d0\n"
+"10: movem.l (%sp)+,%d2-%d7/%a2-%a3\n"
+"    rts\n"
 "\n"
 
 /* Pause a shared-mode BLiTTER operation for the length of a flick,
@@ -633,6 +783,7 @@ extern void stdl_ovsc_ta(void);
 extern void stdl_ovsc_tb(void);
 extern void stdl_ovsc_tc(void);
 extern void stdl_ovsc_spin(int turns);
+extern long stdl_ovsc_sample(const uint16_t *table, int n2);
 
 /*
  * Palette staging. With a border open the display starts fetching
@@ -763,6 +914,134 @@ static int ovsc_calibrate(int *live)
 }
 
 /*
+ * Measure the flick path on this machine instead of scaling the
+ * plain ST's instruction costs: a 16MHz CPU on an 8MHz bus with a
+ * cache does not simply halve them (measured: the counter path
+ * placed its writes over plus or minus five cycles on a Mega STE
+ * where the emulator shows none). The sampler runs the very
+ * instruction sequence the ISR uses, against a scratch byte, on
+ * picture lines where the counter still moves, and reads the
+ * counter straight after the write; the counter is then the clock,
+ * in steps of two bytes per four cycles. Four table settings give
+ * the fixed path, a turn, the first turn's discount and a nop, in
+ * counter bytes x16. Up to 32 samples each, a line a sample, under
+ * a frame in all with interrupts off. Anything outside what an ST
+ * can produce leaves the scaled tables in place.
+ */
+static long ovsc_measure_one(int n, int pad, int want)
+{
+    uint16_t table[32];
+    int i, k = 0;
+    long sum = 0;
+
+    for (i = 0; i < 16; i++) {
+        table[i] = (uint16_t)n;
+        table[16 + i] = (uint16_t)((3 - pad) * 2);
+    }
+    for (i = 0; i < want * 4 && k < want; i++) {
+        long r = stdl_ovsc_sample(table, 0);
+        int slot2, thr, after, oread, oafter, cost;
+
+        if (r < 0) {
+            continue;
+        }
+        slot2 = (int)((r >> 16) & 0x3e);
+        thr = (int)((r >> 8) & 0xff);
+        after = (int)(r & 0xff);
+        oread = 30 + slot2;                 /* the byte the poll saw */
+        oafter = (after - (thr + 98)) & 0xff;
+        cost = oafter - oread;
+        if (cost < 4 || cost > 140) {
+            continue;                       /* not within the line */
+        }
+        sum += cost;
+        k++;
+    }
+    stdl_ovsc_msamples = (uint16_t)(stdl_ovsc_msamples + k);
+    return (k >= 8) ? (sum * 16) / k : -1;
+}
+
+static int ovsc_measure(void)
+{
+    uint16_t sr;
+    long s0, s1, s2, s3, turn, nop, first;
+
+    stdl_ovsc_msamples = 0;
+    sr = stdl_int_off();
+    s0 = ovsc_measure_one(0, 0, 32);
+    s1 = ovsc_measure_one(4, 0, 32);
+    s2 = ovsc_measure_one(8, 0, 32);
+    s3 = ovsc_measure_one(0, 3, 32);
+    stdl_int_restore(sr);
+    if (s0 < 0 || s1 < 0 || s2 < 0 || s3 < 0) {
+        return 0;
+    }
+    turn = (s2 - s1) / 4;
+    first = s1 - s0 - 4 * turn;
+    nop = (s3 - s0) / 3;
+    /* a turn is 10-12 cycles on any ST, 5-6 bytes, and never under
+     * two or over ten; a nop a third of that; the fixed path 30 to
+     * 120 bytes */
+    if (turn < 2 * 16 || turn > 10 * 16 || nop < 8 || nop > 4 * 16
+        || s0 < 30 * 16 || s0 > 120 * 16 || first > 2 * 16
+        || first < -6 * 16) {
+        return 0;
+    }
+    stdl_ovsc_mF = (uint16_t)s0;
+    stdl_ovsc_mTURN = (uint16_t)turn;
+    stdl_ovsc_mFIRST = (int16_t)first;
+    stdl_ovsc_mNOP = (uint16_t)nop;
+    return 1;
+}
+
+/* the tables from the measured costs: the 50Hz write's target in
+ * counter bytes, less the read slot's own byte and the fixed path,
+ * in turns and nops */
+static void ovsc_table_measured(int c)
+{
+    const long F = stdl_ovsc_mF, T = stdl_ovsc_mTURN;
+    const long FI = stdl_ovsc_mFIRST, NP = stdl_ovsc_mNOP;
+    /* the counter read after the write is ~8 plain-ST cycles past
+     * it: the write is that much before the measured cost's end */
+    const long rd = (8L * 16 * c) / 192;
+    const long pair = (OVSC_PAIR_CPU * (long)c) / 192;
+    long t50, tw, need, rem;
+    int i, n, pad;
+
+    t50 = stdl_ovsc_wide
+        ? ((long)stdl_ovsc_test - 44) * 16 + pair
+        : ((long)stdl_ovsc_test + OVSC_AFTER) * 16;
+    /* a read at cycle X sees the byte fetched at X-64: the line's
+     * fetch starts at 56 and the read's bus cycle sees the count as
+     * it was 8 cycles before (the same mapping the slot positions
+     * OVSC_HIT_READ encodes: byte 130 from cycle 326) */
+    tw = (t50 + rd - 64L * 16) / 2;         /* bytes x16 */
+    for (i = 0; i < 16; i++) {
+        long hit = (i < 15) ? (130 + 2 * i) * 16L : 164 * 16L;
+        need = tw - hit - F;
+        if (need < 0) {
+            need = 0;
+        }
+        n = (int)(need / T);
+        if (n >= 1) {
+            n = (int)((need - FI) / T);
+            rem = need - FI - n * T;
+        } else {
+            rem = need;
+        }
+        pad = (int)((rem + NP / 2) / NP);
+        if (pad > 3) {
+            pad = 3;
+        }
+        if (pad < 0) {
+            pad = 0;
+        }
+        stdl_ovsc_n1[i] = (uint16_t)n;
+        stdl_ovsc_n1[16 + i] = (uint16_t)((3 - pad) * 2);
+    }
+}
+
+/*
  * Fill the flick's tables for a dbra turn of c/16 cycles. Costs
  * between the poll's last read and the writes are the flick path's
  * instruction times on an 8MHz 68000 (see the asm) scaled by
@@ -778,31 +1057,72 @@ static void ovsc_table(int c)
 {
     const int tb = (OVSC_TB_CPU * c) / 192 + OVSC_TB_BUS;
     const int tt = (OVSC_TT_CPU * c) / 192 + OVSC_TT_BUS;
-    const int tm = (OVSC_TM_CPU * c) / 192 + OVSC_TM_BUS;
+    const int nop = (OVSC_NOP_CPU * c) / 192;
     const int first = (OVSC_FIRST_TURN * c) / 192;
-    int i, n, hit;
+    /* the 60Hz write's target: the pulse centred a cycle before the
+     * test, whatever the CPU makes of its two nops */
+    /* the 60Hz write early enough that only the 50Hz edge needs
+     * precision: the pulse ends OVSC_AFTER past the test, whatever
+     * the CPU makes of the instructions between the writes */
+    const int pair = (OVSC_PAIR_CPU * c) / 192;
+    const int t1 = stdl_ovsc_wide
+                 ? ((int)stdl_ovsc_test - 44) * 16
+                 : ((int)stdl_ovsc_test + OVSC_AFTER) * 16 - pair;
+    int i, n, pad, hit, want;
 
     for (i = 0; i < 16; i++) {
         hit = (i < 15) ? (OVSC_HIT_READ + 4 * i) * 16
                        : OVSC_PARK_READ * 16
                          + (OVSC_PARK_CPU * c) / 192 + OVSC_PARK_BUS;
-        n = (OVSC_T1 * 16 - hit - tb + c / 2) / c;
+        want = t1 - hit - tb;
+        n = want / c;
         if (n >= 1) {
-            n = (OVSC_T1 * 16 - hit - tb + first + c / 2) / c;
+            want += first;
+            n = want / c;
         }
-        stdl_ovsc_n1[i] = (uint16_t)((n < 0) ? 0 : n);
+        if (n < 0) {
+            n = 0;
+            want = 0;
+        }
+        /* the residual, in nops: 0..3, the ladder's four entries */
+        pad = (want - n * c + nop / 2) / nop;
+        if (pad > 3) {
+            pad = 3;
+        }
+        stdl_ovsc_n1[i] = (uint16_t)n;
+        stdl_ovsc_n1[16 + i] = (uint16_t)((3 - pad) * 2);
     }
-    n = ((OVSC_T2 - OVSC_T1) * 16 - tm + c / 2) / c;
-    stdl_ovsc_n2 = (uint16_t)((n < 0) ? 0 : n);
-    /* tick mode: no turns before the 60Hz write, it lands where the
-     * fixed path puts it; the turns between the writes make up the
-     * rest of the way to OVSC_T2 */
+    /* tick mode: the turns from the read that sees Timer B step to
+     * the 60Hz write; no ladder, the poll period is the jitter; the
+     * 60Hz edge moves earlier by the turns that widen the pulse */
     hit = OVSC_TICK_READ * 16 + (OVSC_TICK_CPU * c) / 192 + OVSC_TICK_BUS;
-    n = (OVSC_T2 * 16 - hit - tt - tm + c / 2) / c;
+    n = (t1 - (int)stdl_ovsc_n2 * c - hit - tt + c / 2) / c;
     stdl_ovsc_n2t = (uint16_t)((n < 0) ? 0 : n);
+    /* the first version's 77-cycle gap for the wide shape: the
+     * move/dbra-exit/move between the writes costs ~26 plain-ST
+     * cycles plus two bus slots, the rest is turns. Tick mode widens
+     * its pulse by ~16 cycles of turns instead: its 60Hz edge has
+     * room before the test and its jitter needs it */
+    n = stdl_ovsc_wide
+      ? (77 * 16 - (26 * 16 * c) / 192 - 2 * 16 + c / 2) / c
+      : (stdl_ovsc_tick ? (16 * 16 + c / 2) / c : 0);
+    stdl_ovsc_n2 = (uint16_t)((n < 0) ? 0 : n);
     /* the check that line 263 displayed: ~1300 plain-ST cycles of
      * polling, a line and a half, in this CPU's turns */
     stdl_ovsc_postn = (uint16_t)((40 * 192) / c);
+    stdl_ovsc_dspin1 = (uint16_t)((60 * 16) / c);
+    stdl_ovsc_dspin2 = (uint16_t)((512 * 16) / c);
+    if (stdl_ovsc_measured) {
+        ovsc_table_measured(c);
+    }
+}
+
+/* for the probe: rebuild the tables after changing stdl_ovsc_test */
+void stdl_ovsc_retable(void)
+{
+    if (c16 != 0) {
+        ovsc_table(c16);
+    }
 }
 
 /*
@@ -821,20 +1141,21 @@ static int ovsc_counter_live(int c)
     int k, i, live = 0;
     uint8_t v, p, off;
 
-    for (k = 0; k < 3; k++) {
+    for (k = 0; k < 5; k++) {
         v = MFP_TBDR;
         for (i = 0; i < 8000 && MFP_TBDR == v; i++) {
         }
         p = *vc;
-        for (i = 0; i < 200 && *vc == p; i++) {
+        for (i = 0; i < 400 && *vc == p; i++) {
         }
         stdl_ovsc_spin((180 * 16) / c);
         off = (uint8_t)(*vc - p);
+        stdl_ovsc_cal_off[k] = off;
         if (off > 8 && off < 156) {
             live++;
         }
     }
-    return live >= 2;
+    return live >= 3;
 }
 
 /*
@@ -1287,6 +1608,7 @@ static int ovsc_open(int which)
             c16 = OVSC_C16_8MHZ;
         }
         stdl_ovsc_tick = (uint8_t)!live;
+        stdl_ovsc_measured = (uint8_t)(live ? ovsc_measure() : 0);
         ovsc_table(c16);
     }
     ovsc_program(m);

@@ -257,8 +257,15 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   is and runs out the distance with dbra loops calibrated, the
   first time the border opens, against the machine's own scanlines
   (one to two frames with interrupts masked, once per process; it
-  finds the picture start from the Display Enable events themselves
-  and re-measures anything no ST could produce). Measured
+  finds the picture start from the Display Enable events themselves,
+  then measures the flick's own instruction costs on the machine by
+  running them against a scratch byte and reading the counter back,
+  and re-measures anything no ST could produce). The flick is a
+  short 60Hz pulse across the GLUE's border test, restored inside
+  line 262 - a restore landing in line 263 leaves the Shifter's
+  plane phase a word out for the whole frame on real hardware, every
+  colour wrong with every shape in place, and no emulator renders
+  that. Measured
   in Hatari: the restore lands within ~8 cycles of the window's
   centre on a plain ST, an STE and a 16MHz Mega STE, and the
   border held for 1500 consecutive frames with no miss. Each

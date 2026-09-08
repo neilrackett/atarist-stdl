@@ -36,7 +36,7 @@
 #include <stdio.h>
 #include <stdl/stdl.h>
 
-extern uint16_t stdl_ovsc_n1[16];
+extern uint16_t stdl_ovsc_n1[32];   /* turns, then ladder entries */
 extern uint16_t stdl_ovsc_n2, stdl_ovsc_n2t, stdl_ovsc_postn;
 extern uint8_t  stdl_ovsc_tick;
 extern uint8_t  stdl_ovsc_l262lo, stdl_ovsc_l262mid, stdl_ovsc_tbseen;
@@ -108,6 +108,7 @@ int main(int argc, char *argv[])
     if (zero) {
         for (i = 0; i < 16; i++) {
             stdl_ovsc_n1[i] = 0;
+            stdl_ovsc_n1[16 + i] = 6;       /* ladder: no nops */
         }
         stdl_ovsc_n2 = 0;
         stdl_ovsc_n2t = 0;

@@ -118,8 +118,13 @@ seamlessly: content goes at rows 200..244 with nothing to align
 around. Each border costs an interrupt and two to three lines of
 polling per frame (under 1% of an 8MHz frame), and the bottom, the
 first time it opens, one to two frames with interrupts masked to
-calibrate its delay loops against the machine's own scanlines - the
-200Hz tick loses a few counts, once. While any border is open TOS's
+calibrate its delay loops against the machine's own scanlines and
+its own execution of the flick's instructions - the 200Hz tick
+loses a few counts, once. The flick is a short 60Hz pulse across the
+GLUE's border test, restored inside line 262: on real hardware a
+restore that lands in line 263 leaves the Shifter's plane phase a
+word out for the rest of the frame (every colour wrong, every shape
+in place), which no emulator shows. While any border is open TOS's
 200Hz Timer C vector carries a prefix that lowers the CPU mask
 inside the handler so the border timers can interrupt it; it runs
 for over two scanlines at a time, and without that the ISRs would

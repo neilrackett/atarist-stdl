@@ -61,17 +61,22 @@ void STDL_CloseTopBorder(void);
  * old picture goes at surface rows 200..244. Timer B (counting
  * Display Enable events) gets the ISR near the end of the picture,
  * and the Shifter's video counter, read while line 262 is being
- * fetched, places the sync flick to within a few cycles of where
- * the GLUE tests for the border and where the next line would
- * start: 60Hz on for ~80 cycles across the test, off again before
- * line 263 can start early. The dbra loops that run out that
- * distance are calibrated the first time the bottom border opens,
- * by timing the same loop against displayed scanlines - one to two
- * frames with interrupts masked (the 200Hz system tick loses a few
- * counts, once) - so the placement holds on any CPU speed. On a
- * machine whose video counter cannot be read mid-line (no ST, but
- * an emulator's 16MHz mode) the ISR times from Timer B instead;
- * the check is part of the calibration.
+ * fetched, places the sync flick to the bus cycle: a 60Hz pulse of
+ * 16 to 28 cycles across the GLUE's border test at cycle ~500,
+ * restored to 50Hz before line 262 ends. It must end inside the
+ * line: real hardware fixes the next line's length at the boundary,
+ * and a restore that arrives in line 263 cuts that line four cycles
+ * short and leaves the Shifter's plane phase a word out for the rest
+ * of the frame - every colour wrong, every shape in place - which
+ * no emulator shows. The loops that run out the distance are
+ * calibrated the first time the bottom border opens, against
+ * displayed scanlines and then against the machine's own execution
+ * of the flick's instructions, read back from the counter - one to
+ * two frames with interrupts masked (the 200Hz system tick loses a
+ * few counts, once) - so the placement holds on any CPU speed. On a
+ * machine whose video counter cannot be read mid-line (an
+ * emulator's 16MHz mode) the ISR times from Timer B instead, less
+ * precisely; the check is part of the calibration.
  *
  * Costs an interrupt and two to three lines of polling per frame,
  * under 1% of an 8MHz frame, most of it waiting on the beam. Same

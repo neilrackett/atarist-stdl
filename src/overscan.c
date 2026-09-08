@@ -282,6 +282,14 @@ uint16_t stdl_ovsc_mF, stdl_ovsc_mTURN, stdl_ovsc_mNOP;
 int16_t  stdl_ovsc_mFIRST;
 uint16_t stdl_ovsc_msamples;
 uint8_t  stdl_ovsc_measured;
+/* the counter's lead on the emulated model, reported for the probe
+ * and not yet applied: an STE that prefetches moves its counter
+ * before cycle 56, and every counter-placed write then lands that
+ * much earlier against the GLUE than the model says. pre_cyc is the
+ * moving time of a line as this poll measures it (not yet agreeing
+ * with the emulator's 320), pre the excess in bytes */
+uint8_t  stdl_ovsc_pre;
+uint16_t stdl_ovsc_pre_cyc, stdl_ovsc_pre_np, stdl_ovsc_pre_nm;
 
 static void *buf_alloc;
 static uint8_t *buf;
@@ -680,6 +688,34 @@ __asm__(
 "    move.b (%a1),%d2\n"
 "    rts\n"
 "\n"
+/* long stdl_ovsc_prepoll(int polls): the counter's low byte read
+ * `polls` times in one branch-free loop, each read compared with
+ * the one before; returns (unchanged reads << 16) | changed reads.
+ * Every poll costs the same whichever way the compare goes, so the
+ * two counts are in one unit and their ratio is the fraction of the
+ * time the counter moves. Interrupts off, and inside the picture. */
+"_stdl_ovsc_prepoll:\n"
+"    movem.l %d2-%d5,-(%sp)\n"
+"    move.l 20(%sp),%d4\n"
+"    move.l %d4,%d1\n"
+"    lea    0xffff8209.w,%a0\n"
+"    moveq  #0,%d3\n"
+"    move.b (%a0),%d0\n"
+"1:  move.b (%a0),%d2\n"
+"    cmp.b  %d2,%d0\n"
+"    sne    %d5\n"
+"    ext.w  %d5\n"
+"    sub.w  %d5,%d3\n"
+"    move.b %d2,%d0\n"
+"    subq.l #1,%d4\n"
+"    bne.s  1b\n"
+"    sub.l  %d3,%d1\n"
+"    swap   %d1\n"
+"    move.w %d3,%d1\n"
+"    move.l %d1,%d0\n"
+"    movem.l (%sp)+,%d2-%d5\n"
+"    rts\n"
+"\n"
 /* long stdl_ovsc_sample(const uint16_t *table, int n2): one
  * calibration sample of the flick path. Waits for the counter to
  * park (two reads a few cycles apart equal: the end of a line, or
@@ -787,6 +823,7 @@ extern void stdl_ovsc_tb(void);
 extern void stdl_ovsc_tc(void);
 extern void stdl_ovsc_spin(int turns);
 extern long stdl_ovsc_sample(const uint16_t *table, int n2);
+extern long stdl_ovsc_prepoll(int polls);
 
 /*
  * Palette staging. With a border open the display starts fetching
@@ -965,6 +1002,60 @@ static long ovsc_measure_one(int n, int pad, int want)
     }
     stdl_ovsc_msamples = (uint16_t)(stdl_ovsc_msamples + k);
     return (k >= 8) ? (sum * 16) / k : -1;
+}
+
+/* how much of a line the counter spends moving: 320 of 512 cycles
+ * when the fetch starts at cycle 56 as emulated; an STE that
+ * prefetches starts earlier and moves longer. A uniform poll loop
+ * over a dozen lines counts reads that changed against reads that
+ * did not, a fraction with no cycle reference in it, and the excess
+ * over 320 cycles, in bytes, is how far every counter-placed write
+ * lands ahead of the GLUE. A poll is ~24 cycles on a plain ST, so
+ * the fraction over twelve lines resolves to a couple of cycles. */
+static void ovsc_measure_pre(void)
+{
+    uint16_t sr;
+    int i, gap, v0, v1;
+    long r, parked, moving, cyc;
+
+    sr = stdl_int_off();
+    MFP_TBCR = 0;
+    MFP_TBDR = 255;
+    MFP_TBCR = 8;
+    /* the blank, then line 63's end: the polls that follow stay
+     * inside the picture (1300 of them are ~100 lines on a plain
+     * ST, fewer on anything faster) */
+    v0 = MFP_TBDR;
+    gap = 0;
+    for (i = 0; i < OVSC_CAL_LIMIT; i++) {
+        v1 = MFP_TBDR;
+        if (v1 != v0) {
+            v0 = v1;
+            gap = 0;
+        } else if (++gap >= OVSC_CAL_GAP) {
+            break;
+        }
+    }
+    for (i = 0; i < OVSC_CAL_LIMIT && MFP_TBDR == v0; i++) {
+    }
+    (void)stdl_ovsc_prepoll(100);           /* warm the loop */
+    r = stdl_ovsc_prepoll(1300);            /* ~100 lines on a plain ST */
+    MFP_TBCR = 0;
+    MFP_IPRA = (uint8_t)~0x01;
+    stdl_int_restore(sr);
+    parked = (r >> 16) & 0xffff;
+    moving = r & 0xffff;
+    stdl_ovsc_pre = 0;
+    stdl_ovsc_pre_np = (uint16_t)parked;
+    stdl_ovsc_pre_nm = (uint16_t)moving;
+    stdl_ovsc_pre_cyc = 0;
+    if (parked + moving > 0 && i < OVSC_CAL_LIMIT) {
+        cyc = (moving * 512L) / (parked + moving);
+        stdl_ovsc_pre_cyc = (uint16_t)cyc;
+        if (cyc > 322 && cyc < 400) {
+            stdl_ovsc_pre = (uint8_t)((cyc - 320) / 2);
+        }
+    }
 }
 
 static int ovsc_measure(void)
@@ -1633,6 +1724,9 @@ static int ovsc_open(int which)
             c16 = OVSC_C16_8MHZ;
         }
         stdl_ovsc_tick = (uint8_t)!live;
+        if (live) {
+            ovsc_measure_pre();
+        }
         stdl_ovsc_measured = (uint8_t)(live ? ovsc_measure() : 0);
         ovsc_table(c16);
     }

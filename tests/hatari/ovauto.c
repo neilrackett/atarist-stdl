@@ -11,6 +11,8 @@
  *   frames=N       frames per position (default 200)
  *   force=0|1      1 forces the counter path whatever the liveness
  *                  check said (default 0)
+ *   measure=0|1|2  0 scaled tables, 1 self-measured (default), 2
+ *                  runs every position both ways, scaled first
  *   test=N         a GLUE test cycle to centre the 60Hz pulse on;
  *                  repeat the line to sweep (default: the library's)
  *   wide=N         a test value run with the first version's pulse
@@ -52,13 +54,14 @@ extern uint16_t stdl_ovsc_cal_lines, stdl_ovsc_cal_c;
 extern uint8_t  stdl_ovsc_cal_live, stdl_ovsc_cal_try, stdl_ovsc_cal_off[5];
 extern uint16_t stdl_ovsc_mF, stdl_ovsc_mTURN, stdl_ovsc_mNOP, stdl_ovsc_msamples;
 extern int16_t  stdl_ovsc_mFIRST;
-extern uint8_t  stdl_ovsc_measured;
+extern uint8_t  stdl_ovsc_measured, stdl_ovsc_pre;
+extern uint16_t stdl_ovsc_pre_cyc, stdl_ovsc_pre_np, stdl_ovsc_pre_nm;
 extern void     stdl_ovsc_retable(void);
 
 #define MAXTESTS 16
 
 static int   tests[MAXTESTS], wides[MAXTESTS], ntests;
-static int   frames = 200, force = 0;
+static int   frames = 200, force = 0, measure = 1;
 static char  mode = 'b';
 static FILE *out;
 
@@ -106,6 +109,8 @@ static int read_cfg(void)
             frames = atoi(eq);
         } else if (strcmp(line, "force") == 0) {
             force = atoi(eq);
+        } else if (strcmp(line, "measure") == 0) {
+            measure = atoi(eq);
         } else if (strcmp(line, "test") == 0 && ntests < MAXTESTS) {
             wides[ntests] = 0;
             tests[ntests++] = atoi(eq);
@@ -143,15 +148,17 @@ int main(void)
     }
     stdl_ovsc_diag = 1;
 
-    for (t = 0; t < ntests; t++) {
+    for (t = 0; t < ntests * (measure == 2 ? 2 : 1); t++) {
         uint32_t m0, m1;
         int f, open_ok = 0, hist[17], other = 0;
-        int i;
+        int i, tt = (measure == 2) ? t / 2 : t;
+        int use_measured = (measure == 2) ? (t & 1) : (measure != 0);
+        static uint8_t could_measure;
 
-        if (tests[t] != 0) {
-            stdl_ovsc_test = (uint16_t)tests[t];
+        if (tests[tt] != 0) {
+            stdl_ovsc_test = (uint16_t)tests[tt];
         }
-        stdl_ovsc_wide = (uint8_t)wides[t];
+        stdl_ovsc_wide = (uint8_t)wides[tt];
         if (t == 0) {
             if (mode == 't' || mode == 'c') {
                 h = STDL_OpenTopBorder();
@@ -165,9 +172,10 @@ int main(void)
                 break;
             }
             paint(STDL_GetVideoSurface());
-        } else {
-            stdl_ovsc_retable();
+            could_measure = stdl_ovsc_measured;
         }
+        stdl_ovsc_measured = (uint8_t)(use_measured && could_measure);
+        stdl_ovsc_retable();
         if (force) {
             stdl_ovsc_tick = 0;
         }
@@ -206,12 +214,15 @@ int main(void)
             say("live samples moving<<3|fast=%u,%u,%u,%u,%u (live: moving>=6, fast=0)\r\n",
                 stdl_ovsc_cal_off[0], stdl_ovsc_cal_off[1], stdl_ovsc_cal_off[2],
                 stdl_ovsc_cal_off[3], stdl_ovsc_cal_off[4]);
-            say("measured=%u samples=%u F=%u turn=%u first=%d nop=%u (bytes x16)\r\n",
-                stdl_ovsc_measured, stdl_ovsc_msamples, stdl_ovsc_mF,
-                stdl_ovsc_mTURN, stdl_ovsc_mFIRST, stdl_ovsc_mNOP);
+            say("measured=%u samples=%u F=%u turn=%u first=%d nop=%u (bytes x16) pre=%u bytes (moving %u of 512 cycles; polls parked %u moving %u)\r\n",
+                could_measure, stdl_ovsc_msamples, stdl_ovsc_mF,
+                stdl_ovsc_mTURN, stdl_ovsc_mFIRST, stdl_ovsc_mNOP,
+                stdl_ovsc_pre, stdl_ovsc_pre_cyc, stdl_ovsc_pre_np,
+                stdl_ovsc_pre_nm);
         }
-        say("%s=%u open=%d/%d misses=%lu polls[0..15]=",
-            wides[t] ? "wide" : "test", stdl_ovsc_test, open_ok, frames,
+        say("%s=%u %s open=%d/%d misses=%lu polls[0..15]=",
+            wides[tt] ? "wide" : "test", stdl_ovsc_test,
+            stdl_ovsc_measured ? "measured" : "scaled", open_ok, frames,
             (unsigned long)(m1 - m0));
         for (i = 0; i < 16; i++) {
             say("%d%s", hist[i], (i < 15) ? "," : "");

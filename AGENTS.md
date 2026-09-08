@@ -132,6 +132,30 @@ warnings** with the Makefile's `-Wall -Wextra`.
   inferring it, and keep the reserve a measured number. Also: the
   blitter-trace lines with a ROM `pc` are EmuTOS's own console
   blits, not the library's.
+- **The emulator renders from the video counter; the Shifter's plane
+  phase is not modelled, and only real hardware shows it.** The first
+  bottom-border flick restored 50Hz 21 cycles into line 263, which
+  Hatari's GLUE model calls harmless (it fixes a line's length at
+  cycle 52); the real GLUE fixes it at the boundary, line 263 came
+  out 508 cycles, the frame stopped being a multiple of the Shifter's
+  16-cycle plane cycle, and every colour was wrong with every shape
+  in place - a plane rotation moves no single-plane pixel, so
+  "geometry intact" does not clear the fetch. The video counter was
+  exact throughout. A sync-rate pulse must end inside the line it
+  started in; the top border always did. When a symptom appears
+  only on hardware, the quickest lever is a set of variant binaries
+  each undoing one change, and a probe that prints one item per
+  line on a cleared screen and holds - a photographed printout with
+  a duplicate overlay was misread 131 for 13 and cost half a day.
+- **Scaling 8MHz instruction costs by a measured loop speed is not a
+  16MHz timing model.** A cached 16MHz CPU on an 8MHz bus placed the
+  flick's writes plus or minus five cycles where the emulator showed
+  none; overscan.c now measures the flick's own instruction sequence
+  on the machine at open time (against a scratch byte mid-line, the
+  counter read back as the clock) and builds its tables from that.
+  A timing diagnostic that reads the counter must keep the read
+  inside the line's fetch (cycles 64-376): a read landing after the
+  park silently tracks the write instead of the line.
 - **Hatari's GEMDOS drive maps names to 8.3.** A scratch binary
   named `BLITCOST2.TOS` beside `BLITCOST.TOS` silently runs
   `BLITCOST.TOS`; four runs of "the fix" measured the old binary.

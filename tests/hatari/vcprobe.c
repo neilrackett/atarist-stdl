@@ -53,6 +53,27 @@ static void sample_mid(void)
         : : "m"(mid[0]), "i"(N - 1) : "d0", "a0", "a1", "memory");
 }
 
+/* the library's lead-measurement loop, one bit a poll: 1 = the
+ * counter changed since the previous poll */
+static uint8_t bits[N];
+
+static void sample_bits(void)
+{
+    __asm__ volatile(
+        "    lea    0xffff8209.w,%%a0\n"
+        "    lea    %0,%%a1\n"
+        "    move.w %1,%%d3\n"
+        "    move.b (%%a0),%%d0\n"
+        "1:  move.b (%%a0),%%d2\n"
+        "    cmp.b  %%d2,%%d0\n"
+        "    sne    %%d1\n"
+        "    and.b  #1,%%d1\n"
+        "    move.b %%d1,(%%a1)+\n"
+        "    move.b %%d2,%%d0\n"
+        "    dbra   %%d3,1b\n"
+        : : "m"(bits[0]), "i"(N - 1) : "d0", "d1", "d2", "d3", "a0", "a1", "memory");
+}
+
 static void wait_de(void)
 {
     uint8_t v = MFP_TBDR;
@@ -99,6 +120,19 @@ int main(void)
         __asm__ volatile("move.w %0,%%sr" :: "d"(sr) : "memory");
     }
 
+    {
+        __asm__ volatile("move.w %%sr,%0\n\tori.w #0x0700,%%sr" : "=d"(sr) :: "memory");
+        MFP_TBCR = 0; MFP_TBDR = 255; MFP_TBCR = 8;
+        wait_de(); wait_de();
+        sample_bits();
+        MFP_TBCR = 0;
+        *(volatile uint8_t *)0xFFFFFA0BUL = (uint8_t)~0x01;
+        __asm__ volatile("move.w %0,%%sr" :: "d"(sr) : "memory");
+    }
+    fprintf(stderr, "changed bits, %d polls of the lead loop from a line end:\r\n", N);
+    for (i = 0; i < N; i++) {
+        fprintf(stderr, "%d%s", bits[i], ((i & 31) == 31) ? "\r\n" : "");
+    }
     fprintf(stderr, "lo byte, %d reads from a line end:\r\n", N);
     for (i = 0; i < N; i++) {
         fprintf(stderr, "%02x%s", lo[i], ((i & 15) == 15) ? "\r\n" : " ");

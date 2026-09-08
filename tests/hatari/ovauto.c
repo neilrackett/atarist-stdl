@@ -55,7 +55,7 @@ extern uint8_t  stdl_ovsc_cal_live, stdl_ovsc_cal_try, stdl_ovsc_cal_off[5];
 extern uint16_t stdl_ovsc_mF, stdl_ovsc_mTURN, stdl_ovsc_mNOP, stdl_ovsc_msamples;
 extern int16_t  stdl_ovsc_mFIRST;
 extern uint8_t  stdl_ovsc_measured, stdl_ovsc_pre;
-extern uint16_t stdl_ovsc_pre_cyc, stdl_ovsc_pre_np, stdl_ovsc_pre_nm;
+extern uint16_t stdl_ovsc_pre_cyc, stdl_ovsc_pre_np, stdl_ovsc_pre_nm, stdl_ovsc_pre_parks;
 extern void     stdl_ovsc_retable(void);
 
 #define MAXTESTS 16
@@ -214,11 +214,11 @@ int main(void)
             say("live samples moving<<3|fast=%u,%u,%u,%u,%u (live: moving>=6, fast=0)\r\n",
                 stdl_ovsc_cal_off[0], stdl_ovsc_cal_off[1], stdl_ovsc_cal_off[2],
                 stdl_ovsc_cal_off[3], stdl_ovsc_cal_off[4]);
-            say("measured=%u samples=%u F=%u turn=%u first=%d nop=%u (bytes x16) pre=%u bytes (moving %u of 512 cycles; polls parked %u moving %u)\r\n",
+            say("measured=%u samples=%u F=%u turn=%u first=%d nop=%u (bytes x16) pre=%u bytes (moving %u of 512 cycles; polls parked %u moving %u parks %u)\r\n",
                 could_measure, stdl_ovsc_msamples, stdl_ovsc_mF,
                 stdl_ovsc_mTURN, stdl_ovsc_mFIRST, stdl_ovsc_mNOP,
                 stdl_ovsc_pre, stdl_ovsc_pre_cyc, stdl_ovsc_pre_np,
-                stdl_ovsc_pre_nm);
+                stdl_ovsc_pre_nm, stdl_ovsc_pre_parks);
         }
         say("%s=%u %s open=%d/%d misses=%lu polls[0..15]=",
             wides[tt] ? "wide" : "test", stdl_ovsc_test,

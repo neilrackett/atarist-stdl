@@ -290,6 +290,8 @@ uint8_t  stdl_ovsc_measured;
  * with the emulator's 320), pre the excess in bytes */
 uint8_t  stdl_ovsc_pre;
 uint16_t stdl_ovsc_pre_cyc, stdl_ovsc_pre_np, stdl_ovsc_pre_nm;
+uint16_t stdl_ovsc_pre_parks;
+static uint8_t pre_buf[256];
 
 static void *buf_alloc;
 static uint8_t *buf;
@@ -688,32 +690,16 @@ __asm__(
 "    move.b (%a1),%d2\n"
 "    rts\n"
 "\n"
-/* long stdl_ovsc_prepoll(int polls): the counter's low byte read
- * `polls` times in one branch-free loop, each read compared with
- * the one before; returns (unchanged reads << 16) | changed reads.
- * Every poll costs the same whichever way the compare goes, so the
- * two counts are in one unit and their ratio is the fraction of the
- * time the counter moves. Interrupts off, and inside the picture. */
-"_stdl_ovsc_prepoll:\n"
-"    movem.l %d2-%d5,-(%sp)\n"
-"    move.l 20(%sp),%d4\n"
-"    move.l %d4,%d1\n"
+/* void stdl_ovsc_burst(uint8_t *buf, int n): n reads of the
+ * counter's low byte back to back into buf - 24 cycles apart on a
+ * plain ST, the bus alone between them */
+"_stdl_ovsc_burst:\n"
+"    move.l 4(%sp),%a1\n"
+"    move.l 8(%sp),%d0\n"
+"    subq.l #1,%d0\n"
 "    lea    0xffff8209.w,%a0\n"
-"    moveq  #0,%d3\n"
-"    move.b (%a0),%d0\n"
-"1:  move.b (%a0),%d2\n"
-"    cmp.b  %d2,%d0\n"
-"    sne    %d5\n"
-"    ext.w  %d5\n"
-"    sub.w  %d5,%d3\n"
-"    move.b %d2,%d0\n"
-"    subq.l #1,%d4\n"
-"    bne.s  1b\n"
-"    sub.l  %d3,%d1\n"
-"    swap   %d1\n"
-"    move.w %d3,%d1\n"
-"    move.l %d1,%d0\n"
-"    movem.l (%sp)+,%d2-%d5\n"
+"1:  move.b (%a0),(%a1)+\n"
+"    dbra   %d0,1b\n"
 "    rts\n"
 "\n"
 /* long stdl_ovsc_sample(const uint16_t *table, int n2): one
@@ -823,7 +809,7 @@ extern void stdl_ovsc_tb(void);
 extern void stdl_ovsc_tc(void);
 extern void stdl_ovsc_spin(int turns);
 extern long stdl_ovsc_sample(const uint16_t *table, int n2);
-extern long stdl_ovsc_prepoll(int polls);
+extern void stdl_ovsc_burst(uint8_t *buf, int n);
 
 /*
  * Palette staging. With a border open the display starts fetching
@@ -1006,25 +992,26 @@ static long ovsc_measure_one(int n, int pad, int want)
 
 /* how much of a line the counter spends moving: 320 of 512 cycles
  * when the fetch starts at cycle 56 as emulated; an STE that
- * prefetches starts earlier and moves longer. A uniform poll loop
- * over a dozen lines counts reads that changed against reads that
- * did not, a fraction with no cycle reference in it, and the excess
- * over 320 cycles, in bytes, is how far every counter-placed write
- * lands ahead of the GLUE. A poll is ~24 cycles on a plain ST, so
- * the fraction over twelve lines resolves to a couple of cycles. */
+ * prefetches starts earlier and moves longer. A burst of reads back
+ * to back over several lines, sorted into parked runs and moving
+ * runs, gives the fraction with no cycle reference in it, and the
+ * excess over 320 cycles, in bytes, is how far every counter-placed
+ * write lands ahead of the GLUE. A read is 24 cycles on a plain ST
+ * and the runs' ends quantise to that, averaged over the lines. */
 static void ovsc_measure_pre(void)
 {
     uint16_t sr;
-    int i, gap, v0, v1;
-    long r, parked, moving, cyc;
+    int i, gap, v0, v1, k;
+    long parked = 0, moving, cyc;
+    int parks = 0, in_park = 0;
 
     sr = stdl_int_off();
     MFP_TBCR = 0;
     MFP_TBDR = 255;
     MFP_TBCR = 8;
-    /* the blank, then line 63's end: the polls that follow stay
-     * inside the picture (1300 of them are ~100 lines on a plain
-     * ST, fewer on anything faster) */
+    /* the blank, then line 63's end: the burst that follows stays
+     * inside the picture (256 reads are eleven lines on a plain ST,
+     * fewer on anything faster) */
     v0 = MFP_TBDR;
     gap = 0;
     for (i = 0; i < OVSC_CAL_LIMIT; i++) {
@@ -1038,19 +1025,34 @@ static void ovsc_measure_pre(void)
     }
     for (i = 0; i < OVSC_CAL_LIMIT && MFP_TBDR == v0; i++) {
     }
-    (void)stdl_ovsc_prepoll(100);           /* warm the loop */
-    r = stdl_ovsc_prepoll(1300);            /* ~100 lines on a plain ST */
+    stdl_ovsc_burst(pre_buf, 32);           /* warm the loop */
+    stdl_ovsc_burst(pre_buf, 256);
     MFP_TBCR = 0;
     MFP_IPRA = (uint8_t)~0x01;
     stdl_int_restore(sr);
-    parked = (r >> 16) & 0xffff;
-    moving = r & 0xffff;
+    /* a run of equal reads is a park; the read that opened it (the
+     * last one to differ) was parked too, so each run is one read
+     * longer than the equal reads in it */
+    for (k = 1; k < 256; k++) {
+        if (pre_buf[k] == pre_buf[k - 1]) {
+            if (!in_park) {
+                in_park = 1;
+                parks++;
+                parked++;
+            }
+            parked++;
+        } else {
+            in_park = 0;
+        }
+    }
+    moving = 256 - parked;
     stdl_ovsc_pre = 0;
     stdl_ovsc_pre_np = (uint16_t)parked;
     stdl_ovsc_pre_nm = (uint16_t)moving;
+    stdl_ovsc_pre_parks = (uint16_t)parks;
     stdl_ovsc_pre_cyc = 0;
-    if (parked + moving > 0 && i < OVSC_CAL_LIMIT) {
-        cyc = (moving * 512L) / (parked + moving);
+    if (parks >= 2 && moving > 0 && i < OVSC_CAL_LIMIT) {
+        cyc = (moving * 512L) / 256;
         stdl_ovsc_pre_cyc = (uint16_t)cyc;
         if (cyc > 322 && cyc < 400) {
             stdl_ovsc_pre = (uint8_t)((cyc - 320) / 2);

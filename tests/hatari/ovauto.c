@@ -41,6 +41,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <osbind.h>
 #include <stdl/stdl.h>
 
 extern uint16_t stdl_ovsc_n1[32], stdl_ovsc_n2t, stdl_ovsc_postn;
@@ -63,18 +64,43 @@ extern void     stdl_ovsc_retable(void);
 static int   tests[MAXTESTS], wides[MAXTESTS], ntests;
 static int   frames = 200, force = 0, measure = 1;
 static char  mode = 'b';
-static FILE *out;
+
+/* Output goes through GEMDOS directly - Cconws for the console and
+ * Fcreate/Fwrite for the file - not through stdio: under a
+ * cartridge that hooks GEMDOS (the unattended runner) the stdio
+ * path bombed at launch with an address error, while raw calls in
+ * another program ran clean. Everything is buffered and the file
+ * is written once, after the borders close. */
+static char  outbuf[4096];
+static int   outlen;
 
 static void say(const char *fmt, ...)
 {
+    char line[200];
     va_list ap;
+    int n;
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
+    n = vsnprintf(line, sizeof line, fmt, ap);
     va_end(ap);
-    if (out != NULL) {
-        va_start(ap, fmt);
-        vfprintf(out, fmt, ap);
-        va_end(ap);
+    if (n < 0) {
+        return;
+    }
+    if (n >= (int)sizeof line) {
+        n = (int)sizeof line - 1;
+    }
+    (void)Cconws(line);
+    if (outlen + n < (int)sizeof outbuf) {
+        memcpy(outbuf + outlen, line, (size_t)n);
+        outlen += n;
+    }
+}
+
+static void flush_file(void)
+{
+    long h = Fcreate("OVAUTO.TXT", 0);
+    if (h >= 0) {
+        Fwrite((short)h, (long)outlen, outbuf);
+        Fclose((short)h);
     }
 }
 
@@ -92,13 +118,30 @@ static void paint(STDL_Surface *s)
 
 static int read_cfg(void)
 {
-    FILE *f = fopen("OVAUTO.CFG", "r");
-    char line[64];
-    if (f == NULL) {
+    static char buf[1024];
+    long h, n;
+    char *p, *end;
+
+    h = Fopen("OVAUTO.CFG", 0);
+    if (h < 0) {
         return 0;
     }
-    while (fgets(line, sizeof line, f) != NULL) {
-        char *eq = strchr(line, '=');
+    n = Fread((short)h, (long)sizeof buf - 1, buf);
+    Fclose((short)h);
+    if (n <= 0) {
+        return 0;
+    }
+    buf[n] = '\0';
+    end = buf + n;
+    for (p = buf; p < end; ) {
+        char *line = p, *eq;
+        while (p < end && *p != '\n' && *p != '\r') {
+            p++;
+        }
+        while (p < end && (*p == '\n' || *p == '\r')) {
+            *p++ = '\0';
+        }
+        eq = strchr(line, '=');
         if (eq == NULL) {
             continue;
         }
@@ -119,7 +162,6 @@ static int read_cfg(void)
             tests[ntests++] = atoi(eq);
         }
     }
-    fclose(f);
     return 1;
 }
 
@@ -129,7 +171,7 @@ int main(void)
     int t, h = 0, status = 0;
 
     if (!read_cfg()) {
-        fprintf(stderr, "OVAUTO: no OVAUTO.CFG\r\n");
+        (void)Cconws("OVAUTO: no OVAUTO.CFG\r\n");
         return 2;
     }
     if (ntests == 0) {
@@ -202,8 +244,7 @@ int main(void)
             }
         }
         m1 = STDL_OverscanMisses();
-        if (out == NULL) {
-            out = fopen("OVAUTO.TXT", "w");
+        if (outlen == 0) {
             say("OVAUTO mode=%c h=%d frames=%d force=%d machine=%08lx\r\n",
                 mode, h, frames, force,
                 (unsigned long)STDL_GetMachineInfo()->mch_cookie);
@@ -237,9 +278,7 @@ int main(void)
     STDL_CloseBottomBorder();
     STDL_CloseTopBorder();
     say("OVAUTO END status=%d\r\n", status);
-    if (out != NULL) {
-        fclose(out);
-    }
     STDL_Quit();
+    flush_file();
     return status;
 }

@@ -241,16 +241,18 @@ uint8_t  stdl_ovsc_wide;       /* probe only: the first version's
                                 * writes - the known-bad reference
                                 * for the slip metric              */ /* the GLUE test cycle the pulse is
                                 * centred on; a probe may move it   */
-/* line-length diagnostic for the hardware probe: with stdl_ovsc_diag
- * set, the ISR reads the counter's low byte at the same CPU-timed
- * offset into lines 263, 264 and 265 right after the flick; the
- * probe turns the three into two line lengths, and a line 263 cut
- * to 508 cycles shows as one counter step (two bytes) against the
- * normal line after it. dspin1/2 are the turns for ~60 and ~512
- * plain-ST cycles */
+/* placement diagnostic for the hardware probe: with stdl_ovsc_diag
+ * set, the ISR counts polls from its 50Hz write until the counter
+ * leaves its parked value at line 263's fetch start (cycle 56), so
+ * the probe sees how far before the line boundary the restore
+ * landed - the quantity the Shifter's plane phase depends on, which
+ * no line length or register reflects (a slipped frame reads
+ * exactly like a good one to every timing measurement tried). A
+ * poll is 12-16 cycles on a plain ST, so the count is coarse per
+ * frame but its distribution over a hundred is not. 255 = never
+ * moved within the bound (the border did not open) */
 uint8_t  stdl_ovsc_diag;
-uint8_t  stdl_ovsc_dlo[3];
-uint16_t stdl_ovsc_dspin1, stdl_ovsc_dspin2;
+uint8_t  stdl_ovsc_dpolls, stdl_ovsc_dfirst, stdl_ovsc_dlast;
 uint16_t stdl_ovsc_n2;
 uint16_t stdl_ovsc_n2t;      /* tick mode: turns between the writes */
 uint16_t stdl_ovsc_postn;    /* poll bound for line 263's DE end     */
@@ -614,15 +616,16 @@ __asm__(
 "ovsc_tb_check:\n"
 "    tst.b  _stdl_ovsc_diag\n"
 "    beq.s  11f\n"
-"    move.w _stdl_ovsc_dspin1,%d2\n"
-"12: dbra   %d2,12b\n"
-"    move.b (%a1),_stdl_ovsc_dlo\n"
-"    move.w _stdl_ovsc_dspin2,%d2\n"
-"13: dbra   %d2,13b\n"
-"    move.b (%a1),_stdl_ovsc_dlo+1\n"
-"    move.w _stdl_ovsc_dspin2,%d2\n"
-"14: dbra   %d2,14b\n"
-"    move.b (%a1),_stdl_ovsc_dlo+2\n"
+"    move.b (%a1),%d1\n"
+"    move.b %d1,_stdl_ovsc_dfirst\n"
+"    moveq  #0,%d2\n"
+"12: cmp.b  (%a1),%d1\n"
+"    bne.s  13f\n"
+"    addq.w #1,%d2\n"
+"    cmp.w  #254,%d2\n"
+"    bne.s  12b\n"
+"13: move.b %d2,_stdl_ovsc_dpolls\n"
+"    move.b (%a1),_stdl_ovsc_dlast\n"
 "11: move.w _stdl_ovsc_postn,%d2\n"
 "    bsr    stdl_ovsc_wait_de_n\n"
 "    bmi    ovsc_tb_late\n"
@@ -945,6 +948,9 @@ static long ovsc_measure_one(int n, int pad, int want)
         if (r < 0) {
             continue;
         }
+        if (i < 4) {
+            continue;                       /* cold cache: warm-up only */
+        }
         slot2 = (int)((r >> 16) & 0x3e);
         thr = (int)((r >> 8) & 0xff);
         after = (int)(r & 0xff);
@@ -983,7 +989,7 @@ static int ovsc_measure(void)
      * two or over ten; a nop a third of that; the fixed path 30 to
      * 120 bytes */
     if (turn < 2 * 16 || turn > 10 * 16 || nop < 8 || nop > 4 * 16
-        || s0 < 30 * 16 || s0 > 120 * 16 || first > 2 * 16
+        || s0 < 10 * 16 || s0 > 120 * 16 || first > 2 * 16
         || first < -6 * 16) {
         return 0;
     }
@@ -1110,8 +1116,6 @@ static void ovsc_table(int c)
     /* the check that line 263 displayed: ~1300 plain-ST cycles of
      * polling, a line and a half, in this CPU's turns */
     stdl_ovsc_postn = (uint16_t)((40 * 192) / c);
-    stdl_ovsc_dspin1 = (uint16_t)((60 * 16) / c);
-    stdl_ovsc_dspin2 = (uint16_t)((512 * 16) / c);
     if (stdl_ovsc_measured) {
         ovsc_table_measured(c);
     }
@@ -1138,20 +1142,41 @@ void stdl_ovsc_retable(void)
 static int ovsc_counter_live(int c)
 {
     volatile uint8_t *vc = (volatile uint8_t *)0xFFFF8209UL;
+    uint8_t burst[32];
     int k, i, live = 0;
-    uint8_t v, p, off;
+    uint8_t v, p;
 
+    (void)c;
     for (k = 0; k < 5; k++) {
+        int moving = 0, fast = 0;
+
         v = MFP_TBDR;
         for (i = 0; i < 8000 && MFP_TBDR == v; i++) {
         }
         p = *vc;
         for (i = 0; i < 400 && *vc == p; i++) {
         }
-        stdl_ovsc_spin((180 * 16) / c);
-        off = (uint8_t)(*vc - p);
-        stdl_ovsc_cal_off[k] = off;
-        if (off > 8 && off < 156) {
+        /* 32 reads back to back, register-only, so their spacing
+         * is the bus and nothing else: 24 cycles on a plain ST (the
+         * counter steps 12 bytes a read), less on a faster one */
+        __asm__ volatile(
+            "    lea    0xffff8209.w,%%a0\n"
+            "    move.l %0,%%a1\n"
+            "    moveq  #31,%%d0\n"
+            "1:  move.b (%%a0),(%%a1)+\n"
+            "    dbra   %%d0,1b\n"
+            : : "g"(burst) : "d0", "a0", "a1", "memory");
+        for (i = 1; i < 32; i++) {
+            int step = (uint8_t)(burst[i] - burst[i - 1]);
+            if (step >= 2 && step <= 12) {
+                moving++;
+            } else if (step > 12 && step < 128) {
+                fast++;                     /* an emulator's double-
+                                             * speed counter: 16 a read */
+            }
+        }
+        stdl_ovsc_cal_off[k] = (uint8_t)((moving << 3) | (fast > 7 ? 7 : fast));
+        if (moving >= 6 && fast == 0) {
             live++;
         }
     }

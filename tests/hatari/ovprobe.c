@@ -150,7 +150,7 @@ int main(int argc, char *argv[])
                 stdl_ovsc_n2, stdl_ovsc_n2t, stdl_ovsc_postn);
         fprintf(stderr, "n1=");
         for (i = 0; i < 16; i++) {
-            fprintf(stderr, "%u ", stdl_ovsc_n1[i]);
+            fprintf(stderr, "%u%s", stdl_ovsc_n1[i], (i == 7) ? "\r\n   " : " ");
         }
         fprintf(stderr, "\r\nmisses open=%lu paint=%lu run=%lu tbseen=%u\r\n",
                 (unsigned long)m_open, (unsigned long)m_paint,

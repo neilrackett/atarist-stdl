@@ -178,6 +178,19 @@ warnings** with the Makefile's `-Wall -Wextra`.
   border close and the terminate path reseed the Shifter that way.
   Any new sync-rate or resolution trick wants the same guard on its
   way out.
+- **A success check that accepts "the next event" can pass on the
+  wrong line, and then the miss counter lies.** The bottom ISR's
+  post-check waited for any Display Enable end within a bound; when
+  the pulse fell a line early (the emulator's Mega STE), line 262's
+  own end satisfied it, the border stayed closed and misses read
+  zero - a game port's frame capture found 37% of frames cut short
+  that no counter had noticed. Timer B's count identifies a line
+  (armed at a known value, one less per line end), so waits for a
+  particular line's event compare the value, never "changed". And
+  verify a border with the picture, not the counter: Hatari's
+  `--trace video_border_v` says per frame whether a border was
+  removed, and an AVI capture with `--avirecord` gives per-frame
+  extents that need no eyes.
 - **Isolate resident firmware before sharpening a line-locked ISR.**
   With the placement right, the real Mega STE still flickered the
   bottom border a few times a second and a probe's opens jittered

@@ -1234,6 +1234,33 @@ static void ovsc_table(int c)
     }
 }
 
+/*
+ * Reseed the Shifter's plane phase. A sync-rate pulse that ends in
+ * the next line leaves the phase rotated - every colour wrong - and
+ * on hardware the rotation survives the program's exit and a
+ * resolution change to medium: the desktop came back rotated after
+ * a probe ran the old placement. A moment of hi-res is what the
+ * left-border trick does at every line's end on a colour monitor,
+ * so it is safe, and switching the Shifter to one plane and back is
+ * the demo-era reset. Done in the blanking with interrupts off; a
+ * probe calls it to see whether it puts the desktop right, and if
+ * it does the close path will.
+ */
+void stdl_ovsc_shifter_reset(void)
+{
+    volatile uint8_t *res = (volatile uint8_t *)0xFFFF8260UL;
+    uint16_t sr;
+    uint8_t old;
+
+    STDL_WaitVBL();
+    sr = stdl_int_off();
+    old = *res;
+    *res = 2;
+    stdl_ovsc_spin((60 * 16) / (c16 ? c16 : OVSC_C16_8MHZ));
+    *res = old;
+    stdl_int_restore(sr);
+}
+
 /* for the probe: rebuild the tables after changing stdl_ovsc_test */
 void stdl_ovsc_retable(void)
 {

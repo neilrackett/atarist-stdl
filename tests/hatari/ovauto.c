@@ -19,6 +19,10 @@
  *                  that entry (measured tables only; default the
  *                  library's, 14)
  *   lead=L         the lead for entries without their own
+ *   reset=1        after the borders close, switch the Shifter to
+ *                  hi-res for a moment and back: does the desktop
+ *                  come back with its colours right after a wide=
+ *                  run has rotated the plane phase?
  *   wide=N         a test value run with the first version's pulse
  *                  shape instead (60Hz at N-44, 50Hz at N+33, into
  *                  the next line): the known-bad reference
@@ -64,12 +68,13 @@ extern int16_t  stdl_ovsc_lead;
 extern uint16_t stdl_ovsc_found, stdl_ovsc_search_frames;
 extern uint16_t stdl_ovsc_pre_cyc, stdl_ovsc_pre_np, stdl_ovsc_pre_nm, stdl_ovsc_pre_parks;
 extern void     stdl_ovsc_retable(void);
+extern void     stdl_ovsc_shifter_reset(void);
 
 #define MAXTESTS 16
 
 static int   tests[MAXTESTS], wides[MAXTESTS], leads[MAXTESTS], ntests;
 static int   lead_default = -1;
-static int   frames = 200, force = 0, measure = 1;
+static int   frames = 200, force = 0, measure = 1, reset = 0;
 static char  mode = 'b';
 
 /* Output goes through GEMDOS directly - Cconws for the console and
@@ -166,6 +171,8 @@ static int read_cfg(void)
             measure = atoi(eq);
         } else if (strcmp(line, "lead") == 0) {
             lead_default = atoi(eq);
+        } else if (strcmp(line, "reset") == 0) {
+            reset = atoi(eq);
         } else if ((strcmp(line, "test") == 0 || strcmp(line, "wide") == 0)
                    && ntests < MAXTESTS) {
             char *c = strchr(eq, ',');
@@ -302,6 +309,10 @@ int main(void)
     }
     STDL_CloseBottomBorder();
     STDL_CloseTopBorder();
+    if (reset) {
+        stdl_ovsc_shifter_reset();
+        say("shifter reset done\r\n");
+    }
     say("OVAUTO END status=%d\r\n", status);
     STDL_Quit();
     flush_file();

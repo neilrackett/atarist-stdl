@@ -156,6 +156,20 @@ warnings** with the Makefile's `-Wall -Wextra`.
   A timing diagnostic that reads the counter must keep the read
   inside the line's fetch (cycles 64-376): a read landing after the
   park silently tracks the write instead of the line.
+- **The GLUE's position against the video counter is not a constant
+  of a machine.** On one Mega STE the bottom-border test moved eight
+  cycles between two boots with identical tables: the GLUE and the
+  MMU come up in one of several relative phases (Hatari's "wakeup
+  states"), the counter is the MMU's, and the emulator sits at a
+  further offset from any real machine. Hatari cannot show it - its
+  states shift the counter and the GLUE together - which is why the
+  suggestion to look there was wrongly dismissed for two days on
+  emulator evidence. overscan.c now finds the test at open time by
+  trying the pulse upward until the ISR reports the border open; any
+  future cycle-level placement against a GLUE event wants the same
+  search, not a measured constant, and an emulator result that a
+  hardware suggestion contradicts is a reason to test on hardware,
+  not to discard the suggestion.
 - **Hatari's GEMDOS drive maps names to 8.3.** A scratch binary
   named `BLITCOST2.TOS` beside `BLITCOST.TOS` silently runs
   `BLITCOST.TOS`; four runs of "the fix" measured the old binary.

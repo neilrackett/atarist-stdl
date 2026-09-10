@@ -145,6 +145,11 @@ int main(int argc, char *argv[])
         fprintf(stderr, "cal c16=%u live=%u tick=%u tries=%u\r\n",
                 stdl_ovsc_cal_c, stdl_ovsc_cal_live, stdl_ovsc_tick,
                 stdl_ovsc_cal_try);
+        {
+            extern uint16_t stdl_ovsc_found, stdl_ovsc_search_frames, stdl_ovsc_test;
+            fprintf(stderr, "search found=%u test=%u frames=%u\r\n",
+                    stdl_ovsc_found, stdl_ovsc_test, stdl_ovsc_search_frames);
+        }
         fprintf(stderr, "l262=%02x%02x n2=%u n2t=%u postn=%u\r\n",
                 stdl_ovsc_l262mid, stdl_ovsc_l262lo,
                 stdl_ovsc_n2, stdl_ovsc_n2t, stdl_ovsc_postn);

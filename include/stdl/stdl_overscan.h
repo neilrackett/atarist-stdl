@@ -73,7 +73,14 @@ void STDL_CloseTopBorder(void);
  * displayed scanlines and then against the machine's own execution
  * of the flick's instructions, read back from the counter - one to
  * two frames with interrupts masked (the 200Hz system tick loses a
- * few counts, once) - so the placement holds on any CPU speed. On a
+ * few counts, once) - so the placement holds on any CPU speed. Where
+ * the GLUE's test sits against the counter is then found by trying:
+ * it differs between machines, between the hardware and the
+ * emulator, and from one boot to the next on the same machine, so
+ * the first open tries the pulse from an early position upward and
+ * settles two cycles past the first that opens - about a third of a
+ * second during which the bottom border flickers, once per process,
+ * and STDL_OverscanMisses() counts from after it. On a
  * machine whose video counter cannot be read mid-line (an
  * emulator's 16MHz mode) the ISR times from Timer B instead, less
  * precisely; the check is part of the calibration.

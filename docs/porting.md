@@ -120,7 +120,10 @@ polling per frame (under 1% of an 8MHz frame), and the bottom, the
 first time it opens, one to two frames with interrupts masked to
 calibrate its delay loops against the machine's own scanlines and
 its own execution of the flick's instructions - the 200Hz tick
-loses a few counts, once. The flick is a short 60Hz pulse across the
+loses a few counts, once - and then about a third of a second of
+the bottom border flickering while it finds where the GLUE's
+border test sits against the video counter (it moves from boot to
+boot, so it is searched for rather than assumed). The flick is a short 60Hz pulse across the
 GLUE's border test, restored inside line 262: on real hardware a
 restore that lands in line 263 leaves the Shifter's plane phase a
 word out for the rest of the frame (every colour wrong, every shape

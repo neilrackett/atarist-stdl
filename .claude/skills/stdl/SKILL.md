@@ -260,7 +260,11 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   finds the picture start from the Display Enable events themselves,
   then measures the flick's own instruction costs on the machine by
   running them against a scratch byte and reading the counter back,
-  and re-measures anything no ST could produce). The flick is a
+  and re-measures anything no ST could produce, then spends about a
+  third of a second - the bottom border flickering - finding where
+  the GLUE's border test sits against the counter, which moves from
+  boot to boot on real hardware and cannot be a constant). The flick
+  is a
   short 60Hz pulse across the GLUE's border test, restored inside
   line 262 - a restore landing in line 263 leaves the Shifter's
   plane phase a word out for the whole frame on real hardware, every

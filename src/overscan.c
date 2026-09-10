@@ -169,7 +169,11 @@
                                  * move - measured 28 on a plain ST */
 #define OVSC_AFTER      6       /* the 50Hz write's target past the
                                  * test: inside (test, boundary)    */
-#define OVSC_LEAD       14      /* see stdl_ovsc_lead               */
+#define OVSC_LEAD       0       /* see stdl_ovsc_lead               */
+#define OVSC_SEARCH_LO  486     /* the test search: first position  */
+#define OVSC_SEARCH_HI  530     /* ...last, in steps of 2; frames   */
+#define OVSC_SEARCH_K   3       /* that must open at a position     */
+#define OVSC_SEARCH_PAD 2       /* cycles past the first opener     */
 /* Fixed costs, x16: from the poll's last read to the 60Hz write in
  * counter mode (TB) and tick mode (TT), between the writes (TM),
  * and half a poll period for the reads that catch an edge rather
@@ -300,6 +304,10 @@ uint16_t stdl_ovsc_pre_cyc, stdl_ovsc_pre_np, stdl_ovsc_pre_nm;
  * tables only, since the scaled ones carry a cancelling error in
  * their 16MHz cost scaling. A probe can set it. */
 int16_t  stdl_ovsc_lead = OVSC_LEAD;
+/* the GLUE test position found at open time (0 = not searched);
+ * see ovsc_search() */
+uint16_t stdl_ovsc_found;
+uint16_t stdl_ovsc_search_frames;
 uint16_t stdl_ovsc_pre_parks;
 static uint8_t pre_buf[256];
 
@@ -1235,6 +1243,53 @@ void stdl_ovsc_retable(void)
 }
 
 /*
+ * Where is the GLUE's bottom-border test, in the counter's terms?
+ * Not a constant of the machine: on a Mega STE it moved eight
+ * cycles between two boots with identical tables (the GLUE and the
+ * MMU come up in one of several relative phases - the emulator's
+ * "wakeup states" - and the counter is the MMU's), and the
+ * emulator's model sits at yet another offset from the hardware.
+ * So with the border armed, the pulse is tried from an early
+ * position upward, two cycles a step, and the first position at
+ * which the ISR reports the border open on OVSC_SEARCH_K frames
+ * running is where the 50Hz edge has just cleared the test; the
+ * pulse is then placed OVSC_SEARCH_PAD past it - inside the line
+ * on any machine, since the line's end is a fixed ten cycles or so
+ * past the test on all of them. Four frames a position, so a
+ * typical search (five positions) shows the border flickering for
+ * a third of a second the first time it opens; a search that finds
+ * nothing leaves the default. Once per process, counter path only:
+ * the timed path's jitter is wider than the window it would find.
+ */
+static void ovsc_search(void)
+{
+    int t, k, f, found = 0;
+
+    stdl_ovsc_search_frames = 0;
+    for (t = OVSC_SEARCH_LO; t <= OVSC_SEARCH_HI && !found; t += 2) {
+        stdl_ovsc_test = (uint16_t)t;
+        ovsc_table(c16);
+        STDL_WaitVBL();                     /* the tables take effect */
+        stdl_ovsc_search_frames++;
+        for (k = 0, f = 0; f < OVSC_SEARCH_K; f++) {
+            STDL_WaitVBL();
+            stdl_ovsc_search_frames++;
+            if (stdl_ovsc_botok) {
+                k++;
+            }
+        }
+        if (k == OVSC_SEARCH_K) {
+            found = t;
+        }
+    }
+    stdl_ovsc_found = (uint16_t)found;
+    stdl_ovsc_test = (uint16_t)(found ? found + OVSC_SEARCH_PAD : OVSC_TEST);
+    ovsc_table(c16);
+    stdl_ovsc_missed = 0;                   /* the search's own misses
+                                             * are part of opening */
+}
+
+/*
  * Is the video counter readable as a position while a line is
  * being fetched? On every ST it is: $ff8209 advances two bytes per
  * four cycles from cycle 56 to 376. An emulator's 16MHz mode may
@@ -1746,6 +1801,10 @@ static int ovsc_open(int which)
     }
     ovsc_program(m);
     ovsc_surface();
+    if ((which & MODE_BOT) && !stdl_ovsc_tick && stdl_ovsc_found == 0
+        && !stdl_ovsc_wide) {
+        ovsc_search();
+    }
     return stdl_screen.h;
 }
 

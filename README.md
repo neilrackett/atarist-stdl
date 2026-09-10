@@ -48,7 +48,10 @@ no cycle counting - so a game whose world is taller than 200 lines shows
 it whole instead of cropping or squashing. `STDL_OpenBottomBorder` opens
 the other end (245 lines, seamless: the flick that fools the GLUE is
 placed from the Shifter's video counter with loops calibrated against
-real scanlines when the border opens, so it lands on any CPU speed),
+real scanlines and the machine's own timing when the border opens,
+and the GLUE's test position is found by trying rather than assumed,
+so it lands on any CPU speed and any boot - verified on a real 16MHz
+Mega STE),
 and opening both combines them automatically into a 273-row screen
 filling the display edge to edge. While any border is open, each
 BLiTTER operation is placed from the beam's position so it ends before

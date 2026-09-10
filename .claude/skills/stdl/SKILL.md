@@ -264,17 +264,21 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
   third of a second - the bottom border flickering - finding where
   the GLUE's border test sits against the counter, which moves from
   boot to boot on real hardware and cannot be a constant). The flick
-  is a
-  short 60Hz pulse across the GLUE's border test, restored inside
-  line 262 - a restore landing in line 263 leaves the Shifter's
-  plane phase a word out for the whole frame on real hardware, every
-  colour wrong with every shape in place, and no emulator renders
-  that. Measured
-  in Hatari: the restore lands within ~8 cycles of the window's
-  centre on a plain ST, an STE and a 16MHz Mega STE, and the
-  border held for 1500 consecutive frames with no miss. Each
-  border costs an interrupt plus two to three lines of polling per
-  frame, under 1% of an 8MHz frame. TOS's 200Hz Timer C handler would hold
+  is a short 60Hz pulse across the GLUE's border test, restored
+  inside line 262 - a restore landing in line 263 leaves the
+  Shifter's plane phase a word out for the whole frame on real
+  hardware, every colour wrong with every shape in place, and no
+  emulator renders that. Measured on a real 16MHz Mega STE (TOS
+  2.06): the search took 40 frames, then 300 consecutive frames
+  opened with no miss and the same poll count on every one, and the
+  picture held solid with the right colours, alone and combined
+  with the top. In Hatari the placement lands on the same cycle
+  every frame on a plain ST, an STE and the 16MHz Mega STE, with no
+  miss over 1500 frames. Not yet run on a real plain ST or STE.
+  Resident firmware that holds interrupts off (one cartridge's
+  network stack did) makes the ISR late and the border flicker; it
+  is not a placement fault. Each border costs an interrupt plus two
+  to three lines of polling per frame, under 1% of an 8MHz frame. TOS's 200Hz Timer C handler would hold
   either interrupt off for over two lines at a time (EmuTOS
   measured at ~1140 cycles), so while a border is open its vector
   carries a prefix that lowers the CPU mask to 5 inside the

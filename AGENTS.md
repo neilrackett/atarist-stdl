@@ -170,6 +170,14 @@ warnings** with the Makefile's `-Wall -Wextra`.
   search, not a measured constant, and an emulator result that a
   hardware suggestion contradicts is a reason to test on hardware,
   not to discard the suggestion.
+- **Isolate resident firmware before sharpening a line-locked ISR.**
+  With the placement right, the real Mega STE still flickered the
+  bottom border a few times a second and a probe's opens jittered
+  between runs of identical settings; both vanished with the
+  cartridge's network firmware unloaded (its resident code holds
+  interrupts off long enough to make Timer B late). A hardware
+  jitter that is not in the emulator is an environment question
+  first: reproduce with nothing resident before touching the ISR.
 - **Hatari's GEMDOS drive maps names to 8.3.** A scratch binary
   named `BLITCOST2.TOS` beside `BLITCOST.TOS` silently runs
   `BLITCOST.TOS`; four runs of "the fix" measured the old binary.

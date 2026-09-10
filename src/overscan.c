@@ -225,6 +225,12 @@ uint8_t  stdl_ovsc_tacnt;    /* the count the prefix armed Timer A
 uint8_t  stdl_ovsc_blit;     /* the machine has a BLiTTER: the ISRs
                               * may pause it across a flick      */
 uint8_t  stdl_ovsc_bpaused;  /* ...and did, so resume it on exit  */
+uint8_t  stdl_ovsc_tbn;      /* the count Timer B was armed with
+                              * this frame (event mode): it reads
+                              * that at the ISR, one less per line
+                              * end after, so a line is identified
+                              * by its value, not by "the next step"
+                              */
 uint8_t  stdl_ovsc_topok;    /* this frame's top border opened:    */
 uint8_t  stdl_ovsc_botok;    /* ...and bottom; the beam estimate   */
                              /* reads them (each ISR sets its own) */
@@ -456,30 +462,31 @@ __asm__(
 "    move.b _stdl_ovsc_tacnt,%d1\n"
 "    subq.b #4,%d1\n"
 "    cmp.b  %d1,%d0\n"
-"    blo.s  ovsc_ta_late\n"
+"    blo    ovsc_ta_late\n"
 "    move.b 0xffff8205.w,%d0\n"
 "    cmp.b  _stdl_ovsc_bhi,%d0\n"
-"    bne.s  ovsc_ta_late\n"
+"    bne    ovsc_ta_late\n"
 "    move.b 0xffff8207.w,%d0\n"
 "    cmp.b  _stdl_ovsc_bmid,%d0\n"
-"    bne.s  ovsc_ta_late\n"
+"    bne    ovsc_ta_late\n"
 "    tst.b  0xffff8209.w\n"
-"    bne.s  ovsc_ta_late\n"
+"    bne    ovsc_ta_late\n"
 "    clr.b  0xffff820a.w\n"
 "    lea    0xfffffa21.w,%a0\n"
 "    clr.b  0xfffffa1b.w\n"
 "    move.b #200,(%a0)\n"
 "    move.b #8,0xfffffa1b.w\n"
 "    bsr    stdl_ovsc_wait_de\n"
-"    bmi.s  ovsc_ta_fail\n"
+"    bmi    ovsc_ta_fail\n"
 "    move.b #2,0xffff820a.w\n"
 "    st     _stdl_ovsc_topok\n"
 "    clr.b  0xfffffa1b.w\n"
 "    move.b _stdl_ovsc_tbarm,%d1\n"
 "    beq.s  1f\n"
 "    move.b %d1,(%a0)\n"
+"    move.b %d1,_stdl_ovsc_tbn\n"
 "    move.b #8,0xfffffa1b.w\n"
-"    bra.s  ovsc_ta_out\n"
+"    bra    ovsc_ta_out\n"
 "1:  move.b #255,(%a0)\n"
 "    move.b #5,0xfffffa1b.w\n"
 "ovsc_ta_out:\n"
@@ -496,11 +503,12 @@ __asm__(
 "    move.b _stdl_ovsc_tbarm,%d1\n"
 "    beq.s  1f\n"
 "    move.b #198,0xfffffa21.w\n"
+"    move.b #198,_stdl_ovsc_tbn\n"
 "    move.b #8,0xfffffa1b.w\n"
-"    bra.s  ovsc_ta_out\n"
+"    bra    ovsc_ta_out\n"
 "1:  move.b #255,0xfffffa21.w\n"
 "    move.b #5,0xfffffa1b.w\n"
-"    bra.s  ovsc_ta_out\n"
+"    bra    ovsc_ta_out\n"
 "\n"
 
 /* -- Timer C prefix ------------------------------------------------ */
@@ -523,6 +531,7 @@ __asm__(
 "    move.b #2,0xffff820a.w\n"
 "    clr.b  0xfffffa1b.w\n"
 "    move.b #198,0xfffffa21.w\n"
+"    move.b #198,_stdl_ovsc_tbn\n"
 "    move.b #8,0xfffffa1b.w\n"
 "    move.l _stdl_ovsc_old70,-(%sp)\n"
 "    rts\n"
@@ -569,14 +578,19 @@ __asm__(
  *
  * Tick mode (the open-time check found the counter does not move
  * mid-line, which no ST should do but an emulator's 16MHz mode
- * does): wait for line 262's own Display Enable end on Timer B and
- * time the pulse from that read, at the cost of the poll period as
- * jitter - a 14-cycle spread at 16MHz, wider than the window, so
- * this path loses the border on some frames and exists so an
- * emulator still shows one.
+ * does): wait for line 262's own Display Enable end on Timer B -
+ * by its count, armed at a known value each frame and one less per
+ * line end, not by "the next step": the emulator's counter parks a
+ * line early, the parked-address poll then passes on line 261, and
+ * the next step is 261's end, which put the pulse a line early on
+ * most frames - and time the pulse from that read, at the cost of
+ * the poll period as jitter, a 14-cycle spread at 16MHz. This path
+ * exists so an emulator still shows a border.
  *
- * Afterwards line 263 has to end with a DE event, or the border
- * did not open and the frame is counted; Timer B is then restarted
+ * Afterwards line 263 has to end with a DE event - Timer B reading
+ * its count for that line, so an event from the wrong line cannot
+ * pass - or the border did not open and the frame is counted;
+ * Timer B is then restarted
  * as the stopwatch the top's VBL prefix reads (harmless in
  * bottom-only mode, whose prefix re-arms it anyway).
  *
@@ -623,12 +637,13 @@ __asm__(
 "    bmi    ovsc_tb_late\n"
 "    bra    ovsc_tb_check\n"
 "ovsc_tb_tick_warm:\n"
-"    bra.s  9f\n"
+"    bra    9f\n"
 "ovsc_tb_tick:\n"
-"    move.w #63,%d2\n"
-"    move.b (%a0),%d1\n"
+"    move.w #127,%d2\n"
+"    move.b _stdl_ovsc_tbn,%d1\n"
+"    subq.b #2,%d1\n"
 "8:  cmp.b  (%a0),%d1\n"
-"    bne.s  9f\n"
+"    beq.s  9f\n"
 "    dbra   %d2,8b\n"
 "    bra    ovsc_tb_late\n"
 "9:  move.w %d4,%d2\n"
@@ -655,7 +670,9 @@ __asm__(
 "13: move.b %d2,_stdl_ovsc_dpolls\n"
 "    move.b (%a1),_stdl_ovsc_dlast\n"
 "11: move.w _stdl_ovsc_postn,%d2\n"
-"    bsr    stdl_ovsc_wait_de_n\n"
+"    move.b _stdl_ovsc_tbn,%d1\n"
+"    subq.b #3,%d1\n"
+"    bsr    stdl_ovsc_wait_val\n"
 "    bmi    ovsc_tb_late\n"
 "    st     _stdl_ovsc_botok\n"
 "ovsc_tb_out:\n"
@@ -801,10 +818,20 @@ __asm__(
  * in d2 for waits that know how soon the tick is due. */
 "stdl_ovsc_wait_de:\n"
 "    move.w _stdl_ovsc_waitn,%d2\n"
-"stdl_ovsc_wait_de_n:\n"
 "    move.b (%a0),%d1\n"
 "1:  cmp.b  (%a0),%d1\n"
 "    bne.s  2f\n"
+"    dbra   %d2,1b\n"
+"2:  tst.w  %d2\n"
+"    rts\n"
+/* Wait for Timer B to read the value in d1, the count that
+ * identifies a particular line's end - the bottom ISR uses it for
+ * line 263's, so a pulse that fell a line early cannot pass the
+ * check on line 262's own event (it did, and the miss counter read
+ * zero with the border closed). Bound in d2; N on timeout. */
+"stdl_ovsc_wait_val:\n"
+"1:  cmp.b  (%a0),%d1\n"
+"    beq.s  2f\n"
 "    dbra   %d2,1b\n"
 "2:  tst.w  %d2\n"
 "    rts\n"

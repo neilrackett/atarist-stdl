@@ -190,7 +190,11 @@ warnings** with the Makefile's `-Wall -Wextra`.
   verify a border with the picture, not the counter: Hatari's
   `--trace video_border_v` says per frame whether a border was
   removed, and an AVI capture with `--avirecord` gives per-frame
-  extents that need no eyes.
+  extents that need no eyes. The best surface for that capture is
+  a static screen held for seconds - a splash, a title, any frame a
+  program can be made to hold - with no logic, disk or input behind
+  it: every frame should then be identical, and any variation is
+  the bug. That is how a port found the 37% in the first place.
 - **Isolate resident firmware before sharpening a line-locked ISR.**
   With the placement right, the real Mega STE still flickered the
   bottom border a few times a second and a probe's opens jittered

@@ -1242,23 +1242,31 @@ static void ovsc_table(int c)
  * a probe ran the old placement. A moment of hi-res is what the
  * left-border trick does at every line's end on a colour monitor,
  * so it is safe, and switching the Shifter to one plane and back is
- * the demo-era reset. Done in the blanking with interrupts off; a
- * probe calls it to see whether it puts the desktop right, and if
- * it does the close path will.
+ * the demo-era reset - verified on a Mega STE: the same probe run
+ * with this at its end left the desktop right. Every final close
+ * does it, so no program can leave the desktop rotated whatever
+ * happened while its borders were open; the normal close waits for
+ * the blanking first, the terminate path (hardware only, no GEMDOS)
+ * does it where it stands - invisible either way, on exit.
  */
-void stdl_ovsc_shifter_reset(void)
+static void ovsc_shifter_reseed(void)
 {
     volatile uint8_t *res = (volatile uint8_t *)0xFFFF8260UL;
     uint16_t sr;
     uint8_t old;
 
-    STDL_WaitVBL();
     sr = stdl_int_off();
     old = *res;
     *res = 2;
     stdl_ovsc_spin((60 * 16) / (c16 ? c16 : OVSC_C16_8MHZ));
     *res = old;
     stdl_int_restore(sr);
+}
+
+void stdl_ovsc_shifter_reset(void)
+{
+    STDL_WaitVBL();
+    ovsc_shifter_reseed();
 }
 
 /* for the probe: rebuild the tables after changing stdl_ovsc_test */
@@ -1656,6 +1664,7 @@ static void ovsc_release(void)
     VEC_TC = old_tc_vec;
     SYNC_REG = old_sync;
     stdl_int_restore(sr);
+    ovsc_shifter_reseed();
     mode = 0;
     stdl_blit_policy = NULL;
     stdl_pal_apply_hook = NULL;
@@ -1851,7 +1860,8 @@ static int ovsc_close(int which)
     if (stdl_pal_apply_hook != NULL) {
         STDL_RemoveVBL(ovsc_pal_flush);
     }
-    ovsc_release();                     /* clears the hook */
+    STDL_WaitVBL();                     /* the reseed in the blanking */
+    ovsc_release();                     /* clears the hook, reseeds */
     stdl_palette_apply_hw();            /* immediate, no staging */
     (void)Setscreen(stdl.page[0], stdl.page[0], -1);
     STDL_WaitVBL();

@@ -52,7 +52,12 @@ extern "C" {
 int  STDL_OpenTopBorder(void);
 
 /* Put the border, the timers and the screen surface back. Safe to
- * call when the border is not open. */
+ * call when the border is not open. The last border to close also
+ * reseeds the Shifter's plane phase with a moment of hi-res in the
+ * blanking (so does the terminate path), since a sync trick gone
+ * wrong can leave the phase rotated - every colour wrong - and on
+ * real hardware that survives the program's exit; the desktop
+ * would come back rotated. */
 void STDL_CloseTopBorder(void);
 
 /*

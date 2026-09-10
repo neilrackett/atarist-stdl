@@ -170,6 +170,14 @@ warnings** with the Makefile's `-Wall -Wextra`.
   search, not a measured constant, and an emulator result that a
   hardware suggestion contradicts is a reason to test on hardware,
   not to discard the suggestion.
+- **A Shifter plane-phase slip outlives the program.** On a real
+  Mega STE the desktop came back with its planes rotated after a
+  probe had run a sync pulse ending in the next line; a resolution
+  change to medium did not clear it. A moment of hi-res in the
+  blanking does (verified: same run, desktop normal), so every final
+  border close and the terminate path reseed the Shifter that way.
+  Any new sync-rate or resolution trick wants the same guard on its
+  way out.
 - **Isolate resident firmware before sharpening a line-locked ISR.**
   With the placement right, the real Mega STE still flickered the
   bottom border a few times a second and a probe's opens jittered

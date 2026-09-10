@@ -19,6 +19,14 @@
  *                  that entry (measured tables only; default the
  *                  library's, 14)
  *   lead=L         the lead for entries without their own
+ *   load=N         N full-screen BLiTTER fills a frame while the
+ *                  border is open (hog mode, placed by the policy):
+ *                  does a busy BLiTTER cost frames on this machine?
+ *   loadcpu=N      N thousand iterations of a CPU loop a frame
+ *   loaddisk=1     open, read and close OVAUTO.CFG every frame: a
+ *                  hard-disk driver that masks interrupts during a
+ *                  transfer holds the border ISR off for the whole
+ *                  of it, and no emulator models that
  *   reset=1        after the borders close, switch the Shifter to
  *                  hi-res for a moment and back: does the desktop
  *                  come back with its colours right after a wide=
@@ -75,6 +83,7 @@ extern void     stdl_ovsc_shifter_reset(void);
 static int   tests[MAXTESTS], wides[MAXTESTS], leads[MAXTESTS], ntests;
 static int   lead_default = -1;
 static int   frames = 200, force = 0, measure = 1, reset = 0;
+static int   load = 0, loadcpu = 0, loaddisk = 0;
 static char  mode = 'b';
 
 /* Output goes through GEMDOS directly - Cconws for the console and
@@ -173,6 +182,12 @@ static int read_cfg(void)
             lead_default = atoi(eq);
         } else if (strcmp(line, "reset") == 0) {
             reset = atoi(eq);
+        } else if (strcmp(line, "load") == 0) {
+            load = atoi(eq);
+        } else if (strcmp(line, "loadcpu") == 0) {
+            loadcpu = atoi(eq);
+        } else if (strcmp(line, "loaddisk") == 0) {
+            loaddisk = atoi(eq);
         } else if ((strcmp(line, "test") == 0 || strcmp(line, "wide") == 0)
                    && ntests < MAXTESTS) {
             char *c = strchr(eq, ',');
@@ -257,7 +272,28 @@ int main(void)
         STDL_WaitVBL();
         for (f = 0; f < frames; f++) {
             STDL_Event ev;
+            int n;
             while (STDL_PollEvent(&ev)) {
+            }
+            for (n = 0; n < load; n++) {
+                STDL_Rect r = { 0, 0, 320, 200 };
+                STDL_FillRect(STDL_GetVideoSurface(), &r,
+                              (uint8_t)(1 + ((f + n) & 7)));
+            }
+            if (loadcpu) {
+                volatile uint32_t acc = 0;
+                uint32_t k;
+                for (k = 0; k < (uint32_t)loadcpu * 1000UL; k++) {
+                    acc += k ^ (acc >> 3);
+                }
+            }
+            if (loaddisk) {
+                static char junk[256];
+                long dh = Fopen("OVAUTO.CFG", 0);
+                if (dh >= 0) {
+                    Fread((short)dh, (long)sizeof junk, junk);
+                    Fclose((short)dh);
+                }
             }
             STDL_WaitVBL();
             if (mode != 't') {
@@ -292,10 +328,11 @@ int main(void)
                 stdl_ovsc_pre, stdl_ovsc_pre_cyc, stdl_ovsc_pre_np,
                 stdl_ovsc_pre_nm, stdl_ovsc_pre_parks);
         }
-        say("%s=%u %s lead=%d open=%d/%d misses=%lu polls[0..15]=",
+        say("%s=%u %s lead=%d load=%d/%d/%d open=%d/%d misses=%lu polls[0..15]=",
             wides[tt] ? "wide" : "test", stdl_ovsc_test,
             stdl_ovsc_measured ? "measured" : "scaled",
-            stdl_ovsc_measured ? (int)stdl_ovsc_lead : 0, open_ok, frames,
+            stdl_ovsc_measured ? (int)stdl_ovsc_lead : 0,
+            load, loadcpu, loaddisk, open_ok, frames,
             (unsigned long)(m1 - m0));
         for (i = 0; i < 16; i++) {
             say("%d%s", hist[i], (i < 15) ? "," : "");

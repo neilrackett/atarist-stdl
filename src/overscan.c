@@ -169,6 +169,7 @@
                                  * move - measured 28 on a plain ST */
 #define OVSC_AFTER      6       /* the 50Hz write's target past the
                                  * test: inside (test, boundary)    */
+#define OVSC_LEAD       14      /* see stdl_ovsc_lead               */
 /* Fixed costs, x16: from the poll's last read to the 60Hz write in
  * counter mode (TB) and tick mode (TT), between the writes (TM),
  * and half a poll period for the reads that catch an edge rather
@@ -290,6 +291,15 @@ uint8_t  stdl_ovsc_measured;
  * with the emulator's 320), pre the excess in bytes */
 uint8_t  stdl_ovsc_pre;
 uint16_t stdl_ovsc_pre_cyc, stdl_ovsc_pre_np, stdl_ovsc_pre_nm;
+/* the counter's lead on the emulated model, in cycles: a byte that
+ * Hatari returns from a read at cycle X is returned this much
+ * earlier by the hardware. Found by sweep on a Mega STE (the
+ * self-measured tables, exact in the emulator, placed the 50Hz edge
+ * 12-16 cycles early there, with the counter's moving fraction and
+ * the measured costs both checking out); applied to the measured
+ * tables only, since the scaled ones carry a cancelling error in
+ * their 16MHz cost scaling. A probe can set it. */
+int16_t  stdl_ovsc_lead = OVSC_LEAD;
 uint16_t stdl_ovsc_pre_parks;
 static uint8_t pre_buf[256];
 
@@ -1100,9 +1110,11 @@ static void ovsc_table_measured(int c)
 {
     const long F = stdl_ovsc_mF, T = stdl_ovsc_mTURN;
     const long FI = stdl_ovsc_mFIRST, NP = stdl_ovsc_mNOP;
-    /* the counter read after the write is ~8 plain-ST cycles past
-     * it: the write is that much before the measured cost's end */
-    const long rd = (8L * 16 * c) / 192;
+    /* the counter read after the write is the next bus cycle, ~8
+     * cycles past it at any CPU speed (the bus is 8MHz): the write
+     * is that much before the measured cost's end */
+    const long rd = 8L * 16;
+    (void)c;
     const long pair = (OVSC_PAIR_CPU * (long)c) / 192;
     long t50, tw, need, rem;
     int i, n, pad;
@@ -1114,7 +1126,7 @@ static void ovsc_table_measured(int c)
      * fetch starts at 56 and the read's bus cycle sees the count as
      * it was 8 cycles before (the same mapping the slot positions
      * OVSC_HIT_READ encodes: byte 130 from cycle 326) */
-    tw = (t50 + rd - 64L * 16) / 2;         /* bytes x16 */
+    tw = (t50 + rd - 64L * 16 + (long)stdl_ovsc_lead * 16) / 2;
     for (i = 0; i < 16; i++) {
         long hit = (i < 15) ? (130 + 2 * i) * 16L : 164 * 16L;
         need = tw - hit - F;

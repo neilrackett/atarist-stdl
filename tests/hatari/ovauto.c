@@ -13,8 +13,12 @@
  *                  check said (default 0)
  *   measure=0|1|2  0 scaled tables, 1 self-measured (default), 2
  *                  runs every position both ways, scaled first
- *   test=N         a GLUE test cycle to centre the 60Hz pulse on;
- *                  repeat the line to sweep (default: the library's)
+ *   test=N[,L]     a GLUE test cycle to centre the 60Hz pulse on;
+ *                  repeat the line to sweep (default: the library's).
+ *                  An optional ,L sets the counter lead in cycles for
+ *                  that entry (measured tables only; default the
+ *                  library's, 14)
+ *   lead=L         the lead for entries without their own
  *   wide=N         a test value run with the first version's pulse
  *                  shape instead (60Hz at N-44, 50Hz at N+33, into
  *                  the next line): the known-bad reference
@@ -56,12 +60,14 @@ extern uint8_t  stdl_ovsc_cal_live, stdl_ovsc_cal_try, stdl_ovsc_cal_off[5];
 extern uint16_t stdl_ovsc_mF, stdl_ovsc_mTURN, stdl_ovsc_mNOP, stdl_ovsc_msamples;
 extern int16_t  stdl_ovsc_mFIRST;
 extern uint8_t  stdl_ovsc_measured, stdl_ovsc_pre;
+extern int16_t  stdl_ovsc_lead;
 extern uint16_t stdl_ovsc_pre_cyc, stdl_ovsc_pre_np, stdl_ovsc_pre_nm, stdl_ovsc_pre_parks;
 extern void     stdl_ovsc_retable(void);
 
 #define MAXTESTS 16
 
-static int   tests[MAXTESTS], wides[MAXTESTS], ntests;
+static int   tests[MAXTESTS], wides[MAXTESTS], leads[MAXTESTS], ntests;
+static int   lead_default = -1;
 static int   frames = 200, force = 0, measure = 1;
 static char  mode = 'b';
 
@@ -69,8 +75,9 @@ static char  mode = 'b';
  * Fcreate/Fwrite for the file - not through stdio: under a
  * cartridge that hooks GEMDOS (the unattended runner) the stdio
  * path bombed at launch with an address error, while raw calls in
- * another program ran clean. Everything is buffered and the file
- * is written once, after the borders close. */
+ * another program ran clean. Everything is buffered; nothing is
+ * printed or written until the borders are closed and STDL has
+ * shut down, so no GEMDOS call runs while the vectors are ours. */
 static char  outbuf[4096];
 static int   outlen;
 
@@ -88,7 +95,6 @@ static void say(const char *fmt, ...)
     if (n >= (int)sizeof line) {
         n = (int)sizeof line - 1;
     }
-    (void)Cconws(line);
     if (outlen + n < (int)sizeof outbuf) {
         memcpy(outbuf + outlen, line, (size_t)n);
         outlen += n;
@@ -97,7 +103,10 @@ static void say(const char *fmt, ...)
 
 static void flush_file(void)
 {
-    long h = Fcreate("OVAUTO.TXT", 0);
+    long h;
+    outbuf[outlen] = '\0';
+    (void)Cconws(outbuf);
+    h = Fcreate("OVAUTO.TXT", 0);
     if (h >= 0) {
         Fwrite((short)h, (long)outlen, outbuf);
         Fclose((short)h);
@@ -154,11 +163,17 @@ static int read_cfg(void)
             force = atoi(eq);
         } else if (strcmp(line, "measure") == 0) {
             measure = atoi(eq);
-        } else if (strcmp(line, "test") == 0 && ntests < MAXTESTS) {
-            wides[ntests] = 0;
-            tests[ntests++] = atoi(eq);
-        } else if (strcmp(line, "wide") == 0 && ntests < MAXTESTS) {
-            wides[ntests] = 1;
+        } else if (strcmp(line, "lead") == 0) {
+            lead_default = atoi(eq);
+        } else if ((strcmp(line, "test") == 0 || strcmp(line, "wide") == 0)
+                   && ntests < MAXTESTS) {
+            char *c = strchr(eq, ',');
+            leads[ntests] = -1;
+            if (c != NULL) {
+                *c++ = '\0';
+                leads[ntests] = atoi(c);
+            }
+            wides[ntests] = (line[0] == 'w');
             tests[ntests++] = atoi(eq);
         }
     }
@@ -201,6 +216,11 @@ int main(void)
             stdl_ovsc_test = (uint16_t)tests[tt];
         }
         stdl_ovsc_wide = (uint8_t)wides[tt];
+        if (leads[tt] >= 0) {
+            stdl_ovsc_lead = (int16_t)leads[tt];
+        } else if (lead_default >= 0) {
+            stdl_ovsc_lead = (int16_t)lead_default;
+        }
         if (t == 0) {
             if (mode == 't' || mode == 'c') {
                 h = STDL_OpenTopBorder();
@@ -261,9 +281,10 @@ int main(void)
                 stdl_ovsc_pre, stdl_ovsc_pre_cyc, stdl_ovsc_pre_np,
                 stdl_ovsc_pre_nm, stdl_ovsc_pre_parks);
         }
-        say("%s=%u %s open=%d/%d misses=%lu polls[0..15]=",
+        say("%s=%u %s lead=%d open=%d/%d misses=%lu polls[0..15]=",
             wides[tt] ? "wide" : "test", stdl_ovsc_test,
-            stdl_ovsc_measured ? "measured" : "scaled", open_ok, frames,
+            stdl_ovsc_measured ? "measured" : "scaled",
+            stdl_ovsc_measured ? (int)stdl_ovsc_lead : 0, open_ok, frames,
             (unsigned long)(m1 - m0));
         for (i = 0; i < 16; i++) {
             say("%d%s", hist[i], (i < 15) ? "," : "");

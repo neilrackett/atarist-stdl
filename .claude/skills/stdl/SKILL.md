@@ -141,13 +141,113 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
    - `SDL_SetPalette(SDL_PHYSPAL)` fades work unchanged on 16 entries
 4. GEMDOS: uppercase 8.3 filenames, no argv from the desktop,
    stdout buffered (stderr is not), console prints onto the screen.
-5. Test loop: `STCMD_NO_TTY=1 stcmd make` then run in Hatari:
-   `hatari --machine megaste --tos <tos.img> path/to/PROG.TOS`
-   (Hatari GEMDOS-mounts the containing directory as C:). For
-   automation use `--conout 2` (console to stdout), `--cmd-fifo`
-   (`hatari-shortcut screenshot`, `hatari-event keypress <ST
-   scancode>`, `hatari-event doubleclick`), `--fast-forward on`.
-   Verify on plain ST (`--machine st`) - the 8MHz correctness floor.
+5. Test loop: `STCMD_NO_TTY=1 stcmd make`, then run the .TOS in
+   Hatari through `tests/hatari/run.sh` - setup (emulator, a TOS
+   image), the command language and the pitfalls are in "Testing
+   in Hatari" below. Verify on plain ST (`MACHINE=st`) before
+   calling anything done - it is the 8MHz correctness floor.
+
+## Testing in Hatari
+
+Two things the repository does not ship, both one-time setup: the
+emulator and a TOS ROM image. Nothing else is needed - a program's
+directory is GEMDOS drive C:, so `dist/` with the .TOS and its
+assets is the whole disk.
+
+**Hatari.** The driver defaults to the macOS app bundle at
+`/Applications/Hatari.app/Contents/MacOS/hatari` (the official
+builds are on framagit.org/hatari/releases; hatari-emu.org links
+them). `brew install hatari` on macOS or the distro package on
+Linux instead put a `hatari` binary on PATH, in which case set
+`HATARI=hatari`. Verified with 2.6.1; any recent 2.x has the
+command fifo and `--conout` the driver relies on.
+
+**A TOS image.** EmuTOS is free, redistributable and runs
+everything in this library, so download it rather than hunting for
+a ROM. The ports keep it under `tmp/tos/` (gitignored - it is a
+256K binary and not the port's to ship):
+
+```
+mkdir -p tmp/tos
+curl -sfL -o tmp/tos/emutos.zip \
+  "https://sourceforge.net/projects/emutos/files/emutos/1.4/emutos-256k-1.4.zip/download"
+unzip -jo tmp/tos/emutos.zip emutos-256k-1.4/etos256uk.img -d tmp/tos
+export TOS=$PWD/tmp/tos/etos256uk.img
+```
+
+Releases are on SourceForge, not GitHub (the GitHub releases page
+has no assets). Use the 256K build: it boots on every `MACHINE`
+the driver offers (st, ste, megaste). The language suffix only
+picks the keyboard layout and the driver injects raw scancodes, so
+any of them will do. A real TOS ROM (1.04, 2.06) is copyrighted
+and not downloadable; if the maintainer has one, `TOS=` takes it
+the same way. Two reasons to want one: EmuTOS's own footprint is
+~169KB (screen included), so a 512K fit that fails under EmuTOS at
+`--memsize 0` may be fine under the TOS 1.0x a real 520ST runs -
+measure before "fixing" the game; and a release gets a run under
+the TOS its users will have.
+
+**The driver.** From a port that vendors STDL the path is
+`stdl/tests/hatari/run.sh` or `extern/stdl/tests/hatari/run.sh`:
+
+```
+TOS=tmp/tos/etos256uk.img EXTRA="--memsize 4" \
+  tests/hatari/run.sh smoke dist/GAME.TOS 8 \
+  "waitfor title ready;shot;keydown 0x1c;sleep 0.3;keyup 0x1c;sleep 2;shot"
+```
+
+The third argument is seconds to wait for EmuTOS to boot and the
+program to start (8 is enough with fast-forward on). Then the
+;-separated script runs: `sleep N`, `waitfor STR` (polls the
+console log), `waitfile STR PATH` (polls a file the program writes
+on C:, for output that never reaches the console), `shot`,
+`keydown`/`keyup`/`key VAL` (ST scancode such as 0x1c for Return,
+0x01 for Escape, 0x39 for space, or a single alphanumeric),
+`text STR`, `click`, and `fifo CMD` for anything else Hatari's
+command fifo accepts. Console output lands in
+`tests/hatari/out/NAME.log` (echoed at the end), Hatari's own
+messages in `NAME.err`, screenshots in `out/shots_NAME/`.
+Environment: `MACHINE=st|ste|megaste` (default megaste), `FF=off`
+for screenshots that must be at real speed, `SOUND=on` with
+`fifo hatari-shortcut recsound` to record audio, `EXTRA=` for any
+other Hatari option. Interactively, the same run is
+`hatari --tos $TOS --machine megaste --memsize 4 dist/GAME.TOS`.
+
+Pitfalls, each of which has cost a day:
+
+- **`key VAL` is press and release in the same pump.** Any game
+  that polls key *state* rather than latching a press edge never
+  sees it and looks like it has no keyboard input at all. Always
+  `keydown VAL;sleep 0.3;keyup VAL`.
+- **A black screenshot is usually an early screenshot**, not a
+  crash. With `FF=off` EmuTOS boot plus program start takes
+  ~28 seconds before the first frame. `waitfor` a marker the
+  program prints to stderr (immediate; stdout is line-buffered and
+  arrives late) and shoot after that. Markers also print on the ST
+  screen, so put them before the video mode is set or expect them
+  in the shot.
+- **`--memsize` takes integer MiB and `0` means 512K.** `0.5` is
+  not valid. Default is 1M; a game that needs more wants
+  `EXTRA="--memsize 4"`, and the 512K/1M fit is still a claim to
+  test at `--memsize 0` and `1`.
+- **Program stems are 8 characters.** Hatari's GEMDOS drive maps
+  names to 8.3, so `BLITCOST2.TOS` beside `BLITCOST.TOS` silently
+  runs the old one. Same for every asset name.
+- **`AUTO\` on the test drive runs at boot.** The program's
+  directory is drive C:, so anything in its `AUTO\` folder runs
+  before the program. The joystick fixture `XPADSTUB.PRG`
+  (tests/hatari/xpadstub.c, dropped in `AUTO\` to test TJOY)
+  reports right + fire held permanently, and one left behind made
+  a game with joy-key emulation walk right on its own. When input
+  moves by itself, look in `AUTO\` before looking in the game,
+  and remove the stub once the joystick test is done.
+- **Crashes report a PC, not a symbol.** `NAME.err` carries the
+  "Bus Error"/"Address Error" line with `PC=$xxxxxx`;
+  `tests/hatari/map-crash.sh` maps it to a function from the
+  unstripped ELF and the runtime address of `main` (have the
+  program print `&main` once at startup). A PC in `$e0xxxx` or
+  `$fcxxxx` is inside the ROM - the fault is in what the program
+  asked TOS to do, not where the report points.
 
 ## Game services (use instead of reinventing)
 

@@ -63,7 +63,8 @@ rm -rf "$SHOTDIR" "$FIFO" "$LOG"
 mkdir -p "$SHOTDIR"
 
 if [ -z "${TOS:-}" ]; then
-    echo "$0: set TOS to a TOS/EmuTOS image path" >&2
+    echo "$0: set TOS to a TOS/EmuTOS image path (see 'Testing in" \
+         "Hatari' in .claude/skills/stdl/SKILL.md for a download)" >&2
     exit 2
 fi
 if [ ! -f "$TOS" ]; then

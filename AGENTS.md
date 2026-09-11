@@ -37,7 +37,9 @@ warnings** with the Makefile's `-Wall -Wextra`.
   screenshots, key injection (raw ST scancodes, not SDL codes) and
   console-marker waits - see the script header for the command
   language and the TOS/FF/MACHINE environment overrides. Output
-  lands in `tests/hatari/out/`. Sound verification: record with
+  lands in `tests/hatari/out/`. Emulator and TOS-image setup (an
+  EmuTOS download, no ROM needed) is in the skill's "Testing in
+  Hatari" section. Sound verification: record with
   `hatari-shortcut recsound` (file path comes from the
   `szYMCaptureFileName` key in the Hatari config).
 - **Size is a test result too.** `stcmd make` runs a `sizecheck`

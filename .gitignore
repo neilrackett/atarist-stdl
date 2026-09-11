@@ -18,3 +18,4 @@ tests/hatari/out/
 libstdl-cmini.a
 .DS_Store
 obj/
+tmp/

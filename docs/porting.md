@@ -96,15 +96,16 @@ time, not at runtime.
   least 336 pixels wide (the Shifter fetches one extra group per line
   while the fine scroll is non-zero) and its stride at most 670
   bytes (LINEWIDTH is one byte of words). The registers are
-  programmed from the VBL in the order the hardware wants - the base
-  a frame ahead of the offsets, because the base is latched three
-  lines before the VBL and the offsets are not - so a request made
-  during frame N is on screen for frame N+2 and no frame shows a
-  mismatched pair; `STDL_ScrollWindowPending` says when it has
-  landed, for a page-flipping caller that must not draw into the
-  page still being fetched. `STDL_HasHwScroll` is the test to make
-  at init: on a plain ST the calls fail cleanly and the port keeps a
-  copy-based fallback. Do not mix with `STDL_Flip`: both program the
+  programmed in the order the hardware wants - the base first, the
+  offsets at the VBL whose video counter shows that base latched,
+  because the base is latched three lines before the VBL and the offsets
+  are not - so no frame shows a mismatched pair; a request made in the
+  first 15ms of a frame is on screen from the next frame, a later one a
+  frame after that; `STDL_ScrollWindowPending` says when it has landed,
+  for a page-flipping caller that must not draw into the page still
+  being fetched. `STDL_HasHwScroll` is the test to make at init: on a
+  plain ST the calls fail cleanly and the port keeps a copy-based
+  fallback. Do not mix with `STDL_Flip`: both program the
   base; `STDL_ResetScrollWindow` puts the stock registers back for a
   program that returns to page flipping mid-run (`STDL_Quit` and the
   terminate path do it anyway). See `examples/hwscroll.c`.

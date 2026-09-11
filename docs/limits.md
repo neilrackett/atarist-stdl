@@ -109,9 +109,10 @@ stop trying and redesign instead.
   there, and a port keeps a copy-based fallback. The buffer stride is
   a multiple of 8 from 160 to 670 bytes (LINEWIDTH is a byte of
   words), fine scrolling needs a stride of at least 168, and the
-  base is group (8-byte) aligned. A request is on screen two VBLs
-  after the call. The module and `STDL_Flip` both program the video
-  base, so a program uses one or the other.
+  base is word aligned. A request made early in a frame is on screen
+  at the next VBL, a late one at the VBL after. The module and
+  `STDL_Flip` both program the video base, so a program uses one or
+  the other.
 * The software cursor's save-under is a snapshot: hide the cursor
   before drawing beneath it, and prefer sprites for pointers in
   games that redraw every frame. Cursors are at most 32x32 with

@@ -19,11 +19,13 @@
  * HSCROLL crosses zero shows a base with the wrong line offset: the
  * picture jumps a group sideways for one frame.
  *
- * So each request is applied in two halves: its base at the VBL
- * where it is picked up, its offsets at the VBL after. The offsets
- * written at any VBL are those of the request whose base went in at
- * the previous one, and the pair on screen is always a matching pair.
- * The cost is a frame of latency, which a scrolling game has anyway.
+ * So each request is applied in two halves: its base first, its
+ * offsets at the VBL that finds the video counter reloaded from that
+ * base. The base goes in straight away when the request arrives early
+ * enough in the frame (before the reload), otherwise at the VBL; the
+ * counter comparison makes the two paths one, and the pair on screen
+ * is always a matching pair. A request made early in a frame is on
+ * screen from the next; a late one costs a frame more.
  *
  * Its own translation unit, so a program that never scrolls does
  * not link it (there is no section garbage collection on this
@@ -54,56 +56,82 @@ static volatile uint8_t host_vid[5];
 #define MCH_STE     0x00010000UL
 #define MCH_MEGASTE 0x00010010UL
 
-/* the latest request, written by the program with interrupts off */
-static volatile uint32_t req_base;
-static volatile uint8_t  req_lw;
-static volatile uint8_t  req_hs;
-static volatile uint8_t  req_seq;
+/* video counter, valid as the latched base during the vertical blank */
+#ifdef __m68k__
+#define VID_CNT_HI   (*(volatile uint8_t *)0xFFFF8205UL)
+#define VID_CNT_MID  (*(volatile uint8_t *)0xFFFF8207UL)
+#define VID_CNT_LO   (*(volatile uint8_t *)0xFFFF8209UL)
+#else
+static volatile uint8_t host_cnt[3];
+#define VID_CNT_HI   host_cnt[0]
+#define VID_CNT_MID  host_cnt[1]
+#define VID_CNT_LO   host_cnt[2]
+#endif
 
-/* owned by the VBL callback: the offsets belonging to the base that
- * was written last, and the sequence numbers of what has reached
- * the hardware */
-static uint8_t pend_lw, pend_hs, pend_seq;
+typedef struct {
+    uint32_t base;
+    uint8_t  lw, hs, seq;
+} hws_req_t;
+
+/* the latest request, written by the program with interrupts off */
+static volatile hws_req_t req;
+/* the request whose base has been written to the registers and whose
+ * offsets are due at the VBL that finds it latched */
+static volatile hws_req_t armed;
+/* sequence number of the request fully on the hardware */
 static volatile uint8_t done_seq;
+/* 200Hz stamp of the last VBL, so a request can tell whether it comes
+ * early enough in the frame to write its base itself */
+static volatile uint32_t vbl_stamp;
 
 static int hws_installed;
 
-static void hws_vbl(void)
+static void write_base(uint32_t b)
 {
-    uint32_t b;
-
-    /* the offsets of the base the Shifter will fetch this frame */
-    VID_LINEWIDTH = pend_lw;
-    VID_HSCROLL = pend_hs;
-    done_seq = pend_seq;
-
-    /* the newest base, latched three lines before the next VBL; its
-     * offsets wait for that VBL. The program updates the three
-     * fields with interrupts masked, so this snapshot is consistent. */
-    b = req_base;
     VID_BASE_HI = (uint8_t)(b >> 16);
     VID_BASE_MID = (uint8_t)(b >> 8);
     VID_BASE_LO = (uint8_t)b;
-    pend_lw = req_lw;
-    pend_hs = req_hs;
-    pend_seq = req_seq;
+}
+
+static uint32_t read_counter(void)
+{
+    return ((uint32_t)VID_CNT_HI << 16) | ((uint32_t)VID_CNT_MID << 8)
+         | VID_CNT_LO;
+}
+
+/*
+ * The VBL runs in the blanking, after the video counter was reloaded
+ * from the base three lines earlier: the counter therefore names the
+ * base this frame will fetch. If it is the armed request's, that
+ * request's offsets go in now and it is complete. Then, if a newer
+ * request is waiting, its base is written for the next frame.
+ */
+static void hws_vbl(void)
+{
+    uint32_t cnt = read_counter();
+
+    vbl_stamp = STDL_HZ200;
+    if (cnt == armed.base) {
+        VID_LINEWIDTH = armed.lw;
+        VID_HSCROLL = armed.hs;
+        done_seq = armed.seq;
+    }
+    if (req.seq != armed.seq) {
+        write_base(req.base);
+        armed = req;
+    }
 }
 
 /* Hardware and vectors only: this also runs from the terminate
  * vector, where GEMDOS and the heap are off limits. */
 static void hws_release(void)
 {
-    uint32_t b;
-
     STDL_RemoveVBL(hws_vbl);
     hws_installed = 0;
     VID_LINEWIDTH = 0;
     VID_HSCROLL = 0;
-    b = (uint32_t)(uintptr_t)stdl.page[0];
-    VID_BASE_HI = (uint8_t)(b >> 16);
-    VID_BASE_MID = (uint8_t)(b >> 8);
-    VID_BASE_LO = 0;
-    done_seq = req_seq;
+    write_base((uint32_t)(uintptr_t)stdl.page[0] & ~0xFFUL);
+    done_seq = req.seq;
 }
 
 int STDL_HasHwScroll(void)
@@ -149,12 +177,12 @@ int STDL_SetScrollWindow(const void *base, int stride, int xfine)
     }
 
     if (!hws_installed) {
-        /* seed the pending offsets with the stock values, so the
-         * first VBL writes nothing the Shifter did not already have */
-        pend_lw = 0;
-        pend_hs = 0;
-        pend_seq = req_seq;
-        done_seq = req_seq;
+        /* nothing armed yet: the first VBL finds no matching counter
+         * and simply writes the first base */
+        armed.base = 0xFFFFFFFFUL;
+        armed.seq = req.seq;
+        done_seq = req.seq;
+        vbl_stamp = STDL_HZ200;
         if (STDL_AddVBL(hws_vbl) < 0) {
             return -1;
         }
@@ -163,10 +191,22 @@ int STDL_SetScrollWindow(const void *base, int stride, int xfine)
     }
 
     sr = stdl_int_off();
-    req_base = (uint32_t)(uintptr_t)base;
-    req_lw = (uint8_t)lw;
-    req_hs = (uint8_t)xfine;
-    req_seq++;
+    req.base = (uint32_t)(uintptr_t)base;
+    req.lw = (uint8_t)lw;
+    req.hs = (uint8_t)xfine;
+    req.seq++;
+    /*
+     * The base register is only read when the counter reloads, three
+     * lines before the VBL - about 19.8ms after the previous one. A
+     * request that arrives within the first three 200Hz ticks of the
+     * frame (at most 15ms in) can therefore write its base now and be
+     * on screen from the next frame, its offsets following at that
+     * VBL; a later one waits for the VBL to arm it, costing a frame.
+     */
+    if (STDL_HZ200 - vbl_stamp <= 2) {
+        write_base(req.base);
+        armed = req;
+    }
     stdl_int_restore(sr);
     return 0;
 }
@@ -186,7 +226,7 @@ int STDL_SetScrollOrigin(const STDL_Surface *s, int x, int y)
 
 int STDL_ScrollWindowPending(void)
 {
-    return hws_installed && req_seq != done_seq;
+    return hws_installed && req.seq != done_seq;
 }
 
 void STDL_ResetScrollWindow(void)

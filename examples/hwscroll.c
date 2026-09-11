@@ -61,7 +61,7 @@ int main(int argc, char *argv[])
     STDL_Surface *screen, *world;
     STDL_Colour cols[16];
     int x = 0, y = 0, dx = 1, dy = 1, autoscroll = 0;
-    uint32_t t0, frames = 0;
+    uint32_t t0, frames = 0, late = 0, late2 = 0;
     int i;
 
     (void)argc; (void)argv;
@@ -144,6 +144,13 @@ int main(int argc, char *argv[])
 
         STDL_SetScrollOrigin(world, x, y);
         STDL_WaitVBL();
+        if (STDL_ScrollWindowPending()) {
+            late++;                 /* not on screen after one VBL */
+            STDL_WaitVBL();
+            if (STDL_ScrollWindowPending()) {
+                late2++;            /* nor after two */
+            }
+        }
         frames++;
     }
 done:
@@ -152,8 +159,10 @@ done:
         STDL_ResetScrollWindow();
         STDL_FreeSurface(world);
         STDL_Quit();
-        printf("HWSCROLL: %lu frames in %lu ms\n",
-               (unsigned long)frames, (unsigned long)ms);
+        printf("HWSCROLL: %lu frames in %lu ms, %lu still pending after "
+               "one VBL, %lu after two\n",
+               (unsigned long)frames, (unsigned long)ms,
+               (unsigned long)late, (unsigned long)late2);
     }
     return 0;
 }

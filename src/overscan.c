@@ -1272,9 +1272,10 @@ static void ovsc_table(int c)
  * the demo-era reset - verified on a Mega STE: the same probe run
  * with this at its end left the desktop right. Every final close
  * does it, so no program can leave the desktop rotated whatever
- * happened while its borders were open; the normal close waits for
- * the blanking first, the terminate path (hardware only, no GEMDOS)
- * does it where it stands - invisible either way, on exit.
+ * happened while its borders were open, and both paths wait for the
+ * blanking first: done mid-picture it did not take (a game that
+ * quit with its borders open left a Mega STE's desktop rotated;
+ * closing them first, which waited, did not).
  */
 static void ovsc_shifter_reseed(void)
 {
@@ -1691,6 +1692,18 @@ static void ovsc_release(void)
     VEC_TC = old_tc_vec;
     SYNC_REG = old_sync;
     stdl_int_restore(sr);
+    /* the reseed wants the blanking: done mid-picture it left a
+     * Mega STE's desktop rotated after a program quit with its
+     * borders open (the same reseed from the close path, which
+     * waits, put it right). Wait for the frame counter to step -
+     * hardware only, so the terminate path may - but not for ever:
+     * the counter stands still if the VBL is masked at exit */
+    {
+        uint32_t fc = STDL_FRCLOCK;
+        long i;
+        for (i = 0; i < 400000L && STDL_FRCLOCK == fc; i++) {
+        }
+    }
     ovsc_shifter_reseed();
     mode = 0;
     stdl_blit_policy = NULL;
@@ -1887,8 +1900,8 @@ static int ovsc_close(int which)
     if (stdl_pal_apply_hook != NULL) {
         STDL_RemoveVBL(ovsc_pal_flush);
     }
-    STDL_WaitVBL();                     /* the reseed in the blanking */
-    ovsc_release();                     /* clears the hook, reseeds */
+    ovsc_release();                     /* clears the hook, reseeds
+                                         * in the blanking */
     stdl_palette_apply_hw();            /* immediate, no staging */
     (void)Setscreen(stdl.page[0], stdl.page[0], -1);
     STDL_WaitVBL();

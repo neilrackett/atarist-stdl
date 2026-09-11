@@ -85,6 +85,11 @@ int main(void)
     STDL_SetCursor(NULL);
     CHECK(same(&stdl_screen), "restore after unset");
 
+    /* The caller owns the cursor, as in SDL - and LeakSanitizer
+     * (on by default with ASan on Linux, absent on macOS) fails the
+     * suite over the 272 bytes if the test forgets. */
+    STDL_FreeCursor(c);
+
     if (!failures) printf("cursor tests passed\n");
     return failures != 0;
 }

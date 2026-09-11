@@ -83,6 +83,11 @@ int main(void)
         }
     }
 
+    /* Both surfaces, or LeakSanitizer (on by default with ASan on
+     * Linux, absent on macOS) fails the suite on the metadata. */
+    STDL_FreeSurface(view);
+    STDL_FreeSurface(dst);
+
     if (failures == 0) {
         printf("underleak: OK\n");
         return 0;

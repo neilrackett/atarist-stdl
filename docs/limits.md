@@ -103,6 +103,15 @@ stop trying and redesign instead.
   merges two bitplanes per long; a masked destination or a clip
   origin away from (0,0) falls back to the general path, which is
   roughly twice as slow per point.
+* Hardware scrolling (`STDL_SetScrollWindow` / `STDL_SetScrollOrigin`)
+  is STE and Mega STE only: the plain ST has no LINEWIDTH or HSCROLL
+  register and a 256-byte base granularity. The calls fail cleanly
+  there, and a port keeps a copy-based fallback. The buffer stride is
+  a multiple of 8 from 160 to 670 bytes (LINEWIDTH is a byte of
+  words), fine scrolling needs a stride of at least 168, and the
+  base is group (8-byte) aligned. A request is on screen two VBLs
+  after the call. The module and `STDL_Flip` both program the video
+  base, so a program uses one or the other.
 * The software cursor's save-under is a snapshot: hide the cursor
   before drawing beneath it, and prefer sprites for pointers in
   games that redraw every frame. Cursors are at most 32x32 with

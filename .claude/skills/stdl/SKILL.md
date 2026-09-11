@@ -55,6 +55,7 @@ Full contract: `docs/format.md`. Never invent a different layout.
 | `STDL_BlitIndexed8` (chunky frames at draw time) | | per-frame `STDL_SurfaceFromIndexed8` |
 | `STDL_BlitSurfaceEx` (baked frame, priority plane) | | hand-rolled planar sprite loops |
 | `STDL_DrawChar` (one glyph) | `STDL_SurfaceFromIndexed8` (load time) | `STDL_RemapSurface` per frame |
+| `STDL_SetScrollOrigin` (STE, once a frame) | | copying a play field to scroll it on an STE |
 
 **Bake frames you redraw.** The same frame, colour bank and palette
 always produce the same plane words. Clear a scratch mask to all
@@ -152,6 +153,19 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
 
 - Scrolling camera: `STDL_SetSurfaceOrigin(stripe, 0, cam_y)` -
   short stripe as a windowed level, game keeps level coordinates.
+- Hardware scrolling on an STE: `STDL_SetScrollOrigin(world, x, y)`
+  shows the 320x200 window at pixel (x, y) of a surface at least 336
+  wide (stride up to 670 bytes) by programming the STE's video base,
+  LINEWIDTH and HSCROLL from the VBL - no copy, no CPU cost. The
+  base is written a frame ahead of the two offsets (the Shifter
+  latches the base three lines before the VBL, the offsets apply at
+  once), so the pair on screen always matches; a request lands two
+  VBLs after the call and `STDL_ScrollWindowPending` says when. This
+  is the tile-engine model: keep a play field one tile larger than
+  the screen in a page-flipped pair of buffers, move the window by
+  the pixel, redraw only the strip that scrolls in. Test
+  `STDL_HasHwScroll` at init and keep a copy fallback for the plain
+  ST; do not mix with `STDL_Flip`. `examples/hwscroll.c`.
 - Composition: `STDL_TRANSPARENT` fills punch holes in masked
   surfaces; blits maintain destination masks; `STDL_SurfaceIsOpaque`
   (cached) skips backdrop under solid tiles; `STDL_PutGroup` for

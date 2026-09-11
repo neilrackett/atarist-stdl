@@ -18,6 +18,7 @@ void (*stdl_shutdown_audio)(void);
 void (*stdl_shutdown_music)(void);
 void (*stdl_shutdown_vbl)(void);
 void (*stdl_shutdown_overscan)(void);
+void (*stdl_shutdown_hwscroll)(void);
 uint16_t (*stdl_blit_policy)(uint16_t nlines, uint32_t cpl);
 void (*stdl_pal_apply_hook)(void);
 
@@ -129,6 +130,12 @@ static void release_hardware(void)
     if (stdl_shutdown_vbl != NULL) {
         stdl_shutdown_vbl();
         stdl_shutdown_vbl = NULL;
+    }
+    if (stdl_shutdown_hwscroll != NULL) {
+        /* LINEWIDTH and HSCROLL back to stock before the Setscreen
+         * below repoints the display at page[0] */
+        stdl_shutdown_hwscroll();
+        stdl_shutdown_hwscroll = NULL;
     }
     if (stdl_shutdown_overscan != NULL) {
         /* border, timers and vectors back before the Setscreen

@@ -87,6 +87,27 @@ time, not at runtime.
   pump. Ports that reached into `_vblqueue` at $456 themselves should
   move to this: STDL removes its callbacks on every exit path,
   including the ones that never run `atexit`.
+* **Hardware scrolling (STE)**: `STDL_SetScrollOrigin(world, x, y)`
+  shows the 320x200 window whose top-left pixel is (x, y) of a
+  surface wider and taller than the screen - to the pixel, and
+  without copying anything: the STE's video base, LINEWIDTH and
+  HSCROLL registers do the work. `STDL_SetScrollWindow(base, stride,
+  xfine)` is the same for a raw planar block. Keep the surface at
+  least 336 pixels wide (the Shifter fetches one extra group per line
+  while the fine scroll is non-zero) and its stride at most 670
+  bytes (LINEWIDTH is one byte of words). The registers are
+  programmed from the VBL in the order the hardware wants - the base
+  a frame ahead of the offsets, because the base is latched three
+  lines before the VBL and the offsets are not - so a request made
+  during frame N is on screen for frame N+2 and no frame shows a
+  mismatched pair; `STDL_ScrollWindowPending` says when it has
+  landed, for a page-flipping caller that must not draw into the
+  page still being fetched. `STDL_HasHwScroll` is the test to make
+  at init: on a plain ST the calls fail cleanly and the port keeps a
+  copy-based fallback. Do not mix with `STDL_Flip`: both program the
+  base; `STDL_ResetScrollWindow` puts the stock registers back for a
+  program that returns to page flipping mid-run (`STDL_Quit` and the
+  terminate path do it anyway). See `examples/hwscroll.c`.
 * **Splash screens**: `STDL_ShowDegas("SPLASH.PI1")` after
   SetVideoMode shows a Degas picture with its palette while the
   game loads (`stdlconv pi1` converts, `stdlconv embed` makes C

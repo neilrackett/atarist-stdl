@@ -30,6 +30,7 @@ void (**stdl_host_vblqueue)(void) = host_vblslots;
 void (*stdl_shutdown_audio)(void);
 void (*stdl_shutdown_music)(void);
 void (*stdl_shutdown_vbl)(void);
+void (*stdl_shutdown_hwscroll)(void);
 
 /* video.c is the real STDL_Init and takes supervisor mode; on the
  * host there is nothing to claim, so record the state the modules

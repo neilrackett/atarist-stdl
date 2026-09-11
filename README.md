@@ -42,6 +42,14 @@ joystick key emulation picks the pad up too. Ports need no changes:
 button 0 stays fire, axes 0 and 1 stay the left stick, and with no
 provider everything reads exactly as a plain ST joystick.
 
+On an STE, `STDL_SetScrollOrigin` shows a 320x200 window of a larger
+planar surface positioned to the pixel - the video base, LINEWIDTH
+and HSCROLL registers programmed from the VBL in the order the
+Shifter latches them, so the picture never jumps a group when the fine
+scroll crosses zero - and the smooth-scrolling tile engine model
+(a play field one tile larger than the screen, only the incoming strip
+redrawn) costs no CPU at all. See `examples/hwscroll.c`.
+
 `STDL_OpenTopBorder` trades the top border for 28 extra lines - 228
 visible instead of 200 on any ST, one timer interrupt per frame and
 no cycle counting - so a game whose world is taller than 200 lines shows

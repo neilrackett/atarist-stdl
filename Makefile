@@ -29,7 +29,8 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/sfx.c src/degas.c src/ym.c src/blitter.c \
           src/planes.c src/vbl.c src/indexed.c src/drawchar.c \
           src/surfacefrom.c src/blit8.c src/voice.c \
-          $(XPAD)/xpad.c src/stdl_xpad.c src/overscan.c
+          $(XPAD)/xpad.c src/stdl_xpad.c src/overscan.c \
+          src/hwscroll.c
 # Objects live under obj/, mirroring each source's own path. Sources
 # now come from two places, this repo and the xpad submodule, and
 # building beside the source would drop .o files inside lib/xpad. The
@@ -46,7 +47,8 @@ EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
            dist/TTIMER.TOS dist/TBLITSPD.TOS dist/TVIDINFO.TOS \
            dist/TKEYS.TOS dist/TJOY.TOS dist/LOOPWAVE.TOS \
            dist/TCURSOR.TOS dist/PLAYMUS.TOS dist/SFXDEMO.TOS \
-           dist/BLITCHK.TOS dist/VBLCHK.TOS dist/OVERSCAN.TOS
+           dist/BLITCHK.TOS dist/VBLCHK.TOS dist/OVERSCAN.TOS \
+           dist/HWSCROLL.TOS
 
 all: $(LIB) sizecheck $(EXAMPLES) assets
 
@@ -149,6 +151,8 @@ dist/OVERSCAN.TOS: examples/overscan.c $(LIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
 dist/VBLCHK.TOS: examples/vblchk.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
+dist/HWSCROLL.TOS: examples/hwscroll.c $(LIB)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
 
 dist/CHUNKY.TOS: examples/chunky.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@

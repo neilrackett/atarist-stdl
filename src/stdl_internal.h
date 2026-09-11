@@ -194,6 +194,7 @@ extern void (*stdl_shutdown_audio)(void);
 extern void (*stdl_shutdown_music)(void);
 extern void (*stdl_shutdown_vbl)(void);
 extern void (*stdl_shutdown_overscan)(void);
+extern void (*stdl_shutdown_hwscroll)(void);
 
 /* while set, blitter.c asks this before starting an operation of
  * nlines lines costing cpl bus cycles each: the answer is how many

@@ -1,0 +1,75 @@
+name: CI
+
+# Does it build, and do the host tests still pass? That is the whole
+# job. It runs the same two builds release.yml does, so a commit that
+# would break a release fails here first, on the push that caused it -
+# this repository releases straight from main, so waiting for a pull
+# request would mean waiting forever.
+
+on:
+  push:
+    branches:
+      - main
+    # A commit that only edits prose cannot break the build, and this
+    # repository writes a lot of prose (AGENTS.md, the skill, docs/).
+    # GitHub still runs the job if a push touches anything else too.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.claude/**'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A second push while the first is still building should not leave two
+# runs racing to report on the same branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # stcmd runs docker with -it unless this is set, and there is no
+  # terminal on a runner.
+  STCMD_NO_TTY: 1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+        with:
+          # Xpad is a submodule and the library does not build without
+          # it; it is the only one, so recursing costs nothing.
+          submodules: recursive
+
+      - name: Host tests
+        # First, because they need nothing but a C compiler: a broken
+        # pixel path fails in seconds rather than after a toolchain
+        # install. clang to match what the library is developed
+        # against; gcc passes too, but only one of them needs to run.
+        # ASan on Linux turns LeakSanitizer on (macOS has no LSan), so
+        # this is also the only place a leaked allocation is caught.
+        run: make test CC=clang
+
+      - name: Install the Atari ST toolkit
+        # Generates /usr/local/bin/stcmd, which runs the m68k build in
+        # a container. The installer picks the image for the runner's
+        # architecture, so this is an x86_64 image here and an arm64
+        # one on a developer's Mac; both carry gcc 4.6.4 and libcmini.
+        run: curl -sL https://github.com/sidecartridge/atarist-toolkit-docker/releases/latest/download/install_atarist_toolkit_docker.sh | bash
+
+      - name: Cross build
+        # `all` is the library, the pixel-path size budget (sizecheck,
+        # which fails the build if the objects outgrow PIXEL_MAX) and
+        # every example. -Wall -Wextra must stay silent.
+        run: stcmd make
+
+      - name: Cross build (libcmini)
+        # The second archive is a separate compile of the same sources
+        # against libcmini's headers, so it can break on its own.
+        run: stcmd make cmini

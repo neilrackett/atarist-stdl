@@ -1,0 +1,74 @@
+name: Release
+
+# Build the two archives and put them on the rolling "latest" release.
+#
+# The trigger is a pushed version tag, not a push to main: STDL keeps
+# its version in annotated tags (`git tag -a v1.4.0`) and nowhere else,
+# so the tag is the release. Tagging therefore stays a deliberate act
+# by the maintainer, and this workflow does the rest - move the
+# lightweight "latest" tag onto the same commit and replace the
+# archives on the release attached to it. The release's title and body
+# are left exactly as they are: `gh release upload` touches assets
+# only.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # For rebuilding the assets without cutting a version - after an
+  # Xpad submodule bump, say. Run it from main.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Two tags pushed in quick succession would otherwise race: both move
+# the latest tag and clobber the same two assets, and the loser decides
+# what the release ends up holding.
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+env:
+  STCMD_NO_TTY: 1
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # The push trigger already filters to version tags; this is what
+    # stops a manual dispatch from a side branch publishing it.
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Host tests
+        # The same gate as CI. A tag is not a reason to publish an
+        # archive whose pixel paths fail their reference model.
+        run: make test CC=clang
+
+      - name: Install the Atari ST toolkit
+        run: curl -sL https://github.com/sidecartridge/atarist-toolkit-docker/releases/latest/download/install_atarist_toolkit_docker.sh | bash
+
+      - name: Cross build
+        run: stcmd make
+
+      - name: Cross build (libcmini)
+        run: stcmd make cmini
+
+      - name: Move the latest tag to this commit
+        # The "latest" release is attached to this tag, so moving it
+        # keeps the release's source link pointing at the same commit
+        # the attached archives were built from.
+        run: |
+          git tag -f latest
+          git push -f origin refs/tags/latest
+
+      - name: Replace the archives on the latest release
+        # --clobber, because the release is rolling: same two asset
+        # names every time, so a port's download link never changes.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload latest libstdl.a libstdl-cmini.a --clobber

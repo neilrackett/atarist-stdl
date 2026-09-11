@@ -21,7 +21,18 @@
 
 /*
  * GEMDOS stores 8.3 uppercase names; ported code habitually opens
- * "icon.bmp". Try the path as given, then retry fully uppercased.
+ * "icon.bmp". Try the path as given, then retry with the name
+ * uppercased.
+ *
+ * The name only, not the directories above it: GEMDOS is
+ * case-insensitive throughout, so on target the two are the same
+ * lookup, but uppercasing "data/icon.bmp" whole hands a
+ * case-sensitive host "DATA/ICON.BMP" and a directory that does not
+ * exist. That is not a target concern, it is a host-test one - the
+ * fallback could only ever be exercised on a case-insensitive
+ * developer filesystem, where the first fopen had already
+ * succeeded and the retry never ran.
+ *
  * (Returns FILE* as void* so stdl_internal.h needn't pull stdio
  * into every module.)
  */
@@ -29,7 +40,7 @@ void *stdl_fopen_ci(const char *path, const char *mode)
 {
     FILE *f = fopen(path, mode);
     char upper[256];
-    size_t i, len;
+    size_t i, len, base;
 
     if (f != NULL) {
         return f;
@@ -38,7 +49,16 @@ void *stdl_fopen_ci(const char *path, const char *mode)
     if (len >= sizeof(upper)) {
         return NULL;
     }
-    for (i = 0; i <= len; i++) {
+    base = 0;
+    for (i = 0; i < len; i++) {
+        if (path[i] == '/' || path[i] == '\\') {
+            base = i + 1;
+        }
+    }
+    for (i = 0; i < base; i++) {
+        upper[i] = path[i];
+    }
+    for (i = base; i <= len; i++) {
         upper[i] = (char)toupper((unsigned char)path[i]);
     }
     if (strcmp(upper, path) == 0) {

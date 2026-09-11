@@ -232,9 +232,10 @@ int main(void)
     {
         STDL_Surface *pic = STDL_LoadDegas(
             "../../examples/assets/splash.pi1", NULL);
-        /* macOS FS is case-insensitive so this passes trivially
-         * there; the real test is on GEMDOS, but at least exercise
-         * the code path */
+        /* On a case-insensitive host (macOS) the first fopen
+         * succeeds and this proves little; on a case-sensitive one
+         * (Linux, CI) the file really is SPLASH.PI1 and only the
+         * uppercase retry can find it. */
         CHECK(pic != NULL, "ci open");
         STDL_FreeSurface(pic);
     }

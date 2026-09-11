@@ -32,6 +32,16 @@ warnings** with the Makefile's `-Wall -Wextra`.
   hardware and m68k asm when `__m68k__` is undefined. Run this
   before any emulator debugging - it is far faster and catches
   guard-band overreads. Keep it warning-free too.
+- **CI runs both builds on every push** (`.github/workflows/ci.yml`):
+  the host tests, then the cross build with `sizecheck`, then the
+  libcmini archive. Two things it sees that a developer's Mac does
+  not, so check them before blaming the runner: ASan on Linux turns
+  on LeakSanitizer, which macOS has none of, and its filesystem is
+  case-sensitive, which caught `stdl_fopen_ci` uppercasing whole
+  paths. A pushed `v*` tag additionally publishes `libstdl.a` and
+  `libstdl-cmini.a` to the rolling `latest` release
+  (`.github/workflows/release.yml`), so the version tag is the
+  release and nothing is uploaded by hand.
 - **On target**: `tests/hatari/run.sh NAME dist/PROG.TOS BOOT_WAIT
   "cmd;cmd;..."` drives a program in Hatari with console capture,
   screenshots, key injection (raw ST scancodes, not SDL codes) and

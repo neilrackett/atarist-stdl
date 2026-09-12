@@ -16,7 +16,12 @@ time, not at runtime.
 6. Profile on Mega STE (`dist/TBLITSPD.TOS` gives the baseline;
    the blitter accelerates large same-phase fills/blits
    automatically - align to 16px to benefit).
-7. Verify on plain ST at 8MHz - the correctness floor.
+7. Verify on plain ST at 8MHz - the correctness floor, and the
+   machine the port is for. The blitter, DMA audio, hardware
+   scrolling and 16MHz are enhancements to use where present, not
+   requirements to lean on: a port that needs an STE (hardware
+   scrolling does) should be an explicit decision, and one that
+   needs 16MHz to be playable needs its rendering fixed instead.
 
 ## What maps directly
 

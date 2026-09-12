@@ -214,6 +214,6 @@ clean:
 
 # Run an example in Hatari (host-side): make run-TSPRITE
 run-%:
-	hatari --machine megaste --memsize 4 --fast-boot on dist/$*.TOS
+	hatari --machine ste --memsize 4 --fast-boot on dist/$*.TOS
 
 .PHONY: sizecheck all clean assets test cmini bundle ci

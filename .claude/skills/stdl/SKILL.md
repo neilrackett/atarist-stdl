@@ -11,6 +11,23 @@ converted to ST interleaved planar offline, and spans/rects/blits
 are the primary verbs. The screen is always 320x200, 4 planes,
 16 colours.
 
+**What to target.** A plain 8MHz ST with 1MB is the machine a port
+has to run on: 68000, no blitter, no DMA audio, 512K-1M of RAM for
+code and heap together. Everything above that is progressive
+enhancement - use the blitter, DMA sample playback, hardware
+scrolling and the Mega STE's 16MHz where they are there, and fall
+back cleanly where they are not. `STDL_UseBlitter`, `STDL_HasHwScroll`
+and the STE audio calls all report what the machine has, so the
+fallback is a branch at init, not a second build.
+
+Requiring an STE is allowed but it is a decision, not a default:
+hardware scrolling needs one, and a port built around it should say
+so to the person who asked for the port before that design is
+locked in. Requiring 16MHz to reach a playable frame rate is never
+the answer - if a port only runs on a Mega STE, the rendering needs
+fixing, not the target raising. Measure on `MACHINE=st` before
+believing any frame-rate claim.
+
 **Targeting a TT or Falcon rather than an ST?** Use Atari SDL 1.2 instead
 (runs on plain TOS, no MiNT): those machines are chunky at 256 colours,
 and TT line-doubles 320x240 so one binary covers both. STDL exists for
@@ -145,7 +162,8 @@ paths for debugging; BLITCHK.TOS verifies both paths on target.
    Hatari through `tests/hatari/run.sh` - setup (emulator, a TOS
    image), the command language and the pitfalls are in "Testing
    in Hatari" below. Verify on plain ST (`MACHINE=st`) before
-   calling anything done - it is the 8MHz correctness floor.
+   calling anything done - it is the 8MHz correctness floor, and
+   the machine the port is for.
 
 ## Testing in Hatari
 
@@ -207,11 +225,14 @@ on C:, for output that never reaches the console), `shot`,
 command fifo accepts. Console output lands in
 `tests/hatari/out/NAME.log` (echoed at the end), Hatari's own
 messages in `NAME.err`, screenshots in `out/shots_NAME/`.
-Environment: `MACHINE=st|ste|megaste` (default megaste), `FF=off`
+Environment: `MACHINE=st|ste|megaste` (default ste - an 8MHz CPU,
+so the timing is honest, with the blitter and DMA audio present to
+exercise; `st` is the correctness floor and `megaste` measures what
+16MHz adds), `FF=off`
 for screenshots that must be at real speed, `SOUND=on` with
 `fifo hatari-shortcut recsound` to record audio, `EXTRA=` for any
 other Hatari option. Interactively, the same run is
-`hatari --tos $TOS --machine megaste --memsize 4 dist/GAME.TOS`.
+`hatari --tos $TOS --machine ste --memsize 4 dist/GAME.TOS`.
 
 Pitfalls, each of which has cost a day:
 

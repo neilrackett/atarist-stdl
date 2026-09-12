@@ -100,7 +100,7 @@ This produces `libstdl.a` in the project root and all of the example programs
 in `dist/`, which doubles as a Hatari GEMDOS drive for testing:
 
 ```
-hatari --machine megaste dist/TSPRITE.TOS
+hatari --machine ste dist/TSPRITE.TOS
 ```
 
 Clone with `--recursive`, or run `git submodule update --init`: Xpad is

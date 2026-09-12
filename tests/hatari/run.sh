@@ -33,8 +33,10 @@
 #   TOS     TOS/EmuTOS image  (required if no usable default)
 #   FF      fast-forward on|off (default on; use off when taking
 #           timed screenshots)
-#   MACHINE hatari machine type (default megaste; use st for the
-#           8MHz correctness floor)
+#   MACHINE hatari machine type (default ste: an 8MHz CPU, so the
+#           timing is honest, with the blitter and DMA audio there
+#           to exercise. Use st for the correctness floor, and
+#           megaste only to measure what 16MHz adds)
 #   SOUND   off, on, or a frequency in Hz (default off). "on" means
 #           44100. Recording is a separate step: send
 #           'fifo hatari-shortcut recsound' to start and again to
@@ -53,7 +55,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT=$HERE/out
 HATARI=${HATARI:-/Applications/Hatari.app/Contents/MacOS/hatari}
 FF=${FF:-on}
-MACHINE=${MACHINE:-megaste}
+MACHINE=${MACHINE:-ste}
 SOUND=${SOUND:-off}
 # Hatari's --sound takes off or a frequency, and rejects "on" - which
 # is what this script's own documentation said for a long time, so a

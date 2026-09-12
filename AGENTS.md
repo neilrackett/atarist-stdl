@@ -256,8 +256,20 @@ warnings** with the Makefile's `-Wall -Wextra`.
   TOS queue and DMA counter in tests/host/test_voice.c - steer
   `stdl_host_dma_pos` and call the queue slot like the interrupt
   would.
-- Verify on `--machine st` too: plain 8MHz ST is the correctness
-  floor; the blitter and DMA audio are optional hardware.
+- **The library is for a plain 8MHz ST; everything above it is
+  progressive enhancement.** 68000, no blitter, no DMA audio, 512K
+  to 1M shared between code and heap - that is the machine, and a
+  new primitive works there first. The blitter, DMA sample
+  playback, STE hardware scrolling and the Mega STE's 16MHz are
+  used when present and detected at run time, never assumed:
+  `STDL_UseBlitter`, `STDL_HasHwScroll` and the audio calls exist
+  so a port branches at init rather than shipping two builds. An
+  API that genuinely needs an STE (hardware scrolling) says so in
+  its header and fails cleanly elsewhere. Performance work is
+  measured on `--machine st` first - the harness defaults to `ste`,
+  which is still an 8MHz CPU - because a 16MHz figure hides the
+  regression that matters, and "playable on a Mega STE" is not a
+  result.
 
 ## Shipping a change
 

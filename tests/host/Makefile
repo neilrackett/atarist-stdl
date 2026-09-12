@@ -8,8 +8,10 @@
 #
 #   make -C tests/host run     (or `make test` from the root)
 #
-# The BLiTTER, YM, DMA and IKBD paths are hardware and cannot be
-# tested here - dist/BLITCHK.TOS and the Hatari harness cover them.
+# The BLiTTER, DMA and IKBD paths are hardware and cannot be tested
+# here - dist/BLITCHK.TOS and the Hatari harness cover them. The YM
+# service runs against a register-file stand-in (stubs.c), so the
+# sound tick's bookkeeping is covered natively.
 
 #
 # -fsanitize=alignment earns its place on a library whose fast paths
@@ -36,7 +38,7 @@ CORE    = stubs.c $(SRC)/surface.c $(SRC)/indexed.c $(SRC)/draw.c \
 TESTS   = test_pixel test_compose test_cursor test_assets test_planes \
           test_footprint test_indexed test_glyph test_vbl test_blit8 \
           test_underleak \
-          test_voice
+          test_voice test_ym
 
 all: $(TESTS)
 
@@ -78,12 +80,15 @@ test_blit8: test_blit8.c $(CORE) $(SRC)/blit8.c $(SRC)/surfacefrom.c
 test_voice: test_voice.c $(CORE) $(SRC)/voice.c $(SRC)/vbl.c
 	$(CC) $(CFLAGS) -o $@ $^
 
+test_ym: test_ym.c $(CORE) $(SRC)/ym.c
+	$(CC) $(CFLAGS) -o $@ $^
+
 run: $(TESTS)
 	@./test_pixel && ./test_compose && ./test_cursor \
 	  && ./test_assets && ./test_planes && ./test_footprint \
 	  && ./test_indexed && ./test_glyph && ./test_vbl \
 	  && ./test_underleak \
-	  && ./test_blit8 && ./test_voice \
+	  && ./test_blit8 && ./test_voice && ./test_ym \
 	  && echo "ALL HOST TESTS PASSED"
 
 clean:

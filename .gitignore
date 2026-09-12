@@ -13,6 +13,7 @@ tests/host/test_glyph
 tests/host/test_vbl
 tests/host/test_blit8
 tests/host/test_voice
+tests/host/test_ym
 tests/host/*.dSYM/
 tests/hatari/out/
 libstdl-cmini.a

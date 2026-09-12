@@ -14,13 +14,7 @@
  * whenever it writes the mixer.
  */
 
-#include <mint/osbind.h>
 #include "stdl_internal.h"
-
-#define YM_SELECT (*(volatile uint8_t *)0xFFFF8800UL)
-#define YM_DATA   (*(volatile uint8_t *)0xFFFF8802UL)
-
-#define CONTERM   (*(volatile uint8_t *)0x484UL)
 
 volatile uint8_t stdl_ym_owned;         /* bits 0-2 voices, 3 noise */
 void (*stdl_music_tick)(void);
@@ -33,15 +27,15 @@ static int old_conterm = -1;
 
 void stdl_ym_write(int reg, int val)
 {
-    YM_SELECT = (uint8_t)reg;
-    YM_DATA = (uint8_t)val;
+    STDL_YM_SELECT = (uint8_t)reg;
+    STDL_YM_DATA = (uint8_t)val;
 }
 
 void stdl_ym_mix_update(uint8_t clr, uint8_t set)
 {
     mix_shadow = (uint8_t)((mix_shadow & ~clr) | set);
-    YM_SELECT = 7;
-    stdl_ym_write(7, (YM_SELECT & 0xC0) | (mix_shadow & 0x3F));
+    STDL_YM_SELECT = 7;
+    stdl_ym_write(7, (STDL_YM_READBACK & 0xC0) | (mix_shadow & 0x3F));
 }
 
 /* an effect has finished with a voice: hand it back to the music
@@ -91,7 +85,7 @@ static void ym_shutdown(void)
     }
     stdl_ym_mix_update(0x3F, 0x3F);
     if (old_conterm >= 0) {
-        CONTERM = (uint8_t)old_conterm;
+        STDL_CONTERM = (uint8_t)old_conterm;
         old_conterm = -1;
     }
 }
@@ -109,8 +103,8 @@ int stdl_ym_install(void)
     }
     /* silence the console key click so it cannot fight over the
      * sound chip; key repeat stays on */
-    old_conterm = CONTERM;
-    CONTERM = (uint8_t)(old_conterm & ~1);
+    old_conterm = STDL_CONTERM;
+    STDL_CONTERM = (uint8_t)(old_conterm & ~1);
 
     for (i = 0; i < STDL_NVBLS; i++) {
         if (STDL_VBLQUEUE[i] == NULL) {
@@ -120,7 +114,7 @@ int stdl_ym_install(void)
             return 0;
         }
     }
-    CONTERM = (uint8_t)old_conterm;
+    STDL_CONTERM = (uint8_t)old_conterm;
     old_conterm = -1;
     STDL_SetError("no free VBL queue slot for sound");
     return -1;

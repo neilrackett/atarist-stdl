@@ -32,6 +32,19 @@
 #define STDL_VC_HI      (*(volatile uint8_t *)0xFFFF8205UL)
 #define STDL_VC_MID     (*(volatile uint8_t *)0xFFFF8207UL)
 #define STDL_VC_LO      (*(volatile uint8_t *)0xFFFF8209UL)
+/* YM2149: write a register number to SELECT, then its value to
+ * DATA; reading SELECT returns the selected register's contents
+ * (READBACK), which is how the mixer's port-direction bits are
+ * preserved. CONTERM is TOS's console-attributes byte, bit 0 the
+ * key click that would otherwise fight over the chip. */
+#define STDL_YM_SELECT  (*(volatile uint8_t *)0xFFFF8800UL)
+#define STDL_YM_DATA    (*(volatile uint8_t *)0xFFFF8802UL)
+/* const: read-only by construction, because this names the select
+ * port here and the data register on the host - an assignment
+ * through it would pass the host tests and select a stray register
+ * on the chip. */
+#define STDL_YM_READBACK (*(const volatile uint8_t *)0xFFFF8800UL)
+#define STDL_CONTERM    (*(volatile uint8_t *)0x484UL)
 #else
 /* host-test builds: the "registers" are plain memory provided by
  * tests/host/stubs.c, so every module compiles natively */
@@ -48,6 +61,22 @@ extern volatile uint8_t stdl_host_vidcnt[3];
 #define STDL_VC_HI      stdl_host_vidcnt[0]
 #define STDL_VC_MID     stdl_host_vidcnt[1]
 #define STDL_VC_LO      stdl_host_vidcnt[2]
+/* the YM as a register file: SELECT is the index, DATA the selected
+ * entry, so a test reads the chip state straight out of the array */
+extern volatile uint8_t stdl_host_ym_sel;
+extern volatile uint8_t stdl_host_ym[16];
+extern volatile uint8_t stdl_host_conterm;
+/* Writes go through stdl_host_ym_at, which fails the test if the
+ * selected register is 14 or 15: those are the chip's port pins,
+ * which on an ST drive floppy select, and the register numbers in
+ * sfx.c and music.c are computed (2*v, 8+v) rather than literal.
+ * A host test is the only place that can be caught. */
+unsigned stdl_host_ym_at(unsigned sel);
+#define STDL_YM_SELECT  stdl_host_ym_sel
+#define STDL_YM_DATA    stdl_host_ym[stdl_host_ym_at(stdl_host_ym_sel)]
+#define STDL_YM_READBACK \
+    ((const volatile uint8_t *)stdl_host_ym)[stdl_host_ym_sel & 15]
+#define STDL_CONTERM    stdl_host_conterm
 #endif
 
 /*

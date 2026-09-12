@@ -8,6 +8,7 @@
  */
 
 #include <string.h>
+#include <assert.h>
 #include "stdl_internal.h"
 
 stdl_state_t stdl;
@@ -28,6 +29,22 @@ volatile uint16_t stdl_host_nvbls = 8;
 void (**stdl_host_vblqueue)(void) = host_vblslots;
 
 volatile uint8_t stdl_host_vidcnt[3];
+
+/* the YM2149 as a register file, and the console-attributes byte */
+volatile uint8_t stdl_host_ym_sel;
+volatile uint8_t stdl_host_ym[16];
+volatile uint8_t stdl_host_conterm;
+
+/* Registers 14 and 15 are the chip's two I/O ports; on an ST they
+ * carry floppy drive select, and writing them is the one thing the
+ * library must never do (AGENTS.md). Every host write lands here,
+ * so the suite catches a computed register number that strays. */
+unsigned stdl_host_ym_at(unsigned sel)
+{
+    assert(sel < 14);
+    return sel & 15;
+}
+
 void (*stdl_shutdown_audio)(void);
 void (*stdl_shutdown_music)(void);
 void (*stdl_shutdown_vbl)(void);

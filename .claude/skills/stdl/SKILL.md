@@ -284,6 +284,48 @@ Pitfalls, each of which has cost a day:
   `$fcxxxx` is inside the ROM - the fault is in what the program
   asked TOS to do, not where the report points.
 
+### Measuring, without fooling yourself
+
+A port measured its frame rate for weeks at about 28fps on a Mega
+STE. The real figure was 5.9, and nothing in the emulator was
+lying: every check that had been made was one that a slow game
+passes. These are the ones that would have caught it, cheapest
+first.
+
+- **A 200Hz tick is 5ms, not a millisecond.** Frames divided by a
+  `STDL_GetHz200` delta and called per-second is five times too
+  high - the arithmetic is `12800 / ticks`, not `64000 / ticks`.
+  Five times is the dangerous factor, because it turns an
+  unplayable 6fps into a respectable-looking 29. `STDL_GetTicks` is
+  the one returning milliseconds; swapping between them proves
+  nothing, since `GetTicks` is that same counter times five.
+  Measured: both report identically with `FF=on` and `FF=off`, so
+  fast-forward does not distort either.
+- **Print something whose answer you already know.** The strongest
+  check costs nothing: derive a known quantity from the same
+  timestamps. One engine's internal clock is 70Hz by design, so
+  printing it beside the frame rate turns a scale error into an
+  obvious 14 or 350. Every game has such a number.
+- **When a timing result looks impossible, count events instead.**
+  An integer no clock can distort settles it: that port counted
+  blits per frame, got 4 to 6, and a 200ms frame issuing four blits
+  says immediately that the cost is not where it was assumed. It
+  was a per-frame bookkeeping loop doing 32-bit divides, not the
+  pixel paths.
+- **Check against the wall clock.** With `FF=off` emulated time is
+  real time, so counting the program's own log lines over a known
+  real window is an independent check on anything it measures
+  itself.
+- **Static evidence proves nothing about speed.** A game at 6fps
+  screenshots identically to one at 30, and sounds identical too.
+  Watch it move, or count frames.
+- **A changed `-D` flag does not rebuild anything.** Objects are
+  newer than the sources, so `make EXTRA_CFLAGS=-DFOO` without a
+  clean measures the previous binary - including, once, a run whose
+  instrumentation was simply absent and read as a catastrophic
+  result. This library's own build now tracks header dependencies
+  for the same reason; a port's may not.
+
 ## Game services (use instead of reinventing)
 
 - Scrolling camera: `STDL_SetSurfaceOrigin(stripe, 0, cam_y)` -

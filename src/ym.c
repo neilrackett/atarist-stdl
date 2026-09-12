@@ -18,8 +18,10 @@
 
 volatile uint8_t stdl_ym_owned;         /* bits 0-2 voices, 3 noise */
 void (*stdl_music_tick)(void);
+void (*stdl_tone_tick)(void);
 void (*stdl_sfx_tick)(void);
 void (*stdl_ym_restore_voice)(int voice);
+int (*stdl_ym_tone_hook)(int voice, int lost);
 
 static uint8_t mix_shadow = 0x3F;       /* all off                  */
 static int vbl_slot = -1;
@@ -38,14 +40,27 @@ void stdl_ym_mix_update(uint8_t clr, uint8_t set)
     stdl_ym_write(7, (STDL_YM_READBACK & 0xC0) | (mix_shadow & 0x3F));
 }
 
-/* an effect has finished with a voice: hand it back to the music
- * stream (if one is installed and playing) or silence it */
+/* an effect is taking a voice: mark it and let a tone on it know */
+void stdl_ym_claim_voice(int voice)
+{
+    stdl_ym_owned |= (uint8_t)(1u << voice);
+    if (stdl_ym_tone_hook != NULL) {
+        stdl_ym_tone_hook(voice, 1);
+    }
+}
+
+/* an effect (or tone) has finished with a voice: hand it back to
+ * the tone due on it, else to the music stream (if one is installed
+ * and playing), else silence it */
 void stdl_ym_release_voice(int voice)
 {
     if (voice < 0 || voice > 2) {
         return;
     }
     stdl_ym_owned &= (uint8_t)~(1u << voice);
+    if (stdl_ym_tone_hook != NULL && stdl_ym_tone_hook(voice, 0)) {
+        return;
+    }
     if (stdl_ym_restore_voice != NULL) {
         stdl_ym_restore_voice(voice);
     } else {
@@ -56,12 +71,15 @@ void stdl_ym_release_voice(int voice)
 }
 
 /* VBL queue entry (TOS saves registers around queue calls). Music
- * steps first, effects after, so effect voices always win the
- * frame. */
+ * steps first, tones next, effects last, so effect voices always
+ * win the frame and tones win over the stream. */
 static void ym_vbl(void)
 {
     if (stdl_music_tick != NULL) {
         stdl_music_tick();
+    }
+    if (stdl_tone_tick != NULL) {
+        stdl_tone_tick();
     }
     if (stdl_sfx_tick != NULL) {
         stdl_sfx_tick();
@@ -77,8 +95,10 @@ static void ym_shutdown(void)
         vbl_slot = -1;
     }
     stdl_music_tick = NULL;
+    stdl_tone_tick = NULL;
     stdl_sfx_tick = NULL;
     stdl_ym_restore_voice = NULL;
+    stdl_ym_tone_hook = NULL;
     stdl_ym_owned = 0;
     for (v = 0; v < 3; v++) {
         stdl_ym_write(8 + v, 0);

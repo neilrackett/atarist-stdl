@@ -67,6 +67,11 @@ stop trying and redesign instead.
   owns its voice (music skips it, then gets it back with its state
   restored). The speaker is always voice A; `STDL_PlaySfx` prefers
   voice C. More than three simultaneous effects steal voices.
+* `STDL_Tone` plays the three most recently keyed of its sixteen
+  slots (last-note priority, as `stdlconv midi` does); a displaced
+  note returns when a voice frees. Tones override music on the
+  voices they use, and effects override tones. Square waves only:
+  no envelopes, no noise, no per-slot priority yet.
 * The surface origin applies to blits and rect fills only; draw
   primitives (lines, circles, PutPixel) ignore it.
 * All draw primitives maintain surface masks (fills, spans,

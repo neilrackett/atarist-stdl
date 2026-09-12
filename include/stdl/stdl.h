@@ -32,6 +32,7 @@ extern "C" {
 #include <stdl/stdl_cursor.h>
 #include <stdl/stdl_music.h>
 #include <stdl/stdl_sfx.h>
+#include <stdl/stdl_tone.h>
 
 #ifdef __cplusplus
 }

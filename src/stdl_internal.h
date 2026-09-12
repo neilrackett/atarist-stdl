@@ -276,14 +276,14 @@ static __inline__ void stdl_int_restore(uint16_t sr) { (void)sr; }
 #endif
 
 /*
- * Shared YM2149 service (ym.c): one VBL tick drives the music tick
- * and then the effects tick, so effect voices deterministically
- * override music. stdl_ym_owned is a bitmask of voices (bit 0..2 =
- * A..C, bit 3 = noise generator) currently owned by effects; the
- * music stream skips their registers and hands them back through
- * stdl_ym_release_voice (which calls the restore hook music.c
- * installs). The hooks keep music and effects independently
- * linkable.
+ * Shared YM2149 service (ym.c): one VBL tick drives the music tick,
+ * then the tone tick, then the effects tick, so live tones override
+ * music and effects override both. stdl_ym_owned is a bitmask of
+ * voices (bit 0..2 = A..C, bit 3 = noise generator) currently owned
+ * above the music stream; the stream skips their registers and gets
+ * them back through stdl_ym_release_voice (which offers the voice to
+ * the tone hook first, then the restore hook music.c installs). The
+ * hooks keep music, tones and effects independently linkable.
  */
 int  stdl_ym_install(void);             /* claim the VBL slot        */
 void stdl_ym_write(int reg, int val);   /* VBL/effects context only  */
@@ -291,8 +291,15 @@ void stdl_ym_mix_update(uint8_t clr, uint8_t set); /* r7, shadowed   */
 void stdl_ym_release_voice(int voice);
 extern volatile uint8_t stdl_ym_owned;
 extern void (*stdl_music_tick)(void);   /* stream player per VBL     */
-extern void (*stdl_sfx_tick)(void);     /* effects, after music      */
+extern void (*stdl_tone_tick)(void);    /* live notes, after music   */
+extern void (*stdl_sfx_tick)(void);     /* effects, after tones      */
 extern void (*stdl_ym_restore_voice)(int voice); /* stream re-write  */
+/* tone.c's notice of an effect taking a voice (lost) or handing it
+ * back (not lost); returns non-zero when a tone re-took the voice,
+ * so the stream restore is skipped. Effects claim voices through
+ * stdl_ym_claim_voice so the notice is sent. */
+extern int (*stdl_ym_tone_hook)(int voice, int lost);
+void stdl_ym_claim_voice(int voice);    /* effects context only      */
 
 /* mixer-register bits (tone + noise enable) of one voice */
 #define STDL_YM_VOICE_BITS(v) ((uint8_t)((1u << (v)) | (1u << ((v) + 3))))

@@ -25,10 +25,7 @@
 extern "C" {
 #endif
 
-#include <stdl/stdl_types.h>
-
-/* YM tone period for a frequency in Hz (2MHz master / 16) */
-#define STDL_YM_PERIOD(hz) ((uint16_t)(125000L / (hz)))
+#include <stdl/stdl_ym.h>
 
 typedef struct STDL_Sfx {
     const uint16_t *periods;   /* one per step; 0 = silent step     */

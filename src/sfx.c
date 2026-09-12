@@ -87,7 +87,7 @@ static void sfx_tick(void)
             if (voices[0].running) {
                 voice_off(0);       /* speaker evicts an effect     */
             }
-            stdl_ym_owned |= 0x01;
+            stdl_ym_claim_voice(0);
             stdl_ym_write(0, spk_period & 0xFF);
             stdl_ym_write(1, (spk_period >> 8) & 0x0F);
             stdl_ym_write(8, spk_volume > 15 ? 15 : spk_volume);
@@ -118,7 +118,7 @@ static void sfx_tick(void)
             sv->step = 0;
             sv->ms_acc = 0;
             sv->running = 1;
-            stdl_ym_owned |= (uint8_t)(1u << v);
+            stdl_ym_claim_voice(v);
             apply_step(v);
         } else if (sv->running) {
             sv->ms_acc = (uint16_t)(sv->ms_acc + 20);

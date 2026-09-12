@@ -276,6 +276,11 @@ Pitfalls, each of which has cost a day:
   `STDL_PlaySfx` = step sequences (tone or noise) on auto voices.
   Both steal voices from STDL_Music and hand them back restored.
   These are free: they run off the 50Hz VBL sound tick.
+- Music that arrives as notes at run time (an OPL register stream
+  such as IMF, a MIDI-note stream): `STDL_ToneOn(slot, period, vol)`
+  / `STDL_ToneSet` / `STDL_ToneOff` on 16 slots; the device plays the
+  three newest on the chip, above STDL_Music and below effects, and
+  costs nothing per frame while nothing changes. `examples/tonedemo.c`.
 - Engine-owned framebuffers: `STDL_CreateSurfaceFrom(pixels, w, h,
   stride, mask, maskstride)` wraps caller-owned planar blocks (and an
   optional mask plane) as surfaces - pointer-swappable, memcpy-able,

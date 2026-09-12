@@ -66,12 +66,37 @@ static void detect_machine(void)
 
 /* Only the Mega STE has the speed register at $FF8E21; touching it
  * elsewhere bus-errors. Returns previous setting or -1. */
-static int megaste_speedup(void)
+/*
+ * The Mega STE's speed and cache control. Bit 0 is the cache, bit 1
+ * the 16MHz clock, so 3 is both - and 2, the clock without the
+ * cache, is worth very little, because the bus stays at 8MHz either
+ * way.
+ *
+ * Read-modify-write, touching only those two bits: the rest of the
+ * byte is not ours. Atari's own control panel and the MSTE_CC
+ * utilities leave the high bits set (they write $FF, $FE and $F4),
+ * where writing a bare 3 would clear them - including bit 3, which
+ * those utilities set for both 16MHz modes and clear for 8MHz.
+ */
+#define MSTE_BITS 0x03u
+
+/* Shared with src/cpuspeed.c, which holds the public call: only a
+ * program that asks for it should link that. */
+int stdl_megaste_mode = 1;
+
+void stdl_megaste_apply(int mode)
 {
     if (stdl.mach.is_megaste) {
-        volatile uint8_t *ctl = (volatile uint8_t *)0xFFFF8E21UL;
-        uint8_t old = *ctl;
-        *ctl = 3;                                 /* 16MHz, cache on */
+        STDL_MSTE_CTL = (uint8_t)((STDL_MSTE_CTL & ~MSTE_BITS)
+                             | ((mode == 1 ? 3 : mode) & MSTE_BITS));
+    }
+}
+
+static int megaste_speedup(void)
+{
+    if (stdl.mach.is_megaste && stdl_megaste_mode != 0) {
+        uint8_t old = STDL_MSTE_CTL;
+        stdl_megaste_apply(stdl_megaste_mode);
         return old;
     }
     return -1;
@@ -102,7 +127,7 @@ static void exit_supervisor(long old_ssp)
 static void megaste_speedrestore(void)
 {
     if (stdl.old_cpuspeed >= 0) {
-        *(volatile uint8_t *)0xFFFF8E21UL = (uint8_t)stdl.old_cpuspeed;
+        STDL_MSTE_CTL = (uint8_t)stdl.old_cpuspeed;
         stdl.old_cpuspeed = -1;
     }
 }

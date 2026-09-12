@@ -16,6 +16,13 @@ time, not at runtime.
 6. Profile on Mega STE (`dist/TBLITSPD.TOS` gives the baseline;
    the blitter accelerates large same-phase fills/blits
    automatically - align to 16px to benefit).
+* **Mega STE speed**: `STDL_Init` switches a Mega STE to 16MHz with
+  its cache on. `STDL_UseMegaSteSpeedup(0)` leaves the machine as
+  the user set it (call it before `STDL_Init` to prevent the switch,
+  or after to undo it), and 2 and 3 select the clock without and
+  with the cache. Use it to compare speeds inside one binary rather
+  than believing two builds: `examples/blitchk.c` does.
+
 7. Verify on plain ST at 8MHz - the correctness floor, and the
    machine the port is for. The blitter, DMA audio, hardware
    scrolling and 16MHz are enhancements to use where present, not

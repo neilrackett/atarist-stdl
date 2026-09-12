@@ -214,6 +214,24 @@ int main(void)
     STDL_SetPlaneBudget(4);
     maxcol = 16;
 
+    /*
+     * On a Mega STE, what the 16MHz clock and its cache are worth
+     * for pixel work - measured inside one binary, because frame
+     * times there move with code layout and two builds cannot be
+     * compared. STDL_UseMegaSteSpeedup(0) puts the machine back to
+     * whatever the user had set, which is also how a port opts out
+     * of the switch STDL_Init makes.
+     */
+    if (STDL_GetMachineInfo()->is_megaste) {
+        STDL_UseMegaSteSpeedup(3);
+        timing_pass("16MHz+cache:");
+        STDL_UseMegaSteSpeedup(2);
+        timing_pass("16MHz no cache:");
+        STDL_UseMegaSteSpeedup(0);
+        timing_pass("as the user set it:");
+        STDL_UseMegaSteSpeedup(1);      /* back to the default */
+    }
+
     STDL_Quit();
     return failures != 0;
 }

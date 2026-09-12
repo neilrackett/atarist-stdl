@@ -29,6 +29,7 @@ volatile uint16_t stdl_host_nvbls = 8;
 void (**stdl_host_vblqueue)(void) = host_vblslots;
 
 volatile uint8_t stdl_host_vidcnt[3];
+volatile uint8_t stdl_host_mste_ctl;
 
 /* the YM2149 as a register file, and the console-attributes byte */
 volatile uint8_t stdl_host_ym_sel;

@@ -366,6 +366,14 @@ first.
   keys tone slots 0-8 for you; `STDL_OplReset` at start and end, from
   the main line, which opens the device for you.
   `examples/opldemo.c`.
+- Mega STE speed: `STDL_Init` takes the machine to 16MHz with its
+  cache. `STDL_UseMegaSteSpeedup(0)` leaves it as the user set it,
+  before `STDL_Init` to prevent the switch or after to undo it; 2
+  and 3 are the clock without and with the cache. It exists so a
+  port can A/B the two speeds in one binary, which is the only
+  honest way to measure there - and so a port can decline the
+  switch, since a game that needs 16MHz to be playable has a
+  rendering problem, not a hardware one.
 - Engine-owned framebuffers: `STDL_CreateSurfaceFrom(pixels, w, h,
   stride, mask, maskstride)` wraps caller-owned planar blocks (and an
   optional mask plane) as surfaces - pointer-swappable, memcpy-able,

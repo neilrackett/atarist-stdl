@@ -59,6 +59,40 @@ const STDL_MachineInfo *STDL_GetMachineInfo(void);
 int STDL_UseBlitter(int enable);
 
 /*
+ * The Mega STE's CPU speed and cache, which STDL_Init turns on by
+ * default. A port that wants the machine left as the user set it,
+ * or that wants to compare the two speeds inside one binary, says
+ * so here:
+ *
+ *   0  leave the control alone - and, after STDL_Init, put back
+ *      what the machine had when the library claimed it
+ *   1  the library's default, currently 16MHz with the cache
+ *   2  16MHz, cache off - worth far less than 3 for CPU pixel
+ *      work, since the bus stays at 8MHz either way
+ *   3  16MHz with the cache, the same as 1 today
+ *  -1  query without changing anything
+ *
+ * Returns the previous setting. Values 2 and 3 are the two bits of
+ * the hardware register (bit 0 cache, bit 1 clock); the other bits
+ * of that byte are preserved. Call it before STDL_Init to stop the
+ * switch happening at all, or after to change speed on the fly. On
+ * anything that is not a Mega STE it records the setting and does
+ * nothing else.
+ *
+ * Measured by BLITCHK.TOS on an emulated Mega STE, 50 full-screen
+ * fills plus keyed blits: 2705ms of CPU work at the speed the user
+ * had set, 2610ms at 16MHz without the cache, 1690ms with it. The
+ * cache is what buys the CPU time; the clock alone buys 3%. The
+ * blitter path moved more than expected there (1080ms to 615ms for
+ * the clock alone), which wants confirming on real hardware before
+ * anyone relies on it. Note also that Mega STE frame times shift
+ * about 10% with unrelated code layout, so compare modes inside one
+ * binary rather than between builds - which is what this call is
+ * for.
+ */
+int STDL_UseMegaSteSpeedup(int mode);
+
+/*
  * Plane budget: how many of the four bitplanes STDL maintains.
  *
  * The screen is always four planes, but a game that only uses

@@ -238,6 +238,19 @@ extern void (*stdl_shutdown_vbl)(void);
 extern void (*stdl_shutdown_overscan)(void);
 extern void (*stdl_shutdown_hwscroll)(void);
 
+/* Mega STE speed/cache control: the register, the requested mode
+ * (see STDL_UseMegaSteSpeedup) and the read-modify-write that
+ * applies it. video.c owns them because STDL_Init sets the speed;
+ * src/cpuspeed.c holds the public call. */
+#ifdef __m68k__
+#define STDL_MSTE_CTL (*(volatile uint8_t *)0xFFFF8E21UL)
+#else
+extern volatile uint8_t stdl_host_mste_ctl;
+#define STDL_MSTE_CTL stdl_host_mste_ctl
+#endif
+extern int stdl_megaste_mode;
+void stdl_megaste_apply(int mode);
+
 /* while set, blitter.c asks this before starting an operation of
  * nlines lines costing cpl bus cycles each: the answer is how many
  * of them may run now in hog mode - all of them, or the ones that

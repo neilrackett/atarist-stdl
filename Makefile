@@ -17,8 +17,14 @@ STRIP   = $(CROSS)strip
 # the diff.
 XPAD    = lib/xpad/src
 
+# -MMD -MP: write a .d beside each .o listing the headers it used,
+# so editing one rebuilds what included it. Without this a change to
+# stdl_internal.h left every object stale and `sizecheck` measured
+# the previous build - it read 32 bytes under a clean build of the
+# same commit, which is a gate reporting on code that is not there.
 CFLAGS  = -O2 -fomit-frame-pointer -std=gnu99 -Wall -Wextra \
-          -Wno-unused-parameter -Iinclude -Iinclude/compat -I$(XPAD)
+          -Wno-unused-parameter -MMD -MP \
+          -Iinclude -Iinclude/compat -I$(XPAD)
 
 LIB     = libstdl.a
 
@@ -156,6 +162,9 @@ dist/HWSCROLL.TOS: examples/hwscroll.c $(LIB)
 
 dist/CHUNKY.TOS: examples/chunky.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
+
+# The generated header dependencies, if any objects exist yet.
+-include $(LIBOBJS:.o=.d) $(CMINIOBJS:.o=.d)
 
 # host-side unit tests: native clang + ASan, no cross toolchain
 # needed (run on the host, not through stcmd)

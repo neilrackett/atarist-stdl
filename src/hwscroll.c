@@ -53,21 +53,6 @@ static volatile uint8_t host_vid[5];
 
 /* the plain STE and the Mega STE: the TT and Falcon read as STE-class
  * for the palette but have their own video chips */
-#define MCH_STE     0x00010000UL
-#define MCH_MEGASTE 0x00010010UL
-
-/* video counter, valid as the latched base during the vertical blank */
-#ifdef __m68k__
-#define VID_CNT_HI   (*(volatile uint8_t *)0xFFFF8205UL)
-#define VID_CNT_MID  (*(volatile uint8_t *)0xFFFF8207UL)
-#define VID_CNT_LO   (*(volatile uint8_t *)0xFFFF8209UL)
-#else
-static volatile uint8_t host_cnt[3];
-#define VID_CNT_HI   host_cnt[0]
-#define VID_CNT_MID  host_cnt[1]
-#define VID_CNT_LO   host_cnt[2]
-#endif
-
 typedef struct {
     uint32_t base;
     uint8_t  lw, hs, seq;
@@ -95,8 +80,8 @@ static void write_base(uint32_t b)
 
 static uint32_t read_counter(void)
 {
-    return ((uint32_t)VID_CNT_HI << 16) | ((uint32_t)VID_CNT_MID << 8)
-         | VID_CNT_LO;
+    return ((uint32_t)STDL_VC_HI << 16) | ((uint32_t)STDL_VC_MID << 8)
+         | STDL_VC_LO;
 }
 
 /*
@@ -108,10 +93,12 @@ static uint32_t read_counter(void)
  */
 static void hws_vbl(void)
 {
-    uint32_t cnt = read_counter();
-
     vbl_stamp = STDL_HZ200;
-    if (cnt == armed.base) {
+    /* done_seq first: once the armed request has landed its offsets
+     * are already in the Shifter, and every later frame with the
+     * same base would otherwise re-read the counter and rewrite two
+     * registers for nothing. */
+    if (done_seq != armed.seq && read_counter() == armed.base) {
         VID_LINEWIDTH = armed.lw;
         VID_HSCROLL = armed.hs;
         done_seq = armed.seq;
@@ -131,7 +118,6 @@ static void hws_release(void)
     VID_LINEWIDTH = 0;
     VID_HSCROLL = 0;
     write_base((uint32_t)(uintptr_t)stdl.page[0] & ~0xFFUL);
-    done_seq = req.seq;
 }
 
 int STDL_HasHwScroll(void)
@@ -139,14 +125,17 @@ int STDL_HasHwScroll(void)
     if (!stdl.initialised && STDL_Init(0) < 0) {
         return 0;
     }
-    return stdl.mach.mch_cookie == MCH_STE
-        || stdl.mach.mch_cookie == MCH_MEGASTE;
+    /* any STE-class Shifter, which is what LINEWIDTH and HSCROLL
+     * belong to - the same test overscan.c makes, rather than a
+     * second copy of the cookie map. TT and Falcon are 0x0002xxxx
+     * and above and do not have these registers. */
+    return stdl.mach.is_ste && stdl.mach.mch_cookie < 0x00020000UL;
 }
 
 int STDL_SetScrollWindow(const void *base, int stride, int xfine)
 {
     uint16_t sr;
-    int lw;
+    int lw, fresh = 0;
 
     if (!STDL_HasHwScroll()) {
         STDL_SetError("hardware scrolling needs an STE Shifter");
@@ -170,16 +159,18 @@ int STDL_SetScrollWindow(const void *base, int stride, int xfine)
     xfine &= 15;
     /* while HSCROLL is non-zero the Shifter fetches one extra group
      * (8 bytes in four planes) per line, which LINEWIDTH gives back */
-    lw = (stride - 160) / 2 - (xfine != 0 ? 4 : 0);
+    lw = ((stride - 160) >> 1) - (xfine != 0 ? 4 : 0);
     if (lw < 0) {
         STDL_SetError("fine scrolling needs a stride of at least 168");
         return -1;
     }
 
     if (!hws_installed) {
-        /* nothing armed yet: the first VBL finds no matching counter
-         * and simply writes the first base */
+        /* A base the counter can never hold, so a re-install after
+         * STDL_ResetScrollWindow cannot match the previous
+         * session's armed request and apply its offsets. */
         armed.base = 0xFFFFFFFFUL;
+        fresh = 1;
         armed.seq = req.seq;
         done_seq = req.seq;
         vbl_stamp = STDL_HZ200;
@@ -191,6 +182,16 @@ int STDL_SetScrollWindow(const void *base, int stride, int xfine)
     }
 
     sr = stdl_int_off();
+    /* A game calls this once a frame whether or not the view moved,
+     * and a repeat of the request already on the hardware would cost
+     * three register writes and a frame of "pending" for nothing.
+     * Not on the frame the module was installed: the registers were
+     * reset then, so the same values still have to be written. */
+    if (!fresh && req.base == (uint32_t)(uintptr_t)base
+        && req.lw == (uint8_t)lw && req.hs == (uint8_t)xfine) {
+        stdl_int_restore(sr);
+        return 0;
+    }
     req.base = (uint32_t)(uintptr_t)base;
     req.lw = (uint8_t)lw;
     req.hs = (uint8_t)xfine;
@@ -219,8 +220,16 @@ int STDL_SetScrollOrigin(const STDL_Surface *s, int x, int y)
         STDL_SetError("null surface for scroll origin");
         return -1;
     }
-    /* y * stride is a rare multiply, once per frame at most */
-    base = s->pixels + (int32_t)y * s->stride + (x >> 4) * 8;
+    if (x < 0 || y < 0) {
+        STDL_SetError("scroll origin must not be negative");
+        return -1;
+    }
+    /* Both operands 16-bit so gcc 4.6 emits one mulu.w: as a long
+     * multiply this is a __mulsi3 call, ~200 cycles on a path a game
+     * takes every frame. The group offset is (x / 16) * 8 without
+     * the two variable shifts. */
+    base = s->pixels + (uint32_t)(uint16_t)y * s->stride
+         + ((x >> 1) & ~7);
     return STDL_SetScrollWindow(base, s->stride, x & 15);
 }
 

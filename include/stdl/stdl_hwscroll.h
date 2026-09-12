@@ -65,6 +65,10 @@ int STDL_HasHwScroll(void);
  * fully programmed yet, for a double-buffered caller that must not
  * draw into a page the Shifter is still fetching.
  *
+ * An open overscan border programs the video base too, from its
+ * own timer interrupts, and nothing arbitrates between the two:
+ * scroll or open a border, not both.
+ *
  * Returns 0, or -1 with STDL_GetError() set: no STE Shifter, no
  * video mode, bad alignment or stride, or no free VBL slot (the
  * module runs from one, claimed on the first call).

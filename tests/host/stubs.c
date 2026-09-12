@@ -27,6 +27,7 @@ static void (*host_vblslots[8])(void);
 volatile uint16_t stdl_host_nvbls = 8;
 void (**stdl_host_vblqueue)(void) = host_vblslots;
 
+volatile uint8_t stdl_host_vidcnt[3];
 void (*stdl_shutdown_audio)(void);
 void (*stdl_shutdown_music)(void);
 void (*stdl_shutdown_vbl)(void);

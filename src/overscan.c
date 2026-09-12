@@ -340,9 +340,6 @@ static int      c16;             /* calibrated dbra turn, x16, or 0 */
 #define VEC_TA   (*(volatile uint32_t *)0x134UL)
 #define VEC_TB   (*(volatile uint32_t *)0x120UL)
 #define VEC_TC   (*(volatile uint32_t *)0x114UL)
-#define VC_HI    (*(volatile uint8_t *)0xFFFF8205UL)
-#define VC_MID   (*(volatile uint8_t *)0xFFFF8207UL)
-#define VC_LO    (*(volatile uint8_t *)0xFFFF8209UL)
 
 /* 16x16 multiply and 32/16 divide on the 68000's own instructions:
  * promoted to int, gcc 4.6 calls __mulsi3 and __udivsi3 for these,
@@ -1510,7 +1507,8 @@ static int ovsc_beam(void)
 
     first = pic_first();
     end = pic_end();
-    addr = ((uintptr_t)VC_HI << 16) | ((uintptr_t)VC_MID << 8) | VC_LO;
+    addr = ((uintptr_t)STDL_VC_HI << 16)
+         | ((uintptr_t)STDL_VC_MID << 8) | STDL_VC_LO;
     if (addr > (uintptr_t)buf && addr < end) {
         /* the row: a 32-bit dividend for divu.w, whose quotient
          * comes back in the low word */
@@ -1625,7 +1623,8 @@ static uint16_t ovsc_blit_policy(uint16_t nlines, uint32_t cpl)
      * left before the window against the operation's bus time in
      * lines: (room / 160) * 512 >= nlines * cpl, cross-multiplied
      * so that no divide is needed - two 16x16 multiplies and shifts. */
-    addr = ((uintptr_t)VC_HI << 16) | ((uintptr_t)VC_MID << 8) | VC_LO;
+    addr = ((uintptr_t)STDL_VC_HI << 16)
+         | ((uintptr_t)STDL_VC_MID << 8) | STDL_VC_LO;
     if (addr > (uintptr_t)buf && addr < pic_end()) {
         w = pic_win_addr(addr);
         room = (int32_t)(w - addr);

@@ -110,9 +110,10 @@ stop trying and redesign instead.
   a multiple of 8 from 160 to 670 bytes (LINEWIDTH is a byte of
   words), fine scrolling needs a stride of at least 168, and the
   base is word aligned. A request made early in a frame is on screen
-  at the next VBL, a late one at the VBL after. The module and
-  `STDL_Flip` both program the video base, so a program uses one or
-  the other.
+  at the next VBL, a late one at the VBL after. Three things program
+  the video base - this module, `STDL_Flip` and an open overscan
+  border - and there is no arbitration between them, so a program
+  uses one of the three at a time.
 * The software cursor's save-under is a snapshot: hide the cursor
   before drawing beneath it, and prefer sprites for pointers in
   games that redraw every frame. Cursors are at most 32x32 with

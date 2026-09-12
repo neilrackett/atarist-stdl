@@ -23,6 +23,15 @@
  * tick (ym.c) and the public callback API (vbl.c). */
 #define STDL_NVBLS      (*(volatile uint16_t *)0x454UL)
 #define STDL_VBLQUEUE   (*(void (***)(void))0x456UL)
+/* Video address counter, three bytes of a 24-bit address. During the
+ * vertical blank it holds the base the next frame will fetch, which
+ * is how overscan.c places its flicks and how hwscroll.c knows a
+ * base has been latched. Read it inside a line's fetch or in the
+ * blanking - AGENTS.md records that Hatari parks it at the line end
+ * at 16MHz, so a mid-line read is not trustworthy there. */
+#define STDL_VC_HI      (*(volatile uint8_t *)0xFFFF8205UL)
+#define STDL_VC_MID     (*(volatile uint8_t *)0xFFFF8207UL)
+#define STDL_VC_LO      (*(volatile uint8_t *)0xFFFF8209UL)
 #else
 /* host-test builds: the "registers" are plain memory provided by
  * tests/host/stubs.c, so every module compiles natively */
@@ -30,11 +39,15 @@ extern volatile uint32_t stdl_host_clock;
 extern volatile uint16_t stdl_host_hwpal[16];
 extern volatile uint16_t stdl_host_nvbls;
 extern void (**stdl_host_vblqueue)(void);
+extern volatile uint8_t stdl_host_vidcnt[3];
 #define STDL_HZ200      stdl_host_clock
 #define STDL_FRCLOCK    stdl_host_clock
 #define STDL_HWPAL      stdl_host_hwpal
 #define STDL_NVBLS      stdl_host_nvbls
 #define STDL_VBLQUEUE   stdl_host_vblqueue
+#define STDL_VC_HI      stdl_host_vidcnt[0]
+#define STDL_VC_MID     stdl_host_vidcnt[1]
+#define STDL_VC_LO      stdl_host_vidcnt[2]
 #endif
 
 /*

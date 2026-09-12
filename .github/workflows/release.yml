@@ -45,25 +45,16 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Host tests
-        # The same gate as CI. A tag is not a reason to publish an
-        # archive whose pixel paths fail their reference model.
-        run: make test CC=clang
-
       - name: Install the Atari ST toolkit
         run: curl -sL https://github.com/sidecartridge/atarist-toolkit-docker/releases/latest/download/install_atarist_toolkit_docker.sh | bash
 
-      - name: Cross build
-        run: stcmd make
-
-      - name: Cross build (libcmini)
-        run: stcmd make cmini
-
-      - name: Bundle the examples
-        # The examples are how a port author sees an API working
-        # before committing to it, so they ship as binaries rather
-        # than as sources somebody has to cross-compile first.
-        run: make bundle
+      - name: Build and test
+        # The same `make ci` as the build workflow, gates included: a
+        # tag is not a reason to publish an archive whose pixel paths
+        # fail their reference model. It also builds the examples
+        # zip, which ships so that a port author can see an API
+        # working without cross-compiling anything first.
+        run: make ci
 
       - name: Move the latest tag to this commit
         # The "latest" release is attached to this tag, so moving it

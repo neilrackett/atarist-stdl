@@ -162,6 +162,20 @@ dist/CHUNKY.TOS: examples/chunky.c $(LIB)
 test:
 	$(MAKE) -C tests/host run
 
+# Everything CI runs, in the order it runs it, as one command - so
+# the workflows do not carry a second copy of the build recipe and a
+# developer can reproduce a CI failure with `make ci`. Host-side: it
+# shells out to stcmd itself, so do not run it inside the container.
+# clang for the host tests because that is what the library is
+# developed against; gcc passes too.
+STCMD ?= STCMD_NO_TTY=1 stcmd
+
+ci:
+	$(MAKE) -C tests/host run CC=clang
+	$(STCMD) make
+	$(STCMD) make cmini
+	$(MAKE) bundle
+
 # The example binaries and the assets they load, in one zip for the
 # release page - the examples are how a port author sees an API
 # working, so they are only useful if they are downloadable. Built
@@ -188,4 +202,4 @@ clean:
 run-%:
 	hatari --machine megaste --memsize 4 --fast-boot on dist/$*.TOS
 
-.PHONY: sizecheck all clean assets test cmini bundle
+.PHONY: sizecheck all clean assets test cmini bundle ci

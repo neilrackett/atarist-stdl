@@ -47,15 +47,6 @@ jobs:
           # it; it is the only one, so recursing costs nothing.
           submodules: recursive
 
-      - name: Host tests
-        # First, because they need nothing but a C compiler: a broken
-        # pixel path fails in seconds rather than after a toolchain
-        # install. clang to match what the library is developed
-        # against; gcc passes too, but only one of them needs to run.
-        # ASan on Linux turns LeakSanitizer on (macOS has no LSan), so
-        # this is also the only place a leaked allocation is caught.
-        run: make test CC=clang
-
       - name: Install the Atari ST toolkit
         # Generates /usr/local/bin/stcmd, which runs the m68k build in
         # a container. The installer picks the image for the runner's
@@ -63,19 +54,13 @@ jobs:
         # one on a developer's Mac; both carry gcc 4.6.4 and libcmini.
         run: curl -sL https://github.com/sidecartridge/atarist-toolkit-docker/releases/latest/download/install_atarist_toolkit_docker.sh | bash
 
-      - name: Cross build
-        # `all` is the library, the pixel-path size budget (sizecheck,
-        # which fails the build if the objects outgrow PIXEL_MAX) and
-        # every example. -Wall -Wextra must stay silent.
-        run: stcmd make
-
-      - name: Cross build (libcmini)
-        # The second archive is a separate compile of the same sources
-        # against libcmini's headers, so it can break on its own.
-        run: stcmd make cmini
-
-      - name: Bundle the examples
-        # Only release.yml uploads it, but it is built here too: a
-        # new example missing from the EXAMPLES list should fail on
-        # the push that added it, not on release day.
-        run: make bundle
+      - name: Build and test
+        # `make ci` is the whole recipe and lives in the Makefile, so
+        # this file and release.yml cannot drift apart and a developer
+        # can run the same thing locally: host tests first (they need
+        # only a compiler, so a broken pixel path fails in seconds),
+        # then the cross build with its size budget, the libcmini
+        # archive, and the examples zip. Nothing is uploaded here -
+        # building it is what proves an example listed in EXAMPLES was
+        # actually built and its assets are present.
+        run: make ci

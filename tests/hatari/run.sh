@@ -35,7 +35,13 @@
 #           timed screenshots)
 #   MACHINE hatari machine type (default megaste; use st for the
 #           8MHz correctness floor)
-#   SOUND   on|off (default off; on for recsound verification)
+#   SOUND   off, on, or a frequency in Hz (default off). "on" means
+#           44100. Recording is a separate step: send
+#           'fifo hatari-shortcut recsound' to start and again to
+#           stop, and the file lands wherever szYMCaptureFileName
+#           points in the Hatari config - which must be somewhere
+#           writable, so pass EXTRA="--configfile <copy>" with that
+#           key rewritten rather than assuming the default.
 #   EXTRA   extra hatari options
 set -u
 NAME=$1
@@ -49,6 +55,12 @@ HATARI=${HATARI:-/Applications/Hatari.app/Contents/MacOS/hatari}
 FF=${FF:-on}
 MACHINE=${MACHINE:-megaste}
 SOUND=${SOUND:-off}
+# Hatari's --sound takes off or a frequency, and rejects "on" - which
+# is what this script's own documentation said for a long time, so a
+# run asking for sound died in argument parsing with an empty log.
+if [ "$SOUND" = "on" ]; then
+    SOUND=44100
+fi
 FIFO=$OUT/fifo_$NAME
 SHOTDIR=$OUT/shots_$NAME
 LOG=$OUT/$NAME.log
@@ -76,8 +88,12 @@ if [ ! -f "$PROG" ]; then
     exit 2
 fi
 
-"$HATARI" --tos "$TOS" --machine "$MACHINE" --fast-forward "$FF" \
-  --fast-boot on ${EXTRA:-} --sound "$SOUND" --statusbar off \
+# EXTRA goes first so this script's own options win: a
+# --configfile in EXTRA (the only way to move the sound capture
+# file) would otherwise replace the TOS and machine chosen here.
+"$HATARI" ${EXTRA:-} --tos "$TOS" --machine "$MACHINE" \
+  --fast-forward "$FF" \
+  --fast-boot on --sound "$SOUND" --statusbar off \
   --conout 2 --cmd-fifo "$FIFO" \
   --screenshot-dir "$SHOTDIR" --screenshot-format png \
   "$PROG" > "$LOG" 2>"$OUT/$NAME.err" &

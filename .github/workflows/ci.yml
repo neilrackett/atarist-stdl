@@ -1,8 +1,8 @@
 name: CI
 
 # Does it build, and do the host tests still pass? That is the whole
-# job. It runs the same two builds release.yml does, so a commit that
-# would break a release fails here first, on the push that caused it -
+# job. It runs everything release.yml builds, so a commit that would
+# break a release fails here first, on the push that caused it -
 # this repository releases straight from main, so waiting for a pull
 # request would mean waiting forever.
 
@@ -73,3 +73,9 @@ jobs:
         # The second archive is a separate compile of the same sources
         # against libcmini's headers, so it can break on its own.
         run: stcmd make cmini
+
+      - name: Bundle the examples
+        # Only release.yml uploads it, but it is built here too: a
+        # new example missing from the EXAMPLES list should fail on
+        # the push that added it, not on release day.
+        run: make bundle

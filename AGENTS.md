@@ -19,8 +19,9 @@ stcmd make                        # interactive terminal
 
 Cross-compiles with m68k-atari-mint-gcc 4.6.4 via
 [atarist-toolkit-docker](https://github.com/sidecartridge/atarist-toolkit-docker).
-Produces `libstdl.a` and `dist/` (17 example .TOS binaries + assets
-copied from `examples/assets/`). The build must stay at **zero
+Produces `libstdl.a` and `dist/` (the example .TOS binaries + assets
+copied from `examples/assets/`; `make bundle` zips them for the
+release page). The build must stay at **zero
 warnings** with the Makefile's `-Wall -Wextra`.
 
 ## Verification expectations
@@ -38,10 +39,14 @@ warnings** with the Makefile's `-Wall -Wextra`.
   not, so check them before blaming the runner: ASan on Linux turns
   on LeakSanitizer, which macOS has none of, and its filesystem is
   case-sensitive, which caught `stdl_fopen_ci` uppercasing whole
-  paths. A pushed `v*` tag additionally publishes `libstdl.a` and
-  `libstdl-cmini.a` to the rolling `latest` release
-  (`.github/workflows/release.yml`), so the version tag is the
-  release and nothing is uploaded by hand.
+  paths. A pushed `v*` tag additionally publishes `libstdl.a`,
+  `libstdl-cmini.a` and `stdl-examples.zip` (`make bundle`: the
+  example binaries and the assets they load) to the rolling
+  `latest` release (`.github/workflows/release.yml`), so the
+  version tag is the release and nothing is uploaded by hand. An
+  example added to the Makefile's `EXAMPLES` list therefore ships
+  on the release page; one built by hand and left in `dist/` does
+  not, which is deliberate.
 - **On target**: `tests/hatari/run.sh NAME dist/PROG.TOS BOOT_WAIT
   "cmd;cmd;..."` drives a program in Hatari with console capture,
   screenshots, key injection (raw ST scancodes, not SDL codes) and

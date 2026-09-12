@@ -1,13 +1,14 @@
 name: Release
 
-# Build the two archives and put them on the rolling "latest" release.
+# Build the two archives and the examples zip, and put them on the
+# rolling "latest" release.
 #
 # The trigger is a pushed version tag, not a push to main: STDL keeps
 # its version in annotated tags (`git tag -a v1.4.0`) and nowhere else,
 # so the tag is the release. Tagging therefore stays a deliberate act
 # by the maintainer, and this workflow does the rest - move the
 # lightweight "latest" tag onto the same commit and replace the
-# archives on the release attached to it. The release's title and body
+# assets on the release attached to it. The release's title and body
 # are left exactly as they are: `gh release upload` touches assets
 # only.
 
@@ -58,6 +59,12 @@ jobs:
       - name: Cross build (libcmini)
         run: stcmd make cmini
 
+      - name: Bundle the examples
+        # The examples are how a port author sees an API working
+        # before committing to it, so they ship as binaries rather
+        # than as sources somebody has to cross-compile first.
+        run: make bundle
+
       - name: Move the latest tag to this commit
         # The "latest" release is attached to this tag, so moving it
         # keeps the release's source link pointing at the same commit
@@ -66,9 +73,11 @@ jobs:
           git tag -f latest
           git push -f origin refs/tags/latest
 
-      - name: Replace the archives on the latest release
-        # --clobber, because the release is rolling: same two asset
-        # names every time, so a port's download link never changes.
+      - name: Replace the assets on the latest release
+        # --clobber, because the release is rolling: the same asset
+        # names every time, so a download link never changes.
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload latest libstdl.a libstdl-cmini.a --clobber
+        run: |
+          gh release upload latest libstdl.a libstdl-cmini.a \
+            stdl-examples.zip --clobber

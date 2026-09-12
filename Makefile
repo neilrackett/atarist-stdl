@@ -162,13 +162,30 @@ dist/CHUNKY.TOS: examples/chunky.c $(LIB)
 test:
 	$(MAKE) -C tests/host run
 
+# The example binaries and the assets they load, in one zip for the
+# release page - the examples are how a port author sees an API
+# working, so they are only useful if they are downloadable. Built
+# from the EXAMPLES list and examples/assets/ rather than from
+# whatever dist/ happens to hold, so a hand-built probe left on the
+# test drive cannot ride along. Host-side, and it compiles nothing:
+# run `stcmd make` first.
+BUNDLE = stdl-examples.zip
+
+bundle:
+	rm -rf $(OBJDIR)/bundle $(BUNDLE)
+	mkdir -p $(OBJDIR)/bundle/STDL
+	cp $(EXAMPLES) examples/assets/* $(OBJDIR)/bundle/STDL/
+	cp examples/LICENSE $(OBJDIR)/bundle/STDL/LICENSE.TXT
+	cd $(OBJDIR)/bundle && zip -qr ../../$(BUNDLE) STDL
+	@echo "$(BUNDLE): `ls $(OBJDIR)/bundle/STDL | wc -l | tr -d ' '` files"
+
 clean:
 	rm -rf $(OBJDIR)
-	rm -f $(CMINILIB) $(LIB) $(EXAMPLES)
+	rm -f $(CMINILIB) $(LIB) $(EXAMPLES) $(BUNDLE)
 	$(MAKE) -C tests/host clean
 
 # Run an example in Hatari (host-side): make run-TSPRITE
 run-%:
 	hatari --machine megaste --memsize 4 --fast-boot on dist/$*.TOS
 
-.PHONY: sizecheck all clean assets test cmini
+.PHONY: sizecheck all clean assets test cmini bundle

@@ -15,6 +15,7 @@ tests/host/test_blit8
 tests/host/test_voice
 tests/host/test_ym
 tests/host/test_tone
+tests/host/test_opl
 tests/host/*.dSYM/
 tests/hatari/out/
 libstdl-cmini.a

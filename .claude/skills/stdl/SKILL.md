@@ -241,6 +241,20 @@ Pitfalls, each of which has cost a day:
   a game with joy-key emulation walk right on its own. When input
   moves by itself, look in `AUTO\` before looking in the game,
   and remove the stub once the joystick test is done.
+- **A sound capture needs the program's own marker, not a sleep.**
+  `hatari-shortcut recsound` records from when it fires, and with
+  `FF=off` the emulator spends about half a minute booting before
+  the program starts, so a fixed sleep usually records the boot and
+  stops before the sound. A demo that plays for four seconds then
+  leaves a capture that is digitally all zero, which reads exactly
+  like a broken sound path - several hours went into a library that
+  was working. Print a marker at start-up **to stderr**, which is
+  unbuffered, `waitfor` it and start recording then; a marker sent
+  to stdout can sit in the buffer until the program exits, so
+  waiting on one syncs to the end of the run. Confirm from the
+  capture itself before believing anything: a quick check of the
+  peak sample says whether there is audio at all, and only then is
+  a spectrum worth reading.
 - **Crashes report a PC, not a symbol.** `NAME.err` carries the
   "Bus Error"/"Address Error" line with `PC=$xxxxxx`;
   `tests/hatari/map-crash.sh` maps it to a function from the
@@ -281,6 +295,14 @@ Pitfalls, each of which has cost a day:
   / `STDL_ToneSet` / `STDL_ToneOff` on 16 slots; the device plays the
   three newest on the chip, above STDL_Music and below effects, and
   costs nothing per frame while nothing changes. `examples/tonedemo.c`.
+  Call `STDL_ToneOpen` once from the main line when the notes come
+  from your own timer or VBL callback: the first key installs the
+  sound service otherwise, and that must not happen inside an
+  interrupt. For OPL2 streams (IMF, the id/Apogee games) call
+  `STDL_OplWrite(reg, val)` per write from your own replay loop and it
+  keys tone slots 0-8 for you; `STDL_OplReset` at start and end, from
+  the main line, which opens the device for you.
+  `examples/opldemo.c`.
 - Engine-owned framebuffers: `STDL_CreateSurfaceFrom(pixels, w, h,
   stride, mask, maskstride)` wraps caller-owned planar blocks (and an
   optional mask plane) as surfaces - pointer-swappable, memcpy-able,

@@ -306,6 +306,11 @@ static int tone_install(void)
     return 0;
 }
 
+int STDL_ToneOpen(void)
+{
+    return tone_install();
+}
+
 int STDL_ToneOn(int slot, uint16_t period, uint8_t volume)
 {
     uint16_t sr;

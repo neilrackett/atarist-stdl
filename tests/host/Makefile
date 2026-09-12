@@ -38,7 +38,7 @@ CORE    = stubs.c $(SRC)/surface.c $(SRC)/indexed.c $(SRC)/draw.c \
 TESTS   = test_pixel test_compose test_cursor test_assets test_planes \
           test_footprint test_indexed test_glyph test_vbl test_blit8 \
           test_underleak \
-          test_voice test_ym test_tone
+          test_voice test_ym test_tone test_opl
 
 all: $(TESTS)
 
@@ -86,12 +86,17 @@ test_ym: test_ym.c $(CORE) $(SRC)/ym.c
 test_tone: test_tone.c $(CORE) $(SRC)/ym.c $(SRC)/tone.c $(SRC)/sfx.c
 	$(CC) $(CFLAGS) -o $@ $^
 
+test_opl: test_opl.c $(CORE) $(SRC)/ym.c $(SRC)/tone.c $(SRC)/sfx.c \
+          $(SRC)/opl.c
+	$(CC) $(CFLAGS) -o $@ $^
+
 run: $(TESTS)
 	@./test_pixel && ./test_compose && ./test_cursor \
 	  && ./test_assets && ./test_planes && ./test_footprint \
 	  && ./test_indexed && ./test_glyph && ./test_vbl \
 	  && ./test_underleak \
 	  && ./test_blit8 && ./test_voice && ./test_ym && ./test_tone \
+	  && ./test_opl \
 	  && echo "ALL HOST TESTS PASSED"
 
 clean:

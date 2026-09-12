@@ -72,6 +72,9 @@ stop trying and redesign instead.
   note returns when a voice frees. Tones override music on the
   voices they use, and effects override tones. Square waves only:
   no envelopes, no noise, no per-slot priority yet.
+* `STDL_OplWrite` follows only the OPL2 note registers (F-number,
+  block, key-on) and the carrier total level; timbre, rhythm mode
+  and the noise generator are ignored, so drums are silent.
 * The surface origin applies to blits and rect fills only; draw
   primitives (lines, circles, PutPixel) ignore it.
 * All draw primitives maintain surface masks (fills, spans,

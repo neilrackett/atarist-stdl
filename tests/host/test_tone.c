@@ -48,6 +48,19 @@ static uint16_t voice_period(int v)
 
 #define TONE_ON(v)  ((stdl_host_ym[7] & (1u << (v))) == 0)
 
+/* VBL queue slots in use - the sound service should claim one */
+static int slots_used(void)
+{
+    int i, n = 0;
+
+    for (i = 0; i < STDL_NVBLS; i++) {
+        if (STDL_VBLQUEUE[i] != NULL) {
+            n++;
+        }
+    }
+    return n;
+}
+
 /* which voice is sounding a period, or -1 */
 static int voice_of_period(unsigned period)
 {
@@ -203,6 +216,25 @@ int main(void)
     vbl_fn();                           /* so it lands next frame */
     CHECK(voice_of_period(600) >= 0,
           "slot 6 should return on the freed voice with no slot call");
+    STDL_ToneOff(-1);
+    vbl_fn();
+
+    /*
+     * Opening claims the service with nothing keyed, so a program
+     * feeding notes from its own interrupt can get the install out
+     * of the way on the main line. A later key must not install
+     * anything a second time.
+     */
+    stdl_shutdown_music();
+    stdl_host_conterm = 0x03;
+    CHECK(STDL_ToneOpen() == 0, "open failed");
+    CHECK(slots_used() == 1, "open should claim one VBL slot");
+    CHECK(STDL_ToneActive(-1) == 0, "open should sound nothing");
+    CHECK((stdl_host_conterm & 1) == 0, "open should silence the click");
+    STDL_ToneOn(0, 500, 12);
+    CHECK(slots_used() == 1, "a key after open claimed a second slot");
+    vbl_fn();
+    CHECK(voice_period(0) == 500, "key after open: %u", voice_period(0));
     STDL_ToneOff(-1);
     vbl_fn();
 

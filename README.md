@@ -79,7 +79,7 @@ emulated; see [docs/limits.md](docs/limits.md).
 | `include/compat/` | SDL.h and SDL_mixer.h - the SDL 1.2 compatibility shims                             |
 | `src/`            | video, surface, surfacefrom, draw, blit, blit8, blitter, planes, palette, event,    |
 |                   | cursor, time, dirty, vbl, sprite, drawchar, indexed, asset, bmp, degas, audio,      |
-|                   | voice, music, sfx, tone, ym, compat, mixer                                          |
+|                   | voice, music, sfx, tone, opl, ym, compat, mixer                                     |
 | `tools/stdlconv/` | asset converter: image quantise + planar, sprite/tile/font banks, Degas PI1,        |
 |                   | WAV (incl. MS ADPCM) to STE DMA rates, MIDI to YM music, C-array embedding          |
 | `examples/`       | ported SDL 1.2 test programs + original STDL demos and their assets (public domain) |
@@ -144,6 +144,7 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | PLAYMUS.TOS  | YM music (stdlconv midi -> STDL_Music) + DMA chunks via the SDL_mixer shim       |
 | SFXDEMO.TOS  | Degas splash, YM effects stealing/restoring music voices, joystick key emulation |
 | TONEDEMO.TOS | live notes on the three YM voices: a fourth note displacing and returning        |
+| OPLDEMO.TOS  | an OPL2 register stream (the IMF games' music format) replayed as YM notes       |
 | BLITCHK.TOS  | BLiTTER vs CPU byte-identical verification at two plane budgets + timing         |
 | VBLCHK.TOS   | 50Hz VBL callbacks, then an abnormal exit - the desktop coming back is the pass  |
 | OVERSCAN.TOS | border overscan: T top (228), B bottom (245), both combine (273), SPACE closes   |

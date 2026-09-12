@@ -47,6 +47,18 @@ extern "C" {
  * newest note. Returns 0, or -1 with STDL_GetError set (bad slot,
  * or no free VBL queue slot for sound).
  */
+/*
+ * Install the shared sound service without sounding anything, from
+ * the main line. Keying the first note installs it anyway, so this
+ * is for two cases: a program that wants to know now whether the
+ * service is available (returns 0, or -1 with STDL_GetError set),
+ * and one that feeds notes from its own timer or VBL service,
+ * where the install must not happen inside the interrupt - it
+ * claims a VBL slot and touches TOS's console byte, which a
+ * main-line STDL_PlaySfx can be doing at the same moment.
+ */
+int  STDL_ToneOpen(void);
+
 int  STDL_ToneOn(int slot, uint16_t period, uint8_t volume);
 
 /*

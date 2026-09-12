@@ -44,7 +44,8 @@ time, not at runtime.
 | one-shot game effects | `STDL_PlaySample` | monophonic, but the DMA reads your buffer directly: no refill, no mixing, no per-frame cost |
 | PC-speaker sound | `STDL_SpeakerOn/Off` | immediate YM tone; steals voice A from music, restores after |
 | PC-speaker sequences | `STDL_PlaySfx` | step-array effects (periods+volumes), tone or noise, auto voice |
-| music as live notes (OPL register streams, MIDI-note streams) | `STDL_ToneOn/Set/Off` | 16 note slots onto the 3 YM voices, last-note priority; above `STDL_Music`, below effects |
+| music as live notes (MIDI-note streams, a tracker of your own) | `STDL_ToneOn/Set/Off` | 16 note slots onto the 3 YM voices, last-note priority; above `STDL_Music`, below effects. `STDL_ToneOpen` once from the main line if the notes come from your own timer or VBL callback |
+| AdLib / IMF music and effects (OPL2 register streams) | `STDL_OplWrite` | one call per register write; channels 0-8 become tone slots 0-8, the replay rate stays the game's |
 | `SDL_Joystick*` | compat veneer | port 1 as stick 0: 2 digital axes, 1 button |
 | `SDL_CreateCursor` / `SDL_SetCursor` | `STDL_Cursor` | software save-under cursor, max 32x32 |
 

@@ -15,6 +15,26 @@
  * rectangle it copies, and the slack keeps that inside the block. */
 #define GUARD 8
 
+/*
+ * Hide a pointer's provenance from the optimiser.
+ *
+ * gcc knows malloc returns memory aligned to MALLOC_ABI_ALIGNMENT,
+ * which is 4 on m68k-atari-mint, so it can prove block + GUARD is
+ * long aligned, fold the adjustment below to a constant zero and
+ * drop the arithmetic entirely. mintlib's malloc does not honour
+ * that at run time - it hands back word-aligned blocks, which is
+ * the one case the adjustment exists for. So the compiler assumes
+ * away precisely the situation being guarded against, and the
+ * result compiles to `clrb` with no and-with-3 anywhere in the
+ * function. Verified by disassembly, not by reading the source,
+ * because the source looks right either way.
+ */
+static uint8_t *launder(uint8_t *p)
+{
+    __asm__("" : "+g"(p));
+    return p;
+}
+
 STDL_Surface *STDL_CreateSurface(int w, int h)
 {
     STDL_Surface *s;
@@ -59,7 +79,7 @@ STDL_Surface *STDL_CreateSurface(int w, int h)
      * Guarantee it here rather than hope: STDL_CreateSurfaceFrom
      * still cannot, so the check stays there.
      */
-    block = malloc(size + 2 * GUARD + 3);
+    block = launder(malloc(size + 2 * GUARD + 3));
     if (block == NULL) {
         free(s);
         STDL_SetError("out of memory");

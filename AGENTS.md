@@ -253,6 +253,27 @@ warnings** with the Makefile's `-Wall -Wextra`.
   only evaluates them once the BLiTTER is allowed - so it charged 8%
   of a tile blit to blits it then declined to accelerate. It is
   `stdl_row_off` and the 16-bit forms for decisions too.
+- **Three in a row have had the same shape: right in the source,
+  absent on the machine, invisible to every check but a print.** An
+  optimisation behind a run-time predicate that never fired; a test
+  that could not fail; and a guarantee the compiler deleted. Each
+  looked correct in review, each passed the suite, and each was
+  found only when something printed what the machine actually did.
+  The rule that falls out: for anything that is conditional at run
+  time, guarantee what you can, assert it where the assert can fail,
+  and print it from the target in a tool people already run -
+  `dist/BLITCHK.TOS` prints the row alignment for this reason.
+- **A compiler can delete a guarantee about malloc.** gcc knows
+  malloc returns memory aligned to MALLOC_ABI_ALIGNMENT (4 here), so
+  it folded `STDL_CreateSurface`'s long-alignment adjustment to a
+  constant zero and dropped the arithmetic: the function compiled to
+  a literal `clrb` with no and-with-3 in it. mintlib's malloc does
+  not honour that at run time, so the optimiser had assumed away the
+  exact case the code existed for. `launder()` in surface.c hides
+  the pointer's provenance behind an empty asm. Check this class by
+  disassembling, never by reading the source - and note that a C
+  assertion on `pixels & 3` right after the call folds to true by
+  the same reasoning.
 - **An optimisation behind a silent predicate needs a way to see
   whether it fired.** The short-row copy above is guarded by a
   long-alignment test, and `STDL_CreateSurface` did not guarantee

@@ -196,6 +196,24 @@ int main(void)
     printf("blitter %s\n", blit_avail ? "present" : "ABSENT");
 
     /*
+     * Print what the blit's fast paths depend on, because none of it
+     * is visible in a picture: rows must start on a long boundary or
+     * the short-row copy takes the slower word loop. The library
+     * guarantees this for surfaces it allocates, and the guarantee
+     * is the kind a compiler has been seen to optimise away, so it
+     * is checked here on the machine rather than asserted in C.
+     */
+    {
+        STDL_Surface *a = STDL_CreateSurface(336, 224);
+        if (a != NULL) {
+            printf("rows long aligned: %s (adjust %d)\n",
+                   ((uintptr_t)a->pixels & 3) ? "NO - short rows will "
+                   "take the word path" : "yes", (int)a->pix_adj);
+            STDL_FreeSurface(a);
+        }
+    }
+
+    /*
      * The default budget first, then a reduced one. The CPU and
      * BLiTTER paths have to agree at every budget: the blitter runs
      * one pass per plane, so a stale loop count there would show up

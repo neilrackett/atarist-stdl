@@ -237,6 +237,30 @@ warnings** with the Makefile's `-Wall -Wextra`.
   take most of that off sprite-heavy scenes. Measured in Hatari
   only - parked 2026-09-03 with the numbers above, worth revisiting
   when a port with a border open shows it.
+- **A threshold is calibrated against the code it chooses between,
+  so it goes stale when either side gets faster.** The BLiTTER was
+  taken for any unmasked copy of 32 cells or more, a number fitted
+  when short rows went through `memcpy`. Inlining those rows made
+  the CPU path up to twice as fast for tile-sized blits and left the
+  library picking the BLiTTER for a 32x16 copy that the CPU now did
+  in half the time. Re-measure the decision whenever either path
+  changes - `tests/hatari/blitcost.c` times the library's own choice
+  against the CPU path forced, so a stale threshold reads as
+  "SLOWER" instead of hiding.
+- **Keep 32-bit multiplies out of the decision, not just the loop.**
+  The replacement rule `h * (ROW + CELL * ng) > SETUP` costs two
+  `__mulsi3` calls written in plain ints, and the compound condition
+  only evaluates them once the BLiTTER is allowed - so it charged 8%
+  of a tile blit to blits it then declined to accelerate. It is
+  `stdl_row_off` and the 16-bit forms for decisions too.
+- **`memcpy` for a tile row is nearly all prologue.** The aligned
+  fast path called it once per row, which for a 16x16 tile is eight
+  bytes a call: measured about 650 cycles at 16MHz to move what two
+  `move.l` do in thirty. Rows up to `BLIT_INLINE_MAX` are copied
+  inline now. A long move needs the pointers long-aligned, which
+  `STDL_CreateSurfaceFrom` does not promise (word only), so the test
+  is made once per blit - a stride is a whole number of groups, so
+  what holds for the first row holds for all of them.
 - **After touching blit/fill paths**: run `dist/BLITCHK.TOS` - it
   randomises fills/blits and compares the CPU and BLiTTER paths
   byte-for-byte on target. Both paths must stay identical;

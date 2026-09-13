@@ -355,7 +355,43 @@ static __inline__ void stdl_blitter_go(uintptr_t src, int16_t sxinc,
 #define STDL_BLIT_OP_XOR   6    /* src XOR dst  */
 
 #define STDL_BLIT_FILL_MIN_CELLS   32   /* fill: ng * rows          */
-#define STDL_BLIT_COPY_MIN_CELLS   32   /* unmasked blit            */
+/*
+ * Is the BLiTTER worth it for an unmasked copy? Both costs are
+ * linear and the comparison is one multiply, which is nothing
+ * beside a blit: the BLiTTER is a fixed setup plus a rate per cell,
+ * the CPU path a smaller per-blit cost plus a per-row term and a
+ * per-cell term. So the BLiTTER wins once
+ *
+ *     h * (ROW + CELL * ng)  >  SETUP
+ *
+ * A cell count alone cannot express this - 64x8 and 16x32 are both
+ * 32 cells, and on an STE the CPU path is 40% faster for the first
+ * and 3% slower for the second, because what the CPU pays for is
+ * rows.
+ *
+ * The constants are fitted to measurements from
+ * tests/hatari/blitcost.c on an emulated STE, in units where only
+ * their ratios matter. They are the 8MHz numbers: a Mega STE at
+ * 16MHz runs the CPU path about 1.8x faster, so these hand it a few
+ * blits between roughly 128x16 and 192x16 that it would have done
+ * slightly quicker itself. That is a few percent on a machine where
+ * blits are least likely to be the bottleneck, and it keeps one set
+ * of numbers rather than a set per clock - which the speed control
+ * can change at run time anyway.
+ *
+ * Both multiplies stay 16-bit: written as plain ints this test
+ * costs two __mulsi3 calls on every blit the BLiTTER is allowed to
+ * consider, which measured 8% of a tile blit - on blits it then
+ * declines to accelerate.
+ *
+ * They were fitted after the short-row copy went inline; that made
+ * the CPU path up to twice as fast for tile-sized blits, which is
+ * what made the previous flat 32-cell threshold wrong. Re-measure
+ * if either path changes.
+ */
+#define STDL_BLIT_CPU_ROW     26
+#define STDL_BLIT_CPU_CELL     7
+#define STDL_BLIT_SETUP      985
 #define STDL_BLIT_MASKED_MIN_CELLS 64   /* masked: 3 passes/plane   */
 
 /*

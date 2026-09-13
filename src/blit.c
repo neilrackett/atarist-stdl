@@ -14,6 +14,15 @@
  * Masks follow the format contract: bit set = destination preserved.
  */
 
+/*
+ * Rows up to this many bytes are copied inline rather than through
+ * memcpy. The call costs about 650 cycles before it moves anything,
+ * which is most of the cost of a tile-sized row; past this size the
+ * library call's own loop is the better bet. Tuned by measurement -
+ * see the numbers in tests/hatari/blitcost.c.
+ */
+#define BLIT_INLINE_MAX 64
+
 #include <string.h>
 #include "stdl_internal.h"
 
@@ -392,9 +401,11 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                                   * mask upkeep; UNDER/MARK go the CPU
                                   * route */
             && stdl_blitter_active()
-            && stdl_row_off(ng, (uint16_t)h)
-               >= (masked ? STDL_BLIT_MASKED_MIN_CELLS
-                                 : STDL_BLIT_COPY_MIN_CELLS)) {
+            && (masked
+                ? stdl_row_off(ng, (uint16_t)h)
+                  >= STDL_BLIT_MASKED_MIN_CELLS
+                : stdl_row_off(h, (uint16_t)(STDL_BLIT_CPU_ROW
+                       + STDL_BLIT_CPU_CELL * ng)) > STDL_BLIT_SETUP)) {
             /*
              * BLiTTER path, one plane rectangle per pass. Masked
              * blits use XOR-AND-XOR: d ^= s; d &= mask; d ^= s
@@ -465,10 +476,46 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                 uint8_t *dp = drow;
                 int bytes = ng * 8;
                 int y;
+                /*
+                 * A tile blit is one group - eight bytes a row - and
+                 * a libc memcpy call for eight bytes is very nearly
+                 * all prologue: measured 40us a row on a 16MHz Mega
+                 * STE, about 650 cycles to move what a pair of
+                 * move.l do in thirty. Short rows are copied inline
+                 * instead, and the same goes for the two-byte mask
+                 * clear beside it.
+                 *
+                 * The alignment test hoists: a stride is a whole
+                 * number of groups, so if the first row is long
+                 * aligned every row is. It has to be asked rather
+                 * than assumed, because STDL_CreateSurfaceFrom
+                 * promises word alignment and no more, and a long
+                 * move to an odd word is an address error on a
+                 * 68000.
+                 */
+                const int inl = bytes <= BLIT_INLINE_MAX
+                    && (((uintptr_t)sp | (uintptr_t)dp) & 3) == 0;
                 for (y = 0; y < h; y++) {
-                    memcpy(dp, sp, (size_t)bytes);
+                    if (inl) {
+                        const uint32_t *s4 = (const uint32_t *)sp;
+                        uint32_t *d4 = (uint32_t *)dp;
+                        int n = bytes >> 2;
+                        do {
+                            *d4++ = *s4++;
+                        } while (--n != 0);
+                    } else {
+                        memcpy(dp, sp, (size_t)bytes);
+                    }
                     if (dmrow != NULL) {
-                        memset(dmrow, 0, (size_t)(ng * 2));
+                        if (inl && ((uintptr_t)dmrow & 1) == 0) {
+                            uint16_t *m = (uint16_t *)dmrow;
+                            int n = ng;
+                            do {
+                                *m++ = 0;
+                            } while (--n != 0);
+                        } else {
+                            memset(dmrow, 0, (size_t)(ng * 2));
+                        }
                         dmrow += dmstride;
                     }
                     sp += src->stride;

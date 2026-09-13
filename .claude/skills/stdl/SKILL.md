@@ -292,6 +292,19 @@ lying: every check that had been made was one that a slow game
 passes. These are the ones that would have caught it, cheapest
 first.
 
+- **A blit costs a fixed sum before it moves a pixel.** Measured on
+  an emulated STE, an unmasked same-phase blit is about 0.42ms of
+  clipping, phase and dispatch whatever its size, and 0.23ms on a
+  16MHz Mega STE. At 20-60 blits a frame that is 5-25ms of frame
+  time in setup alone, so fewer, larger blits beat many small ones
+  even when the pixel count is identical. `tests/hatari/blitcost.c`
+  in the STDL repo measures it on your machine.
+- **Say which path a performance claim is about.** The library has a
+  CPU path and a BLiTTER path and picks between them per blit, so a
+  number that does not say which one ran cannot be acted on. Force
+  each with `STDL_UseBlitter(0)` and `(1)` and quote both; a
+  difference that appears only when the BLiTTER is *allowed* but
+  never used is a cost in the decision, not in the blit.
 - **A 200Hz tick is 5ms, not a millisecond.** Frames divided by a
   `STDL_GetHz200` delta and called per-second is five times too
   high - the arithmetic is `12800 / ticks`, not `64000 / ticks`.

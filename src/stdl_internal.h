@@ -391,7 +391,7 @@ static __inline__ void stdl_blitter_go(uintptr_t src, int16_t sxinc,
  */
 #define STDL_BLIT_CPU_ROW     26
 #define STDL_BLIT_CPU_CELL     7
-#define STDL_BLIT_SETUP      985
+#define STDL_BLIT_SETUP      860
 #define STDL_BLIT_MASKED_MIN_CELLS 64   /* masked: 3 passes/plane   */
 
 /*

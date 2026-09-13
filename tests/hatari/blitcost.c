@@ -45,6 +45,12 @@ int main(int argc, char *argv[])
     STDL_Init(STDL_INIT_VIDEO);
     STDL_SetVideoMode(320, 200, 4, 0);
     dst = STDL_CreateSurface(336, 200); src = STDL_CreateSurface(336, 200);
+    printf("BC: src %p dst %p stride %u, long aligned: %s\n",
+           (void *)src->pixels, (void *)dst->pixels,
+           (unsigned)src->stride,
+           ((((uintptr_t)src->pixels | (uintptr_t)dst->pixels) & 3) == 0)
+           ? "yes - short rows copy inline"
+           : "NO - short rows fall back to memcpy");
     printf("BC: w h allowed cpu1 cpu2 verdict\n"); fflush(stdout);
     for (hi = 0; hi < 3; hi++) for (wi = 0; wi < 6; wi++) {
         uint32_t def, c; unsigned long b;

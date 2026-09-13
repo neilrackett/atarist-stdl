@@ -493,21 +493,30 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                  * move to an odd word is an address error on a
                  * 68000.
                  */
-                const int inl = bytes <= BLIT_INLINE_MAX
-                    && (((uintptr_t)sp | (uintptr_t)dp) & 3) == 0;
+                const int shortrow = bytes <= BLIT_INLINE_MAX;
+                const int lng = (((uintptr_t)sp | (uintptr_t)dp) & 3) == 0;
                 for (y = 0; y < h; y++) {
-                    if (inl) {
+                    if (shortrow && lng) {
                         const uint32_t *s4 = (const uint32_t *)sp;
                         uint32_t *d4 = (uint32_t *)dp;
                         int n = bytes >> 2;
                         do {
                             *d4++ = *s4++;
                         } while (--n != 0);
+                    } else if (shortrow) {
+                        /* only word aligned - a borrowed block may
+                         * be - but still cheaper than the call */
+                        const uint16_t *s2 = (const uint16_t *)sp;
+                        uint16_t *d2 = (uint16_t *)dp;
+                        int n = bytes >> 1;
+                        do {
+                            *d2++ = *s2++;
+                        } while (--n != 0);
                     } else {
                         memcpy(dp, sp, (size_t)bytes);
                     }
                     if (dmrow != NULL) {
-                        if (inl && ((uintptr_t)dmrow & 1) == 0) {
+                        if (shortrow && ((uintptr_t)dmrow & 1) == 0) {
                             uint16_t *m = (uint16_t *)dmrow;
                             int n = ng;
                             do {

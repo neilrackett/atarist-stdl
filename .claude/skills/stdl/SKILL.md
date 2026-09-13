@@ -299,6 +299,13 @@ first.
   time in setup alone, so fewer, larger blits beat many small ones
   even when the pixel count is identical. `tests/hatari/blitcost.c`
   in the STDL repo measures it on your machine.
+- **Have the program say which path it took.** A library fast path
+  can be gated on something invisible - an alignment, a flag, a
+  machine feature - and when it declines, the picture is identical
+  and only the clock knows. A port and the library once measured
+  the same blit correctly and disagreed by 1.85x for exactly that
+  reason. Print the condition next to the timing, not just the
+  timing.
 - **Say which path a performance claim is about.** The library has a
   CPU path and a BLiTTER path and picks between them per blit, so a
   number that does not say which one ran cannot be acted on. Force

@@ -148,6 +148,32 @@ int main(void)
         }
     }
 
+    /*
+     * Rows must start on a long boundary. The blit's short-row copy
+     * declines without it and falls back to memcpy, which is not a
+     * failure anything else can see: the picture is identical and
+     * only the clock knows. malloc here is word aligned and what it
+     * returns depends on allocation history, so this asserts what
+     * STDL_CreateSurface promises rather than what one run happened
+     * to get.
+     */
+    {
+        int i;
+        for (i = 1; i <= 40; i++) {
+            STDL_Surface *a = STDL_CreateSurface(i * 8 + 1, 3);
+            /* an odd-sized neighbour, to shift the allocator along */
+            STDL_Surface *b = STDL_CreateSurface(i + 1, 1);
+            CHECK(a != NULL && b != NULL, "alloc");
+            if (a != NULL) {
+                CHECK(((uintptr_t)a->pixels & 3) == 0,
+                      "pixels %p not long aligned at w=%d",
+                      (void *)a->pixels, i * 8 + 1);
+                STDL_FreeSurface(a);
+            }
+            STDL_FreeSurface(b);
+        }
+    }
+
     if (failures == 0) {
         printf("surface footprint tests passed\n");
         return 0;

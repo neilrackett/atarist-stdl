@@ -103,6 +103,12 @@ typedef struct STDL_Surface {
     /* cached STDL_SurfaceIsOpaque scan: 0 unknown, 1 opaque, 2 not */
     uint8_t   opaque_state;
 
+    /* Library use: bytes the pixel block was advanced to put
+     * `pixels` on a long boundary, so STDL_FreeSurface can hand
+     * malloc back what it gave. Sits in padding that was there
+     * anyway - do not read or write it. */
+    uint8_t   pix_adj;
+
     STDL_PixelFormat *format;  /* per-surface logical palette           */
 } STDL_Surface;
 

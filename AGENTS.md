@@ -253,6 +253,21 @@ warnings** with the Makefile's `-Wall -Wextra`.
   only evaluates them once the BLiTTER is allowed - so it charged 8%
   of a tile blit to blits it then declined to accelerate. It is
   `stdl_row_off` and the 16-bit forms for decisions too.
+- **An optimisation behind a silent predicate needs a way to see
+  whether it fired.** The short-row copy above is guarded by a
+  long-alignment test, and `STDL_CreateSurface` did not guarantee
+  it: mintlib's malloc is word aligned and what it returns depends
+  on allocation history, so the fast path ran on one machine's
+  surfaces and never on another's. Nothing could see it - same
+  pixels, same everything, only the clock differs - and two of us
+  measured correctly and drew opposite conclusions because neither
+  probe said which path it took. The allocator guarantees the
+  alignment now (`pix_adj` remembers what was added, so free still
+  hands malloc back its own pointer), `tests/host/test_footprint.c`
+  asserts it across sizes and allocation orders, and
+  `tests/hatari/blitcost.c` prints the alignment before the timings.
+  Any new fast path with a run-time condition wants the same three:
+  guarantee what you can, assert it, and print it.
 - **`memcpy` for a tile row is nearly all prologue.** The aligned
   fast path called it once per row, which for a 16x16 tile is eight
   bytes a call: measured about 650 cycles at 16MHz to move what two

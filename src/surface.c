@@ -48,14 +48,27 @@ STDL_Surface *STDL_CreateSurface(int w, int h)
     s->format->palette->colors =
         (STDL_Colour *)(s->format->palette + 1);
 
-    block = malloc(size + 2 * GUARD);
+    /*
+     * Three bytes of slack so `pixels` can be put on a long
+     * boundary. mintlib's malloc is only word aligned, and which it
+     * gives back depends on what has been allocated before, so a
+     * surface's rows were long aligned or not by luck. The blit
+     * path has a fast copy that needs long alignment and silently
+     * declines without it, which meant the fast path worked on one
+     * machine's allocation pattern and never fired on another's.
+     * Guarantee it here rather than hope: STDL_CreateSurfaceFrom
+     * still cannot, so the check stays there.
+     */
+    block = malloc(size + 2 * GUARD + 3);
     if (block == NULL) {
         free(s);
         STDL_SetError("out of memory");
         return NULL;
     }
-    memset(block, 0, size + 2 * GUARD);
+    memset(block, 0, size + 2 * GUARD + 3);
     s->pixels = block + GUARD;
+    s->pix_adj = (uint8_t)((4 - ((uintptr_t)s->pixels & 3)) & 3);
+    s->pixels += s->pix_adj;
     s->w = (int16_t)w;
     s->h = (int16_t)h;
     s->stride = (uint16_t)(groups * 8);
@@ -81,7 +94,7 @@ void STDL_FreeSurface(STDL_Surface *s)
     /* borrowed blocks (STDL_CreateSurfaceFrom) stay the caller's */
     if (!(s->flags & STDL_PREALLOC)) {
         if (s->pixels != NULL) {
-            free(s->pixels - GUARD);
+            free(s->pixels - GUARD - s->pix_adj);
         }
         if (s->mask != NULL) {
             free(s->mask - GUARD);

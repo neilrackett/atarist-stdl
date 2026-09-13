@@ -268,6 +268,18 @@ warnings** with the Makefile's `-Wall -Wextra`.
   `tests/hatari/blitcost.c` prints the alignment before the timings.
   Any new fast path with a run-time condition wants the same three:
   guarantee what you can, assert it, and print it.
+
+  Be careful where the assert lives. A host test asserting that
+  `STDL_CreateSurface` returns long-aligned rows passes whether or
+  not the code does anything, because host malloc is generously
+  aligned and mintlib's is not - the guarantee is real work only on
+  target, so that is where it has to be checked, and
+  `tests/hatari/blitcost.c` prints it. What the host *can* test is
+  the other side: `tests/host/test_blit8.c` hands
+  `STDL_CreateSurfaceFrom` a deliberately word-aligned block and
+  compares the result against an aligned one, which fails if the
+  word-copy fallback is wrong. A test that cannot fail is worse
+  than no test, because it is counted.
 - **`memcpy` for a tile row is nearly all prologue.** The aligned
   fast path called it once per row, which for a 16x16 tile is eight
   bytes a call: measured about 650 cycles at 16MHz to move what two

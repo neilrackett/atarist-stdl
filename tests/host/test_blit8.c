@@ -257,6 +257,60 @@ int main(void)
     free(block);
     free(mask);
 
+    /*
+     * A borrowed block the caller only word-aligned. The blit's
+     * short-row copy needs long alignment and takes a word loop
+     * when it cannot have it; that is the path no library-allocated
+     * surface reaches any more, and the one a host test can
+     * actually exercise. An assertion that STDL_CreateSurface
+     * returns long-aligned rows passes here whatever the code does,
+     * because host malloc is generously aligned - on target it is
+     * word aligned and the guarantee is real work. Check it there
+     * (tests/hatari/blitcost.c prints it), and check the fallback's
+     * output here.
+     */
+    {
+        static uint8_t ba[64 * 8 + 32], bb[64 * 8 + 32];
+        STDL_Surface *sa, *sb, *ra, *rb;
+        uint8_t *pa = ba, *pb = bb;
+        int x, y, bad = 0;
+
+        while (((uintptr_t)pa & 3) != 2) { pa++; }
+        while (((uintptr_t)pb & 3) != 2) { pb++; }
+        sa = STDL_CreateSurfaceFrom(pa, 32, 8, 16, NULL, 0);
+        sb = STDL_CreateSurfaceFrom(pb, 32, 8, 16, NULL, 0);
+        ra = STDL_CreateSurface(32, 8);
+        rb = STDL_CreateSurface(32, 8);
+        CHECK(sa != NULL && sb != NULL && ra != NULL && rb != NULL,
+              "misaligned setup");
+        if (sa != NULL && sb != NULL && ra != NULL && rb != NULL) {
+            for (y = 0; y < 8; y++) {
+                for (x = 0; x < 32; x++) {
+                    uint8_t v = (uint8_t)((x * 3 + y * 5) & 15);
+                    STDL_PutPixel(sa, x, y, v);
+                    STDL_PutPixel(ra, x, y, v);
+                }
+            }
+            STDL_BlitSurface(sa, NULL, sb, NULL);
+            STDL_BlitSurface(ra, NULL, rb, NULL);
+            for (y = 0; y < 8; y++) {
+                for (x = 0; x < 32; x++) {
+                    if (STDL_GetPixel(sb, x, y)
+                        != STDL_GetPixel(rb, x, y)) {
+                        bad++;
+                    }
+                }
+            }
+            CHECK(bad == 0,
+                  "word-aligned blit differs from aligned: %d pixels",
+                  bad);
+        }
+        STDL_FreeSurface(sa);
+        STDL_FreeSurface(sb);
+        STDL_FreeSurface(ra);
+        STDL_FreeSurface(rb);
+    }
+
     if (failures) {
         printf("%d FAILURES\n", failures);
         return 1;

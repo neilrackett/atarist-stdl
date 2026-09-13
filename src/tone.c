@@ -29,10 +29,9 @@
  * silent - with three voices and a game firing effects, the
  * alternative drops notes it need not drop. Only when there is no
  * free voice does a note wait on the one it is parked on. The
- * ownership mask is what says which voices are taken - the stolen
- * flag records only the steals this module was told about, and an
- * effect already sounding when the first STDL_ToneOn installs the
- * hook was announced to nobody.
+ * ownership mask is what says which voices are taken, which also
+ * covers an effect that was already sounding when the first
+ * STDL_ToneOn installed the hook and was announced to nobody.
  */
 
 #include <string.h>
@@ -50,28 +49,28 @@ typedef struct {
     /* owned by the tick */
     int8_t   slot;                  /* -1 = idle                 */
     uint8_t  held;                  /* claimed on the chip       */
-    uint8_t  stolen;                /* an effect has it for now  */
     uint16_t period;                /* register shadow           */
     uint8_t  volume;
 } voice_t;
 
 static slot_t  slots[STDL_TONE_SLOTS];
 static voice_t voices[3];
-static volatile uint8_t dirty;
+static volatile uint8_t dirty;      /* re-allocate               */
+static volatile uint8_t params;     /* same notes, new values    */
 static uint32_t stamp_clock;
 
 /* ---------------------------------------------------------------- */
 
 /*
- * A voice this module must not drive. stdl_ym_owned is the truth:
- * the stolen flag only records a steal the hook was told about, and
- * an effect already sounding when the first STDL_ToneOn installs
- * the hook was never announced to anybody.
+ * A voice this module must not drive. The ownership mask is the
+ * whole answer: an effect sets the bit before the hook is told and
+ * clears it before handing back, so a separate flag would only
+ * shadow it - and a flag cannot see an effect that was already
+ * sounding when the first STDL_ToneOn installed the hook.
  */
 static int voice_taken(int v)
 {
-    return voices[v].stolen
-        || (((stdl_ym_owned >> v) & 1u) != 0 && !voices[v].held);
+    return ((stdl_ym_owned >> v) & 1u) != 0 && !voices[v].held;
 }
 
 /* write a voice's note, claiming the voice if this tone module does
@@ -115,7 +114,7 @@ static void drop_voice(int v)
     voice_t *vc = &voices[v];
 
     vc->slot = -1;
-    if (vc->held && !vc->stolen) {
+    if (vc->held) {         /* a taken voice has held == 0 */
         vc->held = 0;
         stdl_ym_release_voice(v);
     }
@@ -215,28 +214,19 @@ static void allocate(void)
      * oldest, which is not the policy this module documents.
      */
     for (i = 0; i < n; i++) {
-        int victim = -1;
-        int cur = voice_of(chosen[i]);
-
-        if (cur >= 0) {
+        if (voice_of(chosen[i]) >= 0) {
             continue;           /* sounding, or parked on a
                                  * voice an effect holds       */
         }
-        for (v = 0; v < 3; v++) {
-            if (voice_taken(v) || voices[v].slot < 0) {
-                continue;
+        /* chosen[] is newest first, so anything older than this
+         * entry is after it and the oldest is last: the order
+         * already says what a stamp comparison would. */
+        for (j = n - 1; j > i; j--) {
+            v = voice_of(chosen[j]);
+            if (v >= 0 && !voice_taken(v)) {
+                voices[v].slot = chosen[i];
+                break;
             }
-            if (slots[voices[v].slot].stamp >= stamp[i]) {
-                continue;       /* newer than us: leave it      */
-            }
-            if (victim < 0
-                || slots[voices[v].slot].stamp
-                   < slots[voices[victim].slot].stamp) {
-                victim = v;
-            }
-        }
-        if (victim >= 0) {
-            voices[victim].slot = chosen[i];
         }
     }
     /* write every voice that has a slot */
@@ -247,13 +237,32 @@ static void allocate(void)
     }
 }
 
+/*
+ * Two flags, because the two kinds of change cost very differently.
+ * A key on or off, or a voice changing hands, can move which slots
+ * sound and needs the allocator. A bend or a volume change cannot:
+ * the same slots are keyed with the same stamps, so the allocation
+ * is already right and only the registers need catching up. An OPL
+ * stream bends and moves levels most frames, and re-running the
+ * allocator for that is a few hundred cycles of the frame spent
+ * reaching the answer it already had.
+ */
 static void tone_tick(void)
 {
-    if (!dirty) {
-        return;
+    if (dirty) {
+        dirty = 0;
+        params = 0;
+        allocate();
+    } else if (params) {
+        int v;
+
+        params = 0;
+        for (v = 0; v < 3; v++) {
+            if (voices[v].slot >= 0) {
+                program_voice(v);
+            }
+        }
     }
-    dirty = 0;
-    allocate();
 }
 
 /* the YM service's notice that an effect took a voice (lost) or is
@@ -264,11 +273,11 @@ static int voice_event(int v, int lost)
     voice_t *vc = &voices[v];
 
     if (lost) {
-        vc->stolen = 1;
+        /* the claim set the ownership bit before calling, so
+         * voice_taken() reports this voice from here on */
         vc->held = 0;
         return 0;
     }
-    vc->stolen = 0;
     if (vc->slot < 0) {
         /* Nothing is due on this voice, so the music stream's
          * restore should run - but a note displaced by a newer one
@@ -298,9 +307,9 @@ static int tone_install(void)
     for (v = 0; v < 3; v++) {
         voices[v].slot = -1;
         voices[v].held = 0;
-        voices[v].stolen = 0;
     }
     dirty = 0;
+    params = 0;
     stdl_ym_tone_hook = voice_event;
     stdl_tone_tick = tone_tick;
     return 0;
@@ -357,7 +366,7 @@ void STDL_ToneSet(int slot, uint16_t period, uint8_t volume)
     if (slots[slot].period != 0) {
         slots[slot].period = period;
         slots[slot].volume = volume;
-        dirty = 1;
+        params = 1;
     }
     stdl_int_restore(sr);
 }
@@ -372,10 +381,17 @@ void STDL_ToneOff(int slot)
         return;
     }
     sr = stdl_int_off();
-    for (s = 0; s < STDL_TONE_SLOTS; s++) {
-        if ((slot < 0 || slot == s) && slots[s].period != 0) {
-            slots[s].period = 0;
+    if (slot >= 0) {
+        if (slots[slot].period != 0) {
+            slots[slot].period = 0;
             dirty = 1;
+        }
+    } else {
+        for (s = 0; s < STDL_TONE_SLOTS; s++) {
+            if (slots[s].period != 0) {
+                slots[s].period = 0;
+                dirty = 1;
+            }
         }
     }
     stdl_int_restore(sr);

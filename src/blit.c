@@ -516,7 +516,10 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                         memcpy(dp, sp, (size_t)bytes);
                     }
                     if (dmrow != NULL) {
-                        if (shortrow && ((uintptr_t)dmrow & 1) == 0) {
+                        /* mask rows are words and every other mask
+                         * write in the library already assumes it,
+                         * so there is nothing to test for here */
+                        if (shortrow) {
                             uint16_t *m = (uint16_t *)dmrow;
                             int n = ng;
                             do {

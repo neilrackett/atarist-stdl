@@ -13,6 +13,8 @@
 
 /* YM tone period for a frequency in Hz (2MHz master / 16). Periods
  * are 12 bits: 31Hz is the lowest tone, the chip's top is inaudible. */
-#define STDL_YM_PERIOD(hz) ((uint16_t)(125000L / (hz)))
+/* The YM's tone divider clock: period = STDL_YM_CLOCK / Hz. */
+#define STDL_YM_CLOCK      125000L
+#define STDL_YM_PERIOD(hz) ((uint16_t)(STDL_YM_CLOCK / (hz)))
 
 #endif /* STDL_YM_H */

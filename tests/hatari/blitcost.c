@@ -53,10 +53,9 @@ int main(int argc, char *argv[])
            : "NO - short rows fall back to memcpy");
     printf("BC: w h allowed cpu1 cpu2 verdict\n"); fflush(stdout);
     for (hi = 0; hi < 3; hi++) for (wi = 0; wi < 6; wi++) {
-        uint32_t def, c; unsigned long b;
+        uint32_t def, c;
         STDL_UseBlitter(0); c = one(dst, src, ws[wi], hs[hi]);
         STDL_UseBlitter(1); def = one(dst, src, ws[wi], hs[hi]);
-        b = 0;
         printf("BC: %3d %2d allowed=%6lu cpu=%6lu %s\n", ws[wi], hs[hi],
                (unsigned long)def, (unsigned long)c,
                def <= c + c / 50 ? "ok" : "SLOWER");

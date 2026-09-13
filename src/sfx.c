@@ -226,7 +226,7 @@ void STDL_SpeakerOn(int freq_hz, uint8_t volume)
         return;
     }
     {
-        long p = 125000L / freq_hz;
+        long p = STDL_YM_CLOCK / freq_hz;
         if (p < 1) p = 1;
         if (p > 0x0FFF) p = 0x0FFF;
         spk_period = (uint16_t)p;

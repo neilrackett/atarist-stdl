@@ -23,8 +23,13 @@
  */
 
 #include <string.h>
+#include "stdl_internal.h"
 #include <stdl/stdl_tone.h>
 #include <stdl/stdl_opl.h>
+
+#if STDL_OPL_CHANNELS > STDL_TONE_SLOTS
+#error "OPL channels map onto tone slots 0-8; there are not enough"
+#endif
 
 #define REG_LEVEL   0x40
 #define REG_FNUM_LO 0xA0
@@ -39,28 +44,34 @@ static uint8_t fnum_lo[STDL_OPL_CHANNELS];
 static uint8_t fnum_hi[STDL_OPL_CHANNELS];   /* block, key-on, F-number 9:8 */
 static uint8_t level[STDL_OPL_CHANNELS];     /* carrier total level 0-63 */
 
+/*
+ * Both halves stay on the 68000's own instructions. fnum is 10 bits
+ * and the OPL constant fits a word, so the product is a mulu.w
+ * through stdl_row_off rather than a __mulsi3 call; the quotient of
+ * 125000/hz is under 65536 for any hz the chip can ask for, so it
+ * is a divu.w rather than __udivsi3. Written as plain 32-bit
+ * arithmetic the pair costs about 600 cycles on an 8MHz machine,
+ * and this runs from a replay interrupt.
+ *
+ * No clamp at the bottom: fnum <= 1023 and block <= 7 cap the pitch
+ * near 6.2kHz, so the period cannot come out zero.
+ */
 static uint16_t period_of(int fnum, int block)
 {
-    uint32_t hz = ((uint32_t)fnum * 49716UL) >> (20 - block);
+    uint32_t hz = stdl_row_off(fnum, 49716u) >> (20 - block);
     uint32_t p;
 
-    if (hz == 0) {
-        return 0;
+    if (hz < 2) {
+        return 0;                   /* below the YM's range      */
     }
-    p = 125000UL / hz;
-    if (p < 1) {
-        p = 1;
-    }
-    if (p > 0x0FFF) {
-        p = 0x0FFF;
-    }
-    return (uint16_t)p;
+    p = stdl_divu((uint32_t)STDL_YM_CLOCK, (uint16_t)hz);
+    return p > 0x0FFF ? (uint16_t)0x0FFF : (uint16_t)p;
 }
 
+/* level is stored masked to 0-63, so this is always 0-15 */
 static uint8_t volume_of(uint8_t total_level)
 {
-    int v = 15 - (total_level >> 2);
-    return v < 0 ? 0 : (uint8_t)v;
+    return (uint8_t)(15 - (total_level >> 2));
 }
 
 /* The channel whose carrier an operator offset (0x00-0x15) belongs
@@ -79,16 +90,25 @@ static int carrier_channel(int op)
 static void update(int ch)
 {
     uint8_t hi = fnum_hi[ch];
-    int block = (hi >> 2) & 7;
-    int fnum = ((hi & 3) << 8) | fnum_lo[ch];
-    uint16_t period = period_of(fnum, block);
-    uint8_t vol = volume_of(level[ch]);
+    uint8_t vol;
+    uint16_t period;
 
-    /* Volume 0 is silence on the YM, and a silent channel that took
-     * a slot would evict an audible one from the three voices: a
-     * level of 60 or more is a key-off here, and a later level
-     * rise keys it on again. */
-    if ((hi & 0x20) == 0 || period == 0 || vol == 0) {
+    /*
+     * Key-off first, and the cheap tests before the pitch: half of
+     * all note events are key-offs, and computing a period for one
+     * is a multiply and a divide thrown away. Volume 0 is silence
+     * on the YM, and a silent channel that took a slot would evict
+     * an audible one from the three voices, so a level of 60 or
+     * more is a key-off here and a later level rise keys it on
+     * again.
+     */
+    vol = volume_of(level[ch]);
+    if ((hi & 0x20) == 0 || vol == 0) {
+        STDL_ToneOff(ch);
+        return;
+    }
+    period = period_of(((hi & 3) << 8) | fnum_lo[ch], (hi >> 2) & 7);
+    if (period == 0) {
         STDL_ToneOff(ch);
     } else if (!STDL_ToneActive(ch)) {
         STDL_ToneOn(ch, period, vol);
@@ -110,11 +130,32 @@ static int keyed(int ch)
     return (fnum_hi[ch] & 0x20) != 0;
 }
 
+/* whether the tone device and this module agree about the channel */
+static int in_sync(int ch)
+{
+    return !STDL_ToneActive(ch) == !keyed(ch);
+}
+
 void STDL_OplWrite(uint8_t reg, uint8_t val)
 {
+    /*
+     * A write that changes nothing is dropped, but only while the
+     * tone device still agrees with this module about whether the
+     * channel is sounding. IMF streams re-send state constantly -
+     * the same key-off byte, an unchanged F-number under a
+     * sustained note - and acting on those costs a multiply, a
+     * divide and a slot call inside the replay interrupt to reach
+     * the state already held. When the two disagree, because
+     * something keyed the slot off behind this module's back, an
+     * identical byte has to be acted on: that is what makes the
+     * next key-on restrike instead of bending a silent slot.
+     */
     if (reg >= REG_FNUM_LO && reg < REG_FNUM_LO + STDL_OPL_CHANNELS) {
         int ch = reg - REG_FNUM_LO;
 
+        if (fnum_lo[ch] == val && in_sync(ch)) {
+            return;
+        }
         fnum_lo[ch] = val;
         if (keyed(ch)) {
             update(ch);
@@ -123,13 +164,21 @@ void STDL_OplWrite(uint8_t reg, uint8_t val)
                && reg < REG_FNUM_HI + STDL_OPL_CHANNELS) {
         int ch = reg - REG_FNUM_HI;
 
+        if (fnum_hi[ch] == val && in_sync(ch)) {
+            return;
+        }
         fnum_hi[ch] = val;
         update(ch);
     } else if (reg >= REG_LEVEL && reg < REG_LEVEL + 0x16) {
         int ch = carrier_channel(reg - REG_LEVEL);
 
         if (ch >= 0) {
-            level[ch] = val & 0x3F;
+            uint8_t lv = (uint8_t)(val & 0x3F);
+
+            if (level[ch] == lv && in_sync(ch)) {
+                return;
+            }
+            level[ch] = lv;
             if (keyed(ch)) {
                 update(ch);
             }

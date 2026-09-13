@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "stdl_internal.h"
+#include "ymtest.h"
 
 static int failures;
 
@@ -26,17 +27,6 @@ static int failures;
         printf("\n"); \
     } \
 } while (0)
-
-static int slots_used(void)
-{
-    int i, n = 0;
-    for (i = 0; i < 8; i++) {
-        if (STDL_VBLQUEUE[i] != NULL) {
-            n++;
-        }
-    }
-    return n;
-}
 
 int main(void)
 {

@@ -416,6 +416,18 @@ static __inline__ uint32_t stdl_row_off(int y, uint16_t stride)
     return r;
 }
 
+/*
+ * 32/16 divide on the 68000's own instruction. gcc 4.6 calls
+ * __udivsi3 for a 32-bit division even when the quotient provably
+ * fits a word - about 350 cycles against 140. The caller must know
+ * the quotient fits, or the CPU traps.
+ */
+static __inline__ uint16_t stdl_divu(uint32_t a, uint16_t b)
+{
+    __asm__("divu.w %1,%0" : "+d"(a) : "d"(b));
+    return (uint16_t)a;
+}
+
 /* The signed twin, for products whose operands are known to fit
  * sixteen bits (a clipped count times a pitch, a sample times a
  * gain). */
@@ -430,6 +442,11 @@ static __inline__ int32_t stdl_mul16(int a, int b)
 static __inline__ uint32_t stdl_row_off(int y, uint16_t stride)
 {
     return (uint32_t)(uint16_t)y * stride;
+}
+
+static __inline__ uint16_t stdl_divu(uint32_t a, uint16_t b)
+{
+    return (uint16_t)(a / b);
 }
 
 static __inline__ int32_t stdl_mul16(int a, int b)

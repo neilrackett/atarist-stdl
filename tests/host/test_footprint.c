@@ -149,27 +149,26 @@ int main(void)
     }
 
     /*
-     * Rows must start on a long boundary. The blit's short-row copy
-     * declines without it and falls back to memcpy, which is not a
-     * failure anything else can see: the picture is identical and
-     * only the clock knows. malloc here is word aligned and what it
-     * returns depends on allocation history, so this asserts what
-     * STDL_CreateSurface promises rather than what one run happened
-     * to get.
+     * Create and free across sizes and allocation orders, which
+     * under ASan catches a wrong pix_adj on the free path - the
+     * block handed back has to be the one malloc gave.
+     *
+     * Deliberately no assertion that the rows come back long
+     * aligned: host malloc returns 8- or 16-aligned blocks, so that
+     * passes whether or not the adjustment code exists. The
+     * guarantee is real work only against mintlib's word-aligned
+     * malloc, so it is checked on target, where BLITCHK.TOS and
+     * tests/hatari/blitcost.c print it.
      */
     {
-        int i;
-        for (i = 1; i <= 40; i++) {
-            STDL_Surface *a = STDL_CreateSurface(i * 8 + 1, 3);
-            /* an odd-sized neighbour, to shift the allocator along */
-            STDL_Surface *b = STDL_CreateSurface(i + 1, 1);
+        int k;
+
+        for (k = 1; k <= 40; k++) {
+            STDL_Surface *a = STDL_CreateSurface(k * 8 + 1, 3);
+            STDL_Surface *b = STDL_CreateSurface(k + 1, 1);
+
             CHECK(a != NULL && b != NULL, "alloc");
-            if (a != NULL) {
-                CHECK(((uintptr_t)a->pixels & 3) == 0,
-                      "pixels %p not long aligned at w=%d",
-                      (void *)a->pixels, i * 8 + 1);
-                STDL_FreeSurface(a);
-            }
+            STDL_FreeSurface(a);
             STDL_FreeSurface(b);
         }
     }

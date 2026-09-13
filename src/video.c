@@ -84,12 +84,14 @@ static void detect_machine(void)
  * program that asks for it should link that. */
 int stdl_megaste_mode = 1;
 
+/* Both callers have already established the machine has this
+ * register - STDL_Init from megaste_speedup, and the public call in
+ * cpuspeed.c - so the test is not repeated here, in an object every
+ * program links. */
 void stdl_megaste_apply(int mode)
 {
-    if (stdl.mach.is_megaste) {
-        STDL_MSTE_CTL = (uint8_t)((STDL_MSTE_CTL & ~MSTE_BITS)
-                             | ((mode == 1 ? 3 : mode) & MSTE_BITS));
-    }
+    STDL_MSTE_CTL = (uint8_t)((STDL_MSTE_CTL & ~MSTE_BITS)
+                              | ((mode == 1 ? 3 : mode) & MSTE_BITS));
 }
 
 static int megaste_speedup(void)

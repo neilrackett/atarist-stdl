@@ -15,6 +15,7 @@
 #include <string.h>
 #include <stdl/stdl.h>
 #include "stdl_internal.h"
+#include "ymtest.h"
 
 static int failures;
 
@@ -27,39 +28,7 @@ static int failures;
     } \
 } while (0)
 
-static void (*vbl_fn)(void);
-
-static void find_vbl(void)
-{
-    int i;
-    vbl_fn = NULL;
-    for (i = 0; i < 8; i++) {
-        if (STDL_VBLQUEUE[i] != NULL) {
-            vbl_fn = STDL_VBLQUEUE[i];
-        }
-    }
-}
-
-static uint16_t voice_period(int v)
-{
-    return (uint16_t)(stdl_host_ym[2 * v]
-                      | ((stdl_host_ym[2 * v + 1] & 0x0F) << 8));
-}
-
 #define TONE_ON(v)  ((stdl_host_ym[7] & (1u << (v))) == 0)
-
-/* VBL queue slots in use - the sound service should claim one */
-static int slots_used(void)
-{
-    int i, n = 0;
-
-    for (i = 0; i < STDL_NVBLS; i++) {
-        if (STDL_VBLQUEUE[i] != NULL) {
-            n++;
-        }
-    }
-    return n;
-}
 
 /* which voice is sounding a period, or -1 */
 static int voice_of_period(unsigned period)

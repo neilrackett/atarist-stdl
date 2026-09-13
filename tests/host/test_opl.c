@@ -15,6 +15,7 @@
 #include <string.h>
 #include <stdl/stdl.h>
 #include "stdl_internal.h"
+#include "ymtest.h"
 
 static int failures;
 
@@ -26,25 +27,6 @@ static int failures;
         printf("\n"); \
     } \
 } while (0)
-
-static void (*vbl_fn)(void);
-
-static void find_vbl(void)
-{
-    int i;
-    vbl_fn = NULL;
-    for (i = 0; i < 8; i++) {
-        if (STDL_VBLQUEUE[i] != NULL) {
-            vbl_fn = STDL_VBLQUEUE[i];
-        }
-    }
-}
-
-static uint16_t voice_period(int v)
-{
-    return (uint16_t)(stdl_host_ym[2 * v]
-                      | ((stdl_host_ym[2 * v + 1] & 0x0F) << 8));
-}
 
 /* key channel ch at block 4 with F-number fnum */
 static void key_on(int ch, int fnum)

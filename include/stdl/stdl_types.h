@@ -127,6 +127,9 @@ extern unsigned long stdl_blit_blitter;  /* rows via the BLiTTER */
 extern unsigned long stdl_blit_inline;   /* rows copied inline   */
 extern unsigned long stdl_blit_memcpy;   /* rows via memcpy      */
 extern unsigned long stdl_blit_shift;    /* rows via the shifter */
+extern unsigned long stdl_blit_unaligned; /* rows that lost the
+                                          * inline copy to a
+                                          * word-aligned buffer  */
 extern unsigned long stdl_blit_rows;     /* rows, any path       */
 extern unsigned long stdl_blit_ticks;    /* 200Hz ticks inside   */
 #endif

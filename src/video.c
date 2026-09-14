@@ -368,8 +368,16 @@ void STDL_WaitVBL(void)
         ;
 }
 
+int (*stdl_ovsc_flip)(void);
+
 void STDL_Flip(void)
 {
+    /* While a border is open, overscan.c owns the video base and
+     * flips between its own two tall pages; Setscreen here would be
+     * a second owner of the same register. */
+    if (stdl_ovsc_flip != NULL && stdl_ovsc_flip()) {
+        return;
+    }
     if (stdl.doublebuf) {
         Setscreen((void *)-1L, stdl.page[stdl.backpage], -1);
         STDL_WaitVBL();

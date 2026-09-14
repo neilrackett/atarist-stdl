@@ -236,6 +236,18 @@ uint8_t  stdl_ovsc_botok;    /* ...and bottom; the beam estimate   */
                              /* reads them (each ISR sets its own) */
 uint8_t  stdl_ovsc_bhi;      /* screen base bytes the top ISR      */
 uint8_t  stdl_ovsc_bmid;     /* compares the video counter against */
+/*
+ * The second page's bytes, when double-buffered; a copy of the
+ * first otherwise. The ISR accepts either, because on the frame
+ * where a flip takes effect the counter reads one page while the
+ * variable says the other - measured as exactly one failed border
+ * per flip when only one base was accepted, which is fifty a second
+ * and plainly visible. Both values are a page start, so accepting
+ * two of them keeps the check's meaning: the beam is at the top of
+ * a frame, not somewhere in the middle of one.
+ */
+uint8_t  stdl_ovsc_bhi2;
+uint8_t  stdl_ovsc_bmid2;
 uint32_t stdl_ovsc_missed;   /* frames whose flip was skipped      */
 
 /* bottom ISR data: dbra turns before the 60Hz write, indexed by
@@ -318,7 +330,32 @@ uint16_t stdl_ovsc_pre_parks;
 static uint8_t pre_buf[256];
 
 static void *buf_alloc;
-static uint8_t *buf;
+static uint8_t *buf;                /* page given to the hardware */
+static uint8_t *buf_base;           /* first page, aligned start  */
+static uint8_t *draw;               /* the one being drawn into  */
+static uint8_t *buf2_alloc;         /* second page, DOUBLEBUF    */
+static uint8_t *page2;              /* its 256-aligned start     */
+
+/*
+ * Which page the video counter is walking right now.
+ *
+ * With two pages the base the hardware fetches from changes a frame
+ * after the register write, and the border ISRs run before the main
+ * line resumes from its wait - so a variable saying "the displayed
+ * page" is stale for exactly one frame, every frame, and the beam
+ * estimate is then wrong by the distance between the pages. The
+ * counter is never ambiguous: the two pages are separate
+ * allocations, so the address itself says which one. This costs a
+ * compare against a decision that already costs hundreds of cycles.
+ */
+static __inline__ uintptr_t live_base(uintptr_t addr)
+{
+    if (page2 != NULL && addr >= (uintptr_t)page2
+        && addr < (uintptr_t)page2 + MAX_FETCH_BYTES) {
+        return (uintptr_t)page2;
+    }
+    return (uintptr_t)buf_base;
+}
 static uint32_t old_ta_vec;      /* original $134 and $120 vectors */
 static uint32_t old_tb_vec;
 static uint32_t old_tc_vec;      /* original $114 (Timer C) vector   */
@@ -461,12 +498,16 @@ __asm__(
 "    cmp.b  %d1,%d0\n"
 "    blo    ovsc_ta_late\n"
 "    move.b 0xffff8205.w,%d0\n"
+"    move.b 0xffff8207.w,%d1\n"
 "    cmp.b  _stdl_ovsc_bhi,%d0\n"
+"    bne.s  2f\n"
+"    cmp.b  _stdl_ovsc_bmid,%d1\n"
+"    beq.s  3f\n"
+"2:  cmp.b  _stdl_ovsc_bhi2,%d0\n"
 "    bne    ovsc_ta_late\n"
-"    move.b 0xffff8207.w,%d0\n"
-"    cmp.b  _stdl_ovsc_bmid,%d0\n"
+"    cmp.b  _stdl_ovsc_bmid2,%d1\n"
 "    bne    ovsc_ta_late\n"
-"    tst.b  0xffff8209.w\n"
+"3:  tst.b  0xffff8209.w\n"
 "    bne    ovsc_ta_late\n"
 "    clr.b  0xffff820a.w\n"
 "    lea    0xfffffa21.w,%a0\n"
@@ -1448,7 +1489,7 @@ static __inline__ int pic_first(void)
     return ((mode & MODE_TOP) && stdl_ovsc_topok) ? 34 : 63;
 }
 
-static __inline__ uintptr_t pic_end(void)
+static __inline__ uintptr_t pic_end(uintptr_t base)
 {
     int rows = 200;
 
@@ -1458,14 +1499,14 @@ static __inline__ uintptr_t pic_end(void)
     if ((mode & MODE_BOT) && stdl_ovsc_botok) {
         rows += 45;
     }
-    return (uintptr_t)buf + ((uintptr_t)rows << 7) + ((uintptr_t)rows << 5);
+    return base + ((uintptr_t)rows << 7) + ((uintptr_t)rows << 5);
 }
 
 /* the counter address at which the reserve before the next window
  * begins, for a beam at `addr` in the picture: the bottom window
  * while the beam is above it, else the VBL's (top modes) or the
  * frame's end (bottom-only: nothing to protect after the bottom) */
-static uintptr_t pic_win_addr(uintptr_t addr)
+static uintptr_t pic_win_addr(uintptr_t addr, uintptr_t base)
 {
     /* rows from row 0 to the reserve's start, times 160, for a
      * picture starting at line 34 or 63 */
@@ -1481,7 +1522,7 @@ static uintptr_t pic_win_addr(uintptr_t addr)
     uintptr_t w;
 
     if (mode & MODE_BOT) {
-        w = (uintptr_t)buf + (open ? bot_open : bot_closed);
+        w = base + (open ? bot_open : bot_closed);
         if (addr < w) {
             return w;
         }
@@ -1492,11 +1533,11 @@ static uintptr_t pic_win_addr(uintptr_t addr)
             return 0;
         }
         if (!(mode & MODE_TOP)) {
-            return (uintptr_t)buf + (OVSC_FRAME_LINES - 63)
-                                    * STDL_SCREEN_STRIDE;
+            return base + (OVSC_FRAME_LINES - 63)
+                            * STDL_SCREEN_STRIDE;
         }
     }
-    return (uintptr_t)buf + (open ? vbl_open : vbl_closed);
+    return base + (open ? vbl_open : vbl_closed);
 }
 
 static int ovsc_beam(void)
@@ -1505,24 +1546,27 @@ static int ovsc_beam(void)
     uint32_t off;
     int tb, r, first;
 
+    uintptr_t base;
+
     first = pic_first();
-    end = pic_end();
     addr = ((uintptr_t)STDL_VC_HI << 16)
          | ((uintptr_t)STDL_VC_MID << 8) | STDL_VC_LO;
-    if (addr > (uintptr_t)buf && addr < end) {
+    base = live_base(addr);
+    end = pic_end(base);
+    if (addr > base && addr < end) {
         /* the row: a 32-bit dividend for divu.w, whose quotient
          * comes back in the low word */
-        off = (uint32_t)(addr - (uintptr_t)buf);
+        off = (uint32_t)(addr - base);
         __asm__("divu.w #160,%0" : "+d"(off));
         r = first + (int)(off & 0xFFFFU);
         return r;
     }
     tb = MFP_TBDR;
     if (!(mode & MODE_TOP)) {
-        r = (addr == (uintptr_t)buf) ? 62 : 312;
+        r = (addr == base) ? 62 : 312;
         return r;
     }
-    if (addr == (uintptr_t)buf) {
+    if (addr == base) {
         /* before the picture: restarted at the prefix, or not yet */
         r = (tb >= 160) ? (int)(ovsc_mulu((uint16_t)(255 - tb), 209) >> 9) : 312;
         return r;
@@ -1617,6 +1661,7 @@ static uint16_t ovsc_blit_policy(uint16_t nlines, uint32_t cpl)
     int line, gap, end, i;
     uint16_t fit;
 
+    uintptr_t base;
     /* Fast path, the common case: the beam is in the picture, so
      * the video counter places it exactly, and the whole operation
      * ends the reserve short of the next window. Bytes of picture
@@ -1625,8 +1670,9 @@ static uint16_t ovsc_blit_policy(uint16_t nlines, uint32_t cpl)
      * so that no divide is needed - two 16x16 multiplies and shifts. */
     addr = ((uintptr_t)STDL_VC_HI << 16)
          | ((uintptr_t)STDL_VC_MID << 8) | STDL_VC_LO;
-    if (addr > (uintptr_t)buf && addr < pic_end()) {
-        w = pic_win_addr(addr);
+    base = live_base(addr);
+    if (addr > base && addr < pic_end(base)) {
+        w = pic_win_addr(addr, base);
         room = (int32_t)(w - addr);
         if (w != 0 && room > 0) {
             cost = ovsc_mulu(nlines, (uint16_t)cpl);
@@ -1745,6 +1791,8 @@ static void ovsc_program(int m)
     MFP_IMRA = (uint8_t)((MFP_IMRA & ~0x21) | bits);
     stdl_ovsc_bhi = (uint8_t)((uintptr_t)buf >> 16);
     stdl_ovsc_bmid = (uint8_t)((uintptr_t)buf >> 8);
+    stdl_ovsc_bhi2 = (uint8_t)((uintptr_t)(page2 ? page2 : buf) >> 16);
+    stdl_ovsc_bmid2 = (uint8_t)((uintptr_t)(page2 ? page2 : buf) >> 8);
     stdl_ovsc_l262lo = (uint8_t)l262;
     stdl_ovsc_l262mid = (uint8_t)(l262 >> 8);
     /* every bounded wait gives up after ~8 lines (4096 plain-ST
@@ -1770,19 +1818,21 @@ static void ovsc_program(int m)
     stdl_shutdown_overscan = ovsc_release;
 }
 
+static int ovsc_flip(void);
+
 static void ovsc_surface(void)
 {
     switch (mode) {
     case MODE_TOP:
-        stdl_screen.pixels = buf + TOP_HIDDEN_ROWS * STDL_SCREEN_STRIDE;
+        stdl_screen.pixels = draw + TOP_HIDDEN_ROWS * STDL_SCREEN_STRIDE;
         stdl_screen.h = STDL_OVERSCAN_TOP_H;
         break;
     case MODE_BOT:
-        stdl_screen.pixels = buf;
+        stdl_screen.pixels = draw;
         stdl_screen.h = STDL_OVERSCAN_BOTTOM_H;
         break;
     case MODE_TOP | MODE_BOT:
-        stdl_screen.pixels = buf + TOP_HIDDEN_ROWS * STDL_SCREEN_STRIDE;
+        stdl_screen.pixels = draw + TOP_HIDDEN_ROWS * STDL_SCREEN_STRIDE;
         stdl_screen.h = STDL_OVERSCAN_BOTH_H;
         break;
     default:
@@ -1807,11 +1857,6 @@ static int ovsc_open(int which)
     }
     if (!stdl.video_set) {
         STDL_SetError("no video mode set");
-        return 0;
-    }
-    if (stdl.doublebuf) {
-        STDL_SetError("border overscan does not combine with "
-                      "STDL_DOUBLEBUF");
         return 0;
     }
     if (stdl.mach.mch_cookie >= 0x00020000UL) {
@@ -1842,13 +1887,38 @@ static int ovsc_open(int which)
         }
         buf = (uint8_t *)(((uintptr_t)buf_alloc + 255)
                           & ~(uintptr_t)255);
+        buf_base = buf;
     }
     memset(buf, 0, MAX_FETCH_BYTES);
+    draw = buf;
+    /*
+     * A second page when the caller asked for STDL_DOUBLEBUF. The
+     * display keeps fetching `buf` while the game draws into
+     * `draw`, and STDL_Flip swaps them - which is why the flip has
+     * to be here rather than in video.c: this module owns the video
+     * base while a border is open, and the beam estimator measures
+     * the video counter against the page being displayed.
+     */
+    if (stdl.doublebuf && buf2_alloc == NULL) {
+        buf2_alloc = malloc(MAX_FETCH_BYTES + 256);
+        if (buf2_alloc == NULL) {
+            STDL_SetError("out of memory for the second overscan page");
+            free(buf_alloc);
+            buf_alloc = NULL;
+            buf = NULL;
+            return 0;
+        }
+        draw = (uint8_t *)(((uintptr_t)buf2_alloc + 255)
+                           & ~(uintptr_t)255);
+        page2 = draw;
+        memset(draw, 0, MAX_FETCH_BYTES);
+    }
 
     if (!mode) {
         /* point the display at the tall buffer and let the switch
          * land before the border trick starts, so no frame ever
          * fetches past the end of the old 200-row screen */
+        stdl_ovsc_flip = ovsc_flip;
         (void)Setscreen(buf, buf, -1);
         STDL_WaitVBL();
         /* palette writes land in the blanking from here on; if no
@@ -1902,13 +1972,63 @@ static int ovsc_close(int which)
     ovsc_release();                     /* clears the hook, reseeds
                                          * in the blanking */
     stdl_palette_apply_hw();            /* immediate, no staging */
+    stdl_ovsc_flip = NULL;
     (void)Setscreen(stdl.page[0], stdl.page[0], -1);
     STDL_WaitVBL();
-    ovsc_surface();
     free(buf_alloc);
     buf_alloc = NULL;
     buf = NULL;
+    free(buf2_alloc);
+    buf2_alloc = NULL;
+    page2 = NULL;
+    draw = NULL;
+    buf_base = NULL;
+    ovsc_surface();
     return 0;
+}
+
+/*
+ * The page flip, while a border is open.
+ *
+ * The base registers are written directly rather than through
+ * Setscreen: a trap here would disable interrupts inside a frame
+ * whose Timer B has to identify a scanline, and this module's whole
+ * timing story is about that ISR not being late. Both pages are
+ * 256-byte aligned, so only the two bytes every ST has are written
+ * and the STE's low byte can stay zero.
+ *
+ * The Shifter latches the base about three lines before the VBL, so
+ * a write landing anywhere earlier in the frame takes effect at the
+ * next one - which is what the wait below returns on. After it, the
+ * page just completed is the one being fetched, `buf` names it for
+ * the beam estimator, and the game draws into the other.
+ */
+static int ovsc_flip(void)
+{
+    uint8_t *shown;
+
+    if (mode == 0 || buf2_alloc == NULL) {
+        return 0;               /* single-buffered: caller's job */
+    }
+    shown = draw;
+    STDL_VB_HI = (uint8_t)(((uintptr_t)shown >> 16) & 0xFF);
+    STDL_VB_MID = (uint8_t)(((uintptr_t)shown >> 8) & 0xFF);
+    STDL_WaitVBL();
+    draw = buf;
+    buf = shown;
+    /*
+     * The bottom ISR polls for the counter reaching line 262 of the
+     * page being displayed, so that address moves with the flip.
+     * Updated here, after the wait, because unlike the top ISR this
+     * one fires at the end of a frame - long after this function
+     * has resumed - so the frame just ended was still polling for
+     * the page it was actually showing.
+     */
+    stdl_ovsc_l262mid = (uint8_t)(((uintptr_t)buf
+        + (uintptr_t)((mode & MODE_TOP) ? 228 : 199)
+          * STDL_SCREEN_STRIDE) >> 8);
+    ovsc_surface();
+    return 1;
 }
 
 int STDL_OpenTopBorder(void)

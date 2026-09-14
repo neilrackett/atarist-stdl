@@ -467,8 +467,12 @@ first.
   border on any 50Hz ST - 228 visible lines instead of 200, added
   above the normal picture. The screen surface is updated in place
   (pixels, h, clip), so drawing code that reads `screen->h` needs no
-  changes; check the return (228, or 0 under STDL_DOUBLEBUF or on
-  TT/Falcon) and keep the 200-line mapping as the fallback. A 60Hz
+  changes; check the return (228, or 0 on TT/Falcon) and keep the
+  200-line mapping as the fallback. `STDL_DOUBLEBUF` works with a
+  border open: the module allocates a second tall page and
+  `STDL_Flip` swaps them, which is what a game wants if it draws a
+  whole frame and shows it - drawing then never races the beam, at
+  the cost of about 37K for the second page. A 60Hz
   base screen is switched to 50Hz while a border is open and
   restored on close - opening a border is an active choice and it
   always takes effect on ST-class hardware. Cost is one Timer A interrupt plus a

@@ -76,7 +76,7 @@ static void close_borders(void)
 int main(int argc, char *argv[])
 {
     STDL_Surface *screen;
-    int top = 0, bot = 0;
+    int top = 0, bot = 0, dbuf = 0;
 
     (void)argc; (void)argv;
     if (STDL_Init(STDL_INIT_VIDEO) < 0) {
@@ -119,10 +119,38 @@ int main(int argc, char *argv[])
                 } else if (sym == STDLK_SPACE) {
                     close_borders();
                     top = bot = 0;
+                } else if (sym == STDLK_d) {
+                    /*
+                     * Double buffering, with the borders open.
+                     * The video mode has to be set again to get
+                     * (or drop) the second page, and that closes
+                     * any border, so they are reopened after.
+                     * STDL_Flip then swaps two tall pages: the
+                     * overscan module owns the video base while a
+                     * border is open, so the flip goes through it
+                     * rather than through Setscreen.
+                     */
+                    int wt = top, wb = bot;
+                    close_borders();
+                    dbuf = !dbuf;
+                    screen = STDL_SetVideoMode(320, 200, 4,
+                                 dbuf ? STDL_DOUBLEBUF : 0);
+                    if (screen == NULL) {
+                        goto done;
+                    }
+                    top = wt ? (STDL_OpenTopBorder() != 0) : 0;
+                    bot = wb ? (STDL_OpenBottomBorder() != 0) : 0;
                 } else {
                     continue;
                 }
                 paint(screen);
+                if (dbuf) {
+                    /* show it: with two pages the one just painted
+                     * is not the one on screen until the flip */
+                    STDL_Flip();
+                    paint(screen);
+                    STDL_Flip();
+                }
             }
         }
         STDL_WaitVBL();

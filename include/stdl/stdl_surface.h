@@ -30,6 +30,18 @@ void          STDL_FreeSurface(STDL_Surface *s);
  * blocks - pointer-swapped, memcpy'd, embedded in larger
  * allocations - while still drawable by every STDL primitive.
  *
+ * Align `pixels` to four bytes, not just two. The blit's fast copy
+ * for short rows moves longs and silently takes a slower word loop
+ * when it cannot, so a buffer from a generic allocator - which is
+ * word aligned, and lands on a long boundary or not depending on
+ * what was allocated before it - halves the speed of tile-sized
+ * blits about half the time, with no symptom but the clock. A
+ * library-allocated surface is long aligned for you; a borrowed one
+ * is the caller's to get right, and one spare word plus rounding
+ * the pointer up is the whole fix. A library built with
+ * -DSTDL_BLIT_STATS counts the rows that lost the fast copy this
+ * way in stdl_blit_unaligned.
+ *
  * pixels: interleaved planar (docs/format.md), even address;
  * stride: bytes per row, multiple of 8, >= ((w+15)>>4)*8;
  * mask/maskstride: transparency+composition mask (bit set =

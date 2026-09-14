@@ -29,6 +29,13 @@
  * base has been latched. Read it inside a line's fetch or in the
  * blanking - AGENTS.md records that Hatari parks it at the line end
  * at 16MHz, so a mid-line read is not trustworthy there. */
+/* Video base, the address the Shifter starts each frame from. The
+ * high two bytes exist on every ST; the low byte is STE-only, so a
+ * base that must work on both is 256-byte aligned and only the two
+ * are written. The Shifter latches this about three lines before
+ * the VBL, so a write has until then to land for the next frame. */
+#define STDL_VB_HI      (*(volatile uint8_t *)0xFFFF8201UL)
+#define STDL_VB_MID     (*(volatile uint8_t *)0xFFFF8203UL)
 #define STDL_VC_HI      (*(volatile uint8_t *)0xFFFF8205UL)
 #define STDL_VC_MID     (*(volatile uint8_t *)0xFFFF8207UL)
 #define STDL_VC_LO      (*(volatile uint8_t *)0xFFFF8209UL)
@@ -58,6 +65,9 @@ extern volatile uint8_t stdl_host_vidcnt[3];
 #define STDL_HWPAL      stdl_host_hwpal
 #define STDL_NVBLS      stdl_host_nvbls
 #define STDL_VBLQUEUE   stdl_host_vblqueue
+extern volatile uint8_t stdl_host_vidbase[2];
+#define STDL_VB_HI      stdl_host_vidbase[0]
+#define STDL_VB_MID     stdl_host_vidbase[1]
 #define STDL_VC_HI      stdl_host_vidcnt[0]
 #define STDL_VC_MID     stdl_host_vidcnt[1]
 #define STDL_VC_LO      stdl_host_vidcnt[2]
@@ -248,6 +258,12 @@ extern void (*stdl_shutdown_hwscroll)(void);
 extern volatile uint8_t stdl_host_mste_ctl;
 #define STDL_MSTE_CTL stdl_host_mste_ctl
 #endif
+/* Set by overscan.c while a border is open: STDL_Flip routes the
+ * page flip through the module that owns the video base, instead of
+ * Setscreen, which would fight it. Returns non-zero if it handled
+ * the flip. */
+extern int (*stdl_ovsc_flip)(void);
+
 extern int stdl_megaste_mode;
 void stdl_megaste_apply(int mode);
 

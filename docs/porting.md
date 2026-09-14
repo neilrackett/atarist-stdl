@@ -38,7 +38,7 @@ time, not at runtime.
 | `SDL_SetVideoMode` | `STDL_SetVideoMode` | w/h/bpp ignored; always 320x200x4 |
 | `SDL_BlitSurface` | `STDL_BlitSurface` | full SDL semantics incl. dstrect writeback |
 | `SDL_FillRect` | wrapper | colour is a palette index, not mapped RGB |
-| `SDL_Flip` | `STDL_Flip` | VBL-synced; page flip with `SDL_DOUBLEBUF` |
+| `SDL_Flip` | `STDL_Flip` | VBL-synced; page flip with `SDL_DOUBLEBUF`, including while an overscan border is open |
 | `SDL_UpdateRect(s)` | no-op | single-buffer rendering is direct to screen RAM |
 | `SDL_MapRGB` | `STDL_MapRGB` | nearest palette index |
 | `SDL_LockSurface` | no-op | surfaces are always addressable |

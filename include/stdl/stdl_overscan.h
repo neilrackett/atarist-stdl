@@ -31,8 +31,16 @@ extern "C" {
  * line 228 read as colour 0, i.e. border.
  *
  * Returns the new visible height (228), or 0 with STDL_GetError()
- * set when unavailable: no video mode yet, or STDL_DOUBLEBUF, which
- * this version does not combine with. The tricks run on a 50Hz
+ * set when unavailable: no video mode yet, or a TT/Falcon.
+ *
+ * STDL_DOUBLEBUF works here: opening a border with it set allocates
+ * a second tall page, and STDL_Flip swaps them. The flip goes
+ * through this module rather than Setscreen, because while a border
+ * is open this module owns the video base, and its interrupts
+ * measure the video counter against the page being displayed. The
+ * cost is one more tall buffer, about 37K; a game that draws a
+ * whole frame and shows it is the case this is for, since it stops
+ * the drawing racing the beam. The tricks run on a 50Hz
  * frame, so a 60Hz base screen is switched to 50Hz while a border
  * is open and restored on the final close - opening a border is an
  * active choice, and it always takes effect on ST-class hardware.
@@ -92,9 +100,9 @@ void STDL_CloseTopBorder(void);
  *
  * Costs an interrupt and two to three lines of polling per frame,
  * under 1% of an 8MHz frame, most of it waiting on the beam. Same
- * requirements and behaviour as the top border otherwise (no
- * STDL_DOUBLEBUF, ST-class machine; the screen surface is updated
- * in place). Returns the resulting surface height, or 0 with
+ * requirements and behaviour as the top border otherwise
+ * (ST-class machine; STDL_DOUBLEBUF supported as above, and the
+ * screen surface is repointed by each flip). Returns the resulting surface height, or 0 with
  * STDL_GetError() set.
  *
  * The two variants combine automatically: opening the second while

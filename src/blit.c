@@ -310,6 +310,8 @@ unsigned long stdl_blit_blitter;    /* took the BLiTTER           */
 unsigned long stdl_blit_inline;     /* short rows copied inline   */
 unsigned long stdl_blit_memcpy;     /* rows through memcpy        */
 unsigned long stdl_blit_shift;      /* the unaligned shift path   */
+unsigned long stdl_blit_unaligned;  /* rows that wanted the inline
+                                     * copy and could not have it */
 unsigned long stdl_blit_rows;       /* rows, whichever path       */
 unsigned long stdl_blit_ticks;      /* 200Hz ticks inside         */
 #endif
@@ -534,6 +536,15 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
 #ifdef STDL_BLIT_STATS
                 if (shortrow) {
                     stdl_blit_inline += (unsigned long)h;
+                    if (!lng) {
+                        /* short enough to copy inline but the rows
+                         * are not long aligned, so it takes the
+                         * word loop instead. A borrowed buffer from
+                         * a generic allocator is misaligned half
+                         * the time, and the only symptom is the
+                         * clock - which cost a port a day. */
+                        stdl_blit_unaligned += (unsigned long)h;
+                    }
                 } else {
                     stdl_blit_memcpy += (unsigned long)h;
                 }

@@ -471,6 +471,25 @@ warnings** with the Makefile's `-Wall -Wextra`.
 - gcc 4.6 does not unswitch loops: hoist loop-invariant branches
   (edge masks, format dispatch) manually; peel first/last
   iterations.
+- **A frame time can move because a library grew, on a machine with
+  no cache at all.** A port measured a reproducible 16ms step across
+  one commit here, on a plain STE, and bisected it cleanly over
+  several rebuilds. Every change in that commit was then exonerated
+  one at a time, and the counters added to settle it read zero: the
+  function had never been called during gameplay. Adding the
+  counters also made the step vanish. What was left is that the
+  commit changed the size of `blit.o` and therefore the address of
+  everything linked after it, and the port's frame sits on a
+  vertical-blank boundary where a few hundred bytes decide which
+  side it lands on. The Mega STE note below is the cached version of
+  the same hazard; this one has no cache to blame.
+  Two things follow. A frame-time regression attributed to a library
+  bump needs "did this code run at all" answered first, and an
+  opt-in counter (`-DSTDL_BLIT_STATS` in blit.c) answers it in one
+  run where a throughput sweep never will. And a port that sits on a
+  frame boundary has no stable ground to measure on, which is an
+  argument for giving it a way to ask how much beam time is left
+  rather than discovering the answer by missing.
 - **Mega STE benchmark numbers are code-layout-sensitive.** Its
   16MHz mode leans on a small cache, so an unrelated rebuild can
   move a frame-time figure ~10% either way (measured: one port's

@@ -299,6 +299,26 @@ first.
   time in setup alone, so fewer, larger blits beat many small ones
   even when the pixel count is identical. `tests/hatari/blitcost.c`
   in the STDL repo measures it on your machine.
+- **Before believing a library bump cost you time, check the code
+  ran.** A port lost 27% of its frame rate across one STDL commit,
+  reproducibly, on a plain STE. The cause was not in that commit:
+  the blit it blamed was never called during gameplay, a guard in
+  the port's own code saw to that. The commit changed the size of an
+  object file, which moved everything after it, and the port's frame
+  sat on a vertical-blank boundary. Build the library with
+  `-DSTDL_BLIT_STATS` and read `stdl_blit_calls`: a counter that
+  says zero ends the investigation in one run. A frame time that
+  steps by exactly one frame period is a missed boundary, not a
+  slowdown - look for what waits, not for what got slower.
+- **With a border open, the BLiTTER loses to the CPU.** Measured on
+  an emulated STE, copies to the screen at 8 rows tall: the CPU path
+  wins at every width up to 256 pixels, and at full width the
+  BLiTTER goes from 615 to 860 when the bottom border opens while
+  the CPU path stays at 740. The overscan blit policy has to place
+  each BLiTTER operation against the beam, and that costs more than
+  the BLiTTER saves at these sizes. A port running overscan should
+  try `STDL_UseBlitter(0)` and measure; one such port finds it costs
+  nothing either way, which says the same thing.
 - **Have the program say which path it took.** A library fast path
   can be gated on something invisible - an alignment, a flag, a
   machine feature - and when it declines, the picture is identical

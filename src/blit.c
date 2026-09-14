@@ -53,9 +53,17 @@ STDL_PLANE_INLINE void copy_group(const uint16_t *sg, uint16_t *dg,
     if (dm != NULL && vis != 0) {
         if ((flags & STDL_BLIT_MARK) != 0) {
             dm[g] |= vis;          /* blitted pixels become foreground */
-        } else {
+        } else if ((flags & STDL_BLIT_UNDER) == 0) {
             dm[g] &= (uint16_t)~vis;   /* blitted pixels become opaque */
         }
+        /*
+         * Under UNDER alone the clear is provably a no-op: vis has
+         * already had the marked bits removed above, so
+         * dm & ~(vis & ~dm) is dm. It stays for UNDER|MARK, where
+         * the set above is emphatically not identity. A port whose
+         * sprites all draw with UNDER was paying a load, a not, an
+         * and and a store per group-row for nothing.
+         */
     }
 }
 
@@ -270,9 +278,11 @@ STDL_PLANE_INLINE void blit_rows_shift(const uint8_t *srow,
                     }
                 }
                 if (dm != NULL) {
+                    /* the clear is identity under UNDER alone -
+                     * see copy_group */
                     if ((flags & STDL_BLIT_MARK) != 0) {
                         dm[g] |= vis;
-                    } else {
+                    } else if ((flags & STDL_BLIT_UNDER) == 0) {
                         dm[g] &= (uint16_t)~vis;
                     }
                 }
@@ -404,6 +414,17 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
     }
 
     masked = (src->flags & STDL_SRCKEY) && src->mask != NULL;
+    /*
+     * With no destination mask there is nothing for UNDER or MARK
+     * to read or set, so they are no-ops - but the fast routes are
+     * gated on flags being zero, so leaving them set costs a caller
+     * that passes them scene-wide both the BLiTTER and the whole-row
+     * copy on every blit to an unmasked surface. blit8.c already
+     * strips its own pair for the same reason.
+     */
+    if (dst->mask == NULL) {
+        flags &= ~(unsigned)(STDL_BLIT_UNDER | STDL_BLIT_MARK);
+    }
 
     {
         int sphase = sx & 15;
@@ -461,28 +482,51 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                 ? (int16_t)(src->maskstride - (ng - 1) * 2) : 0;
             int p;
 
-            for (p = 0; p < np; p++) {
-                uintptr_t sp = sbase + (uintptr_t)(p * 2);
-                uintptr_t dp = dbase + (uintptr_t)(p * 2);
-
-                if (!masked) {
-                    stdl_blitter_go(sp, 8, s_yinc, dp, 8, d_yinc,
-                                    lm, rm, (uint16_t)ng, (uint16_t)h,
-                                    STDL_BLIT_HOP_SRC,
-                                    STDL_BLIT_OP_SRC);
-                } else {
-                    stdl_blitter_go(sp, 8, s_yinc, dp, 8, d_yinc,
-                                    lm, rm, (uint16_t)ng, (uint16_t)h,
-                                    STDL_BLIT_HOP_SRC,
-                                    STDL_BLIT_OP_XOR);
-                    stdl_blitter_go(smbase, 2, sm_yinc, dp, 8, d_yinc,
-                                    lm, rm, (uint16_t)ng, (uint16_t)h,
-                                    STDL_BLIT_HOP_SRC,
-                                    STDL_BLIT_OP_AND);
-                    stdl_blitter_go(sp, 8, s_yinc, dp, 8, d_yinc,
-                                    lm, rm, (uint16_t)ng, (uint16_t)h,
-                                    STDL_BLIT_HOP_SRC,
-                                    STDL_BLIT_OP_XOR);
+            /*
+             * The registers that do not change between planes are
+             * written once. An unmasked four-plane copy issued
+             * eleven of them per plane and a masked one per pass,
+             * which measured as about half the BLiTTER's setup.
+             */
+            if (!masked) {
+                stdl_blitter_setup(8, s_yinc, 8, d_yinc, lm, rm,
+                                   (uint16_t)ng, STDL_BLIT_HOP_SRC,
+                                   STDL_BLIT_OP_SRC);
+                for (p = 0; p < np; p++) {
+                    stdl_blitter_run(sbase + (uintptr_t)(p * 2),
+                                     dbase + (uintptr_t)(p * 2),
+                                     (uint16_t)ng, (uint16_t)h,
+                                     STDL_BLIT_HOP_SRC);
+                }
+            } else {
+                /* XOR-AND-XOR, one pass shape at a time across all
+                 * planes, so each shape's registers are set once */
+                stdl_blitter_setup(8, s_yinc, 8, d_yinc, lm, rm,
+                                   (uint16_t)ng, STDL_BLIT_HOP_SRC,
+                                   STDL_BLIT_OP_XOR);
+                for (p = 0; p < np; p++) {
+                    stdl_blitter_run(sbase + (uintptr_t)(p * 2),
+                                     dbase + (uintptr_t)(p * 2),
+                                     (uint16_t)ng, (uint16_t)h,
+                                     STDL_BLIT_HOP_SRC);
+                }
+                stdl_blitter_setup(2, sm_yinc, 8, d_yinc, lm, rm,
+                                   (uint16_t)ng, STDL_BLIT_HOP_SRC,
+                                   STDL_BLIT_OP_AND);
+                for (p = 0; p < np; p++) {
+                    stdl_blitter_run(smbase,
+                                     dbase + (uintptr_t)(p * 2),
+                                     (uint16_t)ng, (uint16_t)h,
+                                     STDL_BLIT_HOP_SRC);
+                }
+                stdl_blitter_setup(8, s_yinc, 8, d_yinc, lm, rm,
+                                   (uint16_t)ng, STDL_BLIT_HOP_SRC,
+                                   STDL_BLIT_OP_XOR);
+                for (p = 0; p < np; p++) {
+                    stdl_blitter_run(sbase + (uintptr_t)(p * 2),
+                                     dbase + (uintptr_t)(p * 2),
+                                     (uint16_t)ng, (uint16_t)h,
+                                     STDL_BLIT_HOP_SRC);
                 }
             }
             if (dmrow != NULL) {
@@ -533,6 +577,7 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                  * 68000.
                  */
                 const int shortrow = bytes <= BLIT_INLINE_MAX;
+                const int lng = (((uintptr_t)sp | (uintptr_t)dp) & 3) == 0;
 #ifdef STDL_BLIT_STATS
                 if (shortrow) {
                     stdl_blit_inline += (unsigned long)h;
@@ -550,7 +595,6 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                 }
                 stdl_blit_rows += (unsigned long)h;
 #endif
-                const int lng = (((uintptr_t)sp | (uintptr_t)dp) & 3) == 0;
                 for (y = 0; y < h; y++) {
                     if (shortrow && lng) {
                         const uint32_t *s4 = (const uint32_t *)sp;
@@ -590,6 +634,10 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                     dp += dst->stride;
                 }
             } else {
+#ifdef STDL_BLIT_STATS
+                stdl_blit_shift += (unsigned long)h;
+                stdl_blit_rows += (unsigned long)h;
+#endif
 #define BLIT_ALIGNED(np) \
                 blit_rows_aligned(srow + sg0 * 8, drow, \
                                   masked ? smrow + sg0 * 2 : NULL, \

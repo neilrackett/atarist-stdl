@@ -71,7 +71,7 @@ static void cursor_undraw(void)
 static void cursor_draw(int mx, int my)
 {
     STDL_Cursor *c = current;
-    int x0, y0, r, gx, row, g, p, screen_groups;
+    int x0, y0, r, gx, row, g, p, screen_groups, sh, rs;
     int np = stdl_planes;
 
     if (c == NULL || !visible || stdl_screen.pixels == NULL) {
@@ -83,24 +83,41 @@ static void cursor_draw(int mx, int my)
     gx = x0 >> 4;               /* arithmetic shift floors */
     screen_groups = stdl_screen.stride / 8;
 
+    /* the window's shift, and its complement for the high half */
+    sh = 16 - r;                /* 1..16, never 0: r is x0 & 15  */
+    rs = 32 - sh;
+
     for (row = 0; row < c->h; row++) {
         int py = y0 + row;
         uint8_t *line;
-        uint64_t paint, white;
+        uint32_t pv, wv;
+        uint16_t pw[CUR_GROUPS], ww[CUR_GROUPS];
 
         if (py < 0 || py >= stdl_screen.h) {
             continue;
         }
         line = stdl_screen.pixels + stdl_row_off(py, stdl_screen.stride);
 
-        /* place the 32 cursor bits in a 48-bit window whose top bit
-         * is the first pixel of group gx */
-        paint = (uint64_t)(c->mask[row] | c->data[row]) << (16 - r);
-        white = (uint64_t)(c->mask[row] & ~c->data[row]) << (16 - r);
+        /*
+         * The 32 cursor bits sit in a 48-bit window whose top bit is
+         * the first pixel of group gx. Kept as two 32-bit halves
+         * rather than a uint64_t: on this target every variable
+         * 64-bit shift is an __ashldi3 or __lshrdi3 call, and the
+         * old form made eight of them per row - about 15,000 cycles
+         * for a 16-row cursor, redrawn on every mouse move.
+         */
+        pv = c->mask[row] | c->data[row];
+        wv = c->mask[row] & ~c->data[row];
+        pw[0] = (uint16_t)(pv >> rs);
+        pw[1] = (uint16_t)((pv << sh) >> 16);
+        pw[2] = (uint16_t)(pv << sh);
+        ww[0] = (uint16_t)(wv >> rs);
+        ww[1] = (uint16_t)((wv << sh) >> 16);
+        ww[2] = (uint16_t)(wv << sh);
 
         for (g = 0; g < CUR_GROUPS; g++) {
-            uint16_t pm = (uint16_t)(paint >> (32 - 16 * g));
-            uint16_t wm = (uint16_t)(white >> (32 - 16 * g));
+            uint16_t pm = pw[g];
+            uint16_t wm = ww[g];
             uint16_t *grp;
 
             if (gx + g < 0 || gx + g >= screen_groups) {

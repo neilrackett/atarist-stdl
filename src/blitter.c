@@ -78,19 +78,30 @@ int STDL_UseBlitter(int enable)
  * (merged when the line is a single word). hop: 0 = all ones,
  * 2 = source. op: 0 zeros, 1 src AND dst, 3 src, 6 src XOR dst.
  */
-void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
-                     uintptr_t dst, int16_t dxinc, int16_t dyinc,
-                     uint16_t em1, uint16_t em3,
-                     uint16_t nwords, uint16_t nlines,
-                     uint8_t hop, uint8_t op)
+/*
+ * Everything the BLiTTER needs that does not change between the
+ * planes of one operation. A four-plane copy used to write these
+ * eleven registers four times over, and a masked one twelve: at
+ * I/O speed that is 400-500 cycles of pure repetition against a
+ * fitted setup cost of 860, so half the preamble was the same
+ * numbers going back into the same registers. Callers that issue
+ * one plane still use stdl_blitter_go, which is this plus a run.
+ */
+/* the increments, kept for the split path below: the BLiTTER is one
+ * global device and these mirror registers it already holds */
+static int16_t bl_sxinc, bl_syinc, bl_dxinc, bl_dyinc;
+
+void stdl_blitter_setup(int16_t sxinc, int16_t syinc,
+                        int16_t dxinc, int16_t dyinc,
+                        uint16_t em1, uint16_t em3, uint16_t nwords,
+                        uint8_t hop, uint8_t op)
 {
     volatile blitregs_t *b = BLIT;
-    /* bus cycles per line: ~4.5 a word for a fill, ~9 for a copy,
-     * plus a little per line (measured on an STE, and the same on
-     * a Mega STE - the blitter runs on the 8MHz bus whatever the
-     * CPU does) */
-    const uint32_t cpl = (hop == STDL_BLIT_HOP_ONES)
-                       ? (uint32_t)nwords * 5u + 16 : (uint32_t)nwords * 10u + 16;
+
+    bl_sxinc = sxinc;
+    bl_syinc = syinc;
+    bl_dxinc = dxinc;
+    bl_dyinc = dyinc;
 
     b->src_xinc = sxinc;
     b->src_yinc = syinc;
@@ -102,6 +113,30 @@ void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
     b->hop = hop;
     b->op = op;
     b->skew = 0;
+}
+
+void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
+                     uintptr_t dst, int16_t dxinc, int16_t dyinc,
+                     uint16_t em1, uint16_t em3,
+                     uint16_t nwords, uint16_t nlines,
+                     uint8_t hop, uint8_t op)
+{
+    stdl_blitter_setup(sxinc, syinc, dxinc, dyinc, em1, em3, nwords,
+                       hop, op);
+    stdl_blitter_run(src, dst, nwords, nlines, hop);
+}
+
+void stdl_blitter_run(uintptr_t src, uintptr_t dst, uint16_t nwords,
+                      uint16_t nlines, uint8_t hop)
+{
+    volatile blitregs_t *b = BLIT;
+    /* bus cycles per line: ~4.5 a word for a fill, ~9 for a copy,
+     * plus a little per line (measured on an STE, and the same on
+     * a Mega STE - the blitter runs on the 8MHz bus whatever the
+     * CPU does) */
+    const uint32_t cpl = (hop == STDL_BLIT_HOP_ONES)
+                       ? (uint32_t)nwords * 5u + 16 : (uint32_t)nwords * 10u + 16;
+
     /* Hog mode stalls the CPU for the whole operation, which is
      * fine until something needs an interrupt serviced on time: the
      * border overscan trick must take Timer A/B inside a scanline
@@ -151,9 +186,9 @@ void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
              * (nwords-1) x steps and one y step each. 16-bit
              * multiplies - the 32-bit kind is a library call */
             const int16_t sl = (int16_t)(blit_muls((int16_t)(nwords - 1),
-                                                   sxinc) + syinc);
+                                                   bl_sxinc) + bl_syinc);
             const int16_t dl = (int16_t)(blit_muls((int16_t)(nwords - 1),
-                                                   dxinc) + dyinc);
+                                                   bl_dxinc) + bl_dyinc);
             src = (uintptr_t)((int32_t)src + blit_muls((int16_t)n, sl));
             dst = (uintptr_t)((int32_t)dst + blit_muls((int16_t)n, dl));
         }

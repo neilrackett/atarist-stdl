@@ -266,9 +266,10 @@ STDL_PLANE_INLINE void blit_sprite_rows(const uint16_t *srow,
             uint16_t cover = (g == g0) ? cover0
                            : (g == g1 - 1) ? cover1 : 0xFFFFu;
 
-            w[1] = 0;
-            w[2] = 0;
-            w[3] = 0;
+            /* w[p] above the plane budget is never read: every use
+             * below is guarded by the same np test that fills it,
+             * so the three zero stores this loop used to make were
+             * dead - three stores a group, a row, a sprite. */
             if (!runtime_shift) {
                 const uint16_t *sg = src + g * SPR_WORDS;
                 mask = sg[0];

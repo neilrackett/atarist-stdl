@@ -71,6 +71,11 @@ static void mix_block(int8_t *dst)
     for (i = 0; i < STDL_VOICES; i++) {
         voice_t *v = &vc.v[i];
         const int8_t *vt;
+        /* the sample, in a local: the store into dst may alias the
+         * pointer in the voice struct as far as gcc knows, so
+         * without this it is reloaded for every sample - about
+         * 6000 cycles a block at 8MHz */
+        const int8_t *data;
         uint32_t pos, step, end;
         int n;
 
@@ -78,6 +83,7 @@ static void mix_block(int8_t *dst)
             continue;
         }
         vt = v->vt;
+        data = v->data;
         pos = v->pos;
         step = v->step;
         end = v->end;
@@ -95,7 +101,7 @@ static void mix_block(int8_t *dst)
                     end = v->loopstart + v->loopsize;
                     v->end = end;
                 }
-                dst[n] = vt[(uint8_t)v->data[pos >> 16]];
+                dst[n] = vt[(uint8_t)data[pos >> 16]];
                 pos += step;
             }
         } else {
@@ -109,7 +115,7 @@ static void mix_block(int8_t *dst)
                     end = v->loopstart + v->loopsize;
                     v->end = end;
                 }
-                dst[n] += vt[(uint8_t)v->data[pos >> 16]];
+                dst[n] += vt[(uint8_t)data[pos >> 16]];
                 pos += step;
             }
         }

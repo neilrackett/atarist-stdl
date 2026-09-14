@@ -1890,7 +1890,6 @@ static int ovsc_open(int which)
         buf_base = buf;
     }
     memset(buf, 0, MAX_FETCH_BYTES);
-    draw = buf;
     /*
      * A second page when the caller asked for STDL_DOUBLEBUF. The
      * display keeps fetching `buf` while the game draws into
@@ -1898,6 +1897,13 @@ static int ovsc_open(int which)
      * to be here rather than in video.c: this module owns the video
      * base while a border is open, and the beam estimator measures
      * the video counter against the page being displayed.
+     *
+     * Opening the second border comes back through here with the
+     * pages already allocated and possibly already swapped, so the
+     * drawing page is whichever one is not being displayed - not
+     * unconditionally `buf`, which would hand the game the live
+     * page and turn every flip into a swap with itself. Silent, and
+     * the only symptom would be tearing.
      */
     if (stdl.doublebuf && buf2_alloc == NULL) {
         buf2_alloc = malloc(MAX_FETCH_BYTES + 256);
@@ -1908,10 +1914,16 @@ static int ovsc_open(int which)
             buf = NULL;
             return 0;
         }
-        draw = (uint8_t *)(((uintptr_t)buf2_alloc + 255)
-                           & ~(uintptr_t)255);
-        page2 = draw;
+        page2 = (uint8_t *)(((uintptr_t)buf2_alloc + 255)
+                            & ~(uintptr_t)255);
+        draw = page2;
         memset(draw, 0, MAX_FETCH_BYTES);
+    } else if (page2 != NULL) {
+        /* re-open: keep the pages, take whichever is not live */
+        draw = (buf == page2) ? buf_base : page2;
+        memset(draw, 0, MAX_FETCH_BYTES);
+    } else {
+        draw = buf;
     }
 
     if (!mode) {

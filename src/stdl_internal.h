@@ -345,6 +345,15 @@ extern void (*stdl_timer_hook)(void);
  */
 #ifdef __m68k__
 int  stdl_blitter_active(void);
+/* the invariant registers once, then one call per plane: a
+ * four-plane copy was writing eleven identical registers four times
+ * over, half the fitted setup cost */
+void stdl_blitter_setup(int16_t sxinc, int16_t syinc,
+                        int16_t dxinc, int16_t dyinc,
+                        uint16_t em1, uint16_t em3, uint16_t nwords,
+                        uint8_t hop, uint8_t op);
+void stdl_blitter_run(uintptr_t src, uintptr_t dst, uint16_t nwords,
+                      uint16_t nlines, uint8_t hop);
 void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
                      uintptr_t dst, int16_t dxinc, int16_t dyinc,
                      uint16_t em1, uint16_t em3,
@@ -352,6 +361,18 @@ void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
                      uint8_t hop, uint8_t op);
 #else
 #define stdl_blitter_active() 0
+static __inline__ void stdl_blitter_setup(int16_t sxinc, int16_t syinc,
+    int16_t dxinc, int16_t dyinc, uint16_t em1, uint16_t em3,
+    uint16_t nwords, uint8_t hop, uint8_t op)
+{
+    (void)sxinc; (void)syinc; (void)dxinc; (void)dyinc;
+    (void)em1; (void)em3; (void)nwords; (void)hop; (void)op;
+}
+static __inline__ void stdl_blitter_run(uintptr_t src, uintptr_t dst,
+    uint16_t nwords, uint16_t nlines, uint8_t hop)
+{
+    (void)src; (void)dst; (void)nwords; (void)nlines; (void)hop;
+}
 static __inline__ void stdl_blitter_go(uintptr_t src, int16_t sxinc,
     int16_t syinc, uintptr_t dst, int16_t dxinc, int16_t dyinc,
     uint16_t em1, uint16_t em3, uint16_t nwords, uint16_t nlines,
@@ -400,6 +421,11 @@ static __inline__ void stdl_blitter_go(uintptr_t src, int16_t sxinc,
  * consider, which measured 8% of a tile blit - on blits it then
  * declines to accelerate.
  *
+ * Re-fitted again after the BLiTTER's per-plane register writes
+ * were hoisted out of the plane loop, which took 11-13% off every
+ * accelerated blit and moved the crossover down: 128x8 and 32x16
+ * belong to the BLiTTER now and did not before.
+ *
  * They were fitted after the short-row copy went inline; that made
  * the CPU path up to twice as fast for tile-sized blits, which is
  * what made the previous flat 32-cell threshold wrong. Re-measure
@@ -407,7 +433,7 @@ static __inline__ void stdl_blitter_go(uintptr_t src, int16_t sxinc,
  */
 #define STDL_BLIT_CPU_ROW     26
 #define STDL_BLIT_CPU_CELL     7
-#define STDL_BLIT_SETUP      860
+#define STDL_BLIT_SETUP      630
 #define STDL_BLIT_MASKED_MIN_CELLS 64   /* masked: 3 passes/plane   */
 
 /*

@@ -291,10 +291,43 @@ STDL_PLANE_INLINE void blit_rows_shift(const uint8_t *srow,
 
 /* --------------------------------------------------------------- */
 
+#ifdef STDL_BLIT_STATS
+/*
+ * Opt-in counters, compiled in only with -DSTDL_BLIT_STATS. They
+ * exist because a port measured a frame-time step across a library
+ * commit whose every individual change had been exonerated, and the
+ * question that could not be answered from outside was whether the
+ * number of blits had changed rather than their cost. Nothing here
+ * is in a normal build: no counter, no branch, no bytes.
+ *
+ * Read them from the game, print them per frame, reset them when
+ * you like. stdl_blit_ticks is 200Hz ticks accumulated around the
+ * call, so it is 5ms-grained per blit and only means anything
+ * summed over a frame or a run.
+ */
+unsigned long stdl_blit_calls;      /* entries                    */
+unsigned long stdl_blit_blitter;    /* took the BLiTTER           */
+unsigned long stdl_blit_inline;     /* short rows copied inline   */
+unsigned long stdl_blit_memcpy;     /* rows through memcpy        */
+unsigned long stdl_blit_shift;      /* the unaligned shift path   */
+unsigned long stdl_blit_rows;       /* rows, whichever path       */
+unsigned long stdl_blit_ticks;      /* 200Hz ticks inside         */
+#endif
+
 int STDL_BlitSurface(STDL_Surface *src, const STDL_Rect *srcrect,
                      STDL_Surface *dst, STDL_Rect *dstrect)
 {
+#ifdef STDL_BLIT_STATS
+    uint32_t t0 = STDL_HZ200;
+    int r;
+
+    stdl_blit_calls++;
+    r = STDL_BlitSurfaceEx(src, srcrect, dst, dstrect, 0);
+    stdl_blit_ticks += STDL_HZ200 - t0;
+    return r;
+#else
     return STDL_BlitSurfaceEx(src, srcrect, dst, dstrect, 0);
+#endif
 }
 
 int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
@@ -406,6 +439,10 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                   >= STDL_BLIT_MASKED_MIN_CELLS
                 : stdl_row_off(h, (uint16_t)(STDL_BLIT_CPU_ROW
                        + STDL_BLIT_CPU_CELL * ng)) > STDL_BLIT_SETUP)) {
+#ifdef STDL_BLIT_STATS
+            stdl_blit_blitter++;
+            stdl_blit_rows += (unsigned long)h;
+#endif
             /*
              * BLiTTER path, one plane rectangle per pass. Masked
              * blits use XOR-AND-XOR: d ^= s; d &= mask; d ^= s
@@ -494,6 +531,14 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                  * 68000.
                  */
                 const int shortrow = bytes <= BLIT_INLINE_MAX;
+#ifdef STDL_BLIT_STATS
+                if (shortrow) {
+                    stdl_blit_inline += (unsigned long)h;
+                } else {
+                    stdl_blit_memcpy += (unsigned long)h;
+                }
+                stdl_blit_rows += (unsigned long)h;
+#endif
                 const int lng = (((uintptr_t)sp | (uintptr_t)dp) & 3) == 0;
                 for (y = 0; y < h; y++) {
                     if (shortrow && lng) {

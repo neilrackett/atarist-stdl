@@ -113,6 +113,24 @@ typedef struct STDL_Surface {
 } STDL_Surface;
 
 /* Fill "colour" that makes masked pixels transparent again */
+/*
+ * Blit counters, present only in a library built with
+ * -DSTDL_BLIT_STATS. They answer "how many blits, and by which
+ * path" from inside a game's own per-frame logging, which is what
+ * a throughput sweep cannot tell you: a frame-time step can come
+ * from a change in the number of calls as easily as from their
+ * cost. A normal build has no counters, no branches and no bytes.
+ */
+#ifdef STDL_BLIT_STATS
+extern unsigned long stdl_blit_calls;    /* entries              */
+extern unsigned long stdl_blit_blitter;  /* rows via the BLiTTER */
+extern unsigned long stdl_blit_inline;   /* rows copied inline   */
+extern unsigned long stdl_blit_memcpy;   /* rows via memcpy      */
+extern unsigned long stdl_blit_shift;    /* rows via the shifter */
+extern unsigned long stdl_blit_rows;     /* rows, any path       */
+extern unsigned long stdl_blit_ticks;    /* 200Hz ticks inside   */
+#endif
+
 #define STDL_TRANSPARENT 16
 
 typedef struct STDL_Sprite  STDL_Sprite;

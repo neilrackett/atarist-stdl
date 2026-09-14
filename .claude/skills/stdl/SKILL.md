@@ -352,6 +352,13 @@ first.
   says immediately that the cost is not where it was assumed. It
   was a per-frame bookkeeping loop doing 32-bit divides, not the
   pixel paths.
+- **Prove a speed-up with a control that changes one thing.** A fix
+  that reshuffles the heap can look like a fix that works. Keep the
+  mechanism and remove only what you think is incidental - allocate
+  the spare word but skip the alignment, add the instrumentation
+  without the change - and see whether the gain survives. Padding
+  the binary or profiling it are not that test: they move the
+  symptom without saying which half moved it.
 - **Check against the wall clock.** With `FF=off` emulated time is
   real time, so counting the program's own log lines over a known
   real window is an independent check on anything it measures

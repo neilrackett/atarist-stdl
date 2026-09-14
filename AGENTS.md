@@ -263,6 +263,17 @@ warnings** with the Makefile's `-Wall -Wextra`.
   time, guarantee what you can, assert it where the assert can fail,
   and print it from the target in a tool people already run -
   `dist/BLITCHK.TOS` prints the row alignment for this reason.
+- **A performance fix is not confirmed until it survives a control
+  that changes one thing.** Twice this week a fix "worked" because
+  it reshuffled the heap rather than because of its mechanism. The
+  control that settles it keeps the suspected mechanism and removes
+  only what you believe is incidental: allocate the spare word but
+  do not align it, add the instrumentation but not the change. A
+  crude perturbation - a kilobyte of padding, an instrumented build
+  - moves the symptom without telling you which half moved it, and
+  reads as noise when it is a signal you failed to aim. Both of the
+  wrong diagnoses here passed a crude perturbation and died to an
+  aimed one.
 - **A compiler can delete a guarantee about malloc.** gcc knows
   malloc returns memory aligned to MALLOC_ABI_ALIGNMENT (4 here), so
   it folded `STDL_CreateSurface`'s long-alignment adjustment to a

@@ -33,7 +33,7 @@
  * instantiation, so the guarded plane writes vanish. */
 STDL_PLANE_INLINE void copy_group(const uint16_t *sg, uint16_t *dg,
                                   uint16_t vis, uint16_t *dm, int g,
-                                  unsigned flags, const int np)
+                                  const unsigned flags, const int np)
 {
     if (dm != NULL && (flags & STDL_BLIT_UNDER) != 0) {
         vis &= (uint16_t)~dm[g];    /* marked pixels protect themselves */
@@ -80,7 +80,7 @@ STDL_PLANE_INLINE void blit_rows_aligned(const uint8_t *srow,
                               int smstride, int dmstride,
                               int ng, int h,
                               uint16_t lm, uint16_t rm, int masked,
-                              unsigned flags, const int np)
+                              const unsigned flags, const int np)
 {
     int y, g;
 
@@ -638,15 +638,23 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                 stdl_blit_shift += (unsigned long)h;
                 stdl_blit_rows += (unsigned long)h;
 #endif
-#define BLIT_ALIGNED(np) \
+#define BLIT_ALIGNED_F(np, fl) \
                 blit_rows_aligned(srow + sg0 * 8, drow, \
                                   masked ? smrow + sg0 * 2 : NULL, \
                                   dmrow, \
                                   src->stride, dst->stride, \
                                   smstride, dmstride, \
-                                  ng, h, lm, rm, masked, flags, (np))
-                STDL_PLANE_DISPATCH(np, BLIT_ALIGNED);
-#undef BLIT_ALIGNED
+                                  ng, h, lm, rm, masked, (fl), (np))
+#define BLIT_ALIGNED_N2(fl) BLIT_ALIGNED_F(2, (fl))
+#define BLIT_ALIGNED_N4(fl) BLIT_ALIGNED_F(4, (fl))
+                if (np <= 2) {
+                    STDL_FLAG_DISPATCH(flags, BLIT_ALIGNED_N2);
+                } else {
+                    STDL_FLAG_DISPATCH(flags, BLIT_ALIGNED_N4);
+                }
+#undef BLIT_ALIGNED_F
+#undef BLIT_ALIGNED_N2
+#undef BLIT_ALIGNED_N4
             }
         } else {
             /*
@@ -665,13 +673,21 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                 sw0 = -((-sp0 + 15) >> 4);
                 r = sp0 - sw0 * 16;
             }
-#define BLIT_SHIFT(np) \
+#define BLIT_SHIFT_F(np, fl) \
             blit_rows_shift(srow, drow, smrow, dmrow, \
                             src->stride, dst->stride, \
                             smstride, dmstride, \
-                            ng, h, lm, rm, masked, flags, sw0, r, (np))
-            STDL_PLANE_DISPATCH(np, BLIT_SHIFT);
-#undef BLIT_SHIFT
+                            ng, h, lm, rm, masked, (fl), sw0, r, (np))
+#define BLIT_SHIFT_N2(fl) BLIT_SHIFT_F(2, (fl))
+#define BLIT_SHIFT_N4(fl) BLIT_SHIFT_F(4, (fl))
+            if (np <= 2) {
+                STDL_FLAG_DISPATCH(flags, BLIT_SHIFT_N2);
+            } else {
+                STDL_FLAG_DISPATCH(flags, BLIT_SHIFT_N4);
+            }
+#undef BLIT_SHIFT_F
+#undef BLIT_SHIFT_N2
+#undef BLIT_SHIFT_N4
         }
     }
     return 0;

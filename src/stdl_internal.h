@@ -157,6 +157,28 @@ void stdl_planes_normalise(uint8_t *base, int stride, int h);
 #define STDL_PLANE_INLINE \
     static __inline__ __attribute__((always_inline))
 
+/*
+ * The two composition flags as a compile-time class, the same trick
+ * the plane count already gets: inside the loops they stop being
+ * values tested per group per row and become constants the compiler
+ * folds away, freeing the registers that held them. Four classes
+ * times two plane classes is eight instances of a row loop, which
+ * is most of why PIXEL_MAX is where it is - measured at 6548 bytes
+ * for 13-19% on masked blits.
+ */
+#define STDL_FLAG_DISPATCH(fl, BODY) \
+    do {                                                        \
+        if (((fl) & (STDL_BLIT_UNDER | STDL_BLIT_MARK)) == 0) { \
+            BODY(0u);                                           \
+        } else if (((fl) & STDL_BLIT_MARK) == 0) {              \
+            BODY(STDL_BLIT_UNDER);                              \
+        } else if (((fl) & STDL_BLIT_UNDER) == 0) {             \
+            BODY(STDL_BLIT_MARK);                               \
+        } else {                                                \
+            BODY(STDL_BLIT_UNDER | STDL_BLIT_MARK);             \
+        }                                                       \
+    } while (0)
+
 #define STDL_PLANE_DISPATCH(np, BODY) \
     do {                              \
         if ((np) <= 2) { BODY(2); }   \

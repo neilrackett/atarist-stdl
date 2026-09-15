@@ -57,6 +57,17 @@ warnings** with the Makefile's `-Wall -Wextra`.
   Hatari" section. Sound verification: record with
   `hatari-shortcut recsound` (file path comes from the
   `szYMCaptureFileName` key in the Hatari config).
+- **The size ceiling is a decision, not a law.** `PIXEL_MAX` went
+  26000 -> 33000 on 2026-09-15 to buy `STDL_FLAG_DISPATCH`: the blit
+  row loops are specialised on the two composition flags as well as
+  the plane count, which costs 6548 bytes and is worth 19% on
+  ordinary masked blits, 18% on UNDER, 13% on MARK and 7% on both,
+  measured on a plain ST over 400 masked 64x16 blits with the mask
+  reset between runs. The 1M fit that set the old ceiling was a
+  target of its own rather than a hard requirement, and the port
+  that achieved it stays pinned to the version that did. Raising it
+  again wants the same shape of argument: a measurement of what the
+  bytes buy, and a view on which machines still have to fit.
 - **Size is a test result too.** `stcmd make` runs a `sizecheck`
   target that fails the build if the pixel-path objects outgrow
   `PIXEL_MAX` in the Makefile. The archive links whole objects into

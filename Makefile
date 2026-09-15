@@ -69,8 +69,19 @@ all: $(LIB) sizecheck $(EXAMPLES) assets
 # Nothing in tests/host can see that - it is native code there - so
 # the build measures it instead. Raise the ceiling deliberately,
 # with a number, or not at all.
+#
+# Raised 26000 -> 33000 on 2026-09-15, deliberately and with the
+# numbers. STDL_FLAG_DISPATCH specialises the blit row loops on the
+# two composition flags as well as the plane count, which costs 6548
+# bytes and buys 19% on ordinary masked blits, 18% on UNDER, 13% on
+# MARK and 7% on both - measured on a plain ST, 400 masked 64x16
+# blits, mask reset between runs. UNDER is not a niche: one port
+# sets it on essentially every gameplay sprite. The 1M fit that set
+# the old ceiling was a target of its own rather than a requirement,
+# and the port that achieved it stays pinned to the version that
+# did.
 PIXEL_OBJS = $(addprefix $(OBJDIR)/src/,draw.o blit.o sprite.o surface.o)
-PIXEL_MAX  = 26000
+PIXEL_MAX  = 33000
 
 sizecheck: $(PIXEL_OBJS)
 	@n=`$(CROSS)size $(PIXEL_OBJS) | awk 'NR>1 {t+=$$1} END {print t}'`; \

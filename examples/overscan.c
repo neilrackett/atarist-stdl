@@ -76,7 +76,7 @@ static void close_borders(void)
 int main(int argc, char *argv[])
 {
     STDL_Surface *screen;
-    int top = 0, bot = 0, dbuf = 0;
+    int top = 0, bot = 0, dbuf = 0, fast = 1;
 
     (void)argc; (void)argv;
     if (STDL_Init(STDL_INIT_VIDEO) < 0) {
@@ -119,6 +119,24 @@ int main(int argc, char *argv[])
                 } else if (sym == STDLK_SPACE) {
                     close_borders();
                     top = bot = 0;
+                } else if (sym == STDLK_8) {
+                    /*
+                     * Mega STE CPU speed. The borders are closed
+                     * around it deliberately: opening one measures
+                     * the flick's own instruction costs on the
+                     * machine, so a calibration taken at 16MHz is
+                     * wrong at 8 and the other way about. Any port
+                     * changing speed mid-run wants the same
+                     * bracket. STDL_Init takes the 16MHz mode, so
+                     * this is how you get a Mega STE to behave like
+                     * a plain STE for a test.
+                     */
+                    int wt = top, wb = bot;
+                    close_borders();
+                    fast = !fast;
+                    STDL_UseMegaSteSpeedup(fast ? 1 : 0);
+                    top = wt ? (STDL_OpenTopBorder() != 0) : 0;
+                    bot = wb ? (STDL_OpenBottomBorder() != 0) : 0;
                 } else if (sym == STDLK_d) {
                     /*
                      * Double buffering, with the borders open.

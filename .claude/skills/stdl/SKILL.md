@@ -414,7 +414,10 @@ first.
   the main line, which opens the device for you.
   `examples/opldemo.c`.
 - Mega STE speed: `STDL_Init` takes the machine to 16MHz with its
-  cache. `STDL_UseMegaSteSpeedup(0)` leaves it as the user set it,
+  cache. Change it only while any border is closed - opening one
+  measures the flick's instruction costs on the machine, so a
+  calibration taken at one clock is wrong at the other.
+  `examples/overscan.c` brackets its speed key that way. `STDL_UseMegaSteSpeedup(0)` leaves it as the user set it,
   before `STDL_Init` to prevent the switch or after to undo it; 2
   and 3 are the clock without and with the cache. It exists so a
   port can A/B the two speeds in one binary, which is the only

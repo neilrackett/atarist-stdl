@@ -720,6 +720,13 @@ first.
   port's effects sound thin, raise their `vol` before reaching for
   the mixer - and mix music and effects at levels that assume two
   loud voices, not four.
+  **Re-check any balance you hold against these voices when
+  upgrading past v1.8.1.** That change gained one port's effects
+  6dB (-26.0 to -20.3 dBFS peak on identical content) and it had to
+  move its YM music from 60 to 70 to match, -24.7 to -21.4. The
+  correction lives in the port, not the library, and left unmade it
+  surfaces months later as "the sound is wrong now", a long way
+  from the upgrade that caused it.
 - Sample effects: `STDL_PlaySample(buf, bytes, rate)` points the STE
   DMA at your buffer and the hardware reads it once - no ring, no
   refill, **no per-frame cost** (`STDL_PlaySampleLoop` for ambient

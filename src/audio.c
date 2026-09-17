@@ -173,16 +173,43 @@ static void microwire_write(uint16_t data)
         ;
 }
 
+/*
+ * The play position, read without tearing.
+ *
+ * Three byte reads of a counter that is incrementing underneath
+ * them, so a carry between two of the reads gives a value that was
+ * never true. Re-reading the high byte catches only the coarse
+ * case: if the low byte wraps between reading mid and low, the
+ * mid byte has already moved on while the low byte reads as 0, and
+ * the result is up to 255 bytes BEHIND the true position with the
+ * high byte unchanged throughout.
+ *
+ * That was not academic. On a 512-byte voice ring it puts the
+ * apparent play position up to two blocks early, so the mixer's
+ * chase - which stops at the block being played - writes into the
+ * block the hardware is reading, and that is a click. It happens
+ * when a read straddles a mid-byte carry, so its rate follows the
+ * caller's phase against the counter rather than any loop period:
+ * a real STE clicked every 5-10 seconds with the voice device
+ * refilling, against every 30 seconds for the same buffer at the
+ * same rate with nothing writing to it, and the rate drifted
+ * within a session. A 50Hz VBL against a 48.9Hz block rate beats
+ * about once a second, which is the phase that drifts.
+ *
+ * So both bytes above the low one are checked. If neither moved
+ * across the read of the low byte, the three belong together.
+ */
 uint32_t stdl_dma_counter(void)
 {
-    uint8_t h, m, l, h2;
+    uint8_t h, m, l, m2, h2;
 
     do {
         h = DMA_CNT_H;
         m = DMA_CNT_M;
         l = DMA_CNT_L;
+        m2 = DMA_CNT_M;
         h2 = DMA_CNT_H;
-    } while (h != h2);
+    } while (h != h2 || m != m2);
     return ((uint32_t)h << 16) | ((uint32_t)m << 8) | l;
 }
 

@@ -47,6 +47,28 @@ void STDL_CloseVoices(void);
 int  STDL_VoicesOpen(void);
 
 /*
+ * An open device is not quite silent on real hardware. With the
+ * DMA looping a buffer of pure silence and no software touching it
+ * at all, a real STE clicks about once every thirty seconds -
+ * measured with a probe that only opens the device and holds, so
+ * there is nothing else it could be. It is the DMA unit or the
+ * analogue path, no software reaches it, and closing the device is
+ * the only thing that stops it.
+ *
+ * Stated here because a port hearing it will otherwise go looking
+ * for a fault in its own code, which is what happened: the same
+ * probe clicked every 5-10 seconds until v1.8.2, and that part was
+ * ours - a torn read of the DMA position put the mixer's chase two
+ * blocks early and let it write the block the hardware was
+ * reading. Identical geometry either way, 512 frames at 6258Hz, so
+ * the pair is a clean before and after: 5-10 seconds against the
+ * hardware's 30.
+ *
+ * If a port cannot accept that baseline, the device has to be
+ * closed when it is not wanted rather than left open and idle.
+ */
+
+/*
  * Start voice v (0..3) playing `data`: signed 8-bit mono, `len`
  * frames (at most 65535 - longer material belongs on a loop or on
  * STDL_PlaySampleLoop). After the first pass, playback loops the

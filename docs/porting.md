@@ -16,23 +16,39 @@ time, not at runtime.
 6. Profile on Mega STE (`dist/TBLITSPD.TOS` gives the baseline;
    the blitter accelerates large same-phase fills/blits
    automatically - align to 16px to benefit).
-* **Borders and the disk**: do not read a file while a border is
-  open. A hard-disk driver that masks interrupts for the length of
-  a transfer holds the border's ISR off for whole frames. Measured
-  on a real Mega STE, one file opened, read and closed per frame:
-  the bottom border appeared in 5 frames of 300 from a hard drive
-  and 3 of 300 from a floppy - both media, so changing storage is
-  not a way out. Hatari shows none of this, reporting 300 of 300,
-  so load assets before opening the border, or close it around the
-  read.
-* **Borders and the BLiTTER on a Mega STE**: if you open a border,
-  call `STDL_UseBlitter(0)`. On a 16MHz Mega STE with its cache
-  enabled, a program drawing every frame with a border open loses
-  the bottom border - it disappears and flashes back once or twice
-  a second - and forcing the CPU path is the workaround until it is
-  fixed. It costs little, because with a border open the BLiTTER
-  already loses to the CPU at the sizes a game blits. An 8MHz
-  machine, or 16MHz with the cache off, is unaffected.
+* **Known to affect an open border.** None of these stops a port
+  doing any of it - they are measured costs, so you can decide
+  what the border is worth in your frame. All are invisible in
+  Hatari, which is the awkward part: a port can only find them on
+  hardware.
+  * *Disk access.* One file opened, read and closed per frame, on a
+    real Mega STE: the bottom border appeared in 5 frames of 300
+    from a hard drive and 3 of 300 from a floppy. Both media, so
+    changing storage is not a way out - any synchronous transfer
+    holds interrupts off long enough. Loading assets before opening
+    the border, or closing it around a read, avoids it; streaming
+    from disk during play with a border open does not work.
+  * *The BLiTTER on a 16MHz Mega STE with its cache on.* A program
+    drawing every frame loses the bottom border - it disappears and
+    flashes back once or twice a second. The same drawing forced
+    through the CPU with `STDL_UseBlitter(0)` leaves it solid, and
+    costs little, because with a border open the BLiTTER already
+    loses to the CPU at the sizes a game blits (1.14-1.47x the
+    no-border time). 8MHz, or 16MHz with the cache off, is
+    unaffected.
+  * *Drawing volume, unexplained.* One port sees its bottom border
+    flicker in proportion to how much it draws - solid with the top
+    border alone, flickering in play, worst in cutscenes, steady
+    while an inventory screen redraws 45 icons a frame. It survives
+    8MHz and `STDL_UseBlitter(0)`, so it is neither the clock, the
+    cache, the BLiTTER nor the disk, and it is not understood. A
+    small fixed drawing region appears to be safe where a large
+    varying one is not.
+  * *Resident firmware.* A cartridge's network driver flickered the
+    border a few times a second on this machine and stopped
+    entirely when unloaded, its resident code holding interrupts
+    off long enough to make the timer late. Worth ruling out before
+    blaming your own frame.
 * **Display rate**: `STDL_SetRefresh(50)` or `(60)` switches the
   sync rate, `-1` queries, and the return value is the rate that
   actually took effect rather than the one asked for. A PAL machine

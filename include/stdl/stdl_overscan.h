@@ -45,7 +45,8 @@ extern "C" {
  * is open and restored on the final close - opening a border is an
  * active choice, and it always takes effect on ST-class hardware.
  *
- * KNOWN LIMITATION, 16MHz Mega STE with its cache enabled. A
+ * KNOWN TO AFFECT AN OPEN BORDER, on a 16MHz Mega STE with its
+ * cache enabled. A
  * program drawing every frame with a border open loses the bottom
  * border: on a real machine it disappears and flashes back once or
  * twice a second. It needs all three - the 16MHz clock, the cache,
@@ -59,11 +60,13 @@ extern "C" {
  * video counter is not cycle-correct and the border takes the
  * Timer B path there while hardware takes the counter path.
  *
- * So, for now: with a border open on a Mega STE, call
- * STDL_UseBlitter(0). It costs little - with a border open the
- * BLiTTER already loses to the CPU path at the sizes a game blits,
- * measured 1.14-1.47x the no-border time - and on an 8MHz machine,
- * or a 16MHz one with the cache off, none of this arises.
+ * A port on that machine can have the border or the BLiTTER, and
+ * the choice is worth making rather than assuming: STDL_UseBlitter(0)
+ * costs little here, because with a border open the BLiTTER already
+ * loses to the CPU path at the sizes a game blits - measured
+ * 1.14-1.47x the no-border time. On an 8MHz machine, or a 16MHz one
+ * with the cache off, none of this arises. See docs/porting.md for
+ * the other things measured to disturb an open border.
  *
  * Uses MFP Timer A (vector, IERA/IMRA bit 5) and Timer B's counter
  * with its interrupt masked, and puts a prefix on TOS's Timer C

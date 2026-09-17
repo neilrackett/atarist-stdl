@@ -253,6 +253,24 @@ warnings** with the Makefile's `-Wall -Wextra`.
   program can be made to hold - with no logic, disk or input behind
   it: every frame should then be identical, and any variation is
   the bug. That is how a port found the 37% in the first place.
+- **Disk I/O and an open border do not mix, and no emulator will
+  tell you.** `OVAUTO.CFG`'s `loaddisk=1` opens, reads and closes a
+  file every frame while the bottom border runs. On a real Mega STE
+  that is `open=5/300` with 295 misses from a hard drive
+  (ACSI2STM GemDrive) and `3/300` with 297 from a floppy - the
+  border is gone either way, and the two media are within noise of
+  each other. So this is not one driver's fault: any synchronous
+  transfer holds interrupts off long enough, and TOS's own floppy
+  path is as bad as anything attached. The same binary and config
+  in Hatari reports `300/300` and zero misses, because the emulator
+  models none of it. A factor of sixty between the two instruments
+  on the same question.
+  So a port that opens a border must keep the disk out of the
+  frame: load assets before opening, or close the border around a
+  read. That belongs in the porting advice, not just here. Note the
+  miss counter *does* see this one - 295 of them - which makes it a
+  different signature from a border that flickers while misses read
+  clean, and the two should not be assumed to share a cause.
 - **Isolate resident firmware before sharpening a line-locked ISR.**
   With the placement right, the real Mega STE still flickered the
   bottom border a few times a second and a probe's opens jittered
@@ -324,6 +342,28 @@ warnings** with the Makefile's `-Wall -Wextra`.
   a control if the thing being toggled can actually change between
   the two states; an idle machine quietly holds the state you were
   trying to remove.
+- **Tested and dead: memcpy's `movem.l` as a border disturber.** A
+  port's game flickers its bottom border in proportion to how much
+  it draws - solid with the top border alone, flickering in play,
+  worst in cutscenes, and stable while an inventory screen redraws
+  45 icons a frame. That is a dose-response against copy volume,
+  and it survives 8MHz, so it is neither the clock, the cache nor
+  the BLiTTER, all excluded by hardware tests.
+  The mechanism that fitted was interrupt latency: mintlib's
+  `memcpy` moves eleven registers per `movem.l`
+  (`d1-d7/a2-a3/a5-fp`), which is 12 + 8*11 = about 100 cycles
+  during which a 68000 cannot take an interrupt, against a flick
+  pulse of 12-28 cycles that has to land on an exact one - and
+  `blit.c` calls `memcpy` for every long row, so the library does
+  this to itself. It is a good story and it is wrong. `OVAUTO.CFG`
+  gained `loadcopy=N` and `blitter=0` to test it; eight full-width
+  CPU copies a frame on `--machine st` gives 300/300 with zero
+  misses. The ISR polls for its line rather than relying on exact
+  entry, which is presumably what absorbs the jitter.
+  Recorded so nobody spends a day on the same reasoning. What is
+  still unexplained is the dose-response itself: something about
+  drawing volume moves that border on hardware, at any CPU speed,
+  through neither the BLiTTER nor the disk.
 - **Possible future improvement: an unblocking flip.** `STDL_Flip`
   waits for the vertical blank, so a port whose frame takes 34-40ms
   is quantised to 40ms - 25fps on a 50Hz display - and pays a whole

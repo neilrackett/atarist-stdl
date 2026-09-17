@@ -16,6 +16,15 @@ time, not at runtime.
 6. Profile on Mega STE (`dist/TBLITSPD.TOS` gives the baseline;
    the blitter accelerates large same-phase fills/blits
    automatically - align to 16px to benefit).
+* **Borders and the disk**: do not read a file while a border is
+  open. A hard-disk driver that masks interrupts for the length of
+  a transfer holds the border's ISR off for whole frames. Measured
+  on a real Mega STE, one file opened, read and closed per frame:
+  the bottom border appeared in 5 frames of 300 from a hard drive
+  and 3 of 300 from a floppy - both media, so changing storage is
+  not a way out. Hatari shows none of this, reporting 300 of 300,
+  so load assets before opening the border, or close it around the
+  read.
 * **Borders and the BLiTTER on a Mega STE**: if you open a border,
   call `STDL_UseBlitter(0)`. On a 16MHz Mega STE with its cache
   enabled, a program drawing every frame with a border open loses

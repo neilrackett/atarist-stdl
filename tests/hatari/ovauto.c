@@ -22,6 +22,20 @@
  *   load=N         N full-screen BLiTTER fills a frame while the
  *                  border is open (hog mode, placed by the policy):
  *                  does a busy BLiTTER cost frames on this machine?
+ *   loadcopy=N     N full-width 16-row surface copies a frame,
+ *                  which is the load that matters: long rows go
+ *                  through memcpy, and mintlib's moves eleven
+ *                  registers per movem.l - about 100 cycles in
+ *                  which the 68000 cannot take an interrupt,
+ *                  against a flick pulse of 12-28 cycles that has
+ *                  to land on an exact one. load= above is BLiTTER
+ *                  fills and loadcpu= is arithmetic; neither goes
+ *                  near memcpy, which is why both reported the
+ *                  border healthy while a port's game flickered.
+ *   blitter=0|1    STDL_UseBlitter (default 1). 0 forces every
+ *                  loadcopy through the CPU path, which is where
+ *                  memcpy is: an unmasked full-width copy goes to
+ *                  the BLiTTER otherwise and never touches it.
  *   loadcpu=N      N thousand iterations of a CPU loop a frame
  *   loaddisk=1     open, read and close OVAUTO.CFG every frame: a
  *                  hard-disk driver that masks interrupts during a
@@ -105,7 +119,9 @@ extern void     stdl_ovsc_shifter_reset(void);
 static int   tests[MAXTESTS], wides[MAXTESTS], leads[MAXTESTS], ntests;
 static int   lead_default = -1;
 static int   frames = 200, force = 0, measure = 1, reset = 0;
-static int   load = 0, loadcpu = 0, loaddisk = 0;
+static int   load = 0, loadcpu = 0, loaddisk = 0, loadcopy = 0;
+static int   use_blitter = 1;
+static STDL_Surface *copysrc;
 static int   spds[4], nspds;
 static char  mode = 'b';
 
@@ -209,6 +225,10 @@ static int read_cfg(void)
             reset = atoi(eq);
         } else if (strcmp(line, "load") == 0) {
             load = atoi(eq);
+        } else if (strcmp(line, "loadcopy") == 0) {
+            loadcopy = atoi(eq);
+        } else if (strcmp(line, "blitter") == 0) {
+            use_blitter = atoi(eq);
         } else if (strcmp(line, "loadcpu") == 0) {
             loadcpu = atoi(eq);
         } else if (strcmp(line, "loaddisk") == 0) {
@@ -250,6 +270,15 @@ int main(void)
     if (screen == NULL) {
         STDL_Quit();
         return 1;
+    }
+    STDL_UseBlitter(use_blitter);
+    if (loadcopy) {
+        copysrc = STDL_CreateSurface(320, 16);
+        if (copysrc != NULL) {
+            STDL_Rect a;
+            a.x = 0; a.y = 0; a.w = 320; a.h = 16;
+            STDL_FillRect(copysrc, &a, 1);
+        }
     }
     stdl_ovsc_diag = 1;
     if (nspds == 0) {
@@ -327,6 +356,15 @@ int main(void)
                 STDL_FillRect(STDL_GetVideoSurface(), &r,
                               (uint8_t)(1 + ((f + n) & 7)));
             }
+            for (n = 0; n < loadcopy; n++) {
+                STDL_Rect d;
+                d.x = 0; d.y = (int16_t)(40 + n * 16);
+                d.w = 320; d.h = 16;
+                if (copysrc != NULL) {
+                    STDL_BlitSurface(copysrc, NULL,
+                                     STDL_GetVideoSurface(), &d);
+                }
+            }
             if (loadcpu) {
                 volatile uint32_t acc = 0;
                 uint32_t k;
@@ -375,19 +413,21 @@ int main(void)
                 stdl_ovsc_pre, stdl_ovsc_pre_cyc, stdl_ovsc_pre_np,
                 stdl_ovsc_pre_nm, stdl_ovsc_pre_parks);
         }
-        if (open_ok == 0) {
-            /* the border opened at all - stdl_ovsc_botok was never
-             * set in any of the frames that followed. Reported for
-             * years as a line in the file and nothing else, which
-             * is exactly the shape of failure a runner cannot see;
-             * a position that never opened is a failed run. */
+        if (open_ok < frames - frames / 10) {
+            /* Fewer than nine frames in ten had the border open.
+             * This was "open_ok == 0" and let a run through that
+             * opened 5 frames of 300 on real hardware with the disk
+             * busy - a border that is gone, reported as success. A
+             * threshold, because a handful of misses in a long run
+             * is normal and zero is not the only failure. */
             status = 1;
         }
-        say("speed=%d %s=%u %s lead=%d load=%d/%d/%d open=%d/%d misses=%lu polls[0..15]=",
+        say("speed=%d %s=%u %s lead=%d blit=%d load=%d/%d/%d/%d open=%d/%d misses=%lu polls[0..15]=",
             speed, wides[tt] ? "wide" : "test", stdl_ovsc_test,
             stdl_ovsc_measured ? "measured" : "scaled",
             stdl_ovsc_measured ? (int)stdl_ovsc_lead : 0,
-            load, loadcpu, loaddisk, open_ok, frames,
+            use_blitter, load, loadcpu, loaddisk, loadcopy,
+            open_ok, frames,
             (unsigned long)(m1 - m0));
         for (i = 0; i < 16; i++) {
             say("%d%s", hist[i], (i < 15) ? "," : "");

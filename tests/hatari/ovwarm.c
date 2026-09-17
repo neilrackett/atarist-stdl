@@ -272,7 +272,8 @@ static void draw_build(STDL_Surface *screen)
 }
 
 /* the state blocks and an empty bar: on a key press only */
-static int load;                /* per-frame fill: the W key */
+static int load;                /* per-frame copy: the W key */
+static STDL_Surface *loadsrc;   /* what it copies from          */
 static int blit = 1;            /* STDL_UseBlitter: the P key */
 /* the placement policy, remembered so O can put it back; overscan
  * installs it on open and clears it on the final close */
@@ -353,6 +354,12 @@ int main(int argc, char *argv[])
     }
 
     stdl_ovsc_diag = 1;                 /* the ISR then keeps dpolls */
+    loadsrc = STDL_CreateSurface(320, 16);
+    if (loadsrc != NULL) {
+        STDL_Rect a;
+        a.x = 0; a.y = 0; a.w = 320; a.h = 16;
+        STDL_FillRect(loadsrc, &a, 1);
+    }
     for (k = 0; k < 16; k++) {
         hist[k] = 0;
         drawn[0][k] = drawn[1][k] = 0;
@@ -493,16 +500,28 @@ int main(int argc, char *argv[])
             }
         }
         if (load) {
-            /* one full-width fill a frame, the cheapest stand-in
-             * for a game drawing with a border open */
-            /* below the status strip, well inside the old
-             * 200-line picture: a fill at y=0 lands in the top
-             * border and reads as corruption to anyone watching,
-             * which cost a wrong diagnosis once already */
-            STDL_Rect f;
-            f.x = 0; f.y = STAT_Y + 16;
-            f.w = (uint16_t)screen->w; f.h = 16;
-            STDL_FillRect(screen, &f, 1);
+            /*
+             * A full-width *copy*, not a fill. Long rows go through
+             * memcpy, and mintlib's moves eleven registers per
+             * movem.l - 12 + 8*11 = about 100 cycles during which
+             * the 68000 cannot take an interrupt. The border's
+             * flick is a 12-28 cycle pulse that has to land on an
+             * exact cycle, so a copy running across the window can
+             * delay the ISR by several times the pulse width. A
+             * fill does not go near memcpy and was the wrong load
+             * to probe with, which is why this probe reported the
+             * border healthy while a port's game flickered.
+             *
+             * Below the status strip: a load at y=0 lands in the
+             * top border and reads as corruption, which cost a
+             * wrong diagnosis once already.
+             */
+            STDL_Rect d;
+            d.x = 0; d.y = (int16_t)(STAT_Y + 16);
+            d.w = (uint16_t)screen->w; d.h = 16;
+            if (loadsrc != NULL) {
+                STDL_BlitSurface(loadsrc, NULL, screen, &d);
+            }
         }
         if (bot) {
             int b = stdl_ovsc_dpolls < 16 ? stdl_ovsc_dpolls : 15;

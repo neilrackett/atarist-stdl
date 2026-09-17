@@ -645,6 +645,20 @@ first.
   cache off, and not reproducible in Hatari (its video counter is
   not cycle-correct at 16MHz, so the border takes a different path
   there than it does on the machine).
+- Borders and the disk: do not read a file while a border is open.
+  A driver that masks interrupts for the length of a transfer holds
+  the border's ISR off for whole frames, and the border simply is
+  not there. Measured on a real Mega STE with a probe that opens,
+  reads and closes one file per frame: the bottom border opened in
+  5 frames of 300 from a hard drive and 3 of 300 from a floppy.
+  Both media, so it is not one driver being bad - TOS's own floppy
+  path is as bad as anything attached, and a port cannot test its
+  way out by changing storage. The same probe in Hatari reports 300
+  of 300, because no emulator models it - this is one of the few
+  things you cannot develop against the emulator at all.
+  Load assets before opening the border, or close it around the
+  read. A port that streams from disk during play cannot hold a
+  border open at the same time.
 - Display rate: `STDL_SetRefresh(50 | 60)` switches the sync rate
   and returns the rate that actually took effect, `-1` queries. PAL
   machines boot at 50 and NTSC at 60, and 60Hz buys ten more frames

@@ -678,6 +678,16 @@ first.
   without the ring device's callback cost. STE only; voices, the
   ring device and `STDL_PlaySample` are mutually exclusive DMA
   owners.
+  Volume is a table, not a multiply, and scaling an 8-bit sample
+  into an 8-bit table is lossy at low volumes - at `vol` 16 only
+  the loudest eighth of the range survives. Since v1.8.1 a voice at
+  64 is the sample halved, so two at full volume sum to the range
+  exactly and a third or fourth loud voice clips rather than wraps;
+  before that it was quartered, which cost another 6dB of quiet
+  detail and made an ambient effect at `vol` 16 inaudible. If a
+  port's effects sound thin, raise their `vol` before reaching for
+  the mixer - and mix music and effects at levels that assume two
+  loud voices, not four.
 - Sample effects: `STDL_PlaySample(buf, bytes, rate)` points the STE
   DMA at your buffer and the hardware reads it once - no ring, no
   refill, **no per-frame cost** (`STDL_PlaySampleLoop` for ambient

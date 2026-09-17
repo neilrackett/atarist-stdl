@@ -105,17 +105,18 @@ int main(void)
     CHECK(STDL_OpenVoices(6258) < 0, "double open accepted");
 
     /* one-shot ramp at the device rate, full volume: mixed value is
-     * the sample quartered toward zero, and the voice ends exactly
-     * at len. Toward zero, not sample>>2 - an arithmetic shift is a
-     * floor and the table is symmetric about zero now, so -29 gives
-     * -7 where it used to give -8. */
+     * the sample halved toward zero, and the voice ends exactly at
+     * len. Halved, not quartered, since v1.8.1 reserves headroom
+     * for two voices rather than four; and toward zero rather than
+     * >>1, because an arithmetic shift is a floor and the table is
+     * symmetric about zero. */
     STDL_SetVoice(0, ramp, 256, 0, 0, 6258, 64);
     CHECK(STDL_VoiceActive(0), "voice 0 not active");
     tick_at(0);                 /* play in block 0: fills 1,2,3 */
     r = ring_base();
     for (i = 0; i < 256; i++) {
         const int rv = ramp[i];
-        const int want = rv < 0 ? -((-rv) >> 2) : (rv >> 2);
+        const int want = rv < 0 ? -((-rv) >> 1) : (rv >> 1);
         if (r[BLOCK + i] != want) {
             CHECK(0, "ramp[%d]: got %d want %d", i, r[BLOCK + i], want);
             break;
@@ -147,7 +148,8 @@ int main(void)
     r = ring_base();
     for (i = 0; i < 384 - BLOCK; i++) {
         int src = (i < 16) ? i : 8 + ((i - 16) & 7);
-        int want = looped[src] >> 2;
+        const int lv = looped[src];
+        const int want = lv < 0 ? -((-lv) >> 1) : (lv >> 1);
         if (r[BLOCK + i] != want) {
             CHECK(0, "loop[%d]: got %d want %d", i, r[BLOCK + i], want);
             break;
@@ -178,7 +180,8 @@ int main(void)
         uint32_t step = (3129u << 16) / 6258u;
         uint32_t pos = 0;
         for (i = 0; i < 32 && (pos >> 16) < 16; i++) {
-            int want = looped[pos >> 16] >> 2;
+            const int lv = looped[pos >> 16];
+            const int want = lv < 0 ? -((-lv) >> 1) : (lv >> 1);
             if (r[BLOCK + i] != want) {
                 CHECK(0, "frac[%d]: got %d want %d",
                       i, r[BLOCK + i], want);
@@ -188,12 +191,13 @@ int main(void)
         }
     }
 
-    /* volume: level 32 halves the level-64 contribution */
+    /* volume: level 32 halves the level-64 contribution. plus[] is
+     * +64, so 32 at full volume and 16 at half. */
     open_fresh();
     STDL_SetVoice(0, plus, 64, 0, 0, 6258, 32);
     tick_at(0);
     r = ring_base();
-    CHECK(r[BLOCK] == 8, "vol 32: got %d want 8", r[BLOCK]);
+    CHECK(r[BLOCK] == 16, "vol 32: got %d want 16", r[BLOCK]);
 
     /* sequencer tick runs once per VBL, before mixing */
     open_fresh();
@@ -228,11 +232,44 @@ int main(void)
             CHECK(row[0] == 0, "vol %d: silence is not silent", lvl);
         }
         /* and the specific case heard on the machine: an ambient
-         * effect at vol 16 whose content sits inside +/-8 */
-        for (v = -8; v <= 8; v++) {
+         * effect at vol 16 whose content sits inside +/-4. The
+         * threshold is half what it was, which is the point of the
+         * headroom change - +/-8 is now audible rather than
+         * rounded away. */
+        for (v = -4; v <= 4; v++) {
             CHECK(tab[16 * 256 + (v & 255)] == 0,
                   "vol 16: %d -> %d, want 0", v,
                   tab[16 * 256 + (v & 255)]);
+        }
+        CHECK(tab[16 * 256 + (8 & 255)] == 1,
+              "vol 16: 8 -> %d, want 1 (it was rounded away before)",
+              tab[16 * 256 + (8 & 255)]);
+        /* two voices at full volume reach the ends of the range
+         * exactly, which is what the reserve now buys */
+        CHECK(tab[64 * 256 + (127 & 255)] == 63, "vol 64: 127 -> %d",
+              tab[64 * 256 + (127 & 255)]);
+        CHECK(tab[64 * 256 + ((-128) & 255)] == -64,
+              "vol 64: -128 -> %d", tab[64 * 256 + ((-128) & 255)]);
+    }
+
+    /* Four loud voices clamp instead of wrapping. Without the
+     * clamp this sums to -256 and comes back as 0 - silence where
+     * the loudest possible moment should be, which is the failure
+     * that matters: a wrap inverts the waveform, a clip flattens
+     * it. */
+    {
+        int i2;
+
+        open_fresh();
+        for (i2 = 0; i2 < STDL_VOICES; i2++) {
+            STDL_SetVoice(i2, minus, sizeof minus, 0, 0, 6258, 64);
+        }
+        tick_at(0);
+        r = ring_base();
+        CHECK(r[BLOCK] == -128, "four voices at -64 gave %d, want -128",
+              r[BLOCK]);
+        for (i2 = 0; i2 < STDL_VOICES; i2++) {
+            STDL_StopVoice(i2);
         }
     }
 

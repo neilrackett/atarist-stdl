@@ -126,7 +126,15 @@ static void mix_block(int8_t *dst)
                     end = v->loopstart + v->loopsize;
                     v->end = end;
                 }
-                dst[n] += vt[(uint8_t)data[pos >> 16]];
+                {
+                    /* clamped: two voices at full volume sum to
+                     * the range exactly, so only a third or fourth
+                     * loud voice reaches this, and wrapping would
+                     * be far worse than clipping */
+                    const int a = dst[n] + vt[(uint8_t)data[pos >> 16]];
+                    dst[n] = (int8_t)(a > 127 ? 127
+                                    : (a < -128 ? -128 : a));
+                }
                 pos += step;
             }
         }
@@ -204,8 +212,10 @@ int STDL_OpenVoices(int freq)
     memset(vc.ring, 0, RING_FRAMES);
 
     /*
-     * Volume rows: vt[vol][byte] = (int8)byte * vol / 256, so four
-     * voices at vol 64 sum to at most the full s8 range.
+     * Volume rows: vt[vol][byte] = (int8)byte * vol / 128, so a
+     * voice at vol 64 is the sample halved and two of them sum to
+     * the full s8 range exactly. Three or four loud voices clip,
+     * which the mixer clamps.
      *
      * Rounded toward zero, not shifted. An arithmetic >> is a floor,
      * which is not symmetric about zero: at vol 16 every negative
@@ -218,19 +228,30 @@ int STDL_OpenVoices(int freq)
      * +2 gave 0. Truncating toward zero costs a branch per entry of
      * a table built once at open, and nothing per sample.
      *
-     * It does not fix the resolution loss underneath, which is
-     * inherent to scaling an 8-bit sample into an 8-bit table: at
-     * vol 16 the row is s/16, so only the loudest sixteenth of the
-     * range survives at all. That is the headroom rule's doing -
-     * full scale is s/4 so four voices sum without clipping - and
-     * changing it is a loudness change for every port, so it is a
-     * decision rather than a fix.
+     * The divisor is 128 and not 256, which is the other half of
+     * the same report. Scaling an 8-bit sample into an 8-bit table
+     * loses resolution at low volumes whatever the rounding: the
+     * old rule reserved headroom for four voices at once, so full
+     * scale was s/4 and a voice at vol 16 was s/16 - only the
+     * loudest sixteenth of the range survived, and an ambient
+     * effect at that volume was inaudible even once it had stopped
+     * clicking. Halving the reserve doubles what survives at every
+     * volume. Two voices still sum exactly; three or four loud ones
+     * clip instead of wrapping, because the mixer clamps.
+     *
+     * That is a deliberate trade and it makes every port louder.
+     * Clipping needs three voices near peak at the same moment,
+     * where the old rule needed none - against six decibels of
+     * resolution on every quiet sound, at every volume, all the
+     * time. Paula applies volume after the DAC and keeps its
+     * resolution regardless, which no table here can match; this is
+     * the closest an 8-bit table gets.
      */
     for (level = 0; level <= 64; level++) {
         int8_t *row = vc.voltab + level * 256;
         for (s = 0; s < 256; s++) {
             const int v = (int)(int8_t)s * level;
-            row[s] = (int8_t)(v < 0 ? -((-v) >> 8) : (v >> 8));
+            row[s] = (int8_t)(v < 0 ? -((-v) >> 7) : (v >> 7));
         }
     }
 

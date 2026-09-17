@@ -53,8 +53,13 @@ int  STDL_VoicesOpen(void);
  * region [loop_off, loop_off + loop_len); loop_len 0 = one-shot.
  * `freq` is the sample's playback rate in Hz (Paula ports:
  * 3546895 / period), resampled to the device rate. `vol` is 0..64;
- * at 64 a voice contributes a quarter of the output range, so four
- * voices at full volume sum without clipping.
+ * at 64 a voice is the sample halved, so two voices at full volume
+ * sum to the output range exactly and a third or fourth loud voice
+ * clips rather than wraps - the mixer clamps. The reserve is half
+ * what it was before v1.8.1, which made every port louder and
+ * doubled what survives at low volumes: scaling an 8-bit sample
+ * into an 8-bit table is lossy, and at the old quarter scale a
+ * voice at vol 16 kept only the loudest sixteenth of the range.
  *
  * Callable from the voice tick and from the main line (guarded
  * against the VBL internally).

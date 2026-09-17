@@ -709,7 +709,14 @@ first.
   border open: the module allocates a second tall page and
   `STDL_Flip` swaps them, which is what a game wants if it draws a
   whole frame and shows it - drawing then never races the beam, at
-  the cost of about 37K for the second page. A 60Hz
+  the cost of about 37K for the second page.
+  Know what the flip costs before adopting it: it is VBL-synced, so
+  a frame that takes 34-40ms waits for the next vertical blank and
+  is quantised to 40ms, which is 25fps on a 50Hz display. A port
+  whose frame already sits just over a VBL boundary pays a whole
+  frame period for the tear-free picture, and should measure its
+  drawing pass first - the fix is to get the frame under the
+  boundary, not to avoid the flip. A 60Hz
   base screen is switched to 50Hz while a border is open and
   restored on close - opening a border is an active choice and it
   always takes effect on ST-class hardware. Cost is one Timer A interrupt plus a

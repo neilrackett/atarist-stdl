@@ -324,6 +324,18 @@ warnings** with the Makefile's `-Wall -Wextra`.
   a control if the thing being toggled can actually change between
   the two states; an idle machine quietly holds the state you were
   trying to remove.
+- **Possible future improvement: an unblocking flip.** `STDL_Flip`
+  waits for the vertical blank, so a port whose frame takes 34-40ms
+  is quantised to 40ms - 25fps on a 50Hz display - and pays a whole
+  frame period for a tear-free picture. Reported by a port that has
+  parked double buffering for exactly this reason. The honest first
+  answer is that its drawing pass should come under the boundary,
+  and a port sitting on a VBL boundary has no stable ground to
+  measure on either (see the layout note below). But a flip that
+  arms the swap for the next blanking and returns, rather than
+  waiting for it, would let such a port draw through. Not designed,
+  not measured - recorded so the next person meets the constraint
+  before adopting the API rather than after.
 - **Possible future improvement: the blit policy's per-operation
   cost.** With a border open, BLiTTER throughput is 1.14-1.28x the
   no-border time for full-width operations (mostly the split and

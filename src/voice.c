@@ -199,7 +199,23 @@ int STDL_OpenVoices(int freq)
     vc.dma_freq = stdl_dma_rates[stdl_dma_nearest(freq)];
     vc.dma_mode = (uint8_t)(stdl_dma_nearest(freq) | 0x80); /* mono */
 
-    vc.ring_alloc = malloc(RING_FRAMES + 2);
+    /* Guard bytes past the ring, and the whole allocation cleared
+     * below - not just the RING_FRAMES the mixer writes.
+     *
+     * The DMA is handed start = ring and end = ring + RING_FRAMES,
+     * and the frame at `end` should not be played. Should: a real
+     * STE clicked once per loop with a ring of pure silence, at
+     * 12.2Hz against the 81.8ms this ring takes at 6258Hz, and the
+     * bytes immediately past it were uninitialised heap. Hatari
+     * records that same configuration as digital silence, so the
+     * emulator cannot say whether the hardware reads the word at
+     * the end address before it stops.
+     *
+     * Rather than answer that, make it not matter: anything read at
+     * or just past the end address is now a zero this code wrote.
+     * Four bytes because the DMA fetches words and the ring is
+     * aligned up by one. */
+    vc.ring_alloc = malloc(RING_FRAMES + 8);
     vc.voltab = malloc(65 * 256);
     if (vc.ring_alloc == NULL || vc.voltab == NULL) {
         free(vc.ring_alloc);
@@ -208,8 +224,8 @@ int STDL_OpenVoices(int freq)
         STDL_SetError("out of memory for voice mixer");
         return -1;
     }
+    memset(vc.ring_alloc, 0, RING_FRAMES + 8);
     vc.ring = (int8_t *)(((uintptr_t)vc.ring_alloc + 1) & ~(uintptr_t)1);
-    memset(vc.ring, 0, RING_FRAMES);
 
     /*
      * Volume rows: vt[vol][byte] = (int8)byte * vol / 128, so a

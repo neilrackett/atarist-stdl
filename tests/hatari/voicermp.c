@@ -1,0 +1,155 @@
+/*
+ * STDL - Planar Display Library for Atari ST
+ * Copyright (C) 2026 Neil Rackett
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ *
+ * The voice probe that can fail.
+ *
+ * VOICESIL and DMALOOP both play silence, which makes a whole
+ * class of fault invisible in them by construction: if a refill
+ * arrives too late the hardware replays or half-reads a block, and
+ * with zeroes in the ring a missed refill sounds exactly like a
+ * made one. A port pointed that out after hearing its game click
+ * more than either probe did.
+ *
+ * So this one plays a slow ramp on one voice, looped. A repeated
+ * or half-written block breaks the ramp where silence would have
+ * hidden it, and the break is audible.
+ *
+ * It also counts, because ears are not evidence. stdl_voice_late
+ * rises whenever the tick filled all three blocks it is allowed
+ * and still had not caught the play head - the hardware has run on
+ * past what was ready. The bar is that count, one segment per
+ * event, doubling in width so a handful and a hundred look
+ * different.
+ *
+ *   SPACE  read a file every frame, on and off. A synchronous
+ *          transfer holds interrupts off for a frame, which is two
+ *          to three blocks of this ring - the standing explanation
+ *          for a game that clicks in play while an idle probe does
+ *          not. Red while it is doing it.
+ *   ESC    quit.
+ *
+ * Expected, if that explanation is right: a quiet bar and a clean
+ * ramp with the disk idle, both moving the moment SPACE is on.
+ */
+#include <stddef.h>
+#include <string.h>
+#include <osbind.h>
+#include <stdl/stdl.h>
+
+extern uint32_t stdl_voice_late;
+
+static int8_t ramp[256];
+
+/* 3x5 hex digits, as in the overscan probe: a photograph of the
+ * screen has to carry the number, and loading a font would put
+ * disk activity in a probe about disk activity */
+static const uint8_t hexfont[16][5] = {
+    { 7,5,5,5,7 }, { 2,6,2,2,7 }, { 7,1,7,4,7 }, { 7,1,7,1,7 },
+    { 5,5,7,1,1 }, { 7,4,7,1,7 }, { 7,4,7,5,7 }, { 7,1,1,1,1 },
+    { 7,5,7,5,7 }, { 7,5,7,1,7 }, { 7,5,7,5,5 }, { 4,4,7,5,7 },
+    { 7,4,4,4,7 }, { 1,1,7,5,7 }, { 7,4,7,4,7 }, { 7,4,7,4,4 }
+};
+
+static void draw_hex(STDL_Surface *s, int x, int y, uint32_t v)
+{
+    STDL_Rect r;
+    int d, row, col;
+
+    for (d = 7; d >= 0; d--) {
+        const uint8_t *g = hexfont[(v >> (d * 4)) & 15];
+
+        for (row = 0; row < 5; row++) {
+            for (col = 0; col < 3; col++) {
+                if (g[row] & (4 >> col)) {
+                    r.x = (int16_t)(x + (7 - d) * 4 + col);
+                    r.y = (int16_t)(y + row);
+                    r.w = 1; r.h = 1;
+                    STDL_FillRect(s, &r, 15);
+                }
+            }
+        }
+    }
+}
+
+int main(int argc, char *argv[])
+{
+    STDL_Surface *screen;
+    STDL_Rect r;
+    uint32_t shown = 0xFFFFFFFFUL;
+    int i, disk = 0, shown_disk = -1, open;
+
+    (void)argc; (void)argv;
+    if (STDL_Init(STDL_INIT_VIDEO | STDL_INIT_AUDIO) < 0) {
+        return 1;
+    }
+    screen = STDL_SetVideoMode(320, 200, 4, 0);
+    if (screen == NULL) {
+        STDL_Quit();
+        return 1;
+    }
+    /* a full-scale sawtooth: every block boundary is a small step
+     * and a repeated block is a large one, so the fault is audible
+     * against the pattern rather than against silence */
+    for (i = 0; i < 256; i++) {
+        ramp[i] = (int8_t)(i - 128);
+    }
+    open = (STDL_OpenVoices(6258) == 0);
+    if (open) {
+        STDL_SetVoice(0, ramp, 256, 0, 256, 1043, 64);
+    }
+
+    for (;;) {
+        STDL_Event ev;
+
+        while (STDL_PollEvent(&ev)) {
+            if (ev.type == STDL_KEYDOWN) {
+                if (ev.key.keysym.sym == STDLK_ESCAPE) {
+                    goto done;
+                }
+                if (ev.key.keysym.sym == STDLK_SPACE) {
+                    disk = !disk;
+                }
+            }
+        }
+        if (disk) {
+            static char junk[256];
+            long h = Fopen("VOICERMP.TOS", 0);
+            if (h >= 0) {
+                Fread((short)h, (long)sizeof junk, junk);
+                Fclose((short)h);
+            }
+        }
+        /* redraw on either change: the panel carries the disk
+         * state as well as the count, and a panel that only
+         * repaints when the count moves would show the wrong
+         * colour for as long as nothing went wrong - which is
+         * exactly the run you most want to read */
+        if (stdl_voice_late != shown || disk != shown_disk) {
+            int seg;
+            uint32_t n = stdl_voice_late;
+
+            shown = n;
+            shown_disk = disk;
+            r.x = 0; r.y = 0; r.w = 320; r.h = 40;
+            STDL_FillRect(screen, &r, (uint8_t)(disk ? 9 : 12));
+            draw_hex(screen, 8, 8, n);
+            /* one segment an event, doubling: a handful and a
+             * hundred have to look different from across a room */
+            for (seg = 0; n != 0 && seg < 60; seg++) {
+                n >>= 1;
+                r.x = (int16_t)(8 + seg * 5); r.y = 20;
+                r.w = 4; r.h = 12;
+                STDL_FillRect(screen, &r, 10);
+            }
+        }
+        STDL_WaitVBL();
+    }
+done:
+    if (open) {
+        STDL_CloseVoices();
+    }
+    STDL_Quit();
+    return 0;
+}

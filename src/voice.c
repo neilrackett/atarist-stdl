@@ -65,6 +65,10 @@ const int8_t *stdl_host_voltab(void)
 }
 #endif
 
+/* refills that arrived too late to stay ahead of the play head;
+ * see the tick below. Free to read, never reset except at open. */
+uint32_t stdl_voice_late;
+
 static void voice_shutdown(void)
 {
     /* terminate-vector context: hardware and vectors only */
@@ -172,6 +176,18 @@ static void voice_vbl(void)
         mix_block(vc.ring + vc.fill_block * BLOCK_FRAMES);
         vc.fill_block = (vc.fill_block + 1) & 3;
     }
+    if (guard == 3) {
+        /* Three blocks filled and still not caught up: this tick
+         * arrived so late that the play head has run on past what
+         * was ready, and the hardware has replayed or half-read a
+         * block. With silence in the ring that is inaudible, which
+         * is why it needs counting rather than listening - a probe
+         * playing zeroes cannot fail this way, and two of ours
+         * could not. A frame the VBL never got is the usual cause;
+         * a synchronous disk transfer is two to three blocks of
+         * this ring. */
+        stdl_voice_late++;
+    }
 }
 
 int STDL_OpenVoices(int freq)
@@ -278,6 +294,7 @@ int STDL_OpenVoices(int freq)
         return -1;
     }
     vc.fill_block = 1;          /* playback starts in block 0 */
+    stdl_voice_late = 0;
     vc.open = 1;
     stdl.dma_owner = STDL_DMA_VOICES;
     stdl_shutdown_audio = voice_shutdown;

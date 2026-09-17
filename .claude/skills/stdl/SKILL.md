@@ -247,6 +247,20 @@ Pitfalls, each of which has cost a day:
   arrives late) and shoot after that. Markers also print on the ST
   screen, so put them before the video mode is set or expect them
   in the shot.
+- **Fast-forward is safe for the program's clock and unsafe for
+  the script's.** The 200Hz counter is emulated time, so a
+  benchmark timed on it reads the same either way (measured, both
+  `FF=on` and `FF=off`). What breaks is everything measured in host
+  seconds: a `sleep 40` in the command script is many emulated
+  seconds under FF, so injected keys land after the scene they were
+  aimed at, and a sound recording's length stops meaning anything.
+  Screenshots break too - Hatari repeats stale frames while fast
+  forwarding, so a shot can be several frames old. The rule two
+  ports converged on: **`FF=on` for a benchmark with no input and
+  no audio, `FF=off` for anything involving key timing, a capture
+  or a picture.** It is a whole-run setting; the fifo toggle is not
+  a command (`hatari-shortcut fastforward` breaks the fifo) so it
+  cannot be flipped mid-run.
 - **`--memsize` takes integer MiB and `0` means 512K.** `0.5` is
   not valid. Default is 1M; a game that needs more wants
   `EXTRA="--memsize 4"`, and the 512K/1M fit is still a claim to
@@ -276,6 +290,14 @@ Pitfalls, each of which has cost a day:
   capture itself before believing anything: a quick check of the
   peak sample says whether there is audio at all, and only then is
   a spectrum worth reading.
+- **`waitfor`/`waitfile` patterns must be single words**, because
+  the script is word-split on its way to the harness. And the
+  harness has no watchdog: a program that hangs hangs the run, so
+  do not leave an unattended sweep without something that ends it.
+- **macOS has no `timeout`.** Wrapping `run.sh` in it fails with
+  an empty log and no screenshots, which reads exactly like the
+  program dying on boot. The script bounds its own waits; do not
+  add another.
 - **Crashes report a PC, not a symbol.** `NAME.err` carries the
   "Bus Error"/"Address Error" line with `PC=$xxxxxx`;
   `tests/hatari/map-crash.sh` maps it to a function from the
@@ -283,6 +305,35 @@ Pitfalls, each of which has cost a day:
   program print `&main` once at startup). A PC in `$e0xxxx` or
   `$fcxxxx` is inside the ROM - the fault is in what the program
   asked TOS to do, not where the report points.
+
+### The CPU profiler
+
+Hatari's profiler attributes cycles to addresses, which beats
+ablation and bisecting for finding where time actually goes - one
+port used it to find a 17-second startup that bisecting had blamed
+on the wrong component entirely (it was `stat` in mintlib
+converting DOS timestamps through `mktime`, ~120ms a call on a
+68000).
+
+The recipe, because several steps are not obvious:
+
+1. Copy the **unstripped** ELF over the `.TOS` on the test drive.
+   The profiler needs symbols the stripped binary does not have.
+2. Build a symbol file with `nm`, sanitising the names: Hatari's
+   loader drops anything it cannot parse, so demangle C++ names and
+   strip characters it will not take, or the symbols silently do
+   not load.
+3. Around a marker you have synced on, drive it through the fifo:
+   `hatari-debug symbols <file>`, `hatari-debug profile on`, then
+   `hatari-debug profile save <path>`.
+4. Convert with the machine's clock - one run measured
+   `ms = cycles / 8021` - and attribute exclusive cycles per object
+   file by address range. The TEXT base was `0x149f2` under TOS
+   2.06 with 4MB; it moves with TOS and memory size, so read it
+   rather than assuming it.
+
+Note `hatari-shortcut fastforward` is **not** a fifo command and
+breaks the fifo if you send it.
 
 ### Measuring, without fooling yourself
 
@@ -352,6 +403,40 @@ first.
   says immediately that the cost is not where it was assumed. It
   was a per-frame bookkeeping loop doing 32-bit divides, not the
   pixel paths.
+- **Relink the same objects in a different order to measure your
+  own noise floor.** Layout moves frame times on *every* ST-class
+  machine, not only where there is a cache to blame - "no cache, so
+  layout cannot matter" is the reasoning that has now caught two
+  people here. The control is cheap and needs no run-time switch:
+  link the identical `.o` files in reverse order, so the code is
+  the same and only the addresses differ, and measure both. One
+  port did exactly that on `--machine ste` and found per-scene
+  frame times moving -3.29% to +1.86%, with 13 of 39 scenes moving
+  1.2% or more - which was the size of the win it had just
+  reported.
+  The way out is aggregation, not despair. Over all 39 matched
+  scenes the same control moved -0.29%: layout noise is large per
+  scene and very nearly cancels across them. So quote an aggregate
+  over every matched scene, never a per-scene delta, and run the
+  reverse-link control alongside to establish that run's floor.
+  Measured that way the same change came out -3.97% against a
+  -0.29% floor - real, about fourteen times the noise, and twice
+  what eyeballing a handful of matched log lines had suggested.
+- **Run the same binary twice as well, and quote neither result
+  without both floors.** The cheaper control is the one that gets
+  skipped, because a deterministic demo is assumed to repeat
+  exactly. It does, in aggregate: three pairings of three runs of
+  one unchanged binary agreed to +0.06%, +0.06% and -0.00%. Per
+  scene the same binary disagreed with itself by -1.9% to +2.8%,
+  with no code moved and nothing to do with layout - a 5ms clock
+  over a short window quantises that coarsely. So there are two
+  independent reasons a per-scene delta cannot be quoted, and the
+  reverse-link control alone would let you believe layout was the
+  whole story. The pairing to use: **the same binary twice for the
+  measurement floor, the same objects relinked for the layout
+  floor, and the result stated against both.** The change above
+  finished at -3.97/-4.03/-4.02% against three separate baselines,
+  which is where to stop refining and call it -4.0%.
 - **Prove a speed-up with a control that changes one thing.** A fix
   that reshuffles the heap can look like a fix that works. Keep the
   mechanism and remove only what you think is incidental - allocate
@@ -363,9 +448,122 @@ first.
   real time, so counting the program's own log lines over a known
   real window is an independent check on anything it measures
   itself.
+- **A recorded demo is the best benchmark and the worst
+  speedometer.** Attract-mode or demo playback is deterministic, so
+  frame times repeat across runs and two builds can be compared at
+  all - hand-driven play cannot do that. But an engine's demo path
+  often has its own timing: one pins the tick to the recorded rate
+  and skips the clamp the game uses, so playback runs in slow
+  motion by design and reads about 28Hz against a 70Hz nominal
+  clock. Deterministic and wrong are compatible. Benchmark on the
+  demo, judge speed from play.
+- **Repeatability is a list of things held still.** Machine type, a
+  *specific* TOS image (not whichever EmuTOS is to hand), the
+  `--memsize`, the same config file on the GEMDOS drive, no input,
+  a fixed seed, a fixed frame count, and the program's own clock
+  for the timing. With all of those pinned, one port's 512-frame
+  benchmark repeats to 0.01ms across runs on `st` and `ste` - good
+  enough to see a 0.4ms change. A Mega STE will not do this at any
+  price: its cache moves frame times ~10% with code layout, so
+  compare CPU modes inside one binary through a run-time switch
+  (measured that way in one run: 24.95ms a frame at 16MHz+cache,
+  39.59 at 16MHz without it, 41.45 at 8MHz) and never across
+  builds.
+- **Match runs by a counter, not by hope.** Two runs of the same
+  demo still drift, so print clock-independent counters (tiles
+  changed, blits issued, which path they took) in the same log line
+  as the timings and pair lines between runs by those counters.
+  That is comparing the same scene instead of assuming two runs
+  lined up, and it is what lets a 1-2% difference mean anything
+  when run-to-run noise is larger than that.
+- **A diagnostic gated on the same condition as the code it probes
+  can never fire, and its silence reads like good news.** Count how
+  often it ran and print that beside its result, or a null result
+  means nothing.
+- **An agent's estimate from static structure is a hypothesis, and
+  a cheap one to falsify.** A review agent costed a function at
+  3-10ms a frame from its 987 call sites in the source. Counted at
+  run time it ran 11-21 times a frame, about 3.5ms. Grep measures
+  the source, not the frame - and a confident number derived from
+  structure reads exactly like a measured one in a review, so the
+  habit that matters is asking which of the two you are holding
+  before you plan work around it.
+- **Build the diagnostic to separate the two suspects, not just to
+  notice the failure.** Hardware scrolling that fails by jumping a
+  whole 16-pixel group with the fine offset stuck looks identical
+  whether the port never asked for a fine offset or asked for all
+  sixteen and got none - one is the port's bug and one is the
+  library's or the machine's. One port settled it before the test
+  by accumulating a bitmask of which offsets it requested over 256
+  frames and printing it once: near-`0xFFFF` with the picture stuck
+  points at the library or the Shifter, a couple of low bits points
+  at the port. A shift, an or and a compare per frame.
+  And note what makes it trustworthy: the mask has been seen to
+  take more than one value - `0xFDFF` and `0xFFDD` on some runs,
+  `0xFFFF` on others. A coverage check that has only ever read
+  all-ones is indistinguishable from one that is not measuring
+  anything, but one short reading is weak evidence too. **Two
+  distinct values observed is the bar** - the same bar as the
+  provenance field below, and worth applying to any check whose
+  healthy state is a fixed value. The same applies to whatever identifies the run:
+  `STDL_GetMachineInfo`'s class and `_MCH` cookie went in beside
+  that mask so a log read later could not be a coin flip between
+  two machines - and the two cookies were seen to differ
+  (`0x00010000` on an STE, `0x00010010` on a Mega STE) only because
+  the probe was run on both to collect baselines, not because
+  anyone set out to check it. A provenance field nobody has seen
+  take two values looks like evidence and carries none, and running
+  a check against two inputs by default is what exposes that
+  cheaply. Foresight is not required and should not be relied on. Do not compare coverage between
+  machines, though: a clamp that resolves differently at 8 and
+  16MHz makes a fixed frame window cover different amounts of the
+  same demo, so masks that disagree across machines are not a
+  finding.
+- **A port's own vocabulary collides with the library's.** Grepping
+  a port for "border" to find out whether it opens an ST overscan
+  border found a flag, a call, an options-menu item and four
+  graphics chunks in one engine, every one of them about the EGA
+  border colour or the game's own UI frame, and none of them
+  touching overscan. The same trap waits on "surface", "blit",
+  "palette" and "sprite". Search for calls into the library's API,
+  not for the words it uses.
+- **Say when a result is emulator-only.** A port can be developed
+  entirely in Hatari and be perfectly healthy there while nobody
+  has yet put it on hardware - which makes every claim it carries,
+  including whether a library path works at all, an open question
+  rather than a validated result. Label them as such; the cost of
+  the other habit is on this page several times over.
+- **Check that the thing you are timing actually happened.** A
+  20-second benchmark of "the cost of music" measured a track that
+  had ended 4.5 seconds in; the frame time alone could never have
+  shown it. Record with `recsound` and plot RMS per window (numpy
+  is enough) - the same check settled a music-versus-effects
+  balance complaint to the decibel.
 - **Static evidence proves nothing about speed.** A game at 6fps
   screenshots identically to one at 30, and sounds identical too.
   Watch it move, or count frames.
+- **Have the binary name itself in its own log.** A stamp printed
+  at start-up (`git describe`, plus a `-dirty` marker) means a log
+  coming back from someone else's machine says which build produced
+  it, and a stale file in the ship directory announces itself
+  instead of being reconstructed later. Generate it as a **header**
+  rewritten only when the value changes, never as a `-D` on the
+  compile line: a changed `-D` does not trigger a rebuild (below),
+  so a `-D` stamp goes stale exactly when it matters and a stale
+  build then prints the wrong commit confidently. A wrong
+  provenance field is worse than none, because it reassures.
+- **A rule placed above `all` in a makefile silently becomes the
+  default goal.** `make` then builds that one thing, produces
+  nothing else and exits zero. Pin `.DEFAULT_GOAL`, and check for
+  the artifact rather than the exit status - a build that appears
+  to work while producing nothing is the same family as everything
+  else on this page.
+- **A harness that writes into the directory you ship from will
+  eventually ship the wrong binary.** Swapping profiling and test
+  builds in and out of a deploy directory left an instrumented
+  build sitting where the release build belonged; it was caught on
+  a checksum. Check the artifact you are about to hand over rather
+  than trusting that the build ran.
 - **A changed `-D` flag does not rebuild anything.** Objects are
   newer than the sources, so `make EXTRA_CFLAGS=-DFOO` without a
   clean measures the previous binary - including, once, a run whose

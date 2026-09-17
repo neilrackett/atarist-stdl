@@ -304,6 +304,21 @@ warnings** with the Makefile's `-Wall -Wextra`.
   time, guarantee what you can, assert it where the assert can fail,
   and print it from the target in a tool people already run -
   `dist/BLITCHK.TOS` prints the row alignment for this reason.
+
+  The family keeps growing, and a port working against this library
+  has hit the same shape independently: a counter incremented but
+  never printed, whose number was quoted for days; and a review
+  agent that costed a function at 3-10ms a frame from its 987 call
+  sites in the source, where counting at run time found 11-21 calls
+  a frame and about 3.5ms. A grep measures the source, not the
+  frame, and an agent's confident number derived from structure
+  reads exactly like a measured one - so a review of this library's
+  hot paths says which of the two it is holding. The sharpest statement of the compiler case is
+  theirs: **when you are checking an assumption the compiler is also
+  allowed to make, the check has to come from outside the
+  compiler** - which is why the malloc alignment above needed a
+  disassembly and a print from the target, and why the C assert
+  that looked like it covered it could not.
 - **A performance fix is not confirmed until it survives a control
   that changes one thing.** Twice this week a fix "worked" because
   it reshuffled the heap rather than because of its mechanism. The
@@ -535,6 +550,17 @@ warnings** with the Makefile's `-Wall -Wextra`.
   vertical-blank boundary where a few hundred bytes decide which
   side it lands on. The Mega STE note below is the cached version of
   the same hazard; this one has no cache to blame.
+  There is a cheap control for this, and it wants using before any
+  cross-build performance claim about this library: relink the same
+  object files in a different order. The code is identical and only
+  the addresses move, so whatever the frame time does is the noise
+  floor of the comparison you were about to make. A port ran it on
+  a plain STE and got per-scene frame times moving -3.29% to +1.86%
+  with a third of scenes past 1.2%, which was the size of the win
+  it was reporting - but the aggregate over all 39 matched scenes
+  moved only -0.29%, because layout noise very nearly cancels
+  across scenes. Hence: aggregate over every matched scene, never
+  quote a per-scene delta, and state the floor beside the result.
   Two things follow. A frame-time regression attributed to a library
   bump needs "did this code run at all" answered first, and an
   opt-in counter (`-DSTDL_BLIT_STATS` in blit.c) answers it in one

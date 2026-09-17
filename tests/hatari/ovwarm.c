@@ -91,6 +91,8 @@
 #include <stddef.h>
 #include <stdl/stdl.h>
 
+#include "ovbuild.h"             /* generated; OVWARM_BUILD */
+
 /* library internals; see the note above */
 extern uint8_t stdl_ovsc_warm, stdl_ovsc_diag, stdl_ovsc_dpolls;
 extern uint8_t stdl_ovsc_wide;
@@ -165,6 +167,73 @@ static const struct { int mode; uint8_t col; } speeds[3] = {
     { 0, 12 }                   /* 8MHz             - blue   */
 };
 
+/*
+ * A 3x5 hex font, and the build id drawn with it.
+ *
+ * The point is attribution, not legibility: several of these
+ * probes have gone to the same filename on the same desktop, and a
+ * result read off the screen has to say which binary produced it.
+ * A console line would not survive the video mode being set, and
+ * the file name cannot carry it - GEMDOS gives eight characters
+ * and they are spent. So the commit is drawn on the screen the
+ * reading is taken from, and a photograph carries its own
+ * provenance.
+ *
+ * The id is compiled in from a generated header rather than a -D:
+ * a changed -D does not trigger a rebuild, so a -D stamp goes
+ * stale exactly when it matters and then prints the wrong commit
+ * with confidence. The header is rewritten only when the value
+ * changes, so a no-op build stays a no-op.
+ */
+static const uint8_t hexfont[16][5] = {
+    { 7,5,5,5,7 }, { 2,6,2,2,7 }, { 7,1,7,4,7 }, { 7,1,7,1,7 },
+    { 5,5,7,1,1 }, { 7,4,7,1,7 }, { 7,4,7,5,7 }, { 7,1,1,1,1 },
+    { 7,5,7,5,7 }, { 7,5,7,1,7 }, { 7,5,7,5,5 }, { 4,4,7,5,7 },
+    { 7,4,4,4,7 }, { 1,1,7,5,7 }, { 7,4,7,4,7 }, { 7,4,7,4,4 }
+};
+
+static void draw_build(STDL_Surface *screen)
+{
+    const char *p = OVWARM_BUILD;
+    STDL_Rect r;
+    int x = 130;
+
+    for (; *p != '\0' && x < screen->w - 4; p++) {
+        int d = -1;
+
+        if (*p >= '0' && *p <= '9') {
+            d = *p - '0';
+        } else if (*p >= 'a' && *p <= 'f') {
+            d = *p - 'a' + 10;
+        }
+        if (d < 0) {
+            /* anything else - the '-dirty' marker above all - is a
+             * red block, because a modified tree is the one case
+             * where the commit alone would mislead */
+            r.x = (int16_t)x; r.y = (int16_t)(STAT_Y + 1);
+            r.w = 3; r.h = 5;
+            STDL_FillRect(screen, &r, 9);
+            x += 5;
+            continue;
+        }
+        for (r.h = 1, r.w = 1; ; ) {
+            int row, col;
+
+            for (row = 0; row < 5; row++) {
+                for (col = 0; col < 3; col++) {
+                    if (hexfont[d][row] & (4 >> col)) {
+                        r.x = (int16_t)(x + col);
+                        r.y = (int16_t)(STAT_Y + 1 + row);
+                        STDL_FillRect(screen, &r, 15);
+                    }
+                }
+            }
+            break;
+        }
+        x += 4;
+    }
+}
+
 /* the state blocks and an empty bar: on a key press only */
 static void status_reset(STDL_Surface *screen, int spd, int dbuf)
 {
@@ -175,6 +244,7 @@ static void status_reset(STDL_Surface *screen, int spd, int dbuf)
 
     r.x = 12; r.w = 8; r.h = 8;
     STDL_FillRect(screen, &r, speeds[spd].col);
+    draw_build(screen);
     r.x = 24;
     STDL_FillRect(screen, &r, (uint8_t)(dbuf ? 10 : 8));
     r.x = 36;

@@ -56,6 +56,13 @@ EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
            dist/BLITCHK.TOS dist/VBLCHK.TOS dist/OVERSCAN.TOS \
            dist/HWSCROLL.TOS dist/TONEDEMO.TOS dist/OPLDEMO.TOS
 
+# Pinned, not left to ordering: a rule added above this one would
+# silently become the default goal, and `make` would then build
+# that one thing, produce nothing else and exit zero. A build that
+# appears to work while producing nothing is the hardest kind to
+# notice - a port lost a cycle to exactly this.
+.DEFAULT_GOAL := all
+
 all: $(LIB) sizecheck $(EXAMPLES) assets
 
 # Size budget for the pixel-path objects.

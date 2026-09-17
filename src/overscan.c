@@ -281,26 +281,25 @@ uint16_t stdl_ovsc_n2t;      /* tick mode: turns between the writes */
 uint16_t stdl_ovsc_postn;    /* poll bound for line 263's DE end     */
 uint16_t stdl_ovsc_waitn;    /* poll bound of ~8 lines, any wait     */
 uint8_t  stdl_ovsc_tick;     /* 1 = time from Timer B, not the counter */
-/* pull stdl_ovsc_n1 into the Mega STE's cache at the top of the
- * bottom ISR, where there are lines of slack, rather than meeting
- * it cold inside the timed section. The flick reads two of the
- * table's 32 words and which two depends on where the poll caught
- * the beam, so the slot moves frame to frame; with the cache on, a
- * slot whose line is not resident costs bus cycles the table's own
- * numbers cannot account for, and the flick lands late. That is
- * the shape of the symptom on a real Mega STE: the bottom border
- * solid at 16MHz with the cache off and flickering with it on,
- * unchanged by anything else running. The ISR already warms the
- * flick's *code* this way; this is the data it forgot.
+/*
+ * Tried twice and abandoned (2026-09-17): pre-touching stdl_ovsc_n1
+ * at the top of this ISR, on the theory that the flick reads two of
+ * its 32 words, the slot moves per frame, and a line not resident
+ * in a Mega STE's cache costs bus cycles the table cannot account
+ * for.
  *
- * Four reads, 16 bytes apart, about 96 cycles: the whole 64-byte
- * table if the line is 16 bytes and most of it if it is shorter.
- * The cost matters - a first version walked all 16 longs, about
- * 350 cycles, and that alone pushed the ISR past line 262 on a
- * plain STE and missed every frame. Whatever is added here comes
- * out of the budget between the interrupt and the line, so measure
- * it on --machine st before believing it is free. */
-uint8_t  stdl_ovsc_warm = 1;
+ * The first attempt proved nothing because it was toggled on an
+ * idle screen, where nothing competes for those cache lines: once
+ * the "on" state had pulled the table in, the "off" state went on
+ * measuring a resident table. The second attempt fixed that - the
+ * probe drew a fill every frame, which is what evicts it - and the
+ * answer was the same either way, twice each. So it is not the
+ * table, and the cycles are not spent.
+ *
+ * What that test did find is in AGENTS.md: drawing with a border
+ * open on a 16MHz Mega STE with its cache enabled does not merely
+ * flicker the border, it corrupts the fill itself.
+ */
 uint8_t  stdl_ovsc_l262lo;
 uint8_t  stdl_ovsc_l262mid;
 uint8_t  stdl_ovsc_scratch;
@@ -663,15 +662,6 @@ __asm__(
 "_stdl_ovsc_tb:\n"
 "    movem.l %d0-%d7/%a0-%a3,-(%sp)\n"
 "    bsr    stdl_ovsc_bpause\n"
-/* the table into cache while there is still slack; see
- * stdl_ovsc_warm */
-"    tst.b  _stdl_ovsc_warm\n"
-"    beq.s  12f\n"
-"    move.l _stdl_ovsc_n1,%d0\n"
-"    move.l _stdl_ovsc_n1+16,%d0\n"
-"    move.l _stdl_ovsc_n1+32,%d0\n"
-"    move.l _stdl_ovsc_n1+48,%d0\n"
-"12:\n"
 "    moveq  #0,%d6\n"
 "    moveq  #2,%d7\n"
 "    lea    0xfffffa21.w,%a0\n"

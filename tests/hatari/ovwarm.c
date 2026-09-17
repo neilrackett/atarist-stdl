@@ -7,13 +7,42 @@
  * example must not, and it exists to answer one question on real
  * hardware.
  *
- * W toggles stdl_ovsc_warm, the bottom ISR's cache pre-touch, on
- * at boot and shown as the third status block (green on, blue
- * off). On a Mega STE with the cache enabled, W off is the
- * behaviour that flickered the bottom border. Compare W on against
- * W off in one sitting and nothing else: a Mega STE's timings move
- * with code layout, so this binary against another one is not a
- * comparison, however tempting the two numbers look side by side.
+ * Two independent toggles, and the pair is the experiment.
+ *
+ * W is a per-frame full-width fill: drawing, which is what
+ * flickers a bottom border on a Mega STE with its cache on and
+ * does not at 8MHz or with the cache off. Third status block,
+ * green when on.
+ *
+ * P is STDL_UseBlitter, on at boot. Fourth block, green when the
+ * BLiTTER is allowed and blue when the fill is forced through the
+ * CPU path.
+ *
+ * P off is where the last run got to: with drawing on at 16MHz
+ * with the cache, the bottom border disappears while the BLiTTER
+ * is allowed and is solid on the CPU path. That leaves two
+ * suspects, and O and I take them apart.
+ *
+ * O is stdl_blit_policy, the split-and-place against the beam.
+ * Off means every operation runs in one hog-mode piece wherever
+ * it falls, including across the window.
+ *
+ * I is stdl_ovsc_blit, the ISR's pause and resume of a transfer
+ * that is running when its flick is due. Off means the ISR leaves
+ * the BLiTTER alone.
+ *
+ * Fifth and sixth blocks, green when on, both on at boot, and both
+ * only meaningful while P is green. With the BLiTTER allowed and
+ * drawing on: if the border comes back with O off, the placement
+ * is at fault; if it comes back with I off, the pause and resume
+ * is. Neither key closes the borders, because reopening would
+ * reinstall the very policy O removes.
+ *
+ * Compare inside this one binary and nothing else: a Mega STE's
+ * timings move with code layout, so this binary against another is
+ * not a comparison, however tempting the numbers look side by
+ * side. And take more than one run each way - the difference a
+ * single pair shows is inside the run-to-run floor.
  *
  * The strip's bar is a histogram, not a counter. With diag set the
  * ISR counts polls from its 50Hz write until the counter leaves
@@ -94,7 +123,15 @@
 #include "ovbuild.h"             /* generated; OVWARM_BUILD */
 
 /* library internals; see the note above */
-extern uint8_t stdl_ovsc_warm, stdl_ovsc_diag, stdl_ovsc_dpolls;
+extern uint8_t stdl_ovsc_diag, stdl_ovsc_dpolls;
+/* The two halves of how a BLiTTER operation is driven around the
+ * border's window, so a run can remove one without the other:
+ * stdl_blit_policy splits and places each operation against the
+ * beam, and stdl_ovsc_blit lets the ISR pause a running transfer
+ * for the length of its flick. Forcing the CPU path removes both
+ * at once, which is how far the last run got. */
+extern uint16_t (*stdl_blit_policy)(uint16_t nlines, uint32_t cpl);
+extern uint8_t stdl_ovsc_blit;
 extern uint8_t stdl_ovsc_wide;
 
 static void paint(STDL_Surface *screen)
@@ -196,7 +233,7 @@ static void draw_build(STDL_Surface *screen)
 {
     const char *p = OVWARM_BUILD;
     STDL_Rect r;
-    int x = 130;
+    int x = 200;
 
     for (; *p != '\0' && x < screen->w - 4; p++) {
         int d = -1;
@@ -235,6 +272,12 @@ static void draw_build(STDL_Surface *screen)
 }
 
 /* the state blocks and an empty bar: on a key press only */
+static int load;                /* per-frame fill: the W key */
+static int blit = 1;            /* STDL_UseBlitter: the P key */
+/* the placement policy, remembered so O can put it back; overscan
+ * installs it on open and clears it on the final close */
+static uint16_t (*policy)(uint16_t, uint32_t);
+
 static void status_reset(STDL_Surface *screen, int spd, int dbuf)
 {
     STDL_Rect r;
@@ -242,13 +285,16 @@ static void status_reset(STDL_Surface *screen, int spd, int dbuf)
     r.x = 8; r.y = STAT_Y; r.w = (uint16_t)(screen->w - 16); r.h = 8;
     STDL_FillRect(screen, &r, 0);
 
-    r.x = 12; r.w = 8; r.h = 8;
-    STDL_FillRect(screen, &r, speeds[spd].col);
     draw_build(screen);
-    r.x = 24;
-    STDL_FillRect(screen, &r, (uint8_t)(dbuf ? 10 : 8));
-    r.x = 36;
-    STDL_FillRect(screen, &r, (uint8_t)(stdl_ovsc_warm ? 10 : 12));
+    r.w = 8; r.h = 8;
+    r.x = 12; STDL_FillRect(screen, &r, speeds[spd].col);
+    r.x = 22; STDL_FillRect(screen, &r, (uint8_t)(dbuf ? 10 : 8));
+    r.x = 32; STDL_FillRect(screen, &r, (uint8_t)(load ? 10 : 12));
+    r.x = 42; STDL_FillRect(screen, &r, (uint8_t)(blit ? 10 : 12));
+    r.x = 52; STDL_FillRect(screen, &r,
+                            (uint8_t)(stdl_blit_policy ? 10 : 12));
+    r.x = 62; STDL_FillRect(screen, &r,
+                            (uint8_t)(stdl_ovsc_blit ? 10 : 12));
     if (stdl_ovsc_wide) {
         r.x = 48; r.w = 2;
         STDL_FillRect(screen, &r, 9);
@@ -273,7 +319,7 @@ static void status_col(STDL_Surface *screen, int b, uint8_t h)
 {
     STDL_Rect r;
 
-    r.x = (int16_t)(56 + b * 4); r.w = 3;
+    r.x = (int16_t)(80 + b * 4); r.w = 3;
     r.y = STAT_Y; r.h = 8;
     STDL_FillRect(screen, &r, 0);
     if (h != 0) {
@@ -363,7 +409,21 @@ int main(int argc, char *argv[])
                     STDL_UseMegaSteSpeedup(speeds[spd].mode);
                     top = wt ? (STDL_OpenTopBorder() != 0) : 0;
                     bot = wb ? (STDL_OpenBottomBorder() != 0) : 0;
-                } else if (sym == STDLK_w || sym == STDLK_x) {
+                } else if (sym == STDLK_o || sym == STDLK_i) {
+                    /* live, borders left open: a reopen would put
+                     * the policy O removes straight back */
+                    if (sym == STDLK_o) {
+                        if (stdl_blit_policy != NULL) {
+                            policy = stdl_blit_policy;
+                            stdl_blit_policy = NULL;
+                        } else {
+                            stdl_blit_policy = policy;
+                        }
+                    } else {
+                        stdl_ovsc_blit = (uint8_t)!stdl_ovsc_blit;
+                    }
+                } else if (sym == STDLK_w || sym == STDLK_x
+                           || sym == STDLK_p) {
                     /* close and reopen: the flags are read by the
                      * ISR every frame, but a reopen also re-runs
                      * the calibration, so each state gets a table
@@ -371,7 +431,10 @@ int main(int argc, char *argv[])
                     int wt = top, wb = bot;
                     close_borders();
                     if (sym == STDLK_w) {
-                        stdl_ovsc_warm = (uint8_t)!stdl_ovsc_warm;
+                        load = !load;
+                    } else if (sym == STDLK_p) {
+                        blit = !blit;
+                        STDL_UseBlitter(blit);
                     } else {
                         stdl_ovsc_wide = (uint8_t)!stdl_ovsc_wide;
                     }
@@ -428,6 +491,18 @@ int main(int argc, char *argv[])
                     }
                 }
             }
+        }
+        if (load) {
+            /* one full-width fill a frame, the cheapest stand-in
+             * for a game drawing with a border open */
+            /* below the status strip, well inside the old
+             * 200-line picture: a fill at y=0 lands in the top
+             * border and reads as corruption to anyone watching,
+             * which cost a wrong diagnosis once already */
+            STDL_Rect f;
+            f.x = 0; f.y = STAT_Y + 16;
+            f.w = (uint16_t)screen->w; f.h = 16;
+            STDL_FillRect(screen, &f, 1);
         }
         if (bot) {
             int b = stdl_ovsc_dpolls < 16 ? stdl_ovsc_dpolls : 15;

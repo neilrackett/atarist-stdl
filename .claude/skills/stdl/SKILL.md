@@ -625,6 +625,16 @@ first.
   honest way to measure there - and so a port can decline the
   switch, since a game that needs 16MHz to be playable has a
   rendering problem, not a hardware one.
+- Borders plus the BLiTTER on a Mega STE: open a border and call
+  `STDL_UseBlitter(0)`. At 16MHz with the cache on, drawing every
+  frame with a border open loses the bottom border on real
+  hardware - it disappears and flashes back once or twice a second
+  - and the CPU path is solid under the same drawing. Costs little:
+  with a border open the BLiTTER already loses to the CPU at the
+  sizes a game blits. Unaffected at 8MHz, or at 16MHz with the
+  cache off, and not reproducible in Hatari (its video counter is
+  not cycle-correct at 16MHz, so the border takes a different path
+  there than it does on the machine).
 - Display rate: `STDL_SetRefresh(50 | 60)` switches the sync rate
   and returns the rate that actually took effect, `-1` queries. PAL
   machines boot at 50 and NTSC at 60, and 60Hz buys ten more frames

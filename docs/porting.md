@@ -16,6 +16,14 @@ time, not at runtime.
 6. Profile on Mega STE (`dist/TBLITSPD.TOS` gives the baseline;
    the blitter accelerates large same-phase fills/blits
    automatically - align to 16px to benefit).
+* **Borders and the BLiTTER on a Mega STE**: if you open a border,
+  call `STDL_UseBlitter(0)`. On a 16MHz Mega STE with its cache
+  enabled, a program drawing every frame with a border open loses
+  the bottom border - it disappears and flashes back once or twice
+  a second - and forcing the CPU path is the workaround until it is
+  fixed. It costs little, because with a border open the BLiTTER
+  already loses to the CPU at the sizes a game blits. An 8MHz
+  machine, or 16MHz with the cache off, is unaffected.
 * **Display rate**: `STDL_SetRefresh(50)` or `(60)` switches the
   sync rate, `-1` queries, and the return value is the rate that
   actually took effect rather than the one asked for. A PAL machine

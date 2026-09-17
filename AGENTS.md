@@ -265,6 +265,65 @@ warnings** with the Makefile's `-Wall -Wextra`.
   named `BLITCOST2.TOS` beside `BLITCOST.TOS` silently runs
   `BLITCOST.TOS`; four runs of "the fix" measured the old binary.
   Keep test program stems to eight characters.
+- **Drawing with a border open is what flickers a Mega STE, and
+  only with its cache on.** A probe whose status strip repainted
+  every frame flickered the bottom border constantly at 16MHz with
+  the cache enabled, was solid at 8MHz with the same drawing, and
+  solid at 16MHz with the cache off. Stop the per-frame drawing and
+  it is steady at every speed, back to the one-flicker-a-minute the
+  border has always had. So the suspect is the blit policy's cost
+  model: it places each operation against the beam from estimates
+  that do not know the CPU got faster while the bus did not.
+  **It is the BLiTTER path, and `STDL_UseBlitter(0)` is the
+  workaround.** Measured on the machine at 16MHz with the cache on,
+  a full-width 16-row fill every frame with the bottom border open:
+  with the BLiTTER allowed the border disappears and returns only
+  in brief flashes once or twice a second; forced through the CPU
+  path the same drawing leaves it solid. So the fault is in how a
+  BLiTTER operation is driven around the border's window, not in
+  the ISR's own timing - the two candidates being the blit policy's
+  placement against the beam and `stdl_ovsc_bpause`'s pause and
+  resume across the window, and the next measurement is which.
+  Taking those two apart did not settle it, which is itself the
+  result: with the BLiTTER allowed and drawing on, removing the
+  placement (`stdl_blit_policy = NULL`) makes the *whole screen*
+  flicker, and removing the ISR's pause (`stdl_ovsc_blit = 0`)
+  leaves the bottom border flickering constantly. Neither half is
+  the culprit alone and both are needed, so the fault is in the
+  model they share rather than in either mechanism - and the
+  obvious candidates do not explain it: `cpl` is bus time and does
+  not move with the CPU clock, and `OVSC_RESERVE` is six lines
+  against a decision latency that *shrinks* at 16MHz.
+  It cannot be chased in the emulator. At 16MHz Hatari's video
+  counter is not cycle-correct, so the bottom border takes the
+  Timer B path there while hardware takes the counter path - the
+  failing code is the path the emulator does not run. That leaves
+  hardware experiments, which are expensive, so this is parked with
+  a workaround rather than half-fixed: report it to a port as a
+  known limitation, and with a border open on a cached Mega STE
+  call `STDL_UseBlitter(0)`. It costs little, since with a border
+  open the BLiTTER already loses to the CPU at the sizes a game
+  blits.
+  A caution about reading hardware reports, which cost a wrong
+  entry in this file. "The top half of the top border is wrong" was
+  read here as half the screen and written up as a fill running
+  with the wrong extent, which would have been a far more serious
+  bug. A photograph settled it: the band was about sixteen rows of
+  273, exactly the fill the probe asks for, landing in the top
+  border because the probe draws at y=0 and the top border is the
+  28 rows above the old picture. Get the picture before theorising
+  from the words, and put a probe's own drawing somewhere it cannot
+  be mistaken for the thing being measured.
+  The cache-residency theory is dead, and how it died is worth
+  keeping. The idea was that the flick's timing table falls out of
+  the cache between frames. The first A/B ran on an idle screen,
+  where nothing competes for those lines, so the "off" state
+  measured a table the "on" state had warmed - indistinguishable by
+  construction. The second ran with drawing on, which is what
+  evicts it, and came out the same either way twice. An A/B is only
+  a control if the thing being toggled can actually change between
+  the two states; an idle machine quietly holds the state you were
+  trying to remove.
 - **Possible future improvement: the blit policy's per-operation
   cost.** With a border open, BLiTTER throughput is 1.14-1.28x the
   no-border time for full-width operations (mostly the split and

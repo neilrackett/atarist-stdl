@@ -45,6 +45,26 @@ extern "C" {
  * is open and restored on the final close - opening a border is an
  * active choice, and it always takes effect on ST-class hardware.
  *
+ * KNOWN LIMITATION, 16MHz Mega STE with its cache enabled. A
+ * program drawing every frame with a border open loses the bottom
+ * border: on a real machine it disappears and flashes back once or
+ * twice a second. It needs all three - the 16MHz clock, the cache,
+ * and drawing - and it is the BLiTTER path: the same drawing forced
+ * through the CPU with STDL_UseBlitter(0) leaves the border solid.
+ * Neither half of how a BLiTTER operation is driven around the
+ * window accounts for it on its own; removing the beam-aware
+ * placement makes the whole screen flicker, and removing the ISR's
+ * pause of a running transfer leaves the bottom border flickering
+ * constantly. Hatari cannot reproduce it, because at 16MHz its
+ * video counter is not cycle-correct and the border takes the
+ * Timer B path there while hardware takes the counter path.
+ *
+ * So, for now: with a border open on a Mega STE, call
+ * STDL_UseBlitter(0). It costs little - with a border open the
+ * BLiTTER already loses to the CPU path at the sizes a game blits,
+ * measured 1.14-1.47x the no-border time - and on an 8MHz machine,
+ * or a 16MHz one with the cache off, none of this arises.
+ *
  * Uses MFP Timer A (vector, IERA/IMRA bit 5) and Timer B's counter
  * with its interrupt masked, and puts a prefix on TOS's Timer C
  * vector that lowers the CPU mask inside the 200Hz handler so the

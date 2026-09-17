@@ -22,6 +22,8 @@ extern uint32_t stdl_host_dma_pos;
 extern const void *stdl_host_dma_buf;
 extern int stdl_host_dma_running;
 
+extern const int8_t *stdl_host_voltab(void);
+
 static int failures;
 
 #define CHECK(cond, ...) do { \
@@ -103,13 +105,17 @@ int main(void)
     CHECK(STDL_OpenVoices(6258) < 0, "double open accepted");
 
     /* one-shot ramp at the device rate, full volume: mixed value is
-     * sample>>2, and the voice ends exactly at len */
+     * the sample quartered toward zero, and the voice ends exactly
+     * at len. Toward zero, not sample>>2 - an arithmetic shift is a
+     * floor and the table is symmetric about zero now, so -29 gives
+     * -7 where it used to give -8. */
     STDL_SetVoice(0, ramp, 256, 0, 0, 6258, 64);
     CHECK(STDL_VoiceActive(0), "voice 0 not active");
     tick_at(0);                 /* play in block 0: fills 1,2,3 */
     r = ring_base();
     for (i = 0; i < 256; i++) {
-        int want = ramp[i] >> 2;
+        const int rv = ramp[i];
+        const int want = rv < 0 ? -((-rv) >> 2) : (rv >> 2);
         if (r[BLOCK + i] != want) {
             CHECK(0, "ramp[%d]: got %d want %d", i, r[BLOCK + i], want);
             break;
@@ -197,6 +203,38 @@ int main(void)
     tick_at(BLOCK);
     CHECK(ticks_seen == 2, "tick ran %d times, want 2", ticks_seen);
     STDL_SetVoiceTick(NULL, NULL);
+
+    /*
+     * The volume table is symmetric about zero, and quiet content
+     * at a low volume is silent rather than biased. An arithmetic
+     * shift is a floor, so before this was rounded toward zero a
+     * sample under the rounding threshold came out 0 on its
+     * positive half and -1 on its negative one - a DC-biased square
+     * wave at the sample's own zero crossings, audible on hardware
+     * as a tick under a quiet effect.
+     */
+    {
+        const int8_t *tab = stdl_host_voltab();
+        int lvl, v;
+
+        for (lvl = 0; lvl <= 64; lvl++) {
+            const int8_t *row = tab + lvl * 256;
+
+            for (v = 1; v < 128; v++) {
+                CHECK(row[v & 255] == -row[(-v) & 255],
+                      "vol %d: %d -> %d but %d -> %d",
+                      lvl, v, row[v & 255], -v, row[(-v) & 255]);
+            }
+            CHECK(row[0] == 0, "vol %d: silence is not silent", lvl);
+        }
+        /* and the specific case heard on the machine: an ambient
+         * effect at vol 16 whose content sits inside +/-8 */
+        for (v = -8; v <= 8; v++) {
+            CHECK(tab[16 * 256 + (v & 255)] == 0,
+                  "vol 16: %d -> %d, want 0", v,
+                  tab[16 * 256 + (v & 255)]);
+        }
+    }
 
     STDL_CloseVoices();
     CHECK(!STDL_VoicesOpen(), "still open after close");

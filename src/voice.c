@@ -54,6 +54,17 @@ static struct {
     void    *tick_ud;
 } vc;
 
+#ifndef __m68k__
+/* Host tests read the volume table directly - it is built once at
+ * open and its symmetry is the property worth asserting, which no
+ * amount of mixing through the ring shows as clearly. Compiled out
+ * on target, so it costs a port nothing. */
+const int8_t *stdl_host_voltab(void)
+{
+    return vc.voltab;
+}
+#endif
+
 static void voice_shutdown(void)
 {
     /* terminate-vector context: hardware and vectors only */
@@ -192,12 +203,34 @@ int STDL_OpenVoices(int freq)
     vc.ring = (int8_t *)(((uintptr_t)vc.ring_alloc + 1) & ~(uintptr_t)1);
     memset(vc.ring, 0, RING_FRAMES);
 
-    /* volume rows: vt[vol][byte] = (int8)byte * vol / 256, so four
-     * voices at vol 64 sum to at most the full s8 range */
+    /*
+     * Volume rows: vt[vol][byte] = (int8)byte * vol / 256, so four
+     * voices at vol 64 sum to at most the full s8 range.
+     *
+     * Rounded toward zero, not shifted. An arithmetic >> is a floor,
+     * which is not symmetric about zero: at vol 16 every negative
+     * input from -1 down mapped to -1 while every small positive
+     * mapped to 0, so a quiet sample came out as a DC-biased square
+     * wave toggling at its own zero crossings. On a DMA DAC in
+     * silence that is an audible tick, heard on real hardware as an
+     * intermittent spike under an ambient effect playing at vol 16.
+     * Even at vol 64 it was lopsided: -1 and -2 gave -1 where +1 and
+     * +2 gave 0. Truncating toward zero costs a branch per entry of
+     * a table built once at open, and nothing per sample.
+     *
+     * It does not fix the resolution loss underneath, which is
+     * inherent to scaling an 8-bit sample into an 8-bit table: at
+     * vol 16 the row is s/16, so only the loudest sixteenth of the
+     * range survives at all. That is the headroom rule's doing -
+     * full scale is s/4 so four voices sum without clipping - and
+     * changing it is a loudness change for every port, so it is a
+     * decision rather than a fix.
+     */
     for (level = 0; level <= 64; level++) {
         int8_t *row = vc.voltab + level * 256;
         for (s = 0; s < 256; s++) {
-            row[s] = (int8_t)(((int8_t)s * level) >> 8);
+            const int v = (int)(int8_t)s * level;
+            row[s] = (int8_t)(v < 0 ? -((-v) >> 8) : (v >> 8));
         }
     }
 

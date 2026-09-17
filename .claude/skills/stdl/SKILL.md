@@ -533,6 +533,16 @@ first.
   including whether a library path works at all, an open question
   rather than a validated result. Label them as such; the cost of
   the other habit is on this page several times over.
+- **Check that the thing you are timing actually happened - in
+  both runs, separately.** The rule below is not enough on its own
+  when the measurement is a comparison. A port comparing two 25s
+  captures got burst counts of 490 before a fix and 18 after, which
+  reads as a spectacular improvement until you notice the two
+  recordings had caught different amounts of game activity, and
+  that the 490 were the artefact itself crossing the threshold
+  rather than sounds. Confirm the content of A and of B before
+  comparing their numbers; a deterministic script is what makes
+  that possible.
 - **Check that the thing you are timing actually happened.** A
   20-second benchmark of "the cost of music" measured a track that
   had ended 4.5 seconds in; the frame time alone could never have

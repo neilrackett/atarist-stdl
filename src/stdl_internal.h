@@ -238,6 +238,7 @@ typedef struct {
     int              old_rez;
     uint16_t         old_palette[16];
     int              old_cpuspeed;
+    int              old_sync;    /* -1 until we change the rate  */
 
     /* logical palette for the screen */
     STDL_Colour      colours[16];
@@ -268,6 +269,25 @@ extern void (*stdl_shutdown_audio)(void);
 extern void (*stdl_shutdown_music)(void);
 extern void (*stdl_shutdown_vbl)(void);
 extern void (*stdl_shutdown_overscan)(void);
+
+/* Sync rate. Bit 1 of $FFFF820A: 2 = 50Hz, 0 = 60Hz (bit 0 is the
+ * mono rate and is not ours to touch in low resolution).
+ *   stdl_vbl_hz    the rate actually in effect, 50 or 60, which is
+ *                  the VBL rate everything timed off the VBL has
+ *                  to divide by - see music.c.
+ *   stdl_sync_want the register value the application asked for,
+ *                  or -1 if it never asked. Overscan owns the
+ *                  register while a border is open (its tricks are
+ *                  PAL-timed), so a request made then is recorded
+ *                  and applied on the final close. */
+#ifdef __m68k__
+#define STDL_SYNC_REG (*(volatile uint8_t *)0xFFFF820AUL)
+#else
+extern volatile uint8_t stdl_host_sync_reg;
+#define STDL_SYNC_REG stdl_host_sync_reg
+#endif
+extern uint8_t stdl_vbl_hz;
+extern int     stdl_sync_want;
 extern void (*stdl_shutdown_hwscroll)(void);
 
 /* Mega STE speed/cache control: the register, the requested mode

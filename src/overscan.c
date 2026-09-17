@@ -393,7 +393,7 @@ static int      cal_mode = -1;   /* speed mode it was taken at       */
 #define MFP_TACR (*(volatile uint8_t *)0xFFFFFA19UL)
 #define MFP_TBCR (*(volatile uint8_t *)0xFFFFFA1BUL)
 #define MFP_TBDR (*(volatile uint8_t *)0xFFFFFA21UL)
-#define SYNC_REG (*(volatile uint8_t *)0xFFFF820AUL)
+#define SYNC_REG STDL_SYNC_REG
 #define VEC_VBL  (*(volatile uint32_t *)0x70UL)
 #define VEC_TA   (*(volatile uint32_t *)0x134UL)
 #define VEC_TB   (*(volatile uint32_t *)0x120UL)
@@ -1765,7 +1765,15 @@ static void ovsc_release(void)
     VEC_TA = old_ta_vec;
     VEC_TB = old_tb_vec;
     VEC_TC = old_tc_vec;
-    SYNC_REG = old_sync;
+    /* back to what the application asked for, not to what TOS had:
+     * a port that chose 60Hz before opening a border still wants
+     * it afterwards. stdl_sync_want is -1 when it never asked. */
+    {
+        uint8_t r = (uint8_t)(stdl_sync_want >= 0 ? stdl_sync_want
+                                                  : old_sync);
+        SYNC_REG = r;
+        stdl_vbl_hz = (uint8_t)((r & 2) ? 50 : 60);
+    }
     stdl_int_restore(sr);
     /* the reseed wants the blanking: done mid-picture it left a
      * Mega STE's desktop rotated after a program quit with its
@@ -1904,6 +1912,7 @@ static int ovsc_open(int which)
     if (!mode) {
         old_sync = (uint8_t)(SYNC_REG & 3);
         SYNC_REG = 2;
+        stdl_vbl_hz = 50;       /* the tricks are PAL-timed */
     }
     if (buf_alloc == NULL) {
         /* 256-byte alignment satisfies the plain ST's screen base

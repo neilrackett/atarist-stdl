@@ -16,6 +16,17 @@ time, not at runtime.
 6. Profile on Mega STE (`dist/TBLITSPD.TOS` gives the baseline;
    the blitter accelerates large same-phase fills/blits
    automatically - align to 16px to benefit).
+* **Display rate**: `STDL_SetRefresh(50)` or `(60)` switches the
+  sync rate, `-1` queries, and the return value is the rate that
+  actually took effect rather than the one asked for. A PAL machine
+  boots at 50Hz and an NTSC one at 60; 60Hz gives ten more frames a
+  second with the same 320x200 picture. The VBL rate moves with it,
+  so time from `STDL_GetTicks` rather than counting frames -
+  `STDL_Music` compensates, per-tick things like `STDL_Sfx`
+  envelopes and `STDL_AddVBL` callbacks cannot. A border forces
+  50Hz while it is open (the overscan tricks are PAL-timed) and
+  applies the request on the final close. Some period TVs will not
+  sync 60Hz on a PAL machine, so check the return value.
 * **Mega STE speed**: `STDL_Init` switches a Mega STE to 16MHz with
   its cache on. `STDL_UseMegaSteSpeedup(0)` leaves the machine as
   the user set it (call it before `STDL_Init` to prevent the switch,

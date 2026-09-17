@@ -38,7 +38,7 @@ CORE    = stubs.c $(SRC)/surface.c $(SRC)/indexed.c $(SRC)/draw.c \
 TESTS   = test_pixel test_compose test_cursor test_assets test_planes \
           test_footprint test_indexed test_glyph test_vbl test_blit8 \
           test_underleak \
-          test_voice test_ym test_tone test_opl
+          test_voice test_ym test_tone test_opl test_refresh
 
 all: $(TESTS)
 
@@ -80,6 +80,10 @@ test_blit8: test_blit8.c $(CORE) $(SRC)/blit8.c $(SRC)/surfacefrom.c
 test_voice: test_voice.c $(CORE) $(SRC)/voice.c $(SRC)/vbl.c
 	$(CC) $(CFLAGS) -o $@ $^
 
+test_refresh: test_refresh.c $(CORE) $(SRC)/refresh.c $(SRC)/music.c \
+              $(SRC)/ym.c $(SRC)/asset.c
+	$(CC) $(CFLAGS) -o $@ $^
+
 test_ym: test_ym.c $(CORE) $(SRC)/ym.c
 	$(CC) $(CFLAGS) -o $@ $^
 
@@ -90,14 +94,13 @@ test_opl: test_opl.c $(CORE) $(SRC)/ym.c $(SRC)/tone.c $(SRC)/sfx.c \
           $(SRC)/opl.c
 	$(CC) $(CFLAGS) -o $@ $^
 
+# Runs every binary in TESTS rather than a second hand-kept list:
+# a test added to TESTS alone still built, still linked and still
+# reported nothing, which is the "test that cannot fail" this suite
+# exists to catch, one level up. Caught while adding test_refresh.
 run: $(TESTS)
-	@./test_pixel && ./test_compose && ./test_cursor \
-	  && ./test_assets && ./test_planes && ./test_footprint \
-	  && ./test_indexed && ./test_glyph && ./test_vbl \
-	  && ./test_underleak \
-	  && ./test_blit8 && ./test_voice && ./test_ym && ./test_tone \
-	  && ./test_opl \
-	  && echo "ALL HOST TESTS PASSED"
+	@set -e; for t in $(TESTS); do ./$$t; done; \
+	  echo "ALL HOST TESTS PASSED"
 
 clean:
 	rm -f $(TESTS)

@@ -138,9 +138,10 @@ static uint32_t step_frame(STDL_Music *m, uint32_t pos)
 }
 
 /* per-VBL music tick (registered with the YM service). The
- * accumulator replays non-50Hz streams at the right speed on a
- * 50Hz VBL; 60Hz displays would run 20%% fast - low resolution on
- * a colour monitor is 50Hz, which is v1's world. */
+ * accumulator replays a stream of any tick rate at the right speed
+ * on the VBL, dividing by the rate actually in effect rather than
+ * by 50: STDL_SetRefresh can put the display at 60Hz, and a tune
+ * that assumed the VBL was 50 would then run 20%% fast. */
 static void music_tick(void)
 {
     STDL_Music *m = cur;
@@ -153,8 +154,8 @@ static void music_tick(void)
     pos = cur_pos;
     frame = cur_frame;
     tick_acc = (uint16_t)(tick_acc + m->tick_hz);
-    while (tick_acc >= 50 && playing) {
-        tick_acc -= 50;
+    while (tick_acc >= stdl_vbl_hz && playing) {
+        tick_acc = (uint16_t)(tick_acc - stdl_vbl_hz);
         pos = step_frame(m, pos);
         frame++;
         if (frame >= m->nframes) {

@@ -99,6 +99,37 @@ int STDL_UseBlitter(int enable);
 int STDL_UseMegaSteSpeedup(int mode);
 
 /*
+ * The display's sync rate: 50 or 60, or -1 to ask without
+ * changing. Returns the rate now in effect.
+ *
+ * What TOS set at boot is the machine's region - PAL starts at 50,
+ * NTSC at 60 - and this is how a port asks for the other. 60Hz
+ * gives ten more frames a second and the same 320x200 picture; it
+ * is worth having for a game already inside its frame budget, and
+ * worth nothing for one that is not.
+ *
+ * Three things to know before using it.
+ *
+ * The VBL rate changes with it, so anything timed by counting
+ * frames runs 20%% fast at 60Hz. STDL_Music is rate-aware and
+ * compensates; STDL_Sfx envelopes and STDL_AddVBL callbacks are
+ * per-tick by definition and will not. Time from STDL_GetTicks
+ * where it matters.
+ *
+ * Overscan is PAL-timed. While a border is open the display is
+ * forced to 50Hz whatever was asked for, and the request takes
+ * effect on the final close - so this returns 50 while a border is
+ * open, and a port that wants both cannot have both.
+ *
+ * And 60Hz on a PAL machine is outside what some period TVs and
+ * monitors will sync, though ST colour monitors take both. It is
+ * opt-in for that reason, and the return value is what actually
+ * happened, so a port can ask and then believe the answer rather
+ * than the request.
+ */
+int STDL_SetRefresh(int hz);
+
+/*
  * Plane budget: how many of the four bitplanes STDL maintains.
  *
  * The screen is always four planes, but a game that only uses

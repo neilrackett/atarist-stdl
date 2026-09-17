@@ -625,6 +625,22 @@ first.
   honest way to measure there - and so a port can decline the
   switch, since a game that needs 16MHz to be playable has a
   rendering problem, not a hardware one.
+- Display rate: `STDL_SetRefresh(50 | 60)` switches the sync rate
+  and returns the rate that actually took effect, `-1` queries. PAL
+  machines boot at 50 and NTSC at 60, and 60Hz buys ten more frames
+  a second at the same 320x200 - worth having for a game already
+  inside its frame budget and worth nothing for one that is not.
+  Three things bite. The VBL rate moves with it, so anything timed
+  by counting frames runs 20% fast at 60Hz (`STDL_Music` is
+  rate-aware and compensates; `STDL_Sfx` envelopes and
+  `STDL_AddVBL` callbacks are per-tick by definition and do not) -
+  time from `STDL_GetTicks` where it matters. Overscan is PAL-timed,
+  so a border forces 50Hz while it is open and the request lands on
+  the final close, which means a port cannot have both. And 60Hz on
+  a PAL machine is outside what some period TVs will sync, which is
+  why it is opt-in and why the return value is the rate rather than
+  an acknowledgement - ask, then believe the answer.
+  `examples/vblchk.c` measures the VBL at both rates.
 - Engine-owned framebuffers: `STDL_CreateSurfaceFrom(pixels, w, h,
   stride, mask, maskstride)` wraps caller-owned planar blocks (and an
   optional mask plane) as surfaces - pointer-swappable, memcpy-able,

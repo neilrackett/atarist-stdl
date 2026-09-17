@@ -83,6 +83,8 @@ static void detect_machine(void)
 /* Shared with src/cpuspeed.c, which holds the public call: only a
  * program that asks for it should link that. */
 int stdl_megaste_mode = 1;
+uint8_t stdl_vbl_hz = 50;       /* see stdl_internal.h */
+int     stdl_sync_want = -1;
 
 /* Both callers have already established the machine has this
  * register - STDL_Init from megaste_speedup, and the public call in
@@ -170,6 +172,14 @@ static void release_hardware(void)
         stdl_shutdown_overscan();
         stdl_shutdown_overscan = NULL;
     }
+    if (stdl.old_sync >= 0) {
+        /* after the overscan release above, which owns the
+         * register while a border is open */
+        STDL_SYNC_REG = (uint8_t)stdl.old_sync;
+        stdl.old_sync = -1;
+    }
+    stdl_vbl_hz = 50;
+    stdl_sync_want = -1;
     stdl_events_remove();
     if (stdl.video_set) {
         for (i = 0; i < 16; i++) {
@@ -277,6 +287,7 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
     }
 
     if (!stdl.video_set) {
+        stdl.old_sync = -1;     /* nothing to put back yet */
         stdl.old_rez = Getrez();
         if (stdl.old_rez == 2) {
             STDL_SetError("monochrome monitor: low resolution "

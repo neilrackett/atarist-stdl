@@ -13,7 +13,13 @@
  *    of what the main program is doing, and stop the moment it is
  *    removed. The host suite can only check the slot bookkeeping.
  *
- * 2. STDL hands the machine back however the program dies. This one
+ * 2. STDL_SetRefresh really changes the display rate, which is only
+ *    observable as the VBL rate: ten more ticks a second and a tune
+ *    that still plays at the right speed. Checked by measuring,
+ *    because the register accepts the write on any machine and the
+ *    monitor is what decides whether anything happened.
+ *
+ * 3. STDL hands the machine back however the program dies. This one
  *    ends by calling Pterm directly - which is what a failed assert,
  *    an abort() or a bus error does: the C runtime never runs, so
  *    atexit handlers never fire. If the GEMDOS terminate vector is
@@ -64,6 +70,7 @@ static int measure(const char *what, int ms, int lo, int hi)
 int main(void)
 {
     STDL_Surface *screen;
+    int boot_hz, other_hz, got_hz;
 
     if (STDL_Init(STDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "init failed: %s\n", STDL_GetError());
@@ -80,9 +87,35 @@ int main(void)
         fprintf(stderr, "FAIL add: %s\n", STDL_GetError());
         return 1;
     }
-    /* 50Hz for two seconds, with slack for a machine whose display
-     * runs at 60Hz and for the 5ms clock the delay is measured on */
-    measure("50Hz tick", 2000, 90, 125);
+    /* Whatever the machine booted at - PAL 50, NTSC 60 - measured
+     * over two seconds, with slack for the 5ms clock the delay is
+     * timed on. Asking first is the point: the rate is a property
+     * of the machine, not an assumption. */
+    boot_hz = STDL_SetRefresh(-1);
+    fprintf(stderr, "display is %dHz\n", boot_hz);
+    measure("boot rate tick", 2000, boot_hz * 2 - 10, boot_hz * 2 + 5);
+
+    /* The other rate. The call returns what actually took effect,
+     * so a machine that will not change says so rather than
+     * leaving the caller to assume it worked - and the tick count
+     * is the independent check on the answer, since the register
+     * takes the write either way and the monitor decides. */
+    other_hz = (boot_hz == 50) ? 60 : 50;
+    got_hz = STDL_SetRefresh(other_hz);
+    if (got_hz != other_hz) {
+        fprintf(stderr, "SKIP switch: asked %dHz, got %dHz\n",
+                other_hz, got_hz);
+    } else {
+        measure("switched rate tick", 2000,
+                other_hz * 2 - 10, other_hz * 2 + 5);
+        if (STDL_SetRefresh(boot_hz) != boot_hz) {
+            fprintf(stderr, "FAIL: could not switch back\n");
+            failures++;
+        } else {
+            measure("back at the boot rate", 2000,
+                    boot_hz * 2 - 10, boot_hz * 2 + 5);
+        }
+    }
 
     /* installing again must not double the rate: it is the same
      * callback, and it should still hold exactly one slot */
@@ -104,8 +137,13 @@ int main(void)
      * clean up, then leave the way a crashing program leaves.
      */
     STDL_AddVBL(count_vbl);
-    fprintf(stderr, "terminating without atexit - the desktop should "
-                    "come back clean\n");
+    /* leave the machine on the other rate deliberately: the
+     * terminate vector has to put the sync register back too, and
+     * a desktop that comes back rolling is the failure */
+    STDL_SetRefresh(other_hz);
+    fprintf(stderr, "terminating without atexit at %dHz - the desktop "
+                    "should come back clean and at %dHz\n",
+            other_hz, boot_hz);
     Pterm(1);
     return 1;                       /* not reached */
 }

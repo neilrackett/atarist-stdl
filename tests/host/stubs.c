@@ -31,6 +31,13 @@ void (**stdl_host_vblqueue)(void) = host_vblslots;
 volatile uint8_t stdl_host_vidcnt[3];
 volatile uint8_t stdl_host_vidbase[2];
 volatile uint8_t stdl_host_mste_ctl;
+volatile uint8_t stdl_host_sync_reg = 2;    /* 50Hz, as PAL boots */
+/* Normally video.c's, which the host tests do not link: the sync
+ * rate in effect, the rate an application asked for, and the hook
+ * that says overscan owns the register right now. */
+uint8_t stdl_vbl_hz = 50;
+int     stdl_sync_want = -1;
+void  (*stdl_shutdown_overscan)(void);
 
 /* the YM2149 as a register file, and the console-attributes byte */
 volatile uint8_t stdl_host_ym_sel;

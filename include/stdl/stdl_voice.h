@@ -83,6 +83,16 @@ int  STDL_VoicesOpen(void);
  * into an 8-bit table is lossy, and at the old quarter scale a
  * voice at vol 16 kept only the loudest sixteenth of the range.
  *
+ * If your port balances these voices against anything else - YM
+ * music especially - that balance is wrong after the change and
+ * the fix is in your code, not here. Measured by a port doing
+ * exactly that: its effects went from -26.0 to -20.3 dBFS peak on
+ * identical content, so it moved its music volume from 60 to 70,
+ * which took the music from -24.7 to -21.4. Six decibels on one
+ * side of a mix nobody re-checked is the kind of regression that
+ * gets described as "the sound is wrong now" long after the
+ * upgrade that caused it.
+ *
  * Callable from the voice tick and from the main line (guarded
  * against the VBL internally).
  */

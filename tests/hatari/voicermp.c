@@ -26,6 +26,17 @@
  * looking for. The triangle ends where it began, so the loop is
  * continuous and any discontinuity heard is the machine's.
  *
+ * What it should sound like, so nobody chases the signal itself:
+ * a quiet low rumble, and nothing else. 24.4Hz is below what most
+ * speakers reproduce, so what arrives is its harmonics - which is
+ * also a fair description of "quiet static", and was duly reported
+ * as one. Verified by capturing the emulator's output and
+ * measuring it rather than by listening: 24.3Hz against the 24.4
+ * the table and rate predict, peak -16.4 dBFS, and the largest
+ * single-sample step in three and a half seconds is 1.1% of
+ * peak-to-peak. There is no discontinuity in this signal. If you
+ * hear a tap, a click or a break, it is not coming from here.
+ *
  * It also counts, because ears are not evidence. stdl_voice_late
  * rises whenever the tick filled all three blocks it is allowed
  * and still had not caught the play head - the hardware has run on

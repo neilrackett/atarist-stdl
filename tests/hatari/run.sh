@@ -36,7 +36,12 @@
 #   MACHINE hatari machine type (default ste: an 8MHz CPU, so the
 #           timing is honest, with the blitter and DMA audio there
 #           to exercise. Use st for the correctness floor, and
-#           megaste only to measure what 16MHz adds)
+#           megaste to measure what 16MHz adds - and as the only
+#           setting under which STDL_UseMegaSteSpeedup does
+#           anything: Hatari honours writes to $FFFF8E21 and really
+#           does change clock, so speed-dependent code is testable
+#           here, not only on hardware. Do not pass --cpuclock as
+#           well, which pins it)
 #   SOUND   off, on, or a frequency in Hz (default off). "on" means
 #           44100. Recording is a separate step: send
 #           'fifo hatari-shortcut recsound' to start and again to

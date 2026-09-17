@@ -184,6 +184,36 @@ warnings** with the Makefile's `-Wall -Wextra`.
   A timing diagnostic that reads the counter must keep the read
   inside the line's fetch (cycles 64-376): a read landing after the
   park silently tracks the write instead of the line.
+- **"Once per process" is an assumption, and a new API can falsify
+  it.** The bottom border measures its own instruction timings on
+  the machine at the first open and caches them, under a comment
+  saying the CPU speed does not change under a running program -
+  true until `STDL_UseMegaSteSpeedup` shipped, after which a Mega
+  STE calibrated at 16MHz and dropped to 8 did not open the bottom
+  border at all. The cache records the mode it was taken at now and
+  re-measures when that changes; a border left open across the
+  change still runs against the table it was given, which the
+  header and docs say. The audit is the lesson: a new call that
+  changes machine state has to be checked against every "measured
+  once" in the library, not only against the code it touches.
+
+  The second lesson is about the emulator, and it was learned by
+  getting it wrong out loud. **Hatari does change CPU speed when
+  $FFFF8E21 is written**, as long as nothing has pinned the clock
+  with `--cpuclock`: under `--machine megaste` a fixed loop measures
+  303 ticks at mode 1 or 3 against 551 at mode 0, with mode 2 at 548
+  - the clock alone buys almost nothing, the cache is the whole
+  speedup, which matches real hardware and the BLITCHK figures in
+  `stdl_video.h`. `tests/hatari/spdprob.c` is that measurement.
+  So this bug was reproducible in the emulator from the day it was
+  written and nobody ran the case: the example's speed key was
+  tested on `st` and `ste`, where the call does nothing by
+  definition. `OVAUTO.CFG`'s `speed=` line is the regression test
+  (open at the boot speed, close, switch, reopen: `open=0/200`
+  before the fix, `200/200` after) and a position that never opened
+  now exits non-zero instead of only saying so in the file. Before
+  concluding that a hardware behaviour is outside Hatari, measure
+  it - the claim is cheap to check and expensive to get wrong.
 - **The GLUE's position against the video counter is not a constant
   of a machine.** On one Mega STE the bottom-border test moved eight
   cycles between two boots with identical tables: the GLUE and the

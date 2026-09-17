@@ -79,6 +79,12 @@ int STDL_UseBlitter(int enable);
  * anything that is not a Mega STE it records the setting and does
  * nothing else.
  *
+ * Change speed with the borders closed. Opening one measures the
+ * timing of its own code on the machine, and that measurement is
+ * redone on the next open after a speed change - but a border
+ * already open keeps the table it was given, which is wrong at the
+ * other clock. See examples/overscan.c.
+ *
  * Measured by BLITCHK.TOS on an emulated Mega STE, 50 full-screen
  * fills plus keyed blits: 2705ms of CPU work at the speed the user
  * had set, 2610ms at 16MHz without the cache, 1690ms with it. The

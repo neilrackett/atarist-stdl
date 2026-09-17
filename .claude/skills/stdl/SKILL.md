@@ -416,7 +416,10 @@ first.
 - Mega STE speed: `STDL_Init` takes the machine to 16MHz with its
   cache. Change it only while any border is closed - opening one
   measures the flick's instruction costs on the machine, so a
-  calibration taken at one clock is wrong at the other.
+  calibration taken at one clock is wrong at the other. The next
+  open after a speed change re-measures; a border left open across
+  it does not, and on real hardware a 16MHz table at 8MHz does not
+  open the bottom border at all.
   `examples/overscan.c` brackets its speed key that way. `STDL_UseMegaSteSpeedup(0)` leaves it as the user set it,
   before `STDL_Init` to prevent the switch or after to undo it; 2
   and 3 are the clock without and with the cache. It exists so a

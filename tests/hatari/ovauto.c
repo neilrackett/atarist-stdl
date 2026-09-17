@@ -27,6 +27,28 @@
  *                  hard-disk driver that masks interrupts during a
  *                  transfer holds the border ISR off for the whole
  *                  of it, and no emulator models that
+ *   speed=N        open the borders once at the speed STDL_Init
+ *                  chose, close them, STDL_UseMegaSteSpeedup(N),
+ *                  and only then run the positions. Repeat the line
+ *                  to sweep: every position is run at each speed in
+ *                  turn, borders closed and reopened between, so
+ *                  one run compares 1 (16MHz, cache) against 2
+ *                  (16MHz, no cache) against 0 (8MHz) on the same
+ *                  machine in the same binary - the only honest
+ *                  comparison on hardware whose timings move with
+ *                  code layout. The order is
+ *                  the point: the bottom border's timings are
+ *                  measured on the machine at open time and cached,
+ *                  so setting the speed before the first open can
+ *                  never be wrong, and `speed=0` on a Mega STE is
+ *                  the regression test for the cache - it opened at
+ *                  16MHz, ran at 8, and the border did not appear.
+ *                  Hatari honours the register under --machine
+ *                  megaste (measured: a fixed loop takes 303 ticks
+ *                  at mode 1 or 3 and 551 at 0, with mode 2 at 548 -
+ *                  the clock alone buys almost nothing, the cache is
+ *                  the speedup), so this is testable in the emulator
+ *                  and not only on hardware.
  *   reset=1        after the borders close, switch the Shifter to
  *                  hi-res for a moment and back: does the desktop
  *                  come back with its colours right after a wide=
@@ -84,6 +106,7 @@ static int   tests[MAXTESTS], wides[MAXTESTS], leads[MAXTESTS], ntests;
 static int   lead_default = -1;
 static int   frames = 200, force = 0, measure = 1, reset = 0;
 static int   load = 0, loadcpu = 0, loaddisk = 0;
+static int   spds[4], nspds;
 static char  mode = 'b';
 
 /* Output goes through GEMDOS directly - Cconws for the console and
@@ -180,6 +203,8 @@ static int read_cfg(void)
             measure = atoi(eq);
         } else if (strcmp(line, "lead") == 0) {
             lead_default = atoi(eq);
+        } else if (strcmp(line, "speed") == 0 && nspds < 4) {
+            spds[nspds++] = atoi(eq);
         } else if (strcmp(line, "reset") == 0) {
             reset = atoi(eq);
         } else if (strcmp(line, "load") == 0) {
@@ -206,7 +231,7 @@ static int read_cfg(void)
 int main(void)
 {
     STDL_Surface *screen;
-    int t, h = 0, status = 0;
+    int t, sp, h = 0, status = 0;
 
     if (!read_cfg()) {
         (void)Cconws("OVAUTO: no OVAUTO.CFG\r\n");
@@ -227,6 +252,28 @@ int main(void)
         return 1;
     }
     stdl_ovsc_diag = 1;
+    if (nspds == 0) {
+        spds[nspds++] = -1;             /* leave the speed alone */
+    }
+
+    for (sp = 0; sp < nspds; sp++) {
+    int speed = spds[sp];
+
+    if (speed >= 0) {
+        /* prime the calibration at the speed STDL_Init chose, then
+         * change clock with the borders closed - the sequence a
+         * program that switches speed mid-run actually performs */
+        if (mode == 't' || mode == 'c') {
+            STDL_OpenTopBorder();
+        }
+        if (mode == 'b' || mode == 'c') {
+            STDL_OpenBottomBorder();
+        }
+        STDL_WaitVBL();
+        STDL_CloseBottomBorder();
+        STDL_CloseTopBorder();
+        STDL_UseMegaSteSpeedup(speed);
+    }
 
     for (t = 0; t < ntests * (measure == 2 ? 2 : 1); t++) {
         uint32_t m0, m1;
@@ -328,8 +375,16 @@ int main(void)
                 stdl_ovsc_pre, stdl_ovsc_pre_cyc, stdl_ovsc_pre_np,
                 stdl_ovsc_pre_nm, stdl_ovsc_pre_parks);
         }
-        say("%s=%u %s lead=%d load=%d/%d/%d open=%d/%d misses=%lu polls[0..15]=",
-            wides[tt] ? "wide" : "test", stdl_ovsc_test,
+        if (open_ok == 0) {
+            /* the border opened at all - stdl_ovsc_botok was never
+             * set in any of the frames that followed. Reported for
+             * years as a line in the file and nothing else, which
+             * is exactly the shape of failure a runner cannot see;
+             * a position that never opened is a failed run. */
+            status = 1;
+        }
+        say("speed=%d %s=%u %s lead=%d load=%d/%d/%d open=%d/%d misses=%lu polls[0..15]=",
+            speed, wides[tt] ? "wide" : "test", stdl_ovsc_test,
             stdl_ovsc_measured ? "measured" : "scaled",
             stdl_ovsc_measured ? (int)stdl_ovsc_lead : 0,
             load, loadcpu, loaddisk, open_ok, frames,
@@ -346,6 +401,8 @@ int main(void)
     }
     STDL_CloseBottomBorder();
     STDL_CloseTopBorder();
+    }
+    STDL_UseMegaSteSpeedup(1);
     if (reset) {
         stdl_ovsc_shifter_reset();
         say("shifter reset done\r\n");

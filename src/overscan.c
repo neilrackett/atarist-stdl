@@ -281,6 +281,26 @@ uint16_t stdl_ovsc_n2t;      /* tick mode: turns between the writes */
 uint16_t stdl_ovsc_postn;    /* poll bound for line 263's DE end     */
 uint16_t stdl_ovsc_waitn;    /* poll bound of ~8 lines, any wait     */
 uint8_t  stdl_ovsc_tick;     /* 1 = time from Timer B, not the counter */
+/* pull stdl_ovsc_n1 into the Mega STE's cache at the top of the
+ * bottom ISR, where there are lines of slack, rather than meeting
+ * it cold inside the timed section. The flick reads two of the
+ * table's 32 words and which two depends on where the poll caught
+ * the beam, so the slot moves frame to frame; with the cache on, a
+ * slot whose line is not resident costs bus cycles the table's own
+ * numbers cannot account for, and the flick lands late. That is
+ * the shape of the symptom on a real Mega STE: the bottom border
+ * solid at 16MHz with the cache off and flickering with it on,
+ * unchanged by anything else running. The ISR already warms the
+ * flick's *code* this way; this is the data it forgot.
+ *
+ * Four reads, 16 bytes apart, about 96 cycles: the whole 64-byte
+ * table if the line is 16 bytes and most of it if it is shorter.
+ * The cost matters - a first version walked all 16 longs, about
+ * 350 cycles, and that alone pushed the ISR past line 262 on a
+ * plain STE and missed every frame. Whatever is added here comes
+ * out of the budget between the interrupt and the line, so measure
+ * it on --machine st before believing it is free. */
+uint8_t  stdl_ovsc_warm = 1;
 uint8_t  stdl_ovsc_l262lo;
 uint8_t  stdl_ovsc_l262mid;
 uint8_t  stdl_ovsc_scratch;
@@ -364,6 +384,7 @@ static uint8_t  old_ier;         /* previous IERA/IMRA state of both */
 static uint8_t  old_imr;         /* timer bits (0x21 mask)           */
 static int      mode;            /* MODE_TOP | MODE_BOT */
 static int      c16;             /* calibrated dbra turn, x16, or 0 */
+static int      cal_mode = -1;   /* speed mode it was taken at       */
 
 #define MFP_IERA (*(volatile uint8_t *)0xFFFFFA07UL)
 #define MFP_IPRA (*(volatile uint8_t *)0xFFFFFA0BUL)
@@ -642,6 +663,15 @@ __asm__(
 "_stdl_ovsc_tb:\n"
 "    movem.l %d0-%d7/%a0-%a3,-(%sp)\n"
 "    bsr    stdl_ovsc_bpause\n"
+/* the table into cache while there is still slack; see
+ * stdl_ovsc_warm */
+"    tst.b  _stdl_ovsc_warm\n"
+"    beq.s  12f\n"
+"    move.l _stdl_ovsc_n1,%d0\n"
+"    move.l _stdl_ovsc_n1+16,%d0\n"
+"    move.l _stdl_ovsc_n1+32,%d0\n"
+"    move.l _stdl_ovsc_n1+48,%d0\n"
+"12:\n"
 "    moveq  #0,%d6\n"
 "    moveq  #2,%d7\n"
 "    lea    0xfffffa21.w,%a0\n"
@@ -1939,11 +1969,28 @@ static int ovsc_open(int which)
             stdl_pal_apply_hook = ovsc_pal_stage;
         }
     }
-    if ((which & MODE_BOT) && c16 == 0) {
-        /* once per process: the CPU speed does not change under a
-         * running program. A failed measurement (no displayed line
-         * seen) falls back to the plain ST's numbers rather than
-         * refuse the border. */
+    if ((which & MODE_BOT)
+        && (c16 == 0 || cal_mode != stdl_megaste_mode)) {
+        /*
+         * Once per process used to be enough, on the grounds that
+         * the CPU speed does not change under a running program.
+         * STDL_UseMegaSteSpeedup made that false, and the symptom
+         * on real hardware is unambiguous: a Mega STE calibrated at
+         * 16MHz and then dropped to 8 does not open the bottom
+         * border at all, because every timing in the table is
+         * measured in the wrong clock's cycles. So the calibration
+         * is redone whenever the requested speed has changed since
+         * it was taken.
+         *
+         * Change speed with the borders closed: this recalibrates
+         * on the next open, and a border already open goes on
+         * running against the table it was given. A port that
+         * writes the speed register itself rather than through the
+         * library gets no notification and no recalibration.
+         *
+         * A failed measurement (no displayed line seen) falls back
+         * to the plain ST's numbers rather than refuse the border.
+         */
         int live;
         c16 = ovsc_calibrate(&live);
         if (c16 == 0) {
@@ -1955,6 +2002,7 @@ static int ovsc_open(int which)
         }
         stdl_ovsc_measured = (uint8_t)(live ? ovsc_measure() : 0);
         ovsc_table(c16);
+        cal_mode = stdl_megaste_mode;
     }
     ovsc_program(m);
     ovsc_surface();

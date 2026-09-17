@@ -2,6 +2,43 @@
  * Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: CC0-1.0
  *
+ * Border overscan demo plus two probe keys, W and X. Not the
+ * shipped example: it reaches into library internals, which an
+ * example must not, and it exists to answer one question on real
+ * hardware.
+ *
+ * W toggles stdl_ovsc_warm, the bottom ISR's cache pre-touch, on
+ * at boot and shown as the third status block (green on, blue
+ * off). On a Mega STE with the cache enabled, W off is the
+ * behaviour that flickered the bottom border. Compare W on against
+ * W off in one sitting and nothing else: a Mega STE's timings move
+ * with code layout, so this binary against another one is not a
+ * comparison, however tempting the two numbers look side by side.
+ *
+ * The strip's bar is a histogram, not a counter. With diag set the
+ * ISR counts polls from its 50Hz write until the counter leaves
+ * its parked value, which says how far before line 263's boundary
+ * the restore landed; this draws sixteen columns, one per count,
+ * each a doubling taller per frame in it. One tall column is a
+ * border doing the same thing every frame. Two or more is a border
+ * whose timing moves, which is what a cache-residency problem
+ * looks like and what the eye reports as flicker. The shape is the
+ * reading, so it photographs.
+ *
+ * A histogram and not a counter for two reasons. The count is
+ * coarse per frame - a poll is a dozen-odd cycles and ordinary
+ * interrupt jitter moves it - so a "frames that differed" tally
+ * saturates on noise: it read seven distinct values on a perfectly
+ * healthy emulated STE. And STDL_OverscanMisses() cannot see this
+ * at all, a slipped frame reading exactly like a good one to it,
+ * which is how a port once ran with 37% of its frames cut short
+ * and nothing to show for it.
+ *
+ * X puts back the first version's pulse shape, the known-bad
+ * placement, so the strip can be seen to change before anything is
+ * concluded from it. A metric that has only ever read "fine" is
+ * not evidence.
+ *
  * Border overscan demo: 228, 245 or 273 visible lines on any 50Hz
  * ST.
  *
@@ -53,6 +90,10 @@
 
 #include <stddef.h>
 #include <stdl/stdl.h>
+
+/* library internals; see the note above */
+extern uint8_t stdl_ovsc_warm, stdl_ovsc_diag, stdl_ovsc_dpolls;
+extern uint8_t stdl_ovsc_wide;
 
 static void paint(STDL_Surface *screen)
 {
@@ -136,20 +177,37 @@ static void status_reset(STDL_Surface *screen, int spd, int dbuf)
     STDL_FillRect(screen, &r, speeds[spd].col);
     r.x = 24;
     STDL_FillRect(screen, &r, (uint8_t)(dbuf ? 10 : 8));
+    r.x = 36;
+    STDL_FillRect(screen, &r, (uint8_t)(stdl_ovsc_warm ? 10 : 12));
+    if (stdl_ovsc_wide) {
+        r.x = 48; r.w = 2;
+        STDL_FillRect(screen, &r, 9);
+    }
 }
 
-/* one fill per new segment, nothing at all while the count holds */
-static void status_bar(STDL_Surface *screen, uint32_t from, uint32_t to)
+/* a column's height: a doubling per pixel, so one tall column and
+ * one short one are both still visible after thousands of frames */
+static uint8_t bar_h(uint16_t n)
+{
+    uint8_t h = 0;
+
+    while (n != 0 && h < 8) {
+        h++;
+        n = (uint16_t)(n >> 1);
+    }
+    return h;
+}
+
+/* one column of the histogram, cleared and redrawn */
+static void status_col(STDL_Surface *screen, int b, uint8_t h)
 {
     STDL_Rect r;
-    uint32_t i;
 
-    if (to > (uint32_t)STAT_MAX) {
-        to = (uint32_t)STAT_MAX;
-    }
-    r.y = STAT_Y; r.w = 3; r.h = 8;
-    for (i = from; i < to; i++) {
-        r.x = (int16_t)(40 + i * 4);
+    r.x = (int16_t)(56 + b * 4); r.w = 3;
+    r.y = STAT_Y; r.h = 8;
+    STDL_FillRect(screen, &r, 0);
+    if (h != 0) {
+        r.y = (int16_t)(STAT_Y + 8 - h); r.h = h;
         STDL_FillRect(screen, &r, 9);
     }
 }
@@ -164,7 +222,9 @@ int main(int argc, char *argv[])
 {
     STDL_Surface *screen;
     int top = 0, bot = 0, dbuf = 0, spd = 0, strip = 1, page = 0;
-    uint32_t base = 0, shown[2] = { 0, 0 };
+    uint16_t hist[16];
+    uint8_t  drawn[2][16];
+    int      k;
 
     (void)argc; (void)argv;
     if (STDL_Init(STDL_INIT_VIDEO) < 0) {
@@ -176,6 +236,11 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    stdl_ovsc_diag = 1;                 /* the ISR then keeps dpolls */
+    for (k = 0; k < 16; k++) {
+        hist[k] = 0;
+        drawn[0][k] = drawn[1][k] = 0;
+    }
     top = STDL_OpenTopBorder() != 0;
     paint(screen);
 
@@ -228,6 +293,20 @@ int main(int argc, char *argv[])
                     STDL_UseMegaSteSpeedup(speeds[spd].mode);
                     top = wt ? (STDL_OpenTopBorder() != 0) : 0;
                     bot = wb ? (STDL_OpenBottomBorder() != 0) : 0;
+                } else if (sym == STDLK_w || sym == STDLK_x) {
+                    /* close and reopen: the flags are read by the
+                     * ISR every frame, but a reopen also re-runs
+                     * the calibration, so each state gets a table
+                     * measured under its own conditions */
+                    int wt = top, wb = bot;
+                    close_borders();
+                    if (sym == STDLK_w) {
+                        stdl_ovsc_warm = (uint8_t)!stdl_ovsc_warm;
+                    } else {
+                        stdl_ovsc_wide = (uint8_t)!stdl_ovsc_wide;
+                    }
+                    top = wt ? (STDL_OpenTopBorder() != 0) : 0;
+                    bot = wb ? (STDL_OpenBottomBorder() != 0) : 0;
                 } else if (sym == STDLK_s) {
                     /* the aimed control: no drawing at all while
                      * the border runs, which is the state the
@@ -265,8 +344,10 @@ int main(int argc, char *argv[])
                     paint(screen);
                     STDL_Flip();
                 }
-                base = STDL_OverscanMisses();
-                shown[0] = shown[1] = 0;
+                for (k = 0; k < 16; k++) {
+                    hist[k] = 0;
+                    drawn[0][k] = drawn[1][k] = 0;
+                }
                 page = 0;
                 if (strip) {
                     status_reset(screen, spd, dbuf);
@@ -278,11 +359,24 @@ int main(int argc, char *argv[])
                 }
             }
         }
+        if (bot) {
+            int b = stdl_ovsc_dpolls < 16 ? stdl_ovsc_dpolls : 15;
+            if (hist[b] < 0xffff) {
+                hist[b]++;
+            }
+        }
         if (strip) {
-            uint32_t n = STDL_OverscanMisses() - base;
-            if (n > shown[page]) {
-                status_bar(screen, shown[page], n);
-                shown[page] = n;
+            /* one column at a time, and only when its height has
+             * actually changed - eight redraws per column over a
+             * whole run, so the instrument stays out of the way of
+             * the thing it is measuring */
+            int b;
+            for (b = 0; b < 16; b++) {
+                uint8_t h = bar_h(hist[b]);
+                if (h != drawn[page][b]) {
+                    status_col(screen, b, h);
+                    drawn[page][b] = h;
+                }
             }
         }
         if (dbuf) {

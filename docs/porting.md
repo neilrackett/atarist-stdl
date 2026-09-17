@@ -21,7 +21,11 @@ time, not at runtime.
   the user set it (call it before `STDL_Init` to prevent the switch,
   or after to undo it), and 2 and 3 select the clock without and
   with the cache. Use it to compare speeds inside one binary rather
-  than believing two builds: `examples/blitchk.c` does.
+  than believing two builds: `examples/blitchk.c` does. Change
+  speed with any border closed: the bottom border's timing is
+  measured on the machine at open time, re-measured on the next
+  open after a speed change, and a border left open across the
+  change goes on running against the wrong clock's numbers.
 
 7. Verify on plain ST at 8MHz - the correctness floor, and the
    machine the port is for. The blitter, DMA audio, hardware

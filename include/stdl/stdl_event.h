@@ -162,10 +162,16 @@ uint8_t STDL_GetMouseState(int *x, int *y);
  * asked. The ACIA is MFP channel 6, below the overscan timers at 13
  * and 8, so it cannot preempt them - but an interrupt already in
  * service delays them, and a border's flick has to land on an exact
- * cycle. A port reports the screen flickering on real hardware
- * while the mouse is moved with a border open, which is the same
- * shape as the disk finding in docs/porting.md: not a preemption, a
- * delay.
+ * cycle. Same shape as the disk finding in docs/porting.md: not a
+ * preemption, a delay.
+ *
+ * Measured on a Mega STE with the bottom border open and the mouse
+ * moved continuously: the border flickers and the missed-window
+ * count climbs steadily. With reporting disabled, the same movement
+ * produces neither. Note what that also rules out - a mouse on port
+ * 0 does not come back as joystick 0 traffic once it is silenced,
+ * which was the obvious way for this fix to change the shape of the
+ * problem rather than remove it.
  *
  * Joystick traffic is untouched - its packets are $FD, $FE and $FF
  * against the mouse's $F7 to $FB - so a joystick-only game can

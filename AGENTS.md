@@ -271,6 +271,26 @@ warnings** with the Makefile's `-Wall -Wextra`.
   miss counter *does* see this one - 295 of them - which makes it a
   different signature from a border that flickers while misses read
   clean, and the two should not be assumed to share a cause.
+- **A mouse nobody reads still costs a border.** Moving a mouse with
+  the bottom border open flickers it on a real Mega STE and the
+  missed-window count climbs while the movement lasts; disabling
+  IKBD reporting with `STDL_EnableMouse(0)` stops both. Three ACIA
+  interrupts per movement, about 1.3ms apart: channel 6 cannot
+  preempt the border timers at 13 and 8, but an interrupt in
+  service delays them, and the flick lands on an exact cycle. Same
+  family as the disk finding - a delay, not a preemption.
+  Two things measured rather than assumed on the way, both of which
+  could have gone the other way. The IKBD steals joystick 1's fire
+  bit into the right mouse button while the mouse reports, and
+  event.c folds it back; silencing the mouse hands fire back to the
+  joystick packet rather than leaving it stolen, so a joystick-only
+  port does not lose its fire button - which would have been a far
+  worse bug than the flicker. And the traffic does not reappear as
+  joystick 0 packets once the mouse is silenced, which was the
+  obvious way for this fix to change the problem's shape rather
+  than remove it and would have pointed at joystick interrogation
+  mode instead. Both were checked on hardware because IKBD firmware
+  behaviour is not something an emulator settles.
 - **Isolate resident firmware before sharpening a line-locked ISR.**
   With the placement right, the real Mega STE still flickered the
   bottom border a few times a second and a probe's opens jittered

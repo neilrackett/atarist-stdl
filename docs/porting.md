@@ -56,8 +56,11 @@ time, not at runtime.
   beyond the wasted cycles: the ACIA is MFP channel 6, below the
   border timers at 13 and 8, so it cannot preempt them - but an
   interrupt already in service delays them, and a flick has to land
-  on an exact cycle. A port reports the screen flickering on
-  hardware while the mouse is moved with a border open. Joystick
+  on an exact cycle. Measured on a Mega STE with the bottom border
+  open: moving the mouse continuously flickers the border and the
+  missed-window count climbs; with reporting disabled the same
+  movement produces neither, and the traffic does not reappear as
+  joystick 0 packets. Joystick
   traffic is unaffected, the library puts reporting back when it
   releases the keyboard including down the terminate path, and
   `STDL_GetMouseState` simply stops changing rather than failing.

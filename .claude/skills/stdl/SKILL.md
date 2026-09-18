@@ -668,7 +668,9 @@ first.
   With a border open it is worth more than the cycles: the ACIA
   cannot preempt the border timers but it can delay them, and a
   flick lands on an exact cycle, so moving a mouse flickers the
-  screen on hardware. Joysticks are unaffected ($FD/$FE/$FF against
+  screen on hardware - measured, with the missed-window count
+  climbing while it moves and neither happening once reporting is
+  off. Joysticks are unaffected ($FD/$FE/$FF against
   the mouse's $F7-$FB) **including fire**, which is worth saying
   because the IKBD steals joystick 1's fire bit into the right
   mouse button while the mouse reports: with reporting off it hands

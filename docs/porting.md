@@ -71,6 +71,11 @@ time, not at runtime.
   and first cutscene, and in gameplay 44 gaps with a maximum of
   1.16s, so a two-second hysteresis fires once per quiet stretch
   and never during play.
+  The transitions cost nothing audible: measured on a real STE,
+  cycling pause and resume once a second clicked *less* than the
+  same device left open and idle, which is what happens when the
+  hardware's baseline click only accrues while the DMA is running.
+  So the time spent paused is time without it.
 * **Display rate**: `STDL_SetRefresh(50)` or `(60)` switches the
   sync rate, `-1` queries, and the return value is the rate that
   actually took effect rather than the one asked for. A PAL machine

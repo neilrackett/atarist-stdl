@@ -121,12 +121,16 @@ int  STDL_VoicesOpen(void);
  * 0 through the drain and becomes 1 when the DMA has actually
  * stopped.
  *
- * What is not known: whether stopping and starting the DMA is itself
- * audible on real hardware. Both transitions are on silence by
- * construction, and the emulator records the whole sequence as
- * digital silence - but so it does the baseline click above, which
- * a real STE has. tests/hatari/voicesil.c cycles pause and resume
- * once a second for exactly this question.
+ * Measured on a real STE, cycling pause and resume once a second
+ * with a second of quiet either side, against the same device left
+ * open and idle: the cycling clicked *less often*, not more. Had
+ * the transitions been audible they would have added two clicks a
+ * second and swamped the baseline; instead the baseline itself
+ * thinned out, which is what happens if it only accrues while the
+ * DMA is running. So stopping and starting is inaudible here, and
+ * pausing removes the hardware click in proportion to how long you
+ * stay paused. tests/hatari/voicesil.c is that test - green for
+ * open and idle, cyan for cycling, blue for closed.
  */
 void STDL_PauseVoices(void);
 void STDL_ResumeVoices(void);

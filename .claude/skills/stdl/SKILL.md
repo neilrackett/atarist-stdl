@@ -719,7 +719,12 @@ first.
   it safe to call as soon as all four voices are idle. Call resume
   **unconditionally**, never behind a `VoicesPaused` test: during a
   drain, cancelling the request is the whole job, and skipping it
-  silences the device later with no error.
+  silences the device later with no error. Pausing is measured free
+  on a real STE: cycling pause and resume once a second clicked
+  *less* than the same device left open, so the transitions are
+  inaudible and the 30-second baseline only accrues while the DMA
+  runs - a port that pauses through its menus and cutscenes removes
+  it for that whole stretch.
   Volume is a table, not a multiply, and scaling an 8-bit sample
   into an 8-bit table is lossy at low volumes - at `vol` 16 only
   the loudest eighth of the range survives. Since v1.8.1 a voice at

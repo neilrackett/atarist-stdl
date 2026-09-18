@@ -119,6 +119,17 @@ static const uint16_t chords[4][3] = {
     { 175, 220, 262 }, { 196, 247, 294 },
 };
 
+/*
+ * Twice a second, all three voices are restarted from the first
+ * sample of the table wherever the previous note happened to be in
+ * it. That retrigger steps the DAC, so the arpeggio ticks audibly
+ * at every chord change - about twice a second on a real STE. It is
+ * this example's music being crude, not the library: a real
+ * sequencer fades a voice out before retriggering it, or starts the
+ * new note at the sample's zero crossing. Said here because it was
+ * briefly mistaken for a fault in STDL_Voice, which has its own
+ * quieter click of about one every thirty seconds and no more.
+ */
 static void music_tick(void *ud)
 {
     static int frame, step;

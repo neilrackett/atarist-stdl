@@ -49,6 +49,28 @@ time, not at runtime.
     entirely when unloaded, its resident code holding interrupts
     off long enough to make the timer late. Worth ruling out before
     blaming your own frame.
+* **Pausing the voice device**: an open sound DMA clicks about once
+  every thirty seconds on a real STE even looping pure silence, and
+  that is hardware rather than anything the library does. If your
+  port has long silent stretches - menus, cutscenes, a title screen
+  - `STDL_PauseVoices()` stops the DMA without giving up the
+  16640-entry volume table, which `STDL_OpenVoices` spends about a
+  frame building. `STDL_ResumeVoices()` restarts it, with the first
+  audio about 20ms later.
+  Pause only asks: the DMA stops from the tick once the ring has
+  drained to silence, so a stop never lands mid-waveform and never
+  cuts a playing voice off. That makes it safe to call the moment
+  `STDL_VoiceActive` reports all four idle, and pause-then-resume
+  inside that window costs nothing because the DMA never stopped.
+  **Call `STDL_ResumeVoices()` unconditionally, never behind a
+  `STDL_VoicesPaused()` test** - cancelling a pause that has not
+  been taken yet is most of its job, and skipping it leaves the
+  request standing, which stops the device later with no error and
+  no sound. One port measured its own idle pattern before adopting
+  this: one unbroken 61.8-second idle stretch across intro, title
+  and first cutscene, and in gameplay 44 gaps with a maximum of
+  1.16s, so a two-second hysteresis fires once per quiet stretch
+  and never during play.
 * **Display rate**: `STDL_SetRefresh(50)` or `(60)` switches the
   sync rate, `-1` queries, and the return value is the rate that
   actually took effect rather than the one asked for. A PAL machine

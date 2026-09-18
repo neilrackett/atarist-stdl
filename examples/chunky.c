@@ -20,7 +20,16 @@
  *    STDL_I8_XFLIP, one STDL_I8_COLMAJOR (column-major storage)
  *  - STDL_Voice: a three-voice arpeggio sequenced from the 50Hz
  *    voice tick, playing a generated sawtooth sample (STE only;
- *    a plain ST runs silent)
+ *    a plain ST runs silent). SPACE silences it the way a port
+ *    should: stop the voices, then ask for a pause. An open sound
+ *    DMA clicks about once every thirty seconds on a real STE
+ *    whatever is in its ring, so a game with long quiet stretches
+ *    wants the hardware stopped rather than idling - and pausing
+ *    keeps the 16640-entry volume table that opening spent a frame
+ *    building. The pause is deferred until the ring drains, so the
+ *    arpeggio's last notes finish rather than being cut off; SPACE
+ *    again resumes, unconditionally, which is what the header asks
+ *    for because cancelling an untaken pause is most of its job.
  *  - STDL_GetHz200: the frame-rate bar at the bottom
  *
  * ESC or a joystick button exits.
@@ -135,7 +144,7 @@ int main(void)
     int bx = 40, by = 30, bdx = 2, bdy = 2;
     int cx = 96, cy = 20, cdx = 3, cdy = 2;
     int ax = 240, ay = 150, adx = -2;
-    int music, i;
+    int music, hushed, i;
     uint32_t fps_t0;
     int fps_frames = 0, fps = 0;
 
@@ -221,6 +230,7 @@ int main(void)
 
     /* STE only; a plain ST just stays silent */
     music = (STDL_OpenVoices(12517) == 0);
+    hushed = 0;
     if (music) {
         STDL_SetVoiceTick(music_tick, NULL);
     }
@@ -236,6 +246,25 @@ int main(void)
                 || (ev.type == STDL_KEYDOWN
                     && ev.key.keysym.sym == STDLK_ESCAPE)) {
                 quit = 1;
+            }
+            if (ev.type == STDL_KEYDOWN
+                && ev.key.keysym.sym == STDLK_SPACE && music) {
+                hushed = !hushed;
+                if (hushed) {
+                    int v;
+
+                    /* stop the sequencer first, then the voices it
+                     * is driving: a pause waits for silence, so a
+                     * device still being fed never stops at all */
+                    STDL_SetVoiceTick(NULL, NULL);
+                    for (v = 0; v < STDL_VOICES; v++) {
+                        STDL_StopVoice(v);
+                    }
+                    STDL_PauseVoices();
+                } else {
+                    STDL_ResumeVoices();
+                    STDL_SetVoiceTick(music_tick, NULL);
+                }
             }
         }
         if (quit) {

@@ -707,9 +707,19 @@ first.
   An open device is not quite silent on hardware: with the DMA
   looping silence and nothing writing to it, a real STE clicks
   about once every thirty seconds. That is the DMA or the analogue
-  path, no software reaches it, and only closing the device stops
-  it - worth knowing before you go hunting your own code, since
-  until v1.8.2 the library added a further 3-6x on top of it.
+  path, no software reaches it - worth knowing before you go
+  hunting your own code, since until v1.8.2 the library added a
+  further 3-6x on top of it. `STDL_PauseVoices()` stops the DMA
+  without giving up the volume table that `STDL_OpenVoices` spends
+  a frame building, and `STDL_ResumeVoices()` starts it again about
+  20ms before the first audio; `STDL_VoicesPaused()` reports the
+  hardware rather than the request. Pause only asks - the stop
+  happens from the tick once the ring has drained to silence, so it
+  never lands mid-waveform and never cuts a voice off, which makes
+  it safe to call as soon as all four voices are idle. Call resume
+  **unconditionally**, never behind a `VoicesPaused` test: during a
+  drain, cancelling the request is the whole job, and skipping it
+  silences the device later with no error.
   Volume is a table, not a multiply, and scaling an 8-bit sample
   into an 8-bit table is lossy at low volumes - at `vol` 16 only
   the loudest eighth of the range survives. Since v1.8.1 a voice at

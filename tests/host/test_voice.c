@@ -23,6 +23,7 @@ extern const void *stdl_host_dma_buf;
 extern int stdl_host_dma_running;
 
 extern const int8_t *stdl_host_voltab(void);
+extern uint32_t stdl_voice_late;
 
 static int failures;
 
@@ -272,6 +273,116 @@ int main(void)
             STDL_StopVoice(i2);
         }
     }
+
+    /*
+     * Pause and resume. The contract is in stdl_voice.h: pause is a
+     * request that the tick takes once the ring has drained to
+     * silence, so the DAC is parked on a zero rather than mid-
+     * waveform, and resume restarts at the head of a cleared ring.
+     */
+    {
+        const int8_t *base;
+
+        open_fresh();
+        base = ring_base();
+        STDL_SetVoice(0, plus, sizeof plus, 0, 0, 6258, 64);
+        tick_at(0);             /* fills 1 (content), 2, 3 (silent) */
+        CHECK(!STDL_VoicesPaused(), "paused before any request");
+
+        /* asked for while the ring still holds the effect: the DMA
+         * keeps running until the zeroes have caught up */
+        STDL_PauseVoices();
+        CHECK(stdl_host_dma_running, "pause stopped the DMA at once");
+        CHECK(!STDL_VoicesPaused(), "reported paused while draining");
+        tick_at(BLOCK);         /* fills 0 silent: three in a row */
+        CHECK(stdl_host_dma_running, "stopped with content still in "
+              "the ring");
+        tick_at(2 * BLOCK);     /* fills 1 silent: the ring is zeroes */
+        CHECK(!stdl_host_dma_running, "DMA still running after drain");
+        CHECK(STDL_VoicesPaused(), "not reported paused after the stop");
+        CHECK(STDL_VoicesOpen(), "pause closed the device");
+        for (i = 0; i < RING; i++) {
+            if (base[i] != 0) {
+                CHECK(0, "ring not silent at the stop: [%d] = %d",
+                      i, base[i]);
+                break;
+            }
+        }
+
+        /* inert while paused: no mixing, and no sequencer time - a
+         * paused song must not advance in silence */
+        STDL_SetVoiceTick(count_tick, NULL);
+        ticks_seen = 0;
+        STDL_SetVoice(1, plus, sizeof plus, 0, 0, 6258, 64);
+        tick_at(3 * BLOCK);
+        CHECK(ticks_seen == 0, "sequencer tick ran while paused");
+        /* block 2 is the one a running chase would have filled with
+         * voice 1 from this head position, so the check can fail */
+        CHECK(base[2 * BLOCK] == 0, "mixed into the ring while "
+              "paused: [%d] = %d", 2 * BLOCK, base[2 * BLOCK]);
+        STDL_SetVoiceTick(NULL, NULL);
+
+        STDL_ResumeVoices();
+        CHECK(stdl_host_dma_running, "resume did not restart the DMA");
+        CHECK(!STDL_VoicesPaused(), "still reported paused after resume");
+        /* the voice set while paused plays from the resume */
+        tick_at(0);
+        CHECK(base[BLOCK] == 32, "no audio after resume: %d",
+              base[BLOCK]);
+
+        /*
+         * Pause and resume inside the drain window is free: the DMA
+         * was never stopped, so the play head must not move. The
+         * stub reloads the position on every start, which is what
+         * makes a needless restart visible here.
+         */
+        STDL_StopVoice(1);
+        STDL_PauseVoices();
+        stdl_host_dma_pos = (uint32_t)(uintptr_t)base + 3 * BLOCK;
+        STDL_ResumeVoices();
+        CHECK(stdl_host_dma_pos
+              == (uint32_t)(uintptr_t)base + 3 * BLOCK,
+              "resume restarted a DMA that never stopped");
+
+        /*
+         * And none of that is "late". The chase fills three blocks
+         * on the first tick after every start by construction, which
+         * read as a stalled refill before the counter learned to
+         * skip it - a port watching stdl_voice_late would have seen
+         * one per resume.
+         */
+        CHECK(stdl_voice_late == 0, "%u false late refills",
+              (unsigned)stdl_voice_late);
+    }
+
+    /*
+     * A voice programmed while a pause is pending must not be cut
+     * off. vc.silent saturates during a long quiet, and the
+     * deferred stop needs only a tick that mixes nothing to fire -
+     * which happens about once in 44 on hardware, the block period
+     * being 20.45ms against the VBL's 20. Before STDL_SetVoice
+     * cleared the drain counter, that tick stopped the DMA with the
+     * voice active: silent effect, STDL_VoiceActive stuck at 1, and
+     * a resume restarting mid-waveform. The header promises this is
+     * "not a mute", and this is the test of that sentence.
+     */
+    open_fresh();
+    for (i = 0; i < 6; i++) {           /* a long quiet: silent saturates */
+        tick_at((uint32_t)((i + 1) * BLOCK) % (4 * BLOCK));
+    }
+    STDL_PauseVoices();
+    STDL_SetVoice(0, plus, 64, 0, 0, 6258, 64);
+    /* a tick that mixes nothing: the chase is already level with
+     * the play head, so no block is written and the counter would
+     * still be saturated if SetVoice had not cleared it */
+    tick_at((uint32_t)(stdl_host_dma_pos
+                       - (uint32_t)(uintptr_t)stdl_host_dma_buf));
+    CHECK(stdl_host_dma_running,
+          "a pending pause stopped the DMA under an active voice");
+    CHECK(STDL_VoiceActive(0), "the voice was dropped");
+    STDL_ResumeVoices();
+    STDL_StopVoice(0);
+    STDL_CloseVoices();
 
     STDL_CloseVoices();
     CHECK(!STDL_VoicesOpen(), "still open after close");

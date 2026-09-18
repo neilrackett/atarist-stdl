@@ -68,6 +68,14 @@ holds the CPU off the border and throughput stays within 14-28% of
 the no-border figure; palette writes are staged to the vertical
 blanking so they can never flash mid-frame. See `examples/overscan.c`.
 
+`STDL_PauseVoices()` and `STDL_ResumeVoices()` stop and restart the
+sample mixer's DMA without giving up the volume table its open call
+spends a frame building - for ports whose device is idle through
+menus and cutscenes, where an open sound DMA on a real STE clicks
+about once every thirty seconds whatever is in the ring. The stop is
+deferred until the ring has drained to silence, so it never lands
+mid-waveform.
+
 `STDL_SetRefresh(50 | 60)` switches the display's sync rate and returns
 the rate that actually took effect - ten more frames a second on a game
 already inside its frame budget, on a machine and monitor that will take

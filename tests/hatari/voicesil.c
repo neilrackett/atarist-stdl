@@ -61,7 +61,7 @@
 int main(int argc, char *argv[])
 {
     STDL_Surface *screen;
-    int open = 0, state = 0;
+    int open = 0, state = 0, cycle = 0;
 
     (void)argc; (void)argv;
     if (STDL_Init(STDL_INIT_VIDEO | STDL_INIT_AUDIO) < 0) {
@@ -91,12 +91,20 @@ int main(int argc, char *argv[])
                      * reaching this program under the test
                      * harness and a state it cannot reach is
                      * worse than a state that needs two presses */
-                    state = (state + 1) % 2;
-                    if (state == 0) {
-                        open = (STDL_OpenVoices(6258) == 0);
-                    } else if (open) {
-                        STDL_CloseVoices();
-                        open = 0;
+                    state = (state + 1) % 3;
+                    cycle = 0;
+                    if (state == 2) {
+                        if (open) {
+                            STDL_CloseVoices();
+                            open = 0;
+                        }
+                    } else {
+                        if (!open) {
+                            open = (STDL_OpenVoices(6258) == 0);
+                        }
+                        /* unconditional, per the header: during a
+                         * drain this is what cancels the request */
+                        STDL_ResumeVoices();
                     }
                 }
             }
@@ -107,9 +115,19 @@ int main(int argc, char *argv[])
         /* the whole screen is the indicator - one fill, nothing
          * overlaid. A small marker was tried and never appeared,
          * and an indicator you cannot see is worse than none */
+        if (state == 1 && open) {
+            /* a second either side, so the ear has quiet to judge
+             * the transition against rather than a stutter */
+            if (++cycle == 50) {
+                STDL_PauseVoices();
+            } else if (cycle >= 100) {
+                STDL_ResumeVoices();
+                cycle = 0;
+            }
+        }
         r.x = 0; r.y = 0; r.w = 320; r.h = 200;
         STDL_FillRect(screen, &r,
-                      (uint8_t)(state == 0 ? 10 : 12));
+                      (uint8_t)(state == 0 ? 10 : (state == 1 ? 14 : 12)));
         STDL_WaitVBL();
     }
 done:

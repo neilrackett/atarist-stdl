@@ -65,8 +65,72 @@ int  STDL_VoicesOpen(void);
  * hardware's 30.
  *
  * If a port cannot accept that baseline, the device has to be
- * closed when it is not wanted rather than left open and idle.
+ * closed when it is not wanted rather than left open and idle -
+ * or paused, which is the cheap half of closing it.
  */
+
+/*
+ * Stop and restart the DMA without giving up the device. Everything
+ * STDL_OpenVoices built stays: the ring, the 16640-entry volume
+ * table (about a frame's work on an 8MHz machine, plus two mallocs)
+ * and the voice state. A port whose device is idle for long
+ * stretches - menus, cutscenes, a title screen - can have the
+ * hardware's ~30-second click without paying to rebuild any of that
+ * on the next effect.
+ *
+ * STDL_PauseVoices asks; it does not stop anything itself. The DMA
+ * stops from the tick, once four consecutive quarters have mixed to
+ * pure silence and the ring holds nothing but zeroes - up to 82ms at
+ * 6258Hz. Stopping the DMA parks the DAC on the last byte it read,
+ * so a stop taken mid-waveform would leave a DC step at the pause
+ * and its mirror at the resume, which is a click bought from an API
+ * that exists to avoid one. Draining first makes both transitions
+ * land on zero.
+ *
+ * Two consequences of "asks":
+ *
+ *  - While a voice is still playing, the ring never drains and the
+ *    device keeps running. It is not a mute. To pause a sequencer,
+ *    stop its voices first (STDL_StopVoice on each) and the drain
+ *    follows within a ring.
+ *  - Pause then resume inside that window costs nothing at all: the
+ *    DMA never stopped, so the resume is a flag write and the play
+ *    head never moved. A port can pause the moment STDL_VoiceActive
+ *    reports all four idle and resume from its next STDL_SetVoice
+ *    without thinking about hysteresis.
+ *
+ * Resume restarts playback at the head of a cleared ring, so the
+ * first audio is one quarter (about 20ms at 6258Hz, one frame) after
+ * the call.
+ *
+ * Call it unconditionally - never behind `if (STDL_VoicesPaused())`.
+ * Cancelling a pause that has not been taken yet is the greater
+ * part of its job, and a port that skips the call during the drain
+ * leaves the request standing: the device then stops at the next
+ * four blocks of silence and stays stopped, with no error and no
+ * sound. When the device is neither paused nor pausing it does
+ * nothing, so the unconditional call is free.
+ *
+ * While the device is actually paused the sequencer tick does not
+ * run either - a paused song must not advance in silence - and a
+ * voice programmed with STDL_SetVoice stays silent until the resume.
+ * That last one is the failure to watch for: a port that forgets its
+ * resume gets no sound at all and no error.
+ *
+ * STDL_VoicesPaused reports the hardware, not the request: it stays
+ * 0 through the drain and becomes 1 when the DMA has actually
+ * stopped.
+ *
+ * What is not known: whether stopping and starting the DMA is itself
+ * audible on real hardware. Both transitions are on silence by
+ * construction, and the emulator records the whole sequence as
+ * digital silence - but so it does the baseline click above, which
+ * a real STE has. tests/hatari/voicesil.c cycles pause and resume
+ * once a second for exactly this question.
+ */
+void STDL_PauseVoices(void);
+void STDL_ResumeVoices(void);
+int  STDL_VoicesPaused(void);
 
 /*
  * Start voice v (0..3) playing `data`: signed 8-bit mono, `len`

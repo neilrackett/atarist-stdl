@@ -50,6 +50,10 @@ static struct {
     int8_t  *voltab;            /* 65 rows of 256 */
     voice_t  v[STDL_VOICES];
     int      fill_block;        /* next quarter to mix */
+    uint8_t  pause_req;         /* stop asked for, not yet taken   */
+    uint8_t  paused;            /* DMA actually stopped            */
+    uint8_t  silent;            /* consecutive blocks mixed silent */
+    uint8_t  fresh;             /* first tick after a (re)start    */
     void   (*tick)(void *);
     void    *tick_ud;
 } vc;
@@ -77,8 +81,9 @@ static void voice_shutdown(void)
     stdl.dma_owner = STDL_DMA_FREE;
 }
 
-/* mix one quarter of the ring */
-static void mix_block(int8_t *dst)
+/* mix one quarter of the ring; returns 0 if it wrote pure silence,
+ * which is what the deferred stop in the tick below waits for */
+static int mix_block(int8_t *dst)
 {
     int mixed = 0;
     int i;
@@ -148,6 +153,7 @@ static void mix_block(int8_t *dst)
     if (!mixed) {
         memset(dst, 0, BLOCK_FRAMES);
     }
+    return mixed;
 }
 
 /* the 50Hz VBL callback: sequencer tick, then mix forward */
@@ -156,7 +162,10 @@ static void voice_vbl(void)
     uint32_t off;
     int play_block, guard;
 
-    if (!vc.open) {
+    if (!vc.open || vc.paused) {
+        /* paused: the DMA is stopped, so there is no play head to
+         * chase and no sequencer time to advance. See
+         * STDL_PauseVoices - the tick does not run either. */
         return;
     }
     if (vc.tick != NULL) {
@@ -173,10 +182,14 @@ static void voice_vbl(void)
         if (vc.fill_block == play_block) {
             break;
         }
-        mix_block(vc.ring + vc.fill_block * BLOCK_FRAMES);
+        if (mix_block(vc.ring + vc.fill_block * BLOCK_FRAMES)) {
+            vc.silent = 0;
+        } else if (vc.silent < 4) {
+            vc.silent++;        /* 4 = the whole ring is zeroes */
+        }
         vc.fill_block = (vc.fill_block + 1) & 3;
     }
-    if (guard == 3) {
+    if (guard == 3 && !vc.fresh) {
         /* Three blocks filled and still not caught up: this tick
          * arrived so late that the play head has run on past what
          * was ready, and the hardware has replayed or half-read a
@@ -185,8 +198,31 @@ static void voice_vbl(void)
          * playing zeroes cannot fail this way, and two of ours
          * could not. A frame the VBL never got is the usual cause;
          * a synchronous disk transfer is two to three blocks of
-         * this ring. */
+         * this ring.
+         *
+         * Not on the first tick after a start, which fills three
+         * blocks by construction: playback begins in block 0 with
+         * fill_block at 1, so the chase has the whole rest of the
+         * ring to do and the count means the opposite of late. It
+         * has always been so at open; it only started mattering
+         * when resume made it happen repeatedly, which is what a
+         * port watching this counter would have read as stalls. */
         stdl_voice_late++;
+    }
+    vc.fresh = 0;
+    /*
+     * Deferred stop. STDL_PauseVoices only asks: the DMA stops here,
+     * once four consecutive blocks have been mixed as pure silence
+     * and the ring therefore holds nothing but zeroes wherever the
+     * play head is. Stopping the DMA parks the DAC on whatever byte
+     * it last read, so stopping mid-waveform would leave a DC step
+     * at the pause and another at the resume - two clicks bought by
+     * an API whose whole purpose is to avoid one. Waiting costs at
+     * most a ring (82ms at 6258Hz) and nobody can hear the wait.
+     */
+    if (vc.pause_req && vc.silent >= 4) {
+        stdl_dma_stop();
+        vc.paused = 1;
     }
 }
 
@@ -294,6 +330,7 @@ int STDL_OpenVoices(int freq)
         return -1;
     }
     vc.fill_block = 1;          /* playback starts in block 0 */
+    vc.fresh = 1;               /* so the first chase is not "late" */
     stdl_voice_late = 0;
     vc.open = 1;
     stdl.dma_owner = STDL_DMA_VOICES;
@@ -320,6 +357,59 @@ void STDL_CloseVoices(void)
 int STDL_VoicesOpen(void)
 {
     return vc.open;
+}
+
+/*
+ * Ask for the DMA to stop; see the header. A byte write, so it is
+ * free to call every frame and safe against the VBL without masking
+ * interrupts - which matters, because a port with a border open
+ * cannot afford a mask here.
+ *
+ * The stop itself happens in the tick, once the ring has drained to
+ * silence. If a voice is still playing it never does: this is a
+ * request to stop when there is nothing left to hear, not a mute.
+ */
+void STDL_PauseVoices(void)
+{
+    if (vc.open) {
+        vc.pause_req = 1;
+    }
+}
+
+void STDL_ResumeVoices(void)
+{
+    if (!vc.open) {
+        return;
+    }
+    vc.pause_req = 0;
+    if (!vc.paused) {
+        /* Cancelling a pause that never took effect, which is the
+         * common case for a port that pauses between effects: the
+         * DMA never stopped, the play head never moved, and there
+         * is nothing at all to do. */
+        return;
+    }
+    /*
+     * Nothing races this: the device is stopped and the VBL returns
+     * at its first test while `paused` is set, so the ring and the
+     * chase state are ours to rewrite without masking interrupts.
+     *
+     * The clear is belt-and-braces - the deferred stop only fires on
+     * a silent ring - but playback restarts at block 0 whatever got
+     * us here, and a resume that can replay a stale block is exactly
+     * the click this API exists to avoid.
+     */
+    memset(vc.ring, 0, RING_FRAMES);
+    vc.fill_block = 1;
+    vc.fresh = 1;
+    vc.silent = 0;
+    stdl_dma_start(vc.ring, RING_FRAMES, vc.dma_mode, 1);
+    vc.paused = 0;              /* last: re-arms the tick */
+}
+
+int STDL_VoicesPaused(void)
+{
+    return vc.paused;
 }
 
 void STDL_SetVoice(int v, const int8_t *data, uint32_t len,
@@ -350,6 +440,18 @@ void STDL_SetVoice(int v, const int8_t *data, uint32_t len,
         vol = 64;
     }
     sr = stdl_int_off();
+    /*
+     * Any pending pause starts its drain again from here. Without
+     * this, a voice programmed while a pause is waiting can be cut
+     * off before it is ever heard: vc.silent saturates at 4 during
+     * the quiet, and the deferred stop only needs a tick that mixes
+     * nothing to fire - which happens about once in 44, the block
+     * period being 20.45ms against the VBL's 20. The DMA would stop
+     * with the voice active, leaving it silent, STDL_VoiceActive
+     * stuck at 1 and the eventual resume restarting mid-waveform.
+     * Clearing it here is what makes "not a mute" true.
+     */
+    vc.silent = 0;
     p->active = 0;              /* keep the mixer off a half-set voice */
     p->data = data;
     p->pos = 0;

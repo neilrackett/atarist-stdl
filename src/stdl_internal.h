@@ -286,6 +286,54 @@ extern void (*stdl_shutdown_overscan)(void);
 extern volatile uint8_t stdl_host_sync_reg;
 #define STDL_SYNC_REG stdl_host_sync_reg
 #endif
+/*
+ * Memory the hardware has to reach, which is not the same as memory
+ * the CPU can reach. The Shifter and the sound DMA see ST RAM only;
+ * alt-RAM (TT RAM, and whatever an accelerator adds) is invisible to
+ * both. A program linked with the ALTALLOC flag - which is the
+ * toolchain default - gets alt-RAM back from malloc whenever a
+ * machine has any, so every buffer a video base or a DMA pointer is
+ * aimed at has to be allocated through here instead.
+ *
+ * Getting it wrong is silent and horrible: a screen page in alt-RAM
+ * displays whatever happens to sit at the aliased ST RAM address, so
+ * the machine shows garbage with no error at all. Reported from an
+ * accelerated STF and an STE, both with alt-RAM enabled, and
+ * confirmed by the same binary working with the border closed -
+ * where the page comes from Physbase() and is therefore ST RAM by
+ * construction.
+ *
+ * Returns NULL rather than falling back to alt-RAM. A caller that
+ * cannot have ST RAM must fail loudly; a tester who sees a garbled
+ * screen has no way to know what went wrong, where an open that
+ * refuses with a message says it in one line.
+ */
+#ifdef __m68k__
+void *stdl_stram_alloc(uint32_t bytes);
+void  stdl_stram_free(void *p);
+/* whether a block the hardware must read is somewhere it can. For
+ * buffers the caller allocated: STDL_PlaySample points the DMA
+ * straight at one, and a port that loaded it with plain malloc on
+ * an alt-RAM machine would otherwise get silence or noise with no
+ * error at all. */
+int   stdl_is_stram(const void *p, uint32_t bytes);
+#else
+#include <stdlib.h>
+static __inline__ void *stdl_stram_alloc(uint32_t bytes)
+{
+    return malloc((size_t)bytes);   /* no such distinction on a host */
+}
+static __inline__ void stdl_stram_free(void *p)
+{
+    free(p);
+}
+static __inline__ int stdl_is_stram(const void *p, uint32_t bytes)
+{
+    (void)p; (void)bytes;
+    return 1;               /* no such distinction on a host */
+}
+#endif
+
 /* One command byte to the keyboard ACIA, and whether the IKBD
  * should be reporting the mouse. event.c owns both; src/mouse.c
  * holds the public call that sets the second. */

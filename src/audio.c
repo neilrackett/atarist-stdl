@@ -362,13 +362,13 @@ int STDL_OpenAudio(STDL_AudioSpec *desired, STDL_AudioSpec *obtained)
                   &au.dec_csize);
 
     au.ring_bytes = (uint32_t)RING_FRAMES * au.frame_bytes_dma;
-    au.ring_alloc = malloc(au.ring_bytes + 2);
+    au.ring_alloc = stdl_stram_alloc(au.ring_bytes + 2);
     au.userbuf_max = ((uint32_t)(RING_FRAMES / 2)
         * ((uint32_t)au.spec.freq / au.dma_freq + 2))
         * au.frame_bytes_user;
     au.userbuf = malloc(au.userbuf_max);
     if (au.ring_alloc == NULL || au.userbuf == NULL) {
-        free(au.ring_alloc);
+        stdl_stram_free(au.ring_alloc);
         free(au.userbuf);
         STDL_SetError("out of memory for audio buffers");
         return -1;
@@ -448,6 +448,22 @@ static int sample_start(const void *data, uint32_t bytes, int freq,
         STDL_SetError("bad sample buffer");
         return -1;
     }
+    if (!stdl_is_stram(data, bytes)) {
+        /*
+         * The DMA reads this buffer directly and cannot see
+         * alt-RAM, so a caller that allocated it with plain malloc
+         * on a machine with any - which a program linked ALTALLOC
+         * will do, and that is the toolchain default - would get
+         * silence or noise and no indication why. Refusing says it
+         * in one line instead. STDL_LoadWAV's buffer is ordinary
+         * memory for this reason: it is usually mixed by the CPU,
+         * where alt-RAM is fine.
+         */
+        STDL_SetError("sample buffer is not in ST RAM (the sound DMA "
+                      "cannot reach alt-RAM; allocate it with "
+                      "Mxalloc mode 0)");
+        return -1;
+    }
     stdl_dma_start(data, bytes,
                    (uint8_t)(stdl_dma_nearest(freq) | 0x80), /* mono */
                    repeat);
@@ -514,7 +530,7 @@ void STDL_CloseAudio(void)
         stdl.dma_owner = STDL_DMA_FREE;
     }
     free(au.userbuf);
-    free(au.ring_alloc);
+    stdl_stram_free(au.ring_alloc);
     memset(&au, 0, sizeof(au));
 }
 

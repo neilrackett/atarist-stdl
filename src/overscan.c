@@ -1909,9 +1909,20 @@ static int ovsc_open(int which)
          * granularity; unused rows stay zero = border colour. One
          * buffer sized for the largest mode serves them all, so a
          * mode change never reallocates */
-        buf_alloc = malloc(MAX_FETCH_BYTES + 256);
+        /*
+         * ST RAM, not malloc. The video base is handed to the
+         * Shifter, which cannot see alt-RAM at all - and a program
+         * linked ALTALLOC, the toolchain default, gets alt-RAM from
+         * malloc on any machine that has some. The symptom is a
+         * screen of garbage with no error: reported from an
+         * accelerated STF and an STE, both with alt-RAM, and
+         * confirmed by the same binary being clean with the border
+         * closed, where the page comes from Physbase() instead.
+         */
+        buf_alloc = stdl_stram_alloc(MAX_FETCH_BYTES + 256);
         if (buf_alloc == NULL) {
-            STDL_SetError("out of memory for overscan screen");
+            STDL_SetError("no ST RAM for the overscan screen (the "
+                          "Shifter cannot reach alt-RAM)");
             return 0;
         }
         buf = (uint8_t *)(((uintptr_t)buf_alloc + 255)
@@ -1935,10 +1946,10 @@ static int ovsc_open(int which)
      * the only symptom would be tearing.
      */
     if (stdl.doublebuf && buf2_alloc == NULL) {
-        buf2_alloc = malloc(MAX_FETCH_BYTES + 256);
+        buf2_alloc = stdl_stram_alloc(MAX_FETCH_BYTES + 256);
         if (buf2_alloc == NULL) {
-            STDL_SetError("out of memory for the second overscan page");
-            free(buf_alloc);
+            STDL_SetError("no ST RAM for the second overscan page");
+            stdl_stram_free(buf_alloc);
             buf_alloc = NULL;
             buf = NULL;
             return 0;
@@ -2034,10 +2045,10 @@ static int ovsc_close(int which)
     stdl_ovsc_flip = NULL;
     (void)Setscreen(stdl.page[0], stdl.page[0], -1);
     STDL_WaitVBL();
-    free(buf_alloc);
+    stdl_stram_free(buf_alloc);
     buf_alloc = NULL;
     buf = NULL;
-    free(buf2_alloc);
+    stdl_stram_free(buf2_alloc);
     buf2_alloc = NULL;
     page2 = NULL;
     draw = NULL;

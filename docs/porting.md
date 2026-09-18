@@ -49,6 +49,23 @@ time, not at runtime.
     entirely when unloaded, its resident code holding interrupts
     off long enough to make the timer late. Worth ruling out before
     blaming your own frame.
+* **Alt-RAM and the hardware**: the Shifter and the sound DMA can
+  only reach ST RAM. A program linked with the ALTALLOC flag - the
+  toolchain default - gets alt-RAM back from `malloc` on any
+  machine that has some, so any buffer the *hardware* reads has to
+  come from `Mxalloc` with mode 0 instead. The library does this
+  for everything it allocates itself (screen pages, the overscan
+  pages, both DMA sound rings) as of v1.10.1; what is left to you
+  is any buffer you hand to `STDL_PlaySample` or
+  `STDL_PlaySampleLoop`, which now refuse a block outside ST RAM
+  rather than playing noise.
+  Do not respond by clearing ALTALLOC. Alt-RAM is what makes a 1MB
+  machine viable for a large port - one 594KB game dies at its
+  first allocation without it - so the fix is surgical: hardware
+  buffers in ST RAM, everything else wherever there is room. The
+  symptom when this is wrong is a screen of garbage or silence with
+  no error at all, reported from an accelerated STF and an STE both
+  with alt-RAM enabled.
 * **Turn the mouse off if you never read it**: `STDL_EnableMouse(0)`
   stops the IKBD reporting it. Every movement is a three-byte
   packet, one ACIA interrupt per byte about 1.3ms apart, parsed

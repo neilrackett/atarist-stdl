@@ -271,6 +271,32 @@ warnings** with the Makefile's `-Wall -Wextra`.
   miss counter *does* see this one - 295 of them - which makes it a
   different signature from a border that flickers while misses read
   clean, and the two should not be assumed to share a cause.
+- **Anything the hardware reads has to be in ST RAM, and malloc
+  will not do it.** The Shifter and the sound DMA cannot see
+  alt-RAM, and a program linked ALTALLOC - the toolchain default -
+  gets alt-RAM back from `malloc` on any machine that has some. A
+  screen page there displays whatever sits at the aliased ST RAM
+  address: garbage, with no error. Reported from an accelerated STF
+  and an STE, both with alt-RAM, and pinned down by the same binary
+  running clean with the border closed, where the page comes from
+  `Physbase()` and is ST RAM by construction.
+  `stdl_stram_alloc` (src/stram.c) is the allocator: `Mxalloc` mode
+  0, `Malloc` below TOS 1.04 where no alt-RAM exists to get wrong,
+  and the returned block *checked* against PHYSTOP rather than
+  trusted - the mode argument is a request and the cost of it being
+  ignored is a screen of garbage. It returns NULL rather than
+  falling back, and every caller fails the open with a message,
+  because the tester who hit this had no way to tell what was
+  wrong.
+  Four allocations needed it: both overscan pages, the double-buffer
+  page and both DMA sound rings. When adding anything a video base
+  or a DMA pointer will aim at, it needs this too. A caller's own
+  buffer cannot be fixed from here, so `STDL_PlaySample` checks and
+  refuses instead - `stdl_is_stram` is two compares against the same
+  ceiling.
+  Do not reach for clearing the ALTALLOC flag. A 594KB port dies at
+  its first allocation on a 1MB machine without alt-RAM, which is
+  exactly why testers enable it.
 - **A mouse nobody reads still costs a border.** Moving a mouse with
   the bottom border open flickers it on a real Mega STE and the
   missed-window count climbs while the movement lasts; disabling

@@ -79,15 +79,27 @@ void STDL_FreeWAV(uint8_t *audio_buf);
  *
  * The price is that it is monophonic: a second call replaces
  * whatever is playing (do your own priority arbitration). `data`
- * must be signed 8-bit mono at an even address, stay valid until
- * playback ends, and be sampled at an exact DMA rate - `freq`
+ * must be signed 8-bit mono at an even address, **in ST RAM**, stay
+ * valid until playback ends, and be sampled at an exact DMA rate - `freq`
  * snaps to the nearest of 6258/12517/25033/50066. `bytes` is
  * rounded down to even.
  *
- * Returns 0, or -1 with STDL_GetError set: no DMA hardware, or
- * another device (STDL_OpenAudio ring, STDL_OpenVoices) currently
- * owns the chip - the DMA has one channel and its users cannot
- * coexist.
+ * Returns 0, or -1 with STDL_GetError set: no DMA hardware, another
+ * device (STDL_OpenAudio ring, STDL_OpenVoices) currently owns the
+ * chip - the DMA has one channel and its users cannot coexist - or
+ * a buffer outside ST RAM.
+ *
+ * That last one deserves a word, because it will catch ports that
+ * do everything else right. The DMA cannot see alt-RAM, and a
+ * program linked with ALTALLOC - the toolchain default - gets
+ * alt-RAM back from malloc on any machine that has some. So a
+ * buffer for these calls wants Mxalloc with mode 0 rather than
+ * malloc. The call refuses rather than playing noise, because the
+ * alternative is a silent failure on exactly the machines a port
+ * is least likely to own. STDL_LoadWAV's buffer is ordinary memory
+ * for the same reason in reverse: it is usually handed to the CPU
+ * mixer, where alt-RAM is perfectly good, so paying ST RAM for it
+ * unconditionally would be the wrong default.
  *
  * Ownership sharp edge: the hardware reads the buffer live for the
  * whole playback. Call STDL_StopSample (or start a replacement)

@@ -267,13 +267,16 @@ int STDL_OpenVoices(int freq)
      * or just past the end address is now a zero this code wrote.
      * Four bytes because the DMA fetches words and the ring is
      * aligned up by one. */
-    vc.ring_alloc = malloc(RING_FRAMES + 8);
+    vc.ring_alloc = stdl_stram_alloc(RING_FRAMES + 8);
     vc.voltab = malloc(65 * 256);
     if (vc.ring_alloc == NULL || vc.voltab == NULL) {
-        free(vc.ring_alloc);
+        stdl_stram_free(vc.ring_alloc);
         free(vc.voltab);
         memset(&vc, 0, sizeof(vc));
-        STDL_SetError("out of memory for voice mixer");
+        STDL_SetError(vc.ring_alloc == NULL
+                      ? "no ST RAM for the voice ring (the sound DMA "
+                        "cannot reach alt-RAM)"
+                      : "out of memory for voice mixer");
         return -1;
     }
     memset(vc.ring_alloc, 0, RING_FRAMES + 8);
@@ -324,7 +327,7 @@ int STDL_OpenVoices(int freq)
     }
 
     if (STDL_AddVBL(voice_vbl) < 0) {
-        free(vc.ring_alloc);
+        stdl_stram_free(vc.ring_alloc);
         free(vc.voltab);
         memset(&vc, 0, sizeof(vc));
         return -1;
@@ -349,7 +352,7 @@ void STDL_CloseVoices(void)
     if (stdl.dma_owner == STDL_DMA_VOICES) {
         stdl.dma_owner = STDL_DMA_FREE;
     }
-    free(vc.ring_alloc);
+    stdl_stram_free(vc.ring_alloc);
     free(vc.voltab);
     memset(&vc, 0, sizeof(vc));
 }

@@ -661,6 +661,15 @@ first.
   not understood - a small fixed region looks safe where a large
   varying one does not. **Resident firmware**: a cartridge driver
   holding interrupts off did it too, and stopped when unloaded.
+- Alt-RAM: the Shifter and the sound DMA reach ST RAM only, and a
+  program linked ALTALLOC (the toolchain default) gets alt-RAM from
+  `malloc` wherever a machine has some. The library allocates its
+  own hardware-visible buffers with `Mxalloc` mode 0 from v1.10.1;
+  yours is any buffer passed to `STDL_PlaySample*`, which refuses a
+  block outside ST RAM rather than playing noise. Do not clear
+  ALTALLOC to dodge it - alt-RAM is what makes a 1MB machine viable
+  for a big port - and note the failure mode when it is wrong: a
+  garbled screen or silence, with no error.
 - Mouse: `STDL_EnableMouse(0)` stops the IKBD reporting it, 1 puts
   it back, -1 queries, and it returns the previous setting. A port
   that never reads the mouse should call it once - every movement

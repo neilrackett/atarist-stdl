@@ -224,7 +224,7 @@ static void restore_all(void)
     }
     (void)Setexc(0x102, (void *)old_term);
     release_hardware();
-    free(stdl.page1_alloc);
+    stdl_stram_free(stdl.page1_alloc);
     stdl.page1_alloc = NULL;
     (void)Cconws("\33e");                               /* cursor back on */
     if (stdl.old_ssp != 0) {
@@ -310,7 +310,8 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
     if (stdl.doublebuf && stdl.page[1] == NULL) {
         /* 256-byte alignment satisfies the plain ST's screen base
          * granularity (STE only needs word alignment) */
-        stdl.page1_alloc = malloc(STDL_SCREEN_BYTES + 256);
+        /* ST RAM: the Shifter cannot see alt-RAM */
+        stdl.page1_alloc = stdl_stram_alloc(STDL_SCREEN_BYTES + 256);
         if (stdl.page1_alloc == NULL) {
             STDL_SetError("out of memory for second screen page");
             stdl.doublebuf = 0;

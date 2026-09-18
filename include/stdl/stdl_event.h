@@ -171,6 +171,16 @@ uint8_t STDL_GetMouseState(int *x, int *y);
  * against the mouse's $F7 to $FB - so a joystick-only game can
  * disable the mouse and keep its stick.
  *
+ * Including its fire button, which was worth checking rather than
+ * assuming. While the mouse reports, the IKBD strips fire out of
+ * joystick 1's packets and delivers it as the right mouse button
+ * instead, and event.c folds it back; the question was whether
+ * turning the mouse off would leave the bit stolen with nothing to
+ * steal it into, silently costing a joystick game its fire button.
+ * It does not: measured with a real stick on a Mega STE, fire and
+ * all four directions work with reporting on and off alike. The
+ * fold simply stops being needed.
+ *
  * While disabled, STDL_GetMouseState keeps returning the last
  * position and buttons it had; it does not fail, it simply stops
  * changing. The library always puts mouse reporting back when it

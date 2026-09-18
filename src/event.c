@@ -876,7 +876,11 @@ void STDL_PumpEvents(void)
                  * mouse button instead; software cannot tell the
                  * two apart.  Fold it back into the joystick state
                  * (keeping the mouse event above) so fire works
-                 * whether or not a game also uses the mouse. */
+                 * whether or not a game also uses the mouse.
+                 * After STDL_EnableMouse(0) this stops happening -
+                 * the IKBD hands fire back to joystick 1's own
+                 * packet, measured with a real stick on a Mega STE -
+                 * so the fold goes inert rather than wrong. */
                 joy1_fire = (uint8_t)((item & 0x01) ? 0x80 : 0);
                 joy_ikbd = (uint8_t)((joy_ikbd & 0x0F) | joy1_fire);
                 handle_joy((uint8_t)(joy_ikbd | joy_xpad));

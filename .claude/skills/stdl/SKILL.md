@@ -669,9 +669,13 @@ first.
   cannot preempt the border timers but it can delay them, and a
   flick lands on an exact cycle, so moving a mouse flickers the
   screen on hardware. Joysticks are unaffected ($FD/$FE/$FF against
-  the mouse's $F7-$FB), reporting is restored when the library
-  releases the keyboard, and `STDL_GetMouseState` stops changing
-  rather than failing. `examples/overscan.c`, M.
+  the mouse's $F7-$FB) **including fire**, which is worth saying
+  because the IKBD steals joystick 1's fire bit into the right
+  mouse button while the mouse reports: with reporting off it hands
+  it back to the joystick packet, measured with a real stick on a
+  Mega STE. Reporting is restored when the library releases the
+  keyboard, and `STDL_GetMouseState` stops changing rather than
+  failing. `examples/overscan.c`, M.
 - Display rate: `STDL_SetRefresh(50 | 60)` switches the sync rate
   and returns the rate that actually took effect, `-1` queries. PAL
   machines boot at 50 and NTSC at 60, and 60Hz buys ten more frames

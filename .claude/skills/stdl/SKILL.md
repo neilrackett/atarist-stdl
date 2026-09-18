@@ -661,6 +661,17 @@ first.
   not understood - a small fixed region looks safe where a large
   varying one does not. **Resident firmware**: a cartridge driver
   holding interrupts off did it too, and stopped when unloaded.
+- Mouse: `STDL_EnableMouse(0)` stops the IKBD reporting it, 1 puts
+  it back, -1 queries, and it returns the previous setting. A port
+  that never reads the mouse should call it once - every movement
+  is three ACIA interrupts about 1.3ms apart, parsed regardless.
+  With a border open it is worth more than the cycles: the ACIA
+  cannot preempt the border timers but it can delay them, and a
+  flick lands on an exact cycle, so moving a mouse flickers the
+  screen on hardware. Joysticks are unaffected ($FD/$FE/$FF against
+  the mouse's $F7-$FB), reporting is restored when the library
+  releases the keyboard, and `STDL_GetMouseState` stops changing
+  rather than failing. `examples/overscan.c`, M.
 - Display rate: `STDL_SetRefresh(50 | 60)` switches the sync rate
   and returns the rate that actually took effect, `-1` queries. PAL
   machines boot at 50 and NTSC at 60, and 60Hz buys ten more frames

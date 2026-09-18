@@ -149,6 +149,36 @@ int  STDL_EnableUNICODE(int enable);
 #define STDL_DEFAULT_REPEAT_INTERVAL 30
 
 uint8_t STDL_GetMouseState(int *x, int *y);
+
+/*
+ * Whether the IKBD reports the mouse at all. 1 enables, 0 disables,
+ * -1 queries; returns the previous setting. Callable before or
+ * after STDL_Init, and re-applied whenever the library takes the
+ * keyboard, so it survives the vector swap.
+ *
+ * A port that never reads the mouse should turn it off. Every
+ * movement is a three-byte packet, one ACIA interrupt per byte
+ * about 1.3ms apart, and each one is parsed whether or not anybody
+ * asked. The ACIA is MFP channel 6, below the overscan timers at 13
+ * and 8, so it cannot preempt them - but an interrupt already in
+ * service delays them, and a border's flick has to land on an exact
+ * cycle. A port reports the screen flickering on real hardware
+ * while the mouse is moved with a border open, which is the same
+ * shape as the disk finding in docs/porting.md: not a preemption, a
+ * delay.
+ *
+ * Joystick traffic is untouched - its packets are $FD, $FE and $FF
+ * against the mouse's $F7 to $FB - so a joystick-only game can
+ * disable the mouse and keep its stick.
+ *
+ * While disabled, STDL_GetMouseState keeps returning the last
+ * position and buttons it had; it does not fail, it simply stops
+ * changing. The library always puts mouse reporting back when it
+ * releases the keyboard, including down the terminate path, so a
+ * program that disables it and then crashes still hands the desktop
+ * a working pointer.
+ */
+int STDL_EnableMouse(int enable);
 void    STDL_WarpMouse(uint16_t x, uint16_t y);
 
 /* Joystick 1 (the physical joystick port), reported as events too.

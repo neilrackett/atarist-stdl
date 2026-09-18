@@ -286,6 +286,12 @@ extern void (*stdl_shutdown_overscan)(void);
 extern volatile uint8_t stdl_host_sync_reg;
 #define STDL_SYNC_REG stdl_host_sync_reg
 #endif
+/* One command byte to the keyboard ACIA, and whether the IKBD
+ * should be reporting the mouse. event.c owns both; src/mouse.c
+ * holds the public call that sets the second. */
+void stdl_ikbd_send(uint8_t b);
+extern uint8_t stdl_mouse_on;
+
 extern uint8_t stdl_vbl_hz;
 extern int     stdl_sync_want;
 extern void (*stdl_shutdown_hwscroll)(void);

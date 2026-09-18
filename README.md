@@ -68,6 +68,11 @@ holds the CPU off the border and throughput stays within 14-28% of
 the no-border figure; palette writes are staged to the vertical
 blanking so they can never flash mid-frame. See `examples/overscan.c`.
 
+`STDL_EnableMouse(0)` stops the IKBD reporting a mouse the game never
+reads - three ACIA interrupts per movement that, with a border open,
+are enough to delay the timers a flick depends on and flicker the
+screen.
+
 `STDL_PauseVoices()` and `STDL_ResumeVoices()` stop and restart the
 sample mixer's DMA without giving up the volume table its open call
 spends a frame building - for ports whose device is idle through

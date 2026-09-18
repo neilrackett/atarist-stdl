@@ -37,6 +37,9 @@
 static volatile uint16_t stdl_ring[RING_SIZE];
 static volatile uint8_t  stdl_ring_head;   /* ISR writes here */
 static volatile uint8_t  stdl_ring_tail;   /* pump reads here */
+/* whether the IKBD should report the mouse at all; see
+ * STDL_EnableMouse in src/mouse.c */
+uint8_t stdl_mouse_on = 1;
 static volatile int16_t  stdl_mouse_dx;
 static volatile int16_t  stdl_mouse_dy;
 
@@ -165,7 +168,7 @@ static void capture_keytabs(void)
 /* Send one command byte straight to the keyboard ACIA. Ikbdws would
  * do, but install/remove also run from the terminate vector, where
  * only hardware access is allowed. */
-static void ikbd_send(uint8_t b)
+void stdl_ikbd_send(uint8_t b)
 {
     while (!(ACIA_KBD_CTRL & 0x02)) { }     /* wait for TDRE */
     ACIA_KBD_DATA = b;
@@ -186,7 +189,7 @@ static void ikbd_quiesce(void)
 {
     uint32_t settle;
 
-    ikbd_send(0x13);                        /* pause output */
+    stdl_ikbd_send(0x13);                        /* pause output */
     settle = STDL_HZ200 + 4;                /* ~20ms: command transit
                                                plus a packet in flight */
     while ((int32_t)(STDL_HZ200 - settle) < 0) { }
@@ -206,8 +209,17 @@ void stdl_events_install(void)
     kv->ikbdsys = (long)stdl_ikbd_handler;
     pkt_pending = 0;
     mouse_buttons_isr = 0;
-    ikbd_send(0x11);                        /* resume output */
-    ikbd_send(0x16);                        /* interrogate joysticks:
+    stdl_ikbd_send(0x11);                        /* resume output */
+    if (!stdl_mouse_on) {
+        /* $12 stops the IKBD reporting the mouse at all. Re-sent
+         * here because the command lives in the keyboard processor
+         * and does not survive whatever ran before us. Joystick
+         * traffic is untouched: its packets are $FD, $FE and $FF
+         * against the mouse's $F7 to $FB, and $16 above still gets
+         * its reply. */
+        stdl_ikbd_send(0x12);
+    }
+    stdl_ikbd_send(0x16);                        /* interrogate joysticks:
                                                the $FD reply seeds
                                                joy_state with the true
                                                held state */
@@ -226,7 +238,13 @@ void stdl_events_remove(void)
         kbdvecs_t *kv = (kbdvecs_t *)Kbdvbase();
         ikbd_quiesce();
         kv->ikbdsys = old_ikbdsys;
-        ikbd_send(0x11);
+        stdl_ikbd_send(0x11);
+        /* Always, whatever the program asked for: the desktop this
+         * hands back to needs a pointer, and a game that disabled
+         * the mouse and then crashed would otherwise leave the
+         * machine without one. Pure ACIA writes, so it is legal
+         * from the terminate path too. */
+        stdl_ikbd_send(0x08);
         events_installed = 0;
     }
 }

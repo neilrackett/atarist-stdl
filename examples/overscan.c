@@ -19,7 +19,11 @@
  * seam there, and a row displayed a cycle early or fetched a word
  * out of step would break the pattern. ESC quits.
  *
- * D toggles double buffering and 8 cycles a Mega STE's CPU through
+ * M turns IKBD mouse reporting off and on: moving a mouse with a
+ * border open feeds three ACIA interrupts per movement into a
+ * frame whose flick has to land on an exact cycle, and a game that
+ * never reads the mouse is paying for all of it. D toggles double
+ * buffering and 8 cycles a Mega STE's CPU through
  * 16MHz with its cache, 16MHz without it and 8MHz - the middle one
  * being the setting that says whether a timing problem is the clock
  * or the cache.
@@ -125,7 +129,8 @@ static const struct { int mode; uint8_t col; } speeds[3] = {
 };
 
 /* the state blocks and an empty bar: on a key press only */
-static void status_reset(STDL_Surface *screen, int spd, int dbuf)
+static void status_reset(STDL_Surface *screen, int spd, int dbuf,
+                         int mouse)
 {
     STDL_Rect r;
 
@@ -136,6 +141,8 @@ static void status_reset(STDL_Surface *screen, int spd, int dbuf)
     STDL_FillRect(screen, &r, speeds[spd].col);
     r.x = 24;
     STDL_FillRect(screen, &r, (uint8_t)(dbuf ? 10 : 8));
+    r.x = 36;
+    STDL_FillRect(screen, &r, (uint8_t)(mouse ? 10 : 12));
 }
 
 /* one fill per new segment, nothing at all while the count holds */
@@ -164,6 +171,7 @@ int main(int argc, char *argv[])
 {
     STDL_Surface *screen;
     int top = 0, bot = 0, dbuf = 0, spd = 0, strip = 1, page = 0;
+    int mouse = 1;
     uint32_t base = 0, shown[2] = { 0, 0 };
 
     (void)argc; (void)argv;
@@ -228,6 +236,21 @@ int main(int argc, char *argv[])
                     STDL_UseMegaSteSpeedup(speeds[spd].mode);
                     top = wt ? (STDL_OpenTopBorder() != 0) : 0;
                     bot = wb ? (STDL_OpenBottomBorder() != 0) : 0;
+                } else if (sym == STDLK_m) {
+                    /*
+                     * Mouse reporting, which a border makes worth
+                     * knowing about: every movement is three ACIA
+                     * interrupts about 1.3ms apart, and although
+                     * they cannot preempt the border's timers they
+                     * can delay them, which a flick that has to
+                     * land on an exact cycle will not survive.
+                     * Move the mouse with a border open and watch
+                     * the bar, then turn the mouse off and do it
+                     * again. A game that never reads the mouse
+                     * should turn it off once at startup.
+                     */
+                    mouse = !mouse;
+                    STDL_EnableMouse(mouse);
                 } else if (sym == STDLK_s) {
                     /* the aimed control: no drawing at all while
                      * the border runs, which is the state the
@@ -269,10 +292,10 @@ int main(int argc, char *argv[])
                 shown[0] = shown[1] = 0;
                 page = 0;
                 if (strip) {
-                    status_reset(screen, spd, dbuf);
+                    status_reset(screen, spd, dbuf, mouse);
                     if (dbuf) {
                         STDL_Flip();
-                        status_reset(screen, spd, dbuf);
+                        status_reset(screen, spd, dbuf, mouse);
                         STDL_Flip();
                     }
                 }

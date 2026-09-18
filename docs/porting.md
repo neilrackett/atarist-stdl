@@ -49,6 +49,19 @@ time, not at runtime.
     entirely when unloaded, its resident code holding interrupts
     off long enough to make the timer late. Worth ruling out before
     blaming your own frame.
+* **Turn the mouse off if you never read it**: `STDL_EnableMouse(0)`
+  stops the IKBD reporting it. Every movement is a three-byte
+  packet, one ACIA interrupt per byte about 1.3ms apart, parsed
+  whether or not anybody asked. With a border open that matters
+  beyond the wasted cycles: the ACIA is MFP channel 6, below the
+  border timers at 13 and 8, so it cannot preempt them - but an
+  interrupt already in service delays them, and a flick has to land
+  on an exact cycle. A port reports the screen flickering on
+  hardware while the mouse is moved with a border open. Joystick
+  traffic is unaffected, the library puts reporting back when it
+  releases the keyboard including down the terminate path, and
+  `STDL_GetMouseState` simply stops changing rather than failing.
+  `examples/overscan.c` has it on M.
 * **Pausing the voice device**: an open sound DMA clicks about once
   every thirty seconds on a real STE even looping pure silence, and
   that is hardware rather than anything the library does. If your

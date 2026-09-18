@@ -71,6 +71,16 @@ time, not at runtime.
   and first cutscene, and in gameplay 44 gaps with a maximum of
   1.16s, so a two-second hysteresis fires once per quiet stretch
   and never during play.
+  The shape of a real caller, from the port that asked for this:
+  poll `STDL_VoiceActive` on all four voices once a frame, and two
+  seconds after the last goes quiet call `STDL_PauseVoices` once;
+  call `STDL_ResumeVoices` immediately before every `STDL_SetVoice`,
+  at every call site. Drive that poll from wherever your platform
+  layer pumps events rather than from the game loop - a cutscene
+  player usually does not run the game loop, and cutscenes are
+  where the idle time is. Measured in that port: the DMA stops 8.4s
+  in and does not restart until 68.3s, across two cutscenes and a
+  title screen, with no pause or resume at all during play.
   The transitions cost nothing audible: measured on a real STE,
   cycling pause and resume once a second clicked *less* than the
   same device left open and idle, which is what happens when the

@@ -54,6 +54,7 @@ static struct {
     uint8_t  paused;            /* DMA actually stopped            */
     uint8_t  silent;            /* consecutive blocks mixed silent */
     uint8_t  fresh;             /* first tick after a (re)start    */
+    uint8_t  tick_acc;          /* sequencer 50Hz against the VBL  */
     void   (*tick)(void *);
     void    *tick_ud;
 } vc;
@@ -156,7 +157,7 @@ static int mix_block(int8_t *dst)
     return mixed;
 }
 
-/* the 50Hz VBL callback: sequencer tick, then mix forward */
+/* the VBL callback: sequencer tick (50 a second), then mix forward */
 static void voice_vbl(void)
 {
     uint32_t off;
@@ -169,7 +170,15 @@ static void voice_vbl(void)
         return;
     }
     if (vc.tick != NULL) {
-        vc.tick(vc.tick_ud);
+        /* The sequencer wants 50 a second whatever the display runs
+         * at, or a song written for the 50Hz VBL plays 20% fast
+         * after STDL_SetRefresh(60): at 60Hz one VBL in six passes
+         * it by. The same accumulator music_tick uses. */
+        vc.tick_acc = (uint8_t)(vc.tick_acc + 50);
+        if (vc.tick_acc >= stdl_vbl_hz) {
+            vc.tick_acc = (uint8_t)(vc.tick_acc - stdl_vbl_hz);
+            vc.tick(vc.tick_ud);
+        }
     }
     off = stdl_dma_counter() - (uint32_t)(uintptr_t)vc.ring;
     if (off >= (uint32_t)RING_FRAMES) {
@@ -505,5 +514,6 @@ void STDL_SetVoiceTick(void (*fn)(void *), void *userdata)
 
     vc.tick = fn;
     vc.tick_ud = userdata;
+    vc.tick_acc = 0;
     stdl_int_restore(sr);
 }

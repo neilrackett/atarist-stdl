@@ -209,6 +209,20 @@ int main(void)
     CHECK(ticks_seen == 2, "tick ran %d times, want 2", ticks_seen);
     STDL_SetVoiceTick(NULL, NULL);
 
+    /* ... at 50Hz. At 60Hz it still runs 50 times a second, or a
+     * song written for the 50Hz VBL plays 20% fast */
+    open_fresh();
+    stdl_vbl_hz = 60;
+    STDL_SetVoiceTick(count_tick, NULL);
+    ticks_seen = 0;
+    for (i = 0; i < 60; i++) {
+        tick_at((uint32_t)((i & 3) * BLOCK));
+    }
+    CHECK(ticks_seen == 50, "60Hz: tick ran %d times in 60 VBLs, "
+          "want 50", ticks_seen);
+    stdl_vbl_hz = 50;
+    STDL_SetVoiceTick(NULL, NULL);
+
     /*
      * The volume table is symmetric about zero, and quiet content
      * at a low volume is silent rather than biased. An arithmetic

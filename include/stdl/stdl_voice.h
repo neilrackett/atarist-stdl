@@ -16,7 +16,9 @@
  *
  * A sequencer drives it from the voice tick: a callback run at 50Hz
  * in VBL context, before each mix, from which the STDL_SetVoice*
- * calls are safe. The tick contract is stdl_vbl.h's: no GEMDOS, no
+ * calls are safe. It stays at 50 a second when STDL_SetRefresh puts
+ * the display at 60Hz - one VBL in six passes it by - so a song
+ * keeps its tempo at either rate. The tick contract is stdl_vbl.h's: no GEMDOS, no
  * allocation, no drawing - program voices and return.
  *
  * Sample data is read live by the mixer: stop a voice (or close the
@@ -175,8 +177,9 @@ void STDL_SetVoiceFreq(int v, uint32_t freq);
 void STDL_SetVoiceVolume(int v, uint8_t vol);
 
 /*
- * The sequencer hook: fn(userdata) runs at 50Hz in VBL context,
- * before the mix. NULL uninstalls. See the tick contract above.
+ * The sequencer hook: fn(userdata) runs 50 times a second in VBL
+ * context, at either display rate, before the mix. NULL uninstalls.
+ * See the tick contract above.
  */
 void STDL_SetVoiceTick(void (*fn)(void *), void *userdata);
 

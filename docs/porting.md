@@ -125,8 +125,9 @@ time, not at runtime.
   boots at 50Hz and an NTSC one at 60; 60Hz gives ten more frames a
   second with the same 320x200 picture. The VBL rate moves with it,
   so time from `STDL_GetTicks` rather than counting frames -
-  `STDL_Music` compensates, per-tick things like `STDL_Sfx`
-  envelopes and `STDL_AddVBL` callbacks cannot. A border forces
+  `STDL_Music` and the `STDL_SetVoiceTick` sequencer compensate,
+  per-tick things like `STDL_Sfx` envelopes and `STDL_AddVBL`
+  callbacks cannot. A border forces
   50Hz while it is open (the overscan tricks are PAL-timed) and
   applies the request on the final close. Some period TVs will not
   sync 60Hz on a PAL machine, so check the return value.

@@ -693,8 +693,9 @@ first.
   a second at the same 320x200 - worth having for a game already
   inside its frame budget and worth nothing for one that is not.
   Three things bite. The VBL rate moves with it, so anything timed
-  by counting frames runs 20% fast at 60Hz (`STDL_Music` is
-  rate-aware and compensates; `STDL_Sfx` envelopes and
+  by counting frames runs 20% fast at 60Hz (`STDL_Music` and the
+  `STDL_SetVoiceTick` sequencer are rate-aware and compensate;
+  `STDL_Sfx` envelopes and
   `STDL_AddVBL` callbacks are per-tick by definition and do not) -
   time from `STDL_GetTicks` where it matters. Overscan is PAL-timed,
   so a border forces 50Hz while it is open and the request lands on
@@ -726,7 +727,8 @@ first.
   frame nobody would have guessed at.
 - Sample music: `STDL_OpenVoices(rate)` is a fixed-function 4-voice
   sample mixer (Paula-style loop/period/volume) driven from the VBL
-  with a 50Hz sequencer hook (`STDL_SetVoiceTick`) - module music
+  with a 50Hz sequencer hook (`STDL_SetVoiceTick`, 50 a second at
+  a 60Hz display too) - module music
   without the ring device's callback cost. STE only; voices, the
   ring device and `STDL_PlaySample` are mutually exclusive DMA
   owners.

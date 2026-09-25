@@ -84,8 +84,9 @@ mid-waveform.
 `STDL_SetRefresh(50 | 60)` switches the display's sync rate and returns
 the rate that actually took effect - ten more frames a second on a game
 already inside its frame budget, on a machine and monitor that will take
-it. The VBL rate moves with it, so `STDL_Music` is rate-aware and
-anything counting frames should time from `STDL_GetTicks` instead; a
+it. The VBL rate moves with it, so `STDL_Music` and the voice
+sequencer tick are rate-aware and anything counting frames should time
+from `STDL_GetTicks` instead; a
 border forces 50Hz for as long as it is open, the overscan tricks being
 PAL-timed.
 

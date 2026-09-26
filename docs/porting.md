@@ -125,9 +125,9 @@ time, not at runtime.
   boots at 50Hz and an NTSC one at 60; 60Hz gives ten more frames a
   second with the same 320x200 picture. The VBL rate moves with it,
   so time from `STDL_GetTicks` rather than counting frames -
-  `STDL_Music` and the `STDL_SetVoiceTick` sequencer compensate,
-  per-tick things like `STDL_Sfx` envelopes and `STDL_AddVBL`
-  callbacks cannot. A border forces
+  `STDL_Music`, the `STDL_SetVoiceTick` sequencer and `STDL_Sfx`
+  steps (from v1.12.0) compensate; `STDL_AddVBL` callbacks are
+  per-tick by definition and cannot. A border forces
   50Hz while it is open (the overscan tricks are PAL-timed) and
   applies the request on the final close. Some period TVs will not
   sync 60Hz on a PAL machine, so check the return value.
@@ -174,7 +174,7 @@ time, not at runtime.
 | `Mix_PlayChannel` / `Mix_LoadWAV` | mixer shim | up to 4 chunks software-mixed over the DMA device (STE only) - **costs real CPU**, see below |
 | one-shot game effects | `STDL_PlaySample` | monophonic, but the DMA reads your buffer directly: no refill, no mixing, no per-frame cost |
 | PC-speaker sound | `STDL_SpeakerOn/Off` | immediate YM tone; steals voice A from music, restores after |
-| PC-speaker sequences | `STDL_PlaySfx` | step-array effects (periods+volumes), tone or noise, auto voice |
+| PC-speaker sequences | `STDL_PlaySfx` | step-array effects (periods+volumes), tone or noise, auto voice; optional per-step noise for tone and noise together (gunshots, sinking explosions) |
 | music as live notes (MIDI-note streams, a tracker of your own) | `STDL_ToneOn/Set/Off` | 16 note slots onto the 3 YM voices, last-note priority; above `STDL_Music`, below effects. `STDL_ToneOpen` once from the main line if the notes come from your own timer or VBL callback |
 | AdLib / IMF music and effects (OPL2 register streams) | `STDL_OplWrite` | one call per register write; channels 0-8 become tone slots 0-8, the replay rate stays the game's |
 | `SDL_Joystick*` | compat veneer | port 1 as stick 0: 2 digital axes, 1 button |

@@ -605,7 +605,11 @@ first.
   (cached) skips backdrop under solid tiles; `STDL_PutGroup` for
   runtime asset decoders; `STDL_CreateMask` for built-up surfaces.
 - Sound effects: `STDL_SpeakerOn/Off` = PC-speaker idiom on voice A;
-  `STDL_PlaySfx` = step sequences (tone or noise) on auto voices.
+  `STDL_PlaySfx` = step sequences (tone or noise) on auto voices;
+  give it a `noises` array (v1.12.0) and each step has its own
+  noise period, sounding with the step's tone on the same voice -
+  a crack over a thump for a gunshot, a noise that sinks as an
+  explosion fades. Steps keep their ms at 60Hz.
   Both steal voices from STDL_Music and hand them back restored.
   These are free: they run off the 50Hz VBL sound tick.
 - Music that arrives as notes at run time (an OPL register stream
@@ -693,10 +697,10 @@ first.
   a second at the same 320x200 - worth having for a game already
   inside its frame budget and worth nothing for one that is not.
   Three things bite. The VBL rate moves with it, so anything timed
-  by counting frames runs 20% fast at 60Hz (`STDL_Music` and the
-  `STDL_SetVoiceTick` sequencer are rate-aware and compensate;
-  `STDL_Sfx` envelopes and
-  `STDL_AddVBL` callbacks are per-tick by definition and do not) -
+  by counting frames runs 20% fast at 60Hz (`STDL_Music`, the
+  `STDL_SetVoiceTick` sequencer and `STDL_Sfx` steps are rate-aware
+  and compensate; `STDL_AddVBL` callbacks are per-tick by
+  definition and do not) -
   time from `STDL_GetTicks` where it matters. Overscan is PAL-timed,
   so a border forces 50Hz while it is open and the request lands on
   the final close, which means a port cannot have both. And 60Hz on

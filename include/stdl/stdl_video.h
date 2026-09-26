@@ -112,8 +112,8 @@ int STDL_UseMegaSteSpeedup(int mode);
  *
  * The VBL rate changes with it, so anything timed by counting
  * frames runs 20%% fast at 60Hz. STDL_Music and the STDL_Voice
- * sequencer tick are rate-aware and compensate; STDL_Sfx envelopes
- * and STDL_AddVBL callbacks are per-tick by definition and will not. Time from STDL_GetTicks
+ * sequencer tick and STDL_Sfx steps are rate-aware and compensate;
+ * STDL_AddVBL callbacks are per-tick by definition and will not. Time from STDL_GetTicks
  * where it matters.
  *
  * Overscan is PAL-timed. While a border is open the display is

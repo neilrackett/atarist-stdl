@@ -24,8 +24,9 @@ typedef struct {
     /* owned by the tick */
     const STDL_Sfx *sfx;
     uint16_t step;
-    uint16_t ms_acc;
+    uint16_t acc;                       /* ms x the VBL rate        */
     uint8_t  running;
+    uint8_t  noisy;                     /* this step uses the noise */
 } sfx_voice_t;
 
 static sfx_voice_t voices[3];
@@ -43,12 +44,23 @@ static void voice_off(int v)
     sfx_voice_t *sv = &voices[v];
 
     sv->running = 0;
+    sv->noisy = 0;
     sv->sfx = NULL;
     if (stdl_ym_owned & (1u << v)) {
         stdl_ym_release_voice(v);
     }
 }
 
+/*
+ * Two ways to read a step. Without `noises`, as ever: a step is the
+ * tone at its period, or with `noise` set the noise instead, and a
+ * period of 0 is a rest. With `noises`, tone and noise are separate
+ * per step - the period sounds the tone, the noise entry the noise
+ * generator at that period, both at once when both are set, and a
+ * rest only when neither is. That is what a gunshot wants (a crack
+ * of noise over a thump of tone, on one voice) and an explosion (a
+ * noise that sinks as it fades).
+ */
 static void apply_step(int v)
 {
     sfx_voice_t *sv = &voices[v];
@@ -56,22 +68,35 @@ static void apply_step(int v)
     uint16_t period = fx->periods[sv->step];
     uint8_t vol = fx->volumes != NULL ? fx->volumes[sv->step]
                                       : fx->volume;
+    uint8_t noise, off;
 
-    if (period == 0) {
+    if (fx->noises != NULL) {
+        noise = fx->noises[sv->step] & 0x1F;
+    } else {
+        noise = (period != 0) ? (uint8_t)(fx->noise & 0x1F) : 0;
+        if (noise != 0) {
+            period = 0;                 /* noise effects are noise only */
+        }
+    }
+    sv->noisy = (noise != 0);
+    if (period == 0 && noise == 0) {
         stdl_ym_write(8 + v, 0);
         return;
     }
-    if (fx->noise != 0) {
-        stdl_ym_owned |= 0x08;
-        stdl_ym_write(6, fx->noise & 0x1F);
-        stdl_ym_mix_update(STDL_YM_VOICE_BITS(v),
-                           (uint8_t)(1u << v));   /* noise on, tone off */
-    } else {
+    off = 0;                            /* r7 bits: 1 = off         */
+    if (period != 0) {
         stdl_ym_write(2 * v, period & 0xFF);
         stdl_ym_write(2 * v + 1, (period >> 8) & 0x0F);
-        stdl_ym_mix_update(STDL_YM_VOICE_BITS(v),
-                           (uint8_t)(1u << (v + 3))); /* tone on */
+    } else {
+        off |= (uint8_t)(1u << v);
     }
+    if (noise != 0) {
+        stdl_ym_owned |= 0x08;
+        stdl_ym_write(6, noise);
+    } else {
+        off |= (uint8_t)(1u << (v + 3));
+    }
+    stdl_ym_mix_update(STDL_YM_VOICE_BITS(v), off);
     stdl_ym_write(8 + v, vol > 15 ? 15 : vol);
 }
 
@@ -116,16 +141,19 @@ static void sfx_tick(void)
             sv->sfx = sv->pending;
             sv->pending = NULL;
             sv->step = 0;
-            sv->ms_acc = 0;
+            sv->acc = 0;
             sv->running = 1;
             stdl_ym_claim_voice(v);
             apply_step(v);
         } else if (sv->running) {
-            sv->ms_acc = (uint16_t)(sv->ms_acc + 20);
-            while (sv->running
-                   && sv->ms_acc >= sv->sfx->step_ms) {
-                sv->ms_acc = (uint16_t)
-                    (sv->ms_acc - sv->sfx->step_ms);
+            /* A tick is 1000/rate ms: count in thousandths of a tick
+             * so 60Hz is exact (16.7ms) instead of taken as 20 -
+             * which ran every effect 20% fast after STDL_SetRefresh(60) */
+            const uint16_t step_len =
+                (uint16_t)(sv->sfx->step_ms * stdl_vbl_hz);
+            sv->acc = (uint16_t)(sv->acc + 1000);
+            while (sv->running && sv->acc >= step_len) {
+                sv->acc = (uint16_t)(sv->acc - step_len);
                 sv->step++;
                 if (sv->step >= sv->sfx->nsteps) {
                     voice_off(v);
@@ -134,7 +162,7 @@ static void sfx_tick(void)
                 }
             }
         }
-        if (sv->running && sv->sfx->noise != 0) {
+        if (sv->running && sv->noisy) {
             noise_used = 1;
         }
     }

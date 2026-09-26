@@ -49,7 +49,7 @@ stop trying and redesign instead.
   four SDL_mixer channels at 6258Hz. Module-style sample music
   belongs on `STDL_Voice` instead: a fixed-function four-voice
   mixer driven from the VBL, table-driven volume, no callback in
-  the audio path (see stdl_voice.h), at 28% of an 8MHz STE with
+  the audio path (see stdl_voice.h), at 25% of an 8MHz STE with
   four voices busy at 6258Hz. A game with no frame budget
   to spare wants `STDL_PlaySample` instead, which hands the DMA a
   buffer to read once and costs nothing per frame - at the price of

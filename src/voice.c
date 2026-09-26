@@ -28,7 +28,7 @@
 
 /* ring of RING_FRAMES mono s8 frames, mixed in quarters */
 #define RING_FRAMES 512
-#define BLOCK_FRAMES (RING_FRAMES / 4)
+#define BLOCK_FRAMES (RING_FRAMES / 4)   /* a multiple of 4: see mix_block */
 
 typedef struct {
     const int8_t *data;
@@ -94,9 +94,11 @@ static void voice_shutdown(void)
  *    measured under a port playing four-channel modules. The loop
  *    below is a byte fetch, a table fetch and an add, with the
  *    16.16 step split so the carry does the work, and the one clamp
- *    costs a table lookup a frame. Four voices now mix a block in
- *    5.8ms on an 8MHz STE, everything in: 28% of the machine at
- *    6258Hz. tests/hatari/voicechk.c is that measurement.
+ *    costs a table lookup a frame. Both loops are unrolled four
+ *    times. Four voices now mix a block in 5.2ms on an 8MHz STE,
+ *    everything in: 25% of the machine at 6258Hz (5.8ms and 28%
+ *    before the unrolling). tests/hatari/voicechk.c is that
+ *    measurement.
  *  - Correctness. Clamping after each voice saturates the partial
  *    sums: three loud voices clipped at +127 before a fourth
  *    negative one came back down. The sum clamped once is the sum.
@@ -158,7 +160,31 @@ int stdl_voice_use_c;
  * The index register's upper byte is cleared once, before the loop,
  * and only its low byte is ever loaded. The position the run ends
  * at is worked out here rather than read back, so the word add may
- * wrap past a stretch's end without it mattering. */
+ * wrap past a stretch's end without it mattering.
+ *
+ * Four samples to a pass: .rept writes the body out four times, so
+ * the dbra closing the loop is paid once in four samples rather than
+ * on each - it was 12 of the 68 cycles a sample cost. A run that is
+ * not a multiple of four enters its first pass part-way in, (-run & 3)
+ * bodies along: every instruction in the body is a fixed size, 16
+ * bytes in all, and the jmp adds that times the skip to the block's
+ * start. One body in the source; the store variant for the first
+ * voice and the add for the rest differ in one mnemonic. */
+#define VOICE_BODY_BYTES 16
+#define VOICE_RUN_ASM(store)            \
+    "moveq #0,%%d0\n\t"                 \
+    "jmp (1f,%%pc,%8.w)\n"               \
+    "1:\n\t"                             \
+    ".rept 4\n\t"                        \
+    "move.b (%1,%3.l),%%d0\n\t"          \
+    "move.b (%2,%%d0.w),%%d1\n\t"        \
+    "ext.w %%d1\n\t"                     \
+    store " %%d1,(%0)+\n\t"              \
+    "add.w %6,%4\n\t"                    \
+    "addx.w %5,%3\n\t"                   \
+    ".endr\n\t"                          \
+    "dbra %7,1b"
+
 static uint32_t voice_run(int16_t *acc, const int8_t *data,
                           const int8_t *vt, uint32_t pos,
                           uint32_t step, int run, int first)
@@ -166,40 +192,26 @@ static uint32_t voice_run(int16_t *acc, const int8_t *data,
     uint32_t ipos = pos >> 16;
     uint16_t fpos = (uint16_t)pos, fstep = (uint16_t)step;
     uint16_t istep = (uint16_t)(step >> 16);
-    int16_t count = (int16_t)(run - 1);
+    /* passes after the first, for dbra, and where the first starts */
+    int16_t count = (int16_t)(((run + 3) >> 2) - 1);
+    uint16_t skip = (uint16_t)((-run & 3) * VOICE_BODY_BYTES);
 
     if (run <= 0 || stdl_voice_use_c) {
         return voice_run_c(acc, data, vt, pos, step, run, first);
     }
     if (first) {
         __asm__ volatile(
-            "moveq #0,%%d0\n"
-            "1:\n\t"
-            "move.b (%1,%3.l),%%d0\n\t"
-            "move.b (%2,%%d0.w),%%d1\n\t"
-            "ext.w %%d1\n\t"
-            "move.w %%d1,(%0)+\n\t"
-            "add.w %6,%4\n\t"
-            "addx.w %5,%3\n\t"
-            "dbra %7,1b"
+            VOICE_RUN_ASM("move.w")
             : "+a"(acc), "+a"(data), "+a"(vt), "+d"(ipos), "+d"(fpos),
               "+d"(istep), "+d"(fstep), "+d"(count)
-            :
+            : "d"(skip)
             : "d0", "d1", "cc", "memory");
     } else {
         __asm__ volatile(
-            "moveq #0,%%d0\n"
-            "1:\n\t"
-            "move.b (%1,%3.l),%%d0\n\t"
-            "move.b (%2,%%d0.w),%%d1\n\t"
-            "ext.w %%d1\n\t"
-            "add.w %%d1,(%0)+\n\t"
-            "add.w %6,%4\n\t"
-            "addx.w %5,%3\n\t"
-            "dbra %7,1b"
+            VOICE_RUN_ASM("add.w")
             : "+a"(acc), "+a"(data), "+a"(vt), "+d"(ipos), "+d"(fpos),
               "+d"(istep), "+d"(fstep), "+d"(count)
-            :
+            : "d"(skip)
             : "d0", "d1", "cc", "memory");
     }
     return pos + stdl_mul32x16(step, (uint16_t)run);
@@ -294,13 +306,17 @@ static int mix_block(int8_t *dst)
     }
 #ifdef __m68k__
     if (!stdl_voice_use_c) {
+        /* four frames a pass, as the voices are; a block is a whole
+         * number of passes, so there is no part-way entry here */
         const int16_t *acc = mixacc;
         const int8_t *mid = CLAMP_MID;
-        int16_t count = BLOCK_FRAMES - 1;
+        int16_t count = BLOCK_FRAMES / 4 - 1;
         __asm__ volatile(
             "1:\n\t"
+            ".rept 4\n\t"
             "move.w (%0)+,%%d0\n\t"
             "move.b (%1,%%d0.w),(%2)+\n\t"
+            ".endr\n\t"
             "dbra %3,1b"
             : "+a"(acc), "+a"(mid), "+a"(dst), "+d"(count)
             :

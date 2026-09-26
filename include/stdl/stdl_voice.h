@@ -40,7 +40,7 @@ extern "C" {
  * Open the device: `freq` snaps to the nearest DMA rate (6258 /
  * 12517 / 25033 / 50066 - music typically wants 6258 or 12517,
  * mixing cost scales with the rate: four busy voices at 6258Hz
- * take 28% of an 8MHz STE, measured, so 12517 is over half). Claims the sound DMA: mutually
+ * take 25% of an 8MHz STE, measured, so 12517 is about half). Claims the sound DMA: mutually
  * exclusive with STDL_OpenAudio and STDL_PlaySample*. Returns 0, or
  * -1 with STDL_GetError set (no STE DMA hardware, chip in use, out
  * of memory, no free VBL slot).

@@ -38,6 +38,7 @@ typedef struct {
     uint32_t loopsize;  /* 16.16 loop length, 0 = one-shot          */
     uint32_t step;      /* 16.16 resampling step                    */
     const int8_t *vt;   /* volume table row                         */
+    int16_t repeats;    /* loop passes left; -1 until stopped       */
     uint8_t active;
 } voice_t;
 
@@ -257,7 +258,7 @@ static void voice_mix(voice_t *v, int first)
         int run = BLOCK_FRAMES - n;
         if (pos >= end) {
             uint32_t over = pos - end;
-            if (v->loopsize == 0) {
+            if (v->loopsize == 0 || v->repeats == 0) {
                 v->active = 0;
                 if (first) {
                     memset(mixacc + n, 0, (BLOCK_FRAMES - n) * sizeof(int16_t));
@@ -272,6 +273,9 @@ static void voice_mix(voice_t *v, int first)
              * shorter than a step needs the remainder. */
             if (over >= v->loopsize) {
                 over %= v->loopsize;
+            }
+            if (v->repeats > 0) {
+                v->repeats--;
             }
             pos = v->loopstart + over;
             end = v->loopstart + v->loopsize;
@@ -607,13 +611,22 @@ int STDL_VoicesPaused(void)
     return vc.paused;
 }
 
-void STDL_SetVoice(int v, const int8_t *data, uint32_t len,
-                   uint32_t loop_off, uint32_t loop_len,
-                   uint32_t freq, uint8_t vol)
+/* STDL_SetVoice with a loop count: the loop comes round `repeats`
+ * more times, then the voice ends (-1: until stopped). Set in the same
+ * masked store as the rest of the voice, so even a sound shorter than
+ * a block is counted exactly - provided a step is no longer than the
+ * loop, since one wrap counts one pass however many it skips. At the
+ * device rate, as the SDL_mixer layer plays every chunk, it always
+ * is. Internal: Mix_PlayChannel(channel, chunk, loops) is this with
+ * loops. */
+void stdl_voice_start(int v, const int8_t *data, uint32_t len,
+                      uint32_t loop_off, uint32_t loop_len,
+                      uint32_t freq, uint8_t vol, int repeats)
 {
     voice_t *p;
     uint32_t end, loopstart, loopsize, step;
     const int8_t *vt;
+    int16_t rep;
     uint16_t sr;
 
     if (!vc.open || v < 0 || v >= STDL_VOICES) {
@@ -652,6 +665,7 @@ void STDL_SetVoice(int v, const int8_t *data, uint32_t len,
     loopsize = loop_len << 16;
     step = (freq << 16) / (uint32_t)vc.dma_freq;
     vt = vc.voltab + (uint32_t)vol * 256;
+    rep = (int16_t)((repeats < 0) ? -1 : (repeats > 0x7FFF ? 0x7FFF : repeats));
     sr = stdl_int_off();
     /*
      * Any pending pause starts its drain again from here. Without
@@ -673,8 +687,16 @@ void STDL_SetVoice(int v, const int8_t *data, uint32_t len,
     p->loopsize = loopsize;
     p->step = step;
     p->vt = vt;
+    p->repeats = rep;
     p->active = 1;
     stdl_int_restore(sr);
+}
+
+void STDL_SetVoice(int v, const int8_t *data, uint32_t len,
+                   uint32_t loop_off, uint32_t loop_len,
+                   uint32_t freq, uint8_t vol)
+{
+    stdl_voice_start(v, data, len, loop_off, loop_len, freq, vol, -1);
 }
 
 void STDL_StopVoice(int v)

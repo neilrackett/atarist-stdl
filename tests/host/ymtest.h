@@ -3,11 +3,11 @@
  * Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: LGPL-2.1-or-later
  *
- * Helpers shared by the sound host tests. The YM register layout
- * and the VBL queue scan were copied into each of test_ym.c,
- * test_tone.c and test_opl.c; one copy is enough, and unlike the
- * library this costs no m68k text because tests/host is never
- * linked into anything that runs on target.
+ * Helpers shared by the sound host tests. The YM register layout,
+ * the VBL queue scan and the voice ring were copied into each test
+ * that used them; one copy is enough, and unlike the library this
+ * costs no m68k text because tests/host is never linked into
+ * anything that runs on target.
  */
 #ifndef STDL_YMTEST_H
 #define STDL_YMTEST_H
@@ -43,6 +43,28 @@ static int slots_used(void)
         }
     }
     return n;
+}
+
+/* The voice device's ring as the fake DMA (stubs.c) sees it: its
+ * geometry in voice.c, the buffer the device programmed, and a tick
+ * with the play head put where a test wants it - the same call path
+ * as the interrupt. */
+#define RING  512
+#define BLOCK 128
+
+extern uint32_t stdl_host_dma_pos;
+extern const void *stdl_host_dma_buf;
+
+static const int8_t *ring_base(void)
+{
+    return (const int8_t *)stdl_host_dma_buf;
+}
+
+/* put the fake play head at frame `f` of the ring and tick */
+static void tick_at(uint32_t f)
+{
+    stdl_host_dma_pos = (uint32_t)(uintptr_t)stdl_host_dma_buf + f;
+    vbl_fn();
 }
 
 /* a voice's programmed period, from the register file stub */

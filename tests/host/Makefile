@@ -38,7 +38,8 @@ CORE    = stubs.c $(SRC)/surface.c $(SRC)/indexed.c $(SRC)/draw.c \
 TESTS   = test_pixel test_compose test_cursor test_assets test_planes \
           test_footprint test_indexed test_glyph test_vbl test_blit8 \
           test_underleak \
-          test_voice test_ym test_tone test_sfx test_opl test_refresh
+          test_voice test_ym test_tone test_sfx test_opl test_refresh \
+          test_wav test_mixer test_ring
 
 all: $(TESTS)
 
@@ -88,6 +89,18 @@ test_ym: test_ym.c $(CORE) $(SRC)/ym.c
 	$(CC) $(CFLAGS) -o $@ $^
 
 test_tone: test_tone.c $(CORE) $(SRC)/ym.c $(SRC)/tone.c $(SRC)/sfx.c
+	$(CC) $(CFLAGS) -o $@ $^
+
+test_wav: test_wav.c $(CORE) $(SRC)/wav.c $(SRC)/asset.c
+	$(CC) $(CFLAGS) -o $@ $^
+
+# the SDL_mixer layer on the voice mixer, through its own API
+test_mixer: test_mixer.c $(CORE) $(SRC)/mixer.c $(SRC)/voice.c $(SRC)/vbl.c \
+            $(SRC)/wav.c $(SRC)/music.c $(SRC)/ym.c $(SRC)/asset.c
+	$(CC) $(CFLAGS) -I../../include/compat -o $@ $^
+
+# the ring device's refill, both paths, pumped by hand
+test_ring: test_ring.c $(CORE) $(SRC)/ring.c $(SRC)/wav.c $(SRC)/asset.c
 	$(CC) $(CFLAGS) -o $@ $^
 
 test_sfx: test_sfx.c $(CORE) $(SRC)/ym.c $(SRC)/sfx.c

@@ -146,5 +146,8 @@ int STDL_SamplePlaying(void)
     return 0;
 }
 
+/* defined in event.c on target, whose pump calls it */
+void (*stdl_audio_hook)(void);
+
 /* defined in video.c on target, which the host tests do not link */
 void (*stdl_pal_apply_hook)(void);

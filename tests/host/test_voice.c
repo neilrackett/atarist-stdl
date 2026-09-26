@@ -17,9 +17,8 @@
 #include <string.h>
 #include <stdl/stdl.h>
 #include "stdl_internal.h"
+#include "ymtest.h"
 
-extern uint32_t stdl_host_dma_pos;
-extern const void *stdl_host_dma_buf;
 extern int stdl_host_dma_running;
 
 extern const int8_t *stdl_host_voltab(void);
@@ -35,34 +34,6 @@ static int failures;
         printf("\n"); \
     } \
 } while (0)
-
-#define RING 512
-#define BLOCK 128
-
-static void (*vbl_fn)(void);
-
-static void find_vbl(void)
-{
-    int i;
-    vbl_fn = NULL;
-    for (i = 0; i < 8; i++) {
-        if (STDL_VBLQUEUE[i] != NULL) {
-            vbl_fn = STDL_VBLQUEUE[i];
-        }
-    }
-}
-
-static const int8_t *ring_base(void)
-{
-    return (const int8_t *)stdl_host_dma_buf;
-}
-
-/* put the fake play head at frame `f` of the ring and tick */
-static void tick_at(uint32_t f)
-{
-    stdl_host_dma_pos = (uint32_t)(uintptr_t)stdl_host_dma_buf + f;
-    vbl_fn();
-}
 
 static int ticks_seen;
 static void count_tick(void *ud)
@@ -187,6 +158,27 @@ int main(void)
             pos += step;
         }
     }
+
+    /* a loop count (stdl_voice_start, the SDL_mixer layer's loops): a
+     * 16-frame sample looped whole plays its first pass and two more,
+     * then ends - 48 frames, then silence - where STDL_SetVoice alone
+     * loops it until stopped */
+    open_fresh();
+    stdl_voice_start(0, looped, 16, 0, 16, 6258, 64, 2);
+    tick_at(0);
+    r = ring_base();
+    for (i = 0; i < 64; i++) {
+        const int lv = looped[i & 15];
+        const int want = (i < 48) ? (lv < 0 ? -((-lv) >> 1) : (lv >> 1)) : 0;
+        if (r[BLOCK + i] != want) {
+            CHECK(0, "repeats[%d]: got %d want %d", i, r[BLOCK + i], want);
+            break;
+        }
+    }
+    CHECK(!STDL_VoiceActive(0), "voice still active after its repeats");
+    STDL_SetVoice(0, looped, 16, 0, 16, 6258, 64);
+    tick_at(BLOCK);
+    CHECK(STDL_VoiceActive(0), "a new SetVoice should loop until stopped");
 
     /* two voices sum; equal and opposite cancel */
     open_fresh();

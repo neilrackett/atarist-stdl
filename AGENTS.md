@@ -694,8 +694,20 @@ warnings** with the Makefile's `-Wall -Wextra`.
 ## 68000 / gcc 4.6.4 performance notes
 
 - 32-bit multiply/divide are library calls; keep them out of inner
-  loops (use error-accumulator resampling, strided pointers, `&15`
-  and `>>4` instead of `%`/`/`).
+  loops (strided pointers, `&15` and `>>4` instead of `%`/`/`, and
+  for resampling an index and a fraction - an error accumulator's
+  `while` can compile to a multiply, as the next note says).
+- **A loop that never says "multiply" can still call __mulsi3.** The
+  ring device's resampler stepped its source with
+  `while (acc >= frames) { acc -= frames; f += frame_bytes; }`, and
+  gcc 4.6 folded that into a closed form - how many steps, times the
+  frame size - with a `__mulsi3` call on every output frame: 37% of
+  an 8MHz STE with a callback that did nothing, 73% at 12517Hz, for
+  years before anyone measured the silent case. Step a whole index
+  and a fraction instead, with the frame size as a shift
+  (`stdl_audio_convert`), and check the disassembly of any new
+  per-sample loop for `jsr` - `m68k-atari-mint-objdump -dr obj/src/x.o`
+  prints the relocations by name.
 - Variable shifts cost 8+2n cycles each, so two of them per word is
   a fixed tax whatever the shift amount. Building the value from a
   32-bit window needs one: `(((uint32_t)hi << 16) | lo) >> n` rather

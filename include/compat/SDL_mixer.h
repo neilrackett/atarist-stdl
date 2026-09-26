@@ -6,10 +6,28 @@
  * SDL_mixer compatibility subset.
  *
  * Music maps to STDL_Music: YM2149 register streams produced by
- * `stdlconv midi` (works on every ST). Sample chunks map to
- * STDL_Audio DMA mixing (STE/Mega STE; on a plain ST chunk calls
- * fail cleanly and music still plays). Anything not declared here
- * is a compile error by design.
+ * `stdlconv midi` (works on every ST). Sample chunks map to the
+ * STDL_Voice mixer, one channel a voice, mixed from the VBL (STE/Mega
+ * STE; on a plain ST chunk calls fail cleanly and music still
+ * plays). Anything not declared here is a compile error by design.
+ *
+ * Chunks cost, on an 8MHz STE: 9% for one at 6258Hz and 26% for all
+ * four, about twice that at 12517; half of it on a Mega STE
+ * (measured, tests/hatari/mixbench.c). Mix_OpenAudio mixes at 6258 or
+ * 12517, whichever is nearer the rate asked for - a PC game's 22050
+ * gets 12517 - since four voices at 25033 would be the whole machine.
+ * Chunks are converted to that rate as they load, at most 65535
+ * frames each (about five seconds at 12517). The voice ring holds
+ * 82ms at 6258 and 41ms at 12517: a VBL held off for most of that
+ * while a chunk plays - a synchronous disk read can be - repeats a
+ * stretch of it, so a game that loads while effects play may want
+ * 6258. A chunk at full volume plays at half scale, the voice mixer's
+ * room for two loud sounds at once - 6dB quieter than before v1.13.0,
+ * so re-check effects balanced against the music. Mix_PlayChannel's
+ * loops count is exact, counted by the voice mixer to the frame.
+ * Mix_Playing reads the voice, which ends when its last frame is
+ * mixed - up to three blocks (about 60ms at 6258, 30ms at 12517)
+ * before that frame is heard.
  */
 
 #ifndef STDL_COMPAT_SDL_MIXER_H

@@ -255,7 +255,7 @@ STDL_Sprite *stdl_sprite_preshift(STDL_Sprite *spr);
 
 /* cooperative service hooks, run from the event pump (and the
  * compat SDL_Delay): audio ring refill and software cursor motion.
- * Defined in event.c, installed by audio.c / cursor.c so programs
+ * Defined in event.c, installed by ring.c / cursor.c so programs
  * that use neither don't link them. */
 extern void (*stdl_audio_hook)(void);
 extern void (*stdl_cursor_hook)(int x, int y);
@@ -645,8 +645,16 @@ void     stdl_dma_start(const void *data, uint32_t bytes,
 void     stdl_dma_stop(void);
 uint32_t stdl_dma_counter(void);
 
+/* STDL_SetVoice with a loop count: `repeats` more passes, then the
+ * voice ends; -1 until stopped. Exact while a step is no longer than
+ * the loop (voice.c) */
+void stdl_voice_start(int v, const int8_t *data, uint32_t len,
+                      uint32_t loop_off, uint32_t loop_len,
+                      uint32_t freq, uint8_t vol, int repeats);
+
 /* bulk sample conversion to signed 8-bit mono/stereo frames at a
- * new rate (audio.c); shared by the mixer's chunk loader */
+ * new rate (wav.c): the ring device's refill and the mixer's chunk
+ * loader */
 void stdl_audio_convert(int8_t *dst, uint32_t dst_frames,
                         const uint8_t *src, uint32_t src_frames,
                         uint16_t format, int channels, int mono_mix);

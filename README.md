@@ -163,7 +163,7 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | TJOY.TOS     | joystick port 1 as SDL joystick 0; 6 axes/13 buttons when an Xpad pad is present |
 | LOOPWAVE.TOS | STE/Mega STE DMA sample playback (STDL_Audio)                                    |
 | TCURSOR.TOS  | software mouse cursor with save-under                                            |
-| PLAYMUS.TOS  | YM music (stdlconv midi -> STDL_Music) + DMA chunks via the SDL_mixer shim       |
+| PLAYMUS.TOS  | YM music (stdlconv midi -> STDL_Music) + sample chunks via the SDL_mixer shim     |
 | SFXDEMO.TOS  | Degas splash, YM effects stealing/restoring music voices, joystick key emulation |
 | TONEDEMO.TOS | live notes on the three YM voices: a fourth note displacing and returning        |
 | OPLDEMO.TOS  | an OPL2 register stream (the IMF games' music format) replayed as YM notes       |
@@ -226,9 +226,12 @@ three games _smaller_.
 
 Two findings worth repeating for anyone porting: gcc 4.6 turns
 `y * stride` into a `__mulsi3` call costing ~270 cycles, which is
-more than the pixel work in a short span; and the `SDL_mixer` shim
-software-mixes, which measured at 36-75% of an 8MHz CPU - use
-`STDL_PlaySample` for effects that matter.
+more than the pixel work in a short span; and a mixing loop's step
+`while (acc >= n) { acc -= n; p += size; }` compiles to one on every
+sample - the ring audio device spent 37% of an 8MHz STE on silence
+that way until v1.13.0. The `SDL_mixer` shim's chunks now play on the
+voice mixer: 9% of an 8MHz STE for one at 6258Hz and 26% for four,
+where they used to take all of it by the third.
 
 ## Porting with an LLM
 

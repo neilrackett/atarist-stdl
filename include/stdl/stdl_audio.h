@@ -53,6 +53,14 @@ typedef enum {
  * the desired rate; feed data at an exact DMA rate (stdlconv wav)
  * for a pass-through. If `obtained` is non-NULL it receives the
  * actual spec; the callback always sees the *desired* format.
+ *
+ * Cost on an 8MHz STE with a callback that does nothing (measured,
+ * tests/hatari/mixbench.c): 2% when the callback's format is the
+ * hardware's - signed 8-bit at a DMA rate - since it then writes
+ * straight into the ring. Anything else is converted at every
+ * refill: 13% for unsigned 8-bit mono at 12517Hz, 48% for a PC
+ * game's 16-bit stereo at 22050, which plays at 25033 in stereo.
+ * Whatever the callback does is on top.
  */
 int  STDL_OpenAudio(STDL_AudioSpec *desired, STDL_AudioSpec *obtained);
 void STDL_CloseAudio(void);
@@ -69,13 +77,13 @@ void STDL_FreeWAV(uint8_t *audio_buf);
 /*
  * One-shot playback, the cheap path.
  *
- * STDL_OpenAudio is a mixing device: it loops a ring and the pump
- * refills it through your callback, which costs real CPU - on an
- * 8MHz machine, mixing four channels at 6258 Hz costs tens of
- * percent. A game whose frame budget is already spent cannot pay
- * that. STDL_PlaySample instead points the DMA straight at a buffer
- * you already hold and lets the hardware read it once, so playback
- * costs six register writes and nothing per frame.
+ * STDL_OpenAudio is a streaming device: it loops a ring and the pump
+ * refills it through your callback, which pays for any mixing done
+ * in it. For mixed samples STDL_Voice (and the SDL_mixer shim on it)
+ * is the cheaper way. A game whose frame budget is already spent
+ * wants this instead: STDL_PlaySample points the DMA straight at a
+ * buffer you already hold and lets the hardware read it once, so
+ * playback costs six register writes and nothing per frame.
  *
  * The price is that it is monophonic: a second call replaces
  * whatever is playing (do your own priority arbitration). `data`

@@ -11,8 +11,10 @@
  * STDL example, modelled on SDL_mixer's playmus but written for
  * STDL: loads an STM register stream (stdlconv midi output), plays
  * it through the YM2149 from the VBL, and - on an STE/Mega STE -
- * fires a DMA sample chunk every few seconds on top to show music
- * and effects mixing.
+ * fires a sample chunk every few seconds on top to show music and
+ * effects mixing. The chunks play on STDL's voice mixer, from the VBL
+ * like the music; every other one with a loop count (a pass and two
+ * more), which is Mix_PlayChannel's last argument as SDL_mixer has it.
  *
  * Runs on a plain ST too: chunks fail cleanly, music still plays.
  */
@@ -31,6 +33,7 @@ int main(int argc, char *argv[])
 	Mix_Music *music;
 	Mix_Chunk *beep;
 	Uint32 start, next_beep;
+	int beeps = 0;
 
 	if ( SDL_Init(SDL_INIT_AUDIO) < 0 ) {
 		fprintf(stderr, "Couldn't initialize SDL: %s\n",
@@ -72,9 +75,10 @@ int main(int argc, char *argv[])
 	while ( SDL_GetTicks() - start < PLAY_SECONDS * 1000 ) {
 		SDL_Delay(50);
 		if ( beep != NULL && SDL_GetTicks() >= next_beep ) {
-			printf("beep!\n");
-			Mix_PlayChannel(-1, beep, 0);
+			printf(beeps & 1 ? "beep beep beep!\n" : "beep!\n");
+			Mix_PlayChannel(-1, beep, (beeps & 1) ? 2 : 0);
 			next_beep += 4000;
+			beeps++;
 		}
 	}
 

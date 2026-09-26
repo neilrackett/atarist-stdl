@@ -781,13 +781,22 @@ first.
   refill, **no per-frame cost** (`STDL_PlaySampleLoop` for ambient
   loops). Stop before freeing a playing buffer - the DMA reads it
   live. Monophonic, so arbitrate by
-  priority yourself. Prefer it to `STDL_OpenAudio`/`Mix_PlayChannel`
-  for game effects: those are mixing devices, and software-mixing
-  four channels at 6258Hz measured **36-75% of an 8MHz STE** (still
-  25-43% on a 16MHz Mega STE) in Koules - the same effects through
-  `STDL_PlaySample` measured 0%. Reach for the ring device only when
-  you genuinely need a continuous mixed stream. Feed it signed 8-bit
-  mono at an exact DMA rate (`stdlconv wav --rate 6258`); the WAVs
+  priority yourself. It is the one path that costs nothing; when a
+  game needs sounds on top of each other, the SDL_mixer shim
+  (`Mix_PlayChannel`) plays up to four chunks on the voice mixer from
+  the VBL, **9% of an 8MHz STE for one chunk at 6258Hz and 26% for
+  four** (about twice that at 12517; half of it on a Mega STE). Before
+  v1.13.0 it mixed in C over the ring device and measured 36-75% in
+  Koules - the same effects through `STDL_PlaySample` measured 0%. A
+  chunk at full volume plays at half scale, a voice at 64: 6dB quieter
+  than before v1.13.0, so re-check effects you balanced against the
+  music. Reach for the ring device (`STDL_OpenAudio`) only when you
+  genuinely need a continuous stream of your own: it costs 2% for a
+  callback that does nothing, plus whatever the callback does, in the
+  pump - if the callback writes signed 8-bit at an exact DMA rate
+  (`stdlconv wav --rate 6258`), straight into the ring. Any other
+  format is converted at every refill: 13% for unsigned 8-bit mono at
+  12517Hz, 48% for a PC game's 16-bit stereo at 22050. The WAVs
   `stdlconv` writes are unsigned, so flip the sign bit once at load.
 - A steady 50Hz tick: `STDL_AddVBL(fn)` / `STDL_RemoveVBL(fn)` claim
   a TOS VBL queue slot. This is the only interrupt STDL hands out and
@@ -943,7 +952,9 @@ first.
   arbitrary bpp (`docs/limits.md` is the authority).
 - Assuming DMA audio is free because "the hardware plays it":
   true of `STDL_PlaySample`, false of the ring device, whose
-  callback and resample run on the CPU inside the pump.
+  callback (and a resample, where its format is not the hardware's)
+  runs on the CPU inside the pump, and of the voice mixer, which
+  mixes in the VBL.
 - Lowercase or long filenames in `fopen`/`STDL_LoadBMP`.
 
 ## Reference

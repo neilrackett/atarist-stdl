@@ -4,83 +4,35 @@
  * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * SDL_mixer compatibility subset: YM music through STDL_Music,
- * sample chunks mixed in software over the STDL_Audio DMA callback.
+ * sample chunks on the STDL_Voice mixer, a channel a voice. What that
+ * costs and changes for a port is in include/compat/SDL_mixer.h.
+ * Before v1.13.0 the chunks were mixed in C over the STDL_OpenAudio
+ * ring, from the event pump.
  */
 
 #include <stdlib.h>
-#include <string.h>
 #include "stdl_internal.h"
 #include <SDL.h>
 #include <SDL_mixer.h>
 
 static int mix_open;            /* Mix_OpenAudio succeeded          */
-static int chunks_ok;           /* DMA device opened for chunks     */
-static int device_freq;
+static int device_freq;         /* the voices' rate; 0 = no chunks  */
 
-typedef struct {
-    Mix_Chunk *chunk;
-    uint32_t   pos;
-    int        loops;           /* remaining repeats after this one */
-    uint8_t    volume;          /* channel volume 0..128            */
-    uint8_t    active;
-} mix_channel_t;
+/* what each channel plays, for Mix_FreeChunk and Mix_VolumeChunk,
+ * and its volume (0..128) */
+static Mix_Chunk *channel_chunk[MIX_CHANNELS];
+static uint8_t channel_volume[MIX_CHANNELS];
 
-static mix_channel_t channels[MIX_CHANNELS];
-
-/* mix all active chunks into the signed 8-bit mono stream */
-static void mix_callback(void *userdata, uint8_t *stream, int len)
+/* SDL_mixer's two volumes, 0..128 each, to a voice's 0..64 */
+static uint8_t voice_volume(const Mix_Chunk *chunk, int channel)
 {
-    int i, c;
-
-    (void)userdata;
-    memset(stream, 0, (size_t)len);
-    for (c = 0; c < MIX_CHANNELS; c++) {
-        mix_channel_t *ch = &channels[c];
-        int8_t *out = (int8_t *)stream;
-        const int8_t *abuf;
-        uint32_t pos, alen;
-        int gain, full;
-
-        if (!ch->active || ch->chunk == NULL) {
-            continue;
-        }
-        abuf = (const int8_t *)ch->chunk->abuf;
-        alen = ch->chunk->alen;
-        pos = ch->pos;
-        gain = ch->chunk->volume * ch->volume;   /* 0..16384 */
-        full = (gain == 128 * 128);
-
-        for (i = 0; i < len; i++) {
-            int s, v;
-            if (pos >= alen) {
-                if (ch->loops != 0) {
-                    if (ch->loops > 0) {
-                        ch->loops--;
-                    }
-                    pos = 0;
-                } else {
-                    ch->active = 0;
-                    break;
-                }
-            }
-            s = abuf[pos++];
-            if (!full) {
-                s = stdl_mul16(s, gain) >> 14;    /* muls.w, not __mulsi3 */
-            }
-            v = out[i] + s;
-            if (v > 127) v = 127;
-            if (v < -128) v = -128;
-            out[i] = (int8_t)v;
-        }
-        ch->pos = pos;
-    }
+    return (uint8_t)(stdl_mul16(chunk->volume, channel_volume[channel]) >> 8);
 }
 
 int Mix_OpenAudio(int frequency, uint16_t format, int channelcount,
                   int chunksize)
 {
-    STDL_AudioSpec desired, obtained;
-    int c;
+    int c, rate;
 
     (void)format; (void)channelcount; (void)chunksize;
     if (mix_open) {
@@ -88,26 +40,18 @@ int Mix_OpenAudio(int frequency, uint16_t format, int channelcount,
     }
     STDL_Init(STDL_INIT_AUDIO);
     for (c = 0; c < MIX_CHANNELS; c++) {
-        channels[c].active = 0;
-        channels[c].volume = MIX_MAX_VOLUME;
+        channel_chunk[c] = NULL;
+        channel_volume[c] = MIX_MAX_VOLUME;
     }
 
-    /* the chunk device is mono signed 8-bit at the nearest DMA
-     * rate; on a plain ST this fails and only music is available */
-    memset(&desired, 0, sizeof(desired));
-    desired.freq = frequency > 0 ? frequency : MIX_DEFAULT_FREQUENCY;
-    desired.format = STDL_AUDIO_S8;
-    desired.channels = 1;
-    desired.samples = 1024;
-    desired.callback = mix_callback;
-    if (STDL_OpenAudio(&desired, &obtained) == 0) {
-        chunks_ok = 1;
-        device_freq = obtained.freq;
-        STDL_PauseAudio(0);
-    } else {
-        chunks_ok = 0;
-        device_freq = 0;
+    /* the DMA rate nearest the one asked for, but no faster than
+     * 12517 (a PC game's 22050 gets 12517); on a plain ST this fails
+     * and only music is available */
+    if (frequency <= 0) {
+        frequency = MIX_DEFAULT_FREQUENCY;
     }
+    rate = stdl_dma_rates[stdl_dma_nearest(frequency < 12517 ? frequency : 12517)];
+    device_freq = (STDL_OpenVoices(rate) == 0) ? rate : 0;
     mix_open = 1;
     return 0;
 }
@@ -118,9 +62,9 @@ void Mix_CloseAudio(void)
         return;
     }
     STDL_HaltMusic();
-    if (chunks_ok) {
-        STDL_CloseAudio();
-        chunks_ok = 0;
+    if (device_freq != 0) {
+        STDL_CloseVoices();
+        device_freq = 0;
     }
     mix_open = 0;
 }
@@ -162,7 +106,8 @@ int Mix_VolumeMusic(int volume)
 /* ---------------------------------------------------------------- */
 /* chunks                                                           */
 
-/* convert any loadable WAV to signed 8-bit mono at the device rate */
+/* convert any loadable WAV to signed 8-bit mono at the device rate,
+ * so a voice plays it at step 1 */
 Mix_Chunk *Mix_LoadWAV(const char *file)
 {
     STDL_AudioSpec spec;
@@ -172,7 +117,7 @@ Mix_Chunk *Mix_LoadWAV(const char *file)
     uint32_t in_frames, out_frames;
     int frame_bytes;
 
-    if (!chunks_ok) {
+    if (device_freq == 0) {
         STDL_SetError("no DMA sound hardware for sample chunks");
         return NULL;
     }
@@ -183,6 +128,14 @@ Mix_Chunk *Mix_LoadWAV(const char *file)
     in_frames = rawlen / (uint32_t)frame_bytes;
     out_frames = (uint32_t)((uint64_t)in_frames * (uint32_t)device_freq
                             / (uint32_t)spec.freq);
+    if (out_frames > 0xFFFF) {
+        /* a voice's longest (SDL_mixer.h): the chunk is cut short,
+         * converting only the source that covers what is kept -
+         * converting all of it into 65535 frames would speed it up */
+        out_frames = 0xFFFF;
+        in_frames = (uint32_t)((uint64_t)out_frames * (uint32_t)spec.freq
+                               / (uint32_t)device_freq);
+    }
     chunk = calloc(1, sizeof(Mix_Chunk));
     if (chunk == NULL || out_frames == 0) {
         free(chunk);
@@ -213,10 +166,11 @@ void Mix_FreeChunk(Mix_Chunk *chunk)
     if (chunk == NULL) {
         return;
     }
+    /* the voice mixer reads the samples live: stop it first */
     for (c = 0; c < MIX_CHANNELS; c++) {
-        if (channels[c].chunk == chunk) {
-            channels[c].active = 0;
-            channels[c].chunk = NULL;
+        if (channel_chunk[c] == chunk) {
+            STDL_StopVoice(c);
+            channel_chunk[c] = NULL;
         }
     }
     free(chunk->abuf);
@@ -227,7 +181,7 @@ int Mix_PlayChannel(int channel, Mix_Chunk *chunk, int loops)
 {
     int c;
 
-    if (!chunks_ok) {
+    if (device_freq == 0) {
         STDL_SetError("no DMA sound hardware for sample chunks");
         return -1;
     }
@@ -236,7 +190,7 @@ int Mix_PlayChannel(int channel, Mix_Chunk *chunk, int loops)
     }
     if (channel < 0) {
         for (c = 0; c < MIX_CHANNELS; c++) {
-            if (!channels[c].active) {
+            if (!STDL_VoiceActive(c)) {
                 channel = c;
                 break;
             }
@@ -249,10 +203,12 @@ int Mix_PlayChannel(int channel, Mix_Chunk *chunk, int loops)
         STDL_SetError("no such mixer channel");
         return -1;
     }
-    channels[channel].chunk = chunk;
-    channels[channel].pos = 0;
-    channels[channel].loops = loops;
-    channels[channel].active = 1;
+    channel_chunk[channel] = chunk;
+    /* the whole chunk is the loop: a pass, then `loops` more (-1:
+     * until halted), counted by the voice mixer where it wraps */
+    stdl_voice_start(channel, (const int8_t *)chunk->abuf, chunk->alen,
+                     0, (loops != 0) ? chunk->alen : 0, (uint32_t)device_freq,
+                     voice_volume(chunk, channel), loops);
     return channel;
 }
 
@@ -262,7 +218,7 @@ int Mix_HaltChannel(int channel)
 
     for (c = 0; c < MIX_CHANNELS; c++) {
         if (channel < 0 || channel == c) {
-            channels[c].active = 0;
+            STDL_StopVoice(c);
         }
     }
     return 0;
@@ -273,11 +229,11 @@ int Mix_Playing(int channel)
     int c, n = 0;
 
     if (channel >= 0) {
-        return (channel < MIX_CHANNELS && channels[channel].active)
+        return (channel < MIX_CHANNELS && STDL_VoiceActive(channel))
             ? 1 : 0;
     }
     for (c = 0; c < MIX_CHANNELS; c++) {
-        n += channels[c].active ? 1 : 0;
+        n += STDL_VoiceActive(c) ? 1 : 0;
     }
     return n;
 }
@@ -286,6 +242,16 @@ static uint8_t clamp_vol(int volume)
 {
     return (uint8_t)(volume > MIX_MAX_VOLUME ? MIX_MAX_VOLUME
                                              : volume);
+}
+
+/* a volume change heard at once on whatever is playing (an idle
+ * voice takes it too, and its next start replaces it) */
+static void refresh_volume(int channel)
+{
+    if (channel_chunk[channel] != NULL) {
+        STDL_SetVoiceVolume(channel,
+                            voice_volume(channel_chunk[channel], channel));
+    }
 }
 
 int Mix_Volume(int channel, int volume)
@@ -297,9 +263,10 @@ int Mix_Volume(int channel, int volume)
     }
     for (c = 0; c < MIX_CHANNELS; c++) {
         if (channel < 0 || channel == c) {
-            old = channels[c].volume;
+            old = channel_volume[c];
             if (volume >= 0) {
-                channels[c].volume = clamp_vol(volume);
+                channel_volume[c] = clamp_vol(volume);
+                refresh_volume(c);
             }
         }
     }
@@ -308,7 +275,7 @@ int Mix_Volume(int channel, int volume)
 
 int Mix_VolumeChunk(Mix_Chunk *chunk, int volume)
 {
-    int old;
+    int c, old;
 
     if (chunk == NULL) {
         return 0;
@@ -316,6 +283,11 @@ int Mix_VolumeChunk(Mix_Chunk *chunk, int volume)
     old = chunk->volume;
     if (volume >= 0) {
         chunk->volume = clamp_vol(volume);
+        for (c = 0; c < MIX_CHANNELS; c++) {
+            if (channel_chunk[c] == chunk) {
+                refresh_volume(c);
+            }
+        }
     }
     return old;
 }

@@ -136,6 +136,19 @@ warnings** with the Makefile's `-Wall -Wextra`.
   must give up within a few lines: an 8ms wait at MFP priority
   holds off the VBL, which arms the timer late, which repeats the
   failure - measured at a dozen frames before the bound existed.
+- **Masked sections store; they do not compute.** `STDL_SetVoice`
+  used to work out its step inside `stdl_int_off()`, and that
+  division is a `__udivsi3` call, about a scanline at 8MHz. A
+  module player calls it from the voice tick, 2ms into the frame,
+  which is where the top border's Timer A lands with a line and a
+  quarter of grace, so the STE lost the border every few seconds -
+  with music on only, and never on a Mega STE, whose tick finishes
+  before line 32. Found by breaking on the miss path in Hatari's
+  debugger and reading the interrupted PC off the ISR's stack: every
+  miss had interrupted the `move.w d3,sr` at the end of SetVoice.
+  Any call a tick or ISR might make does its arithmetic first and
+  masks only the stores. `tests/hatari/ovvoice.c` sweeps retriggers
+  across the window.
 - **Hatari's video counter reads are not cycle-correct at 16MHz.**
   `Video_CalculateAddress` compares CPU cycles against 8MHz line
   positions, so under `--machine megaste` (or `--cpuclock 16`)

@@ -596,6 +596,8 @@ void STDL_SetVoice(int v, const int8_t *data, uint32_t len,
                    uint32_t freq, uint8_t vol)
 {
     voice_t *p;
+    uint32_t end, loopstart, loopsize, step;
+    const int8_t *vt;
     uint16_t sr;
 
     if (!vc.open || v < 0 || v >= STDL_VOICES) {
@@ -618,6 +620,22 @@ void STDL_SetVoice(int v, const int8_t *data, uint32_t len,
     if (vol > 64) {
         vol = 64;
     }
+    /*
+     * Everything is worked out before interrupts go off, so only the
+     * stores are masked. The step's division is a __udivsi3 call, a
+     * scanline or so on an 8MHz machine, and it used to sit inside
+     * the mask: a module player retriggering from the tick put these
+     * calls about 2ms into the frame, where an open top border's
+     * Timer A lands, and held it off past its grace - the border was
+     * lost about one frame in forty with a tick timed to hit it
+     * (tests/hatari/ovvoice.c sweeps the calls across the window;
+     * none now).
+     */
+    end = len << 16;
+    loopstart = loop_off << 16;
+    loopsize = loop_len << 16;
+    step = (freq << 16) / (uint32_t)vc.dma_freq;
+    vt = vc.voltab + (uint32_t)vol * 256;
     sr = stdl_int_off();
     /*
      * Any pending pause starts its drain again from here. Without
@@ -634,11 +652,11 @@ void STDL_SetVoice(int v, const int8_t *data, uint32_t len,
     p->active = 0;              /* keep the mixer off a half-set voice */
     p->data = data;
     p->pos = 0;
-    p->end = len << 16;
-    p->loopstart = loop_off << 16;
-    p->loopsize = loop_len << 16;
-    p->step = (freq << 16) / (uint32_t)vc.dma_freq;
-    p->vt = vc.voltab + (uint32_t)vol * 256;
+    p->end = end;
+    p->loopstart = loopstart;
+    p->loopsize = loopsize;
+    p->step = step;
+    p->vt = vt;
     p->active = 1;
     stdl_int_restore(sr);
 }

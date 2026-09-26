@@ -26,6 +26,12 @@ extern "C" {
  * top-left; only dstrect x/y are read, and the final clipped
  * rectangle is written back to dstrect. Uses the source mask when
  * STDL_SRCKEY is set (see STDL_SetColourKey).
+ *
+ * A whole source onto a destination the same size - srcrect NULL,
+ * dstrect NULL or at 0,0, no colour key, no masks, no clipping, a
+ * width that is a multiple of 16 - is one memcpy on a machine without
+ * a BLiTTER: 19.5ms for 320x200 on an 8MHz ST, against 42 row by
+ * row. A full-size srcrect is not spotted, so pass NULL.
  */
 int STDL_BlitSurface(STDL_Surface *src, const STDL_Rect *srcrect,
                      STDL_Surface *dst, STDL_Rect *dstrect);
@@ -42,7 +48,9 @@ int STDL_BlitSurface(STDL_Surface *src, const STDL_Rect *srcrect,
  * The bit values match STDL_I8_UNDER / STDL_I8_MARK, so a caller
  * composing the same scene from indexed and planar sources can use
  * one set of flags. flags == 0 is exactly STDL_BlitSurface, down to
- * the BLiTTER fast paths; UNDER and MARK take the CPU route.
+ * the BLiTTER fast paths, save the whole-surface memcpy above (every
+ * blit through here would pay to test for it); UNDER and MARK take
+ * the CPU route.
  */
 #define STDL_BLIT_UNDER  0x0004u
 #define STDL_BLIT_MARK   0x0008u

@@ -88,6 +88,15 @@ at both ends, because the unaligned path reads one group either
 side of a row. Measure it - in one port the win was ~9% on a quiet
 screen and near zero on a busy one.
 
+**Restore a whole background with `NULL`.**
+`STDL_BlitSurface(bg, NULL, dst, NULL)` between two surfaces of the
+same size - no colour key, no masks, no clipping, a width that is a
+multiple of 16 - is one `memcpy` on a machine without a BLiTTER:
+19.5ms for 320x200 on a plain 8MHz ST (Hatari, cycle-exact), where
+the row-by-row path takes 42. A full-size rectangle in place of
+`NULL`, or `STDL_BlitSurfaceEx`, takes the row-by-row path; with a
+BLiTTER, the BLiTTER does it faster still (17ms on an STE).
+
 **Check the colour count first.** If the game uses 4 or 8 colours,
 call `STDL_SetPlaneBudget(2)` (or `3`) right after
 `STDL_SetVideoMode`: it is a promise that no index `>= 2^N` is ever
@@ -722,7 +731,8 @@ first.
   same bit values as the indexed path. Use it to compose frames you
   baked once (see "Bake frames you redraw" above) without writing a
   planar blit of your own. `flags == 0` is exactly
-  `STDL_BlitSurface`, BLiTTER fast paths included.
+  `STDL_BlitSurface`, BLiTTER fast paths included, save the
+  whole-surface `memcpy` (see "Restore a whole background").
 - Frame pacing and profiling: `STDL_GetHz200()` is the raw 200Hz
   system counter, for finer grain than `STDL_GetTicks` and for
   pacing in ticks. It counts from boot, so take differences - a

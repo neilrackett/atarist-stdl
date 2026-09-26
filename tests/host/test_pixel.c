@@ -752,6 +752,69 @@ static void test_whole_blit_writeback(void)
     STDL_FreeSurface(dst);
 }
 
+static void test_whole_copy(void)
+{
+    /* a whole surface onto one the same size: one memcpy when the
+     * rows have no padding, the general path for everything else */
+    enum { W = 320, H = 40, VW = 128, VH = 8, VSTRIDE = 96 };
+    STDL_Surface *src = STDL_CreateSurface(W, H);
+    STDL_Surface *dst = STDL_CreateSurface(W, H);
+    STDL_Rect d = { 0, 0, 0, 0 };
+    Ref *rs = ref_new(W, H);
+    Ref *rd = ref_new(W, H);
+    uint8_t *a = malloc((size_t)VSTRIDE * VH);
+    uint8_t *b = malloc((size_t)VSTRIDE * VH);
+    STDL_Surface *va, *vb;
+    int i, x, y, bad = 0;
+
+    randomise(src, 16);
+    randomise(dst, 16);
+    STDL_BlitSurface(src, NULL, dst, &d);
+    CHECK(memcmp(dst->pixels, src->pixels, (size_t)src->stride * H) == 0,
+          "whole copy");
+    CHECK(d.x == 0 && d.y == 0 && d.w == W && d.h == H,
+          "whole copy writeback got %d,%d %ux%u", d.x, d.y, d.w, d.h);
+
+    /* a keyed source keeps its key */
+    randomise(src, 6);
+    randomise(dst, 16);
+    STDL_SetColourKey(src, 1, 3);
+    surf_to_ref(src, rs);
+    surf_to_ref(dst, rd);
+    ref_blit(rs, 0, 0, W, H, rd, 0, 0, 1, 3, &dst->clip);
+    STDL_BlitSurface(src, NULL, dst, NULL);
+    CHECK(ref_cmp(dst, rd, "whole keyed"), "whole keyed copy");
+
+    /* views into wider rows: the bytes beside them are not theirs */
+    for (i = 0; i < VSTRIDE * VH; i++) {
+        a[i] = (uint8_t)rnd();
+    }
+    memset(b, 0xA5, (size_t)VSTRIDE * VH);
+    va = STDL_CreateSurfaceFrom(a, VW, VH, VSTRIDE, NULL, 0);
+    vb = STDL_CreateSurfaceFrom(b, VW, VH, VSTRIDE, NULL, 0);
+    STDL_BlitSurface(va, NULL, vb, NULL);
+    for (y = 0; y < VH; y++) {
+        if (memcmp(b + y * VSTRIDE, a + y * VSTRIDE, VW / 2) != 0) {
+            bad++;
+        }
+        for (x = VW / 2; x < VSTRIDE; x++) {
+            if (b[y * VSTRIDE + x] != 0xA5) {
+                bad++;
+            }
+        }
+    }
+    CHECK(bad == 0, "whole copy between views: %d bad rows or bytes", bad);
+
+    STDL_FreeSurface(va);
+    STDL_FreeSurface(vb);
+    free(a);
+    free(b);
+    ref_free(rs);
+    ref_free(rd);
+    STDL_FreeSurface(src);
+    STDL_FreeSurface(dst);
+}
+
 static void test_sprites(void)
 {
     /* sprite from surface must draw identically to a keyed blit */
@@ -858,6 +921,7 @@ int main(void)
     test_points();
     test_blits();
     test_whole_blit_writeback();
+    test_whole_copy();
     test_sprites();
     test_1bpp();
     test_tiles();

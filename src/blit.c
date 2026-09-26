@@ -326,6 +326,51 @@ unsigned long stdl_blit_rows;       /* rows, whichever path       */
 unsigned long stdl_blit_ticks;      /* 200Hz ticks inside         */
 #endif
 
+/*
+ * One surface onto another of the same size, whole - the background
+ * restore - on a machine without a BLiTTER. STDL_BlitSurfaceEx does
+ * it a memcpy call a row, and each call's set-up is as long as the
+ * copy of a 320-wide row: 42ms for a full screen on a plain ST.
+ * Rows with no padding make the surface one block, and one memcpy
+ * of it takes 19. Caught here, before the general path, because a
+ * long-row path inside STDL_BlitSurfaceEx made every small blit 1-2%
+ * slower by changing how gcc allocates registers in that function
+ * (measured with tests/hatari/blitcost.c; a padding-only control
+ * moved nothing). Out of line, and only reached without a source
+ * rectangle, so a blit that names one pays a single test; anything
+ * else it passes on to the general path. With a BLiTTER the general
+ * path is faster still (17ms on an STE), so it keeps the copy.
+ */
+static __attribute__((noinline)) int
+blit_whole(STDL_Surface *src, STDL_Surface *dst, STDL_Rect *dstrect)
+{
+    if (src == NULL || dst == NULL
+        || (dstrect != NULL && (dstrect->x != 0 || dstrect->y != 0))
+        || src->w != dst->w || src->h != dst->h
+        || (dst->w & 15) != 0
+        || src->stride != (uint16_t)(dst->w >> 1)
+        || dst->stride != (uint16_t)(dst->w >> 1)
+        || src->pixels == NULL || dst->pixels == NULL
+        || ((src->flags & STDL_SRCKEY) && src->mask != NULL)
+        || dst->mask != NULL
+        || (src->org_x | src->org_y | dst->org_x | dst->org_y) != 0
+        || dst->clip.x != 0 || dst->clip.y != 0
+        || dst->clip.w < dst->w || dst->clip.h < dst->h
+        || stdl_planes != 4 || stdl_blitter_active()) {
+        return STDL_BlitSurfaceEx(src, NULL, dst, dstrect, 0);
+    }
+#ifdef STDL_BLIT_STATS
+    stdl_blit_memcpy += (unsigned long)dst->h;
+    stdl_blit_rows += (unsigned long)dst->h;
+#endif
+    memcpy(dst->pixels, src->pixels, (size_t)dst->stride * dst->h);
+    if (dstrect != NULL) {
+        dstrect->w = (uint16_t)dst->w;
+        dstrect->h = (uint16_t)dst->h;
+    }
+    return 0;
+}
+
 int STDL_BlitSurface(STDL_Surface *src, const STDL_Rect *srcrect,
                      STDL_Surface *dst, STDL_Rect *dstrect)
 {
@@ -334,10 +379,14 @@ int STDL_BlitSurface(STDL_Surface *src, const STDL_Rect *srcrect,
     int r;
 
     stdl_blit_calls++;
-    r = STDL_BlitSurfaceEx(src, srcrect, dst, dstrect, 0);
+    r = srcrect == NULL ? blit_whole(src, dst, dstrect)
+        : STDL_BlitSurfaceEx(src, srcrect, dst, dstrect, 0);
     stdl_blit_ticks += STDL_HZ200 - t0;
     return r;
 #else
+    if (srcrect == NULL) {
+        return blit_whole(src, dst, dstrect);
+    }
     return STDL_BlitSurfaceEx(src, srcrect, dst, dstrect, 0);
 #endif
 }

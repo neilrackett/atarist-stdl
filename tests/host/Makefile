@@ -43,7 +43,7 @@ TESTS   = test_pixel test_compose test_cursor test_assets test_planes \
 
 all: $(TESTS)
 
-test_pixel: test_pixel.c $(CORE)
+test_pixel: test_pixel.c $(CORE) $(SRC)/surfacefrom.c
 	$(CC) $(CFLAGS) -o $@ $^
 
 test_compose: test_compose.c $(CORE) $(SRC)/bmp.c $(SRC)/degas.c \

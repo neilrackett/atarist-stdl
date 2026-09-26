@@ -39,7 +39,8 @@ extern "C" {
 /*
  * Open the device: `freq` snaps to the nearest DMA rate (6258 /
  * 12517 / 25033 / 50066 - music typically wants 6258 or 12517,
- * mixing cost scales with the rate). Claims the sound DMA: mutually
+ * mixing cost scales with the rate: four busy voices at 6258Hz
+ * take 28% of an 8MHz STE, measured, so 12517 is over half). Claims the sound DMA: mutually
  * exclusive with STDL_OpenAudio and STDL_PlaySample*. Returns 0, or
  * -1 with STDL_GetError set (no STE DMA hardware, chip in use, out
  * of memory, no free VBL slot).
@@ -143,6 +144,8 @@ int  STDL_VoicesPaused(void);
  * frames (at most 65535 - longer material belongs on a loop or on
  * STDL_PlaySampleLoop). After the first pass, playback loops the
  * region [loop_off, loop_off + loop_len); loop_len 0 = one-shot.
+ * The position's fraction carries across each wrap, as Paula's
+ * does, so a loop only a few frames long keeps its pitch.
  * `freq` is the sample's playback rate in Hz (Paula ports:
  * 3546895 / period), resampled to the device rate. `vol` is 0..64;
  * at 64 a voice is the sample halved, so two voices at full volume

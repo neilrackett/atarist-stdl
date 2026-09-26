@@ -729,7 +729,9 @@ first.
   sample mixer (Paula-style loop/period/volume) driven from the VBL
   with a 50Hz sequencer hook (`STDL_SetVoiceTick`, 50 a second at
   a 60Hz display too) - module music
-  without the ring device's callback cost. STE only; voices, the
+  without the ring device's callback cost, though not free: four
+  busy voices at 6258Hz take 28% of an 8MHz STE, measured, before
+  the sequencer's own tick. STE only; voices, the
   ring device and `STDL_PlaySample` are mutually exclusive DMA
   owners.
   An open device is not quite silent on hardware: with the DMA

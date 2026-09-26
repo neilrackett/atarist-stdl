@@ -82,80 +82,246 @@ static void voice_shutdown(void)
     stdl.dma_owner = STDL_DMA_FREE;
 }
 
+/*
+ * Mixing. Each voice adds into a block of 16-bit sums, and the sums
+ * go to the ring through one clamp table at the end - rather than
+ * each voice adding into the s8 ring and clamping there. Two
+ * reasons, one of each kind:
+ *
+ *  - Speed. The old per-voice loop clamped every sample with two
+ *    compares and compiled, under gcc 4.6, to about 170 cycles a
+ *    voice-sample; four voices at 6258Hz took 45% of an 8MHz STE,
+ *    measured under a port playing four-channel modules. The loop
+ *    below is a byte fetch, a table fetch and an add, with the
+ *    16.16 step split so the carry does the work, and the one clamp
+ *    costs a table lookup a frame. Four voices now mix a block in
+ *    5.8ms on an 8MHz STE, everything in: 28% of the machine at
+ *    6258Hz. tests/hatari/voicechk.c is that measurement.
+ *  - Correctness. Clamping after each voice saturates the partial
+ *    sums: three loud voices clipped at +127 before a fourth
+ *    negative one came back down. The sum clamped once is the sum.
+ *
+ * Each voice also works out how many frames it can run before its
+ * stretch ends, once per stretch, so the inner loop carries no end
+ * test at all.
+ *
+ * The inner loop is 68000 assembly on target with the same loop in
+ * C beside it (voice_run_c): the C is what tests/host exercises, and
+ * both are built on target so tests/hatari/voicechk.c can run the
+ * same mixes through each and compare them byte for byte.
+ */
+
+static int16_t mixacc[BLOCK_FRAMES];
+
+/* s16 sum of up to four half-scale voices, -256..252, to s8 */
+static int8_t clamp_tab[512];
+#define CLAMP_MID (clamp_tab + 256)
+
+static void clamp_build(void)
+{
+    int i;
+    for (i = -256; i < 256; i++) {
+        CLAMP_MID[i] = (int8_t)(i > 127 ? 127 : (i < -128 ? -128 : i));
+    }
+}
+
+/* run frames of one voice into acc: stored for the first voice of the
+ * block, added for the rest. pos is 16.16. */
+static uint32_t voice_run_c(int16_t *acc, const int8_t *data,
+                            const int8_t *vt, uint32_t pos,
+                            uint32_t step, int run, int first)
+{
+    if (first) {
+        while (run-- > 0) {
+            *acc++ = vt[(uint8_t)data[pos >> 16]];
+            pos += step;
+        }
+    } else {
+        while (run-- > 0) {
+            *acc = (int16_t)(*acc + vt[(uint8_t)data[pos >> 16]]);
+            acc++;
+            pos += step;
+        }
+    }
+    return pos;
+}
+
+#ifdef __m68k__
+/* non-zero forces voice_run_c on target (tests/hatari/voicechk.c) */
+int stdl_voice_use_c;
+
+/* The same loop by hand. The 16.16 position is split: the integer
+ * part in a long whose upper word stays clear (frames are at most
+ * 65535) to index the sample, the fraction in a word. add.w of the
+ * step's fraction sets X on overflow and addx.w of its integer part
+ * takes the carry into the index; nothing between the two touches X.
+ * The index register's upper byte is cleared once, before the loop,
+ * and only its low byte is ever loaded. The position the run ends
+ * at is worked out here rather than read back, so the word add may
+ * wrap past a stretch's end without it mattering. */
+static uint32_t voice_run(int16_t *acc, const int8_t *data,
+                          const int8_t *vt, uint32_t pos,
+                          uint32_t step, int run, int first)
+{
+    uint32_t ipos = pos >> 16;
+    uint16_t fpos = (uint16_t)pos, fstep = (uint16_t)step;
+    uint16_t istep = (uint16_t)(step >> 16);
+    int16_t count = (int16_t)(run - 1);
+
+    if (run <= 0 || stdl_voice_use_c) {
+        return voice_run_c(acc, data, vt, pos, step, run, first);
+    }
+    if (first) {
+        __asm__ volatile(
+            "moveq #0,%%d0\n"
+            "1:\n\t"
+            "move.b (%1,%3.l),%%d0\n\t"
+            "move.b (%2,%%d0.w),%%d1\n\t"
+            "ext.w %%d1\n\t"
+            "move.w %%d1,(%0)+\n\t"
+            "add.w %6,%4\n\t"
+            "addx.w %5,%3\n\t"
+            "dbra %7,1b"
+            : "+a"(acc), "+a"(data), "+a"(vt), "+d"(ipos), "+d"(fpos),
+              "+d"(istep), "+d"(fstep), "+d"(count)
+            :
+            : "d0", "d1", "cc", "memory");
+    } else {
+        __asm__ volatile(
+            "moveq #0,%%d0\n"
+            "1:\n\t"
+            "move.b (%1,%3.l),%%d0\n\t"
+            "move.b (%2,%%d0.w),%%d1\n\t"
+            "ext.w %%d1\n\t"
+            "add.w %%d1,(%0)+\n\t"
+            "add.w %6,%4\n\t"
+            "addx.w %5,%3\n\t"
+            "dbra %7,1b"
+            : "+a"(acc), "+a"(data), "+a"(vt), "+d"(ipos), "+d"(fpos),
+              "+d"(istep), "+d"(fstep), "+d"(count)
+            :
+            : "d0", "d1", "cc", "memory");
+    }
+    return pos + stdl_mul32x16(step, (uint16_t)run);
+}
+#else
+#define voice_run voice_run_c
+#endif
+
+/*
+ * Frames a stretch has left, d (16.16) short of its end: ceil(d /
+ * step), or a frame under it, never 0. The caller has already found
+ * d under a block's worth of steps, so the quotient fits a word and
+ * divu.w does it, not __udivsi3 - which cost several hundred cycles
+ * a stretch and made a short loop, a stretch a frame or two long,
+ * dearer than the samples it plays. A step past a word is shifted
+ * down with d and rounded up, so the quotient can only come out low;
+ * stopping a frame early costs one more pass round the stretch loop
+ * and changes nothing that is heard.
+ */
+static int frames_left(uint32_t d, uint32_t step)
+{
+    uint32_t n = d - 1;
+
+    if (step > 0xFFFF) {
+        do {
+            step >>= 1;
+            n >>= 1;
+        } while (step > 0x7FFF);
+        step++;
+    }
+    return stdl_divu(n, (uint16_t)step) + 1;
+}
+
+/* one voice through the block, looping or ending as it goes */
+static void voice_mix(voice_t *v, int first)
+{
+    const int8_t *vt = v->vt;
+    const int8_t *data = v->data;
+    uint32_t pos = v->pos, step = v->step, end = v->end;
+    int n = 0;
+
+    while (n < BLOCK_FRAMES) {
+        int run = BLOCK_FRAMES - n;
+        if (pos >= end) {
+            uint32_t over = pos - end;
+            if (v->loopsize == 0) {
+                v->active = 0;
+                if (first) {
+                    memset(mixacc + n, 0, (BLOCK_FRAMES - n) * sizeof(int16_t));
+                }
+                break;
+            }
+            /* Paula-style: after the current stretch ends, playback
+             * confines to the loop region. The overshoot carries in,
+             * as Paula's period counter would carry it: dropped, a
+             * loop a few frames long came back late every time round
+             * and played flat. It is under a step, so only a loop
+             * shorter than a step needs the remainder. */
+            if (over >= v->loopsize) {
+                over %= v->loopsize;
+            }
+            pos = v->loopstart + over;
+            end = v->loopstart + v->loopsize;
+            v->end = end;
+        }
+        /* stop where pos reaches end: every frame reads inside */
+        if (stdl_mul32x16(step, (uint16_t)(run - 1)) >= end - pos) {
+            run = frames_left(end - pos, step);
+        }
+        pos = voice_run(mixacc + n, data, vt, pos, step, run, first);
+        n += run;
+    }
+    v->pos = pos;
+}
+
 /* mix one quarter of the ring; returns 0 if it wrote pure silence,
  * which is what the deferred stop in the tick below waits for */
 static int mix_block(int8_t *dst)
 {
     int mixed = 0;
-    int i;
+    int i, n;
 
     for (i = 0; i < STDL_VOICES; i++) {
-        voice_t *v = &vc.v[i];
-        const int8_t *vt;
-        /* the sample, in a local: the store into dst may alias the
-         * pointer in the voice struct as far as gcc knows, so
-         * without this it is reloaded for every sample - about
-         * 6000 cycles a block at 8MHz */
-        const int8_t *data;
-        uint32_t pos, step, end;
-        int n;
-
-        if (!v->active) {
-            continue;
+        if (vc.v[i].active) {
+            voice_mix(&vc.v[i], !mixed);
+            mixed = 1;
         }
-        vt = v->vt;
-        data = v->data;
-        pos = v->pos;
-        step = v->step;
-        end = v->end;
-        if (!mixed) {
-            for (n = 0; n < BLOCK_FRAMES; n++) {
-                if (pos >= end) {
-                    if (v->loopsize == 0) {
-                        v->active = 0;
-                        memset(dst + n, 0, BLOCK_FRAMES - n);
-                        break;
-                    }
-                    /* Paula-style: after the current stretch ends,
-                     * playback confines to the loop region */
-                    pos = v->loopstart;
-                    end = v->loopstart + v->loopsize;
-                    v->end = end;
-                }
-                dst[n] = vt[(uint8_t)data[pos >> 16]];
-                pos += step;
-            }
-        } else {
-            for (n = 0; n < BLOCK_FRAMES; n++) {
-                if (pos >= end) {
-                    if (v->loopsize == 0) {
-                        v->active = 0;
-                        break;
-                    }
-                    pos = v->loopstart;
-                    end = v->loopstart + v->loopsize;
-                    v->end = end;
-                }
-                {
-                    /* clamped: two voices at full volume sum to
-                     * the range exactly, so only a third or fourth
-                     * loud voice reaches this, and wrapping would
-                     * be far worse than clipping */
-                    const int a = dst[n] + vt[(uint8_t)data[pos >> 16]];
-                    dst[n] = (int8_t)(a > 127 ? 127
-                                    : (a < -128 ? -128 : a));
-                }
-                pos += step;
-            }
-        }
-        v->pos = pos;
-        mixed = 1;
     }
     if (!mixed) {
         memset(dst, 0, BLOCK_FRAMES);
+        return 0;
     }
-    return mixed;
+#ifdef __m68k__
+    if (!stdl_voice_use_c) {
+        const int16_t *acc = mixacc;
+        const int8_t *mid = CLAMP_MID;
+        int16_t count = BLOCK_FRAMES - 1;
+        __asm__ volatile(
+            "1:\n\t"
+            "move.w (%0)+,%%d0\n\t"
+            "move.b (%1,%%d0.w),(%2)+\n\t"
+            "dbra %3,1b"
+            : "+a"(acc), "+a"(mid), "+a"(dst), "+d"(count)
+            :
+            : "d0", "cc", "memory");
+        return 1;
+    }
+#endif
+    for (n = 0; n < BLOCK_FRAMES; n++) {
+        dst[n] = CLAMP_MID[mixacc[n]];
+    }
+    return 1;
 }
+
+#ifdef __m68k__
+/* tests/hatari/voicechk.c: mix one block into dst from the current
+ * voices, as the tick would */
+int stdl_voice_mix_block(int8_t *dst)
+{
+    return mix_block(dst);
+}
+#endif
 
 /* the VBL callback: sequencer tick (50 a second), then mix forward */
 static void voice_vbl(void)
@@ -327,6 +493,7 @@ int STDL_OpenVoices(int freq)
      * resolution regardless, which no table here can match; this is
      * the closest an 8-bit table gets.
      */
+    clamp_build();
     for (level = 0; level <= 64; level++) {
         int8_t *row = vc.voltab + level * 256;
         for (s = 0; s < 256; s++) {

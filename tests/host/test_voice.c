@@ -86,7 +86,7 @@ int main(void)
     static int8_t looped[16];
     static int8_t plus[64], minus[64];
     const int8_t *r;
-    int i;
+    int i, j;
 
     STDL_Init(0);
     stdl.mach.is_ste = 1;
@@ -157,6 +157,36 @@ int main(void)
         }
     }
     CHECK(STDL_VoiceActive(1), "looping voice went inactive");
+
+    /* a loop at a fractional step carries its overshoot in, as Paula
+     * does, rather than restarting on the loop's first frame: an
+     * eight-frame loop at 1.5 repeats every 16 frames, not every 6.
+     * The second voice's loop is shorter than a step, the remainder
+     * case. Expectations wrap the same 16.16 positions. */
+    for (j = 0; j < 2; j++) {
+        const uint32_t loff = j ? 15 : 8, llen = j ? 1 : 8;
+        const uint32_t step = (9387u << 16) / 6258u;
+        uint32_t pos = 0, end = 16u << 16;
+        open_fresh();
+        STDL_SetVoice(0, looped, 16, loff, llen, 9387, 64);
+        tick_at(0);
+        r = ring_base();
+        for (i = 0; i < 384 - BLOCK; i++) {
+            int lv, want;
+            if (pos >= end) {
+                pos = (loff << 16) + (pos - end) % (llen << 16);
+                end = (loff + llen) << 16;
+            }
+            lv = looped[pos >> 16];
+            want = lv < 0 ? -((-lv) >> 1) : (lv >> 1);
+            if (r[BLOCK + i] != want) {
+                CHECK(0, "loop carry %d [%d]: got %d want %d",
+                      j, i, r[BLOCK + i], want);
+                break;
+            }
+            pos += step;
+        }
+    }
 
     /* two voices sum; equal and opposite cancel */
     open_fresh();
@@ -285,6 +315,29 @@ int main(void)
               r[BLOCK]);
         for (i2 = 0; i2 < STDL_VOICES; i2++) {
             STDL_StopVoice(i2);
+        }
+    }
+
+    /* The clamp is on the sum, not on each partial sum. Three voices
+     * at +63 and one at -64 sum to 125; clamping after each voice,
+     * as the mixer once did, pinned the first three at 127 and left
+     * 63 - half the level, and a flattened wave where there was
+     * none to flatten. */
+    {
+        static int8_t loud[64], low[64];
+
+        memset(loud, 127, sizeof(loud));
+        memset(low, -128, sizeof(low));
+        open_fresh();
+        STDL_SetVoice(0, loud, sizeof loud, 0, 0, 6258, 64);
+        STDL_SetVoice(1, loud, sizeof loud, 0, 0, 6258, 64);
+        STDL_SetVoice(2, loud, sizeof loud, 0, 0, 6258, 64);
+        STDL_SetVoice(3, low, sizeof low, 0, 0, 6258, 64);
+        tick_at(0);
+        r = ring_base();
+        CHECK(r[BLOCK] == 125, "63*3 - 64 gave %d, want 125", r[BLOCK]);
+        for (i = 0; i < STDL_VOICES; i++) {
+            STDL_StopVoice(i);
         }
     }
 

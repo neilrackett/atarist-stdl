@@ -551,7 +551,10 @@ warnings** with the Makefile's `-Wall -Wextra`.
   voice mixer (voice.c) is host-tested end to end through the fake
   TOS queue and DMA counter in tests/host/test_voice.c - steer
   `stdl_host_dma_pos` and call the queue slot like the interrupt
-  would.
+  would. Its inner loop is inline asm with a C twin
+  (`voice_run_c`); tests/hatari/voicechk.c runs random mixes
+  through both on target, compares them byte for byte and times
+  them. Rerun it after touching either.
 - **The library is for a plain 8MHz ST; everything above it is
   progressive enhancement.** 68000, no blitter, no DMA audio, 512K
   to 1M shared between code and heap - that is the machine, and a

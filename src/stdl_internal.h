@@ -286,6 +286,19 @@ extern void (*stdl_shutdown_overscan)(void);
 extern volatile uint8_t stdl_host_sync_reg;
 #define STDL_SYNC_REG stdl_host_sync_reg
 #endif
+
+/* The rate the display is running at now, from the register: what
+ * TOS set at boot is the machine's region, and an NTSC machine (or
+ * one switched before the program ran) starts at 60. Assuming 50
+ * ran every VBL-counted sequencer 20% fast there. TT and Falcon video
+ * does not run from this register; they keep the 50 they always had. */
+static __inline__ uint8_t stdl_sync_hz(void)
+{
+    if (stdl.mach.mch_cookie >= 0x00020000UL) {
+        return 50;
+    }
+    return (STDL_SYNC_REG & 2) ? 50 : 60;
+}
 /*
  * Memory the hardware has to reach, which is not the same as memory
  * the CPU can reach. The Shifter and the sound DMA see ST RAM only;

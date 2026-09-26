@@ -98,6 +98,19 @@ int main(void)
         return 1;
     }
 
+    /* The rate a program starts at is the register's, not 50: an
+     * NTSC machine boots at 60, and the sequencers divide by this.
+     * TT and Falcon video is not driven by the register. */
+    STDL_Init(0);
+    stdl_host_sync_reg = 2;
+    CHECK(stdl_sync_hz() == 50, "sync 2 read as %d", stdl_sync_hz());
+    stdl_host_sync_reg = 0;
+    CHECK(stdl_sync_hz() == 60, "sync 0 read as %d", stdl_sync_hz());
+    stdl.mach.mch_cookie = 0x00020000UL;
+    CHECK(stdl_sync_hz() == 50, "a TT read the ST register: %d", stdl_sync_hz());
+    stdl.mach.mch_cookie = 0;
+    stdl_host_sync_reg = 2;
+
     /* A 50Hz stream of 100 frames is two seconds of music. On a
      * 50Hz VBL that is 100 ticks; on a 60Hz one it must be 120, or
      * the tune is playing fast. Before this was rate-aware the

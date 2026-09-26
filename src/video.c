@@ -178,7 +178,7 @@ static void release_hardware(void)
         STDL_SYNC_REG = (uint8_t)stdl.old_sync;
         stdl.old_sync = -1;
     }
-    stdl_vbl_hz = 50;
+    stdl_vbl_hz = stdl_sync_hz();
     stdl_sync_want = -1;
     stdl_events_remove();
     if (stdl.video_set) {
@@ -302,6 +302,7 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
         if (stdl.old_rez != 0) {
             (void)Setscreen((void *)-1L, (void *)-1L, 0);
         }
+        stdl_vbl_hz = stdl_sync_hz();
         stdl.video_set = 1;
         stdl_events_install();
     }

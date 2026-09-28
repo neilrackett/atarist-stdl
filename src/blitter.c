@@ -24,6 +24,7 @@
 
 #include "stdl_internal.h"
 
+#ifdef __m68k__
 typedef struct {
     uint16_t halftone[16];
     int16_t  src_xinc;
@@ -44,6 +45,15 @@ typedef struct {
 } blitregs_t;
 
 #define BLIT ((volatile blitregs_t *)0xFFFF8A00UL)
+/* the chip runs by itself once started */
+#define BLIT_STARTED() ((void)0)
+#else
+/* host: the registers are a struct, and starting an operation runs
+ * the software model to completion (see stdl_internal.h) */
+typedef stdl_host_blitregs_t blitregs_t;
+#define BLIT (&stdl_host_blit)
+#define BLIT_STARTED() stdl_host_blitter_exec()
+#endif
 
 static int user_enable = 1;
 
@@ -51,10 +61,14 @@ static int user_enable = 1;
  * promoted to int, gcc 4.6 calls __mulsi3 for it */
 static __inline__ int32_t blit_muls(int16_t a, int16_t b)
 {
+#ifdef __m68k__
     int32_t r = a;
 
     __asm__("muls.w %1,%0" : "+d"(r) : "d"(b));
     return r;
+#else
+    return (int32_t)a * b;
+#endif
 }
 
 int stdl_blitter_active(void)
@@ -178,6 +192,7 @@ void stdl_blitter_run(uintptr_t src, uintptr_t dst, uint16_t nwords,
         b->xcount = nwords;
         b->ycount = n;
         b->ctrl = ctrl;
+        BLIT_STARTED();
         while ((b->ctrl & 0x80) || b->ycount != 0)
             ;
         nlines = (uint16_t)(nlines - n);
@@ -189,8 +204,8 @@ void stdl_blitter_run(uintptr_t src, uintptr_t dst, uint16_t nwords,
                                                    bl_sxinc) + bl_syinc);
             const int16_t dl = (int16_t)(blit_muls((int16_t)(nwords - 1),
                                                    bl_dxinc) + bl_dyinc);
-            src = (uintptr_t)((int32_t)src + blit_muls((int16_t)n, sl));
-            dst = (uintptr_t)((int32_t)dst + blit_muls((int16_t)n, dl));
+            src = (uintptr_t)((intptr_t)src + blit_muls((int16_t)n, sl));
+            dst = (uintptr_t)((intptr_t)dst + blit_muls((int16_t)n, dl));
         }
     }
 }

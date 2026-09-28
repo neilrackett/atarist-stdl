@@ -8,8 +8,11 @@
 #
 #   make -C tests/host run     (or `make test` from the root)
 #
-# The BLiTTER, DMA and IKBD paths are hardware and cannot be tested
-# here - dist/BLITCHK.TOS and the Hatari harness cover them. The YM
+# The BLiTTER paths run here against a software model of the chip
+# (blitmodel.c, driven through blitter.c's host registers), so an
+# overread is an ASan failure rather than a silent fetch on target;
+# dist/BLITCHK.TOS still checks the real chip. The DMA and IKBD
+# paths are hardware and are covered by the Hatari harness. The YM
 # service runs against a register-file stand-in (stubs.c), so the
 # sound tick's bookkeeping is covered natively.
 
@@ -31,13 +34,13 @@ SRC     = ../../src
 # (1bpp, byte-per-pixel, colour remap) build surfaces the other
 # suites draw with, not because every program links it - on target
 # it is a separate object precisely so that they don't.
-CORE    = stubs.c $(SRC)/surface.c $(SRC)/indexed.c $(SRC)/draw.c \
-          $(SRC)/blit.c $(SRC)/sprite.c $(SRC)/palette.c \
-          $(SRC)/planes.c
+CORE    = stubs.c blitmodel.c $(SRC)/surface.c $(SRC)/indexed.c \
+          $(SRC)/draw.c $(SRC)/blit.c $(SRC)/sprite.c $(SRC)/palette.c \
+          $(SRC)/planes.c $(SRC)/blitter.c
 
 TESTS   = test_pixel test_compose test_cursor test_assets test_planes \
           test_footprint test_indexed test_glyph test_vbl test_blit8 \
-          test_underleak \
+          test_underleak test_blitter \
           test_voice test_ym test_tone test_sfx test_opl test_refresh \
           test_wav test_mixer test_ring
 
@@ -45,6 +48,11 @@ all: $(TESTS)
 
 test_pixel: test_pixel.c $(CORE) $(SRC)/surfacefrom.c
 	$(CC) $(CFLAGS) -o $@ $^
+
+# built with the counters, for stdl_blit_force: every operation the
+# BLiTTER could take goes to it, whatever its size
+test_blitter: test_blitter.c $(CORE)
+	$(CC) $(CFLAGS) -DSTDL_BLIT_STATS -o $@ $^
 
 test_compose: test_compose.c $(CORE) $(SRC)/bmp.c $(SRC)/degas.c \
               $(SRC)/asset.c

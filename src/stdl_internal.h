@@ -450,9 +450,18 @@ extern void (*stdl_timer_hook)(void);
  * BLiTTER (blitter.c). stdl_blitter_go runs one plane-rectangle
  * operation; callers decide per-op whether the area amortises the
  * register setup (the *_MIN_CELLS thresholds, in words-per-plane).
- * On host builds the driver is stubbed out by the 0 macro.
+ *
+ * The driver is the same code on the host: there the registers are
+ * a plain struct, and starting an operation runs a software model of
+ * the chip (tests/host/blitmodel.c) to completion before the busy
+ * poll looks. Every BLiTTER path in the library therefore runs under
+ * AddressSanitizer in tests/host - an overread the hardware would
+ * silently fetch from a neighbour becomes a failure - and host tests
+ * turn it on by setting stdl.mach.has_blitter. The model is written
+ * from the chip's documented behaviour, and only the paths STDL uses
+ * are modelled: it asserts on anything else (NFSR among them - see
+ * AGENTS.md).
  */
-#ifdef __m68k__
 int  stdl_blitter_active(void);
 /* the invariant registers once, then one call per plane: a
  * four-plane copy was writing eleven identical registers four times
@@ -468,29 +477,30 @@ void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
                      uint16_t em1, uint16_t em3,
                      uint16_t nwords, uint16_t nlines,
                      uint8_t hop, uint8_t op);
-#else
-#define stdl_blitter_active() 0
-static __inline__ void stdl_blitter_setup(int16_t sxinc, int16_t syinc,
-    int16_t dxinc, int16_t dyinc, uint16_t em1, uint16_t em3,
-    uint16_t nwords, uint8_t hop, uint8_t op)
-{
-    (void)sxinc; (void)syinc; (void)dxinc; (void)dyinc;
-    (void)em1; (void)em3; (void)nwords; (void)hop; (void)op;
-}
-static __inline__ void stdl_blitter_run(uintptr_t src, uintptr_t dst,
-    uint16_t nwords, uint16_t nlines, uint8_t hop)
-{
-    (void)src; (void)dst; (void)nwords; (void)nlines; (void)hop;
-}
-static __inline__ void stdl_blitter_go(uintptr_t src, int16_t sxinc,
-    int16_t syinc, uintptr_t dst, int16_t dxinc, int16_t dyinc,
-    uint16_t em1, uint16_t em3, uint16_t nwords, uint16_t nlines,
-    uint8_t hop, uint8_t op)
-{
-    (void)src; (void)sxinc; (void)syinc; (void)dst; (void)dxinc;
-    (void)dyinc; (void)em1; (void)em3; (void)nwords; (void)nlines;
-    (void)hop; (void)op;
-}
+#ifndef __m68k__
+/* the host's BLiTTER registers: the chip's layout, except that the
+ * two address registers hold host pointers */
+typedef struct {
+    uint16_t halftone[16];
+    int16_t  src_xinc;
+    int16_t  src_yinc;
+    uintptr_t src_addr;
+    uint16_t endmask1;
+    uint16_t endmask2;
+    uint16_t endmask3;
+    int16_t  dst_xinc;
+    int16_t  dst_yinc;
+    uintptr_t dst_addr;
+    uint16_t xcount;
+    uint16_t ycount;
+    uint8_t  hop;
+    uint8_t  op;
+    uint8_t  ctrl;
+    uint8_t  skew;
+} stdl_host_blitregs_t;
+extern volatile stdl_host_blitregs_t stdl_host_blit;
+/* runs the operation the registers describe (tests/host/blitmodel.c) */
+void stdl_host_blitter_exec(void);
 #endif
 
 #define STDL_BLIT_HOP_ONES 0

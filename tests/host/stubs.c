@@ -38,6 +38,9 @@ volatile uint8_t stdl_host_sync_reg = 2;    /* 50Hz, as PAL boots */
 uint8_t stdl_vbl_hz = 50;
 int     stdl_sync_want = -1;
 void  (*stdl_shutdown_overscan)(void);
+/* also video.c's: the overscan module's BLiTTER placement policy,
+ * NULL while no border is open (test_blitter installs its own) */
+uint16_t (*stdl_blit_policy)(uint16_t nlines, uint32_t cpl);
 
 /* the YM2149 as a register file, and the console-attributes byte */
 volatile uint8_t stdl_host_ym_sel;

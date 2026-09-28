@@ -35,7 +35,8 @@ SRC     = ../../src
 # suites draw with, not because every program links it - on target
 # it is a separate object precisely so that they don't.
 CORE    = stubs.c blitmodel.c $(SRC)/surface.c $(SRC)/indexed.c \
-          $(SRC)/draw.c $(SRC)/blit.c $(SRC)/sprite.c $(SRC)/palette.c \
+          $(SRC)/draw.c $(SRC)/blit.c $(SRC)/sprite.c $(SRC)/tileset.c \
+          $(SRC)/text.c $(SRC)/palette.c \
           $(SRC)/planes.c $(SRC)/blitter.c
 
 TESTS   = test_pixel test_compose test_cursor test_assets test_planes \

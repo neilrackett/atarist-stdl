@@ -100,8 +100,8 @@ emulated; see [docs/limits.md](docs/limits.md).
 | `include/stdl/`   | public headers, one per module                                                      |
 | `include/compat/` | SDL.h and SDL_mixer.h - the SDL 1.2 compatibility shims                             |
 | `src/`            | video, surface, surfacefrom, draw, blit, blit8, blitter, planes, palette, event,    |
-|                   | cursor, time, dirty, vbl, sprite, drawchar, indexed, asset, bmp, degas, audio,      |
-|                   | voice, music, sfx, tone, opl, ym, compat, mixer                                     |
+|                   | cursor, time, dirty, vbl, sprite, tileset, text, drawchar, indexed, asset, bmp,     |
+|                   | degas, audio, voice, music, sfx, tone, opl, ym, compat, mixer                       |
 | `tools/stdlconv/` | asset converter: image quantise + planar, sprite/tile/font banks, Degas PI1,        |
 |                   | WAV (incl. MS ADPCM) to STE DMA rates, MIDI to YM music, C-array embedding          |
 | `examples/`       | ported SDL 1.2 test programs + original STDL demos and their assets (public domain) |

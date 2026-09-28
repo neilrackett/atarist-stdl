@@ -30,7 +30,8 @@ LIB     = libstdl.a
 
 LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/palette.c src/event.c src/time.c src/dirty.c \
-          src/sprite.c src/asset.c src/compat.c src/bmp.c \
+          src/sprite.c src/tileset.c src/text.c src/asset.c \
+          src/compat.c src/bmp.c \
           src/audio.c src/cursor.c src/music.c src/mixer.c \
           src/sfx.c src/degas.c src/ym.c src/blitter.c \
           src/planes.c src/vbl.c src/indexed.c src/drawchar.c \
@@ -88,8 +89,17 @@ all: $(LIB) sizecheck $(EXAMPLES) assets
 # the old ceiling was a target of its own rather than a requirement,
 # and the port that achieved it stays pinned to the version that
 # did.
-PIXEL_OBJS = $(addprefix $(OBJDIR)/src/,draw.o blit.o sprite.o surface.o)
-PIXEL_MAX  = 33000
+#
+# 2026-09-29: blitter.o joined the set, with the ceiling raised by
+# its own 740 bytes so the change is neutral - logic moved into the
+# driver must not escape the check. And tilesets and text left
+# sprite.o for tileset.o and text.o (2744 bytes), so a port that
+# draws sprites without them stops paying for them; those two are
+# opt-in objects like surfacefrom.o and drawchar.o and are not
+# counted here, which is where the room this made came from.
+PIXEL_OBJS = $(addprefix $(OBJDIR)/src/,draw.o blit.o sprite.o \
+             surface.o blitter.o)
+PIXEL_MAX  = 33740
 
 sizecheck: $(PIXEL_OBJS)
 	@n=`$(CROSS)size $(PIXEL_OBJS) | awk 'NR>1 {t+=$$1} END {print t}'`; \

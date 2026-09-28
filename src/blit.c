@@ -28,6 +28,42 @@
 
 /* --- same-phase copy ------------------------------------------- */
 
+/*
+ * A short row, copied inline rather than through memcpy (see
+ * BLIT_INLINE_MAX). bytes is a whole number of groups, from 8 up to
+ * BLIT_INLINE_MAX; lng says both pointers are long aligned, which a
+ * surface from STDL_CreateSurfaceFrom need not be - and a long move
+ * to an odd word is an address error on a 68000.
+ */
+static __inline__ __attribute__((always_inline))
+void copy_row_short(uint8_t *dp, const uint8_t *sp, int bytes, int lng)
+{
+    if (lng) {
+        const uint32_t *s4 = (const uint32_t *)sp;
+        uint32_t *d4 = (uint32_t *)dp;
+        int n = bytes >> 2;
+        do {
+            *d4++ = *s4++;
+        } while (--n != 0);
+    } else {
+        const uint16_t *s2 = (const uint16_t *)sp;
+        uint16_t *d2 = (uint16_t *)dp;
+        int n = bytes >> 1;
+        do {
+            *d2++ = *s2++;
+        } while (--n != 0);
+    }
+}
+
+/* n mask words cleared, n >= 1; mask rows are word aligned always */
+static __inline__ __attribute__((always_inline))
+void clear_mask_short(uint16_t *m, int n)
+{
+    do {
+        *m++ = 0;
+    } while (--n != 0);
+}
+
 /* one group: dst = (dst & ~vis) | (src & vis), mask upkeep. np is
  * the plane budget and is a compile-time constant in every
  * instantiation, so the guarded plane writes vanish. */
@@ -80,9 +116,14 @@ STDL_PLANE_INLINE void blit_rows_aligned(const uint8_t *srow,
                               int smstride, int dmstride,
                               int ng, int h,
                               uint16_t lm, uint16_t rm, int masked,
-                              const unsigned flags, const int np)
+                              int lng, const unsigned flags,
+                              const int np)
 {
     int y, g;
+    /* the unmasked middle's size, for the inline-or-memcpy choice;
+     * it starts a group into the row, so it shares the row's long
+     * alignment */
+    const int mbytes = (ng - 2) * 8;
 
     if (ng == 1) {
         lm &= rm;
@@ -108,8 +149,20 @@ STDL_PLANE_INLINE void blit_rows_aligned(const uint8_t *srow,
                                dm, g, flags, np);
                 }
             } else if (ng > 2) {
-                if (np == 4) {
-                    memcpy(dg + 4, sg + 4, (size_t)(ng - 2) * 8);
+                /*
+                 * The middle of a row whose edges are partial groups
+                 * - every restore at an unaligned x. It went through
+                 * memcpy a row at a time, whose ~650-cycle prologue
+                 * cost a 32x32 restore at x&15=5 two and a half times
+                 * the aligned one on a plain ST; short middles are
+                 * copied inline now, as whole-group rows already
+                 * were.
+                 */
+                if (np == 4 && mbytes <= BLIT_INLINE_MAX) {
+                    copy_row_short((uint8_t *)(dg + 4),
+                                   (const uint8_t *)(sg + 4), mbytes, lng);
+                } else if (np == 4) {
+                    memcpy(dg + 4, sg + 4, (size_t)mbytes);
                 } else {
                     const uint16_t *sp = sg + 4;
                     uint16_t *dp = dg + 4;
@@ -120,7 +173,11 @@ STDL_PLANE_INLINE void blit_rows_aligned(const uint8_t *srow,
                     }
                 }
                 if (dm != NULL) {
-                    memset(dm + 1, 0, (size_t)(ng - 2) * 2);
+                    if (mbytes <= BLIT_INLINE_MAX) {
+                        clear_mask_short(dm + 1, ng - 2);
+                    } else {
+                        memset(dm + 1, 0, (size_t)(ng - 2) * 2);
+                    }
                 }
             }
             copy_group(sg + (ng - 1) * 4, dg + (ng - 1) * 4,
@@ -651,22 +708,10 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                 stdl_blit_rows += (unsigned long)h;
 #endif
                 for (y = 0; y < h; y++) {
-                    if (shortrow && lng) {
-                        const uint32_t *s4 = (const uint32_t *)sp;
-                        uint32_t *d4 = (uint32_t *)dp;
-                        int n = bytes >> 2;
-                        do {
-                            *d4++ = *s4++;
-                        } while (--n != 0);
-                    } else if (shortrow) {
-                        /* only word aligned - a borrowed block may
-                         * be - but still cheaper than the call */
-                        const uint16_t *s2 = (const uint16_t *)sp;
-                        uint16_t *d2 = (uint16_t *)dp;
-                        int n = bytes >> 1;
-                        do {
-                            *d2++ = *s2++;
-                        } while (--n != 0);
+                    if (shortrow) {
+                        /* word aligned only - a borrowed block may be
+                         * - still beats the call */
+                        copy_row_short(dp, sp, bytes, lng);
                     } else {
                         memcpy(dp, sp, (size_t)bytes);
                     }
@@ -675,11 +720,7 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                          * write in the library already assumes it,
                          * so there is nothing to test for here */
                         if (shortrow) {
-                            uint16_t *m = (uint16_t *)dmrow;
-                            int n = ng;
-                            do {
-                                *m++ = 0;
-                            } while (--n != 0);
+                            clear_mask_short((uint16_t *)dmrow, ng);
                         } else {
                             memset(dmrow, 0, (size_t)(ng * 2));
                         }
@@ -693,13 +734,15 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                 stdl_blit_merge += (unsigned long)h;
                 stdl_blit_rows += (unsigned long)h;
 #endif
+                const int lng = ((((uintptr_t)(srow + sg0 * 8))
+                                  | (uintptr_t)drow) & 3) == 0;
 #define BLIT_ALIGNED_F(np, fl) \
                 blit_rows_aligned(srow + sg0 * 8, drow, \
                                   masked ? smrow + sg0 * 2 : NULL, \
                                   dmrow, \
                                   src->stride, dst->stride, \
                                   smstride, dmstride, \
-                                  ng, h, lm, rm, masked, (fl), (np))
+                                  ng, h, lm, rm, masked, lng, (fl), (np))
 #define BLIT_ALIGNED_N2(fl) BLIT_ALIGNED_F(2, (fl))
 #define BLIT_ALIGNED_N4(fl) BLIT_ALIGNED_F(4, (fl))
                 if (np <= 2) {

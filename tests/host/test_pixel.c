@@ -738,6 +738,110 @@ static void test_blits(void)
     }
 }
 
+/*
+ * Same-phase unmasked blits whose edges are partial groups, 3-10
+ * groups wide - every restore at an unaligned x. The middle of each
+ * row is copied inline when short and through memcpy when long, as
+ * longs when both rows are long aligned and as words when a borrowed
+ * block is only word aligned; every combination against the model,
+ * with the destination mask's upkeep checked where there is one.
+ */
+static void test_partial_middle(void)
+{
+    enum { W = 192, H = 12, STRIDE = W / 2, MSTRIDE = W / 8 };
+    static uint8_t bufs[2][STRIDE * H + 8];
+    static uint16_t mbuf[MSTRIDE * H / 2];
+    int view, withmask, phase, ng;
+
+    for (view = 0; view <= 1; view++) {
+        for (withmask = 0; withmask <= 1; withmask++) {
+            for (phase = 0; phase < 16; phase++) {
+                for (ng = 3; ng <= 10; ng++) {
+                    STDL_Surface *src, *dst;
+                    Ref *rs, *rd;
+                    STDL_Rect sr, dr;
+                    int w = ng * 16 - phase - (int)(rnd() % 15) - 1;
+                    int x, y, bad = 0;
+
+                    if (view) {
+                        /* word aligned, never long aligned; a
+                         * borrowed view brings its own mask */
+                        uint8_t *a = bufs[0], *b = bufs[1];
+                        while (((uintptr_t)a & 3) != 2) { a++; }
+                        while (((uintptr_t)b & 3) != 2) { b++; }
+                        src = STDL_CreateSurfaceFrom(a, W, H, STRIDE,
+                                                     NULL, 0);
+                        dst = STDL_CreateSurfaceFrom(b, W, H, STRIDE,
+                                                     withmask
+                                                     ? (uint8_t *)mbuf
+                                                     : NULL,
+                                                     withmask ? MSTRIDE
+                                                     : 0);
+                    } else {
+                        src = STDL_CreateSurface(W, H);
+                        dst = STDL_CreateSurface(W, H);
+                    }
+                    if (src == NULL || dst == NULL) {
+                        CHECK(0, "partial-middle setup");
+                        return;
+                    }
+                    randomise(src, 16);
+                    randomise(dst, 16);
+                    /* after randomise: PutPixel maintains the mask,
+                     * so drawing the background made it all opaque */
+                    if (withmask && view) {
+                        memset(mbuf, 0xFF, sizeof(mbuf));
+                    } else if (withmask && STDL_CreateMask(dst, 1) != 0) {
+                        CHECK(0, "partial-middle mask");
+                        return;
+                    }
+                    rs = ref_new(W, H);
+                    rd = ref_new(W, H);
+                    surf_to_ref(src, rs);
+                    surf_to_ref(dst, rd);
+
+                    sr.x = (int16_t)(16 + phase);
+                    sr.y = 1;
+                    sr.w = (uint16_t)w;
+                    sr.h = 9;
+                    dr.x = (int16_t)(32 + phase);
+                    dr.y = 2;
+                    ref_blit(rs, sr.x, sr.y, sr.w, sr.h, rd, dr.x, dr.y,
+                             0, 0, &dst->clip);
+                    STDL_BlitSurface(src, &sr, dst, &dr);
+                    CHECK(ref_cmp(dst, rd, "partial middle"),
+                          "partial middle view=%d mask=%d phase=%d w=%d",
+                          view, withmask, phase, w);
+                    if (withmask) {
+                        /* opaque exactly where the blit landed */
+                        for (y = 0; y < H; y++) {
+                            const uint16_t *mr = (const uint16_t *)
+                                (dst->mask + y * dst->maskstride);
+                            for (x = 0; x < W; x++) {
+                                int in = x >= dr.x && x < dr.x + w
+                                      && y >= dr.y && y < dr.y + 9;
+                                int set = (mr[x >> 4]
+                                           >> (15 - (x & 15))) & 1;
+                                if (set == in) {
+                                    bad++;
+                                }
+                            }
+                        }
+                        CHECK(bad == 0, "partial middle mask phase=%d "
+                              "w=%d view=%d: %d bits", phase, w, view,
+                              bad);
+                    }
+                    ref_free(rs);
+                    ref_free(rd);
+                    STDL_FreeSurface(src);
+                    STDL_FreeSurface(dst);
+                    if (failures > 3) return;
+                }
+            }
+        }
+    }
+}
+
 static void test_whole_blit_writeback(void)
 {
     /* NULL srcrect + dstrect writeback semantics */
@@ -920,6 +1024,7 @@ int main(void)
     test_spans();
     test_points();
     test_blits();
+    test_partial_middle();
     test_whole_blit_writeback();
     test_whole_copy();
     test_sprites();

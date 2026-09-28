@@ -170,8 +170,21 @@ dist/PLAYMUS.TOS: examples/playmus.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
 dist/SFXDEMO.TOS: examples/sfxdemo.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
-dist/BLITCHK.TOS: examples/blitchk.c $(LIB)
-	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
+# BLITCHK links the counted build of the pixel paths ahead of the
+# archive (the archive's own copies are then never pulled in): the
+# counters are how it proves each BLiTTER path actually fired, and
+# stdl_blit_force is how it reaches the small corner cases the size
+# thresholds would keep on the CPU. Everything else is the normal
+# library.
+STATSOBJS = $(addprefix $(OBJDIR)/stats/src/,blit.o sprite.o draw.o)
+
+$(OBJDIR)/stats/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -DSTDL_BLIT_STATS -c -o $@ $<
+
+dist/BLITCHK.TOS: examples/blitchk.c $(STATSOBJS) $(LIB)
+	$(CC) $(CFLAGS) -DSTDL_BLIT_STATS -Iinclude/compat -o $@ $< \
+	    $(STATSOBJS) $(LIB) && $(STRIP) $@
 dist/OVERSCAN.TOS: examples/overscan.c $(LIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
 dist/VBLCHK.TOS: examples/vblchk.c $(LIB)
@@ -188,7 +201,7 @@ dist/CHUNKY.TOS: examples/chunky.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
 
 # The generated header dependencies, if any objects exist yet.
--include $(LIBOBJS:.o=.d) $(CMINIOBJS:.o=.d)
+-include $(LIBOBJS:.o=.d) $(CMINIOBJS:.o=.d) $(STATSOBJS:.o=.d)
 
 # host-side unit tests: native clang + ASan, no cross toolchain
 # needed (run on the host, not through stcmd)

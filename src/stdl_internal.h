@@ -501,6 +501,14 @@ static __inline__ void stdl_blitter_go(uintptr_t src, int16_t sxinc,
 #define STDL_BLIT_OP_XOR   6    /* src XOR dst  */
 
 #define STDL_BLIT_FILL_MIN_CELLS   32   /* fill: ng * rows          */
+
+/* stdl_blit_force (see stdl_types.h) exists only in a stats build;
+ * everywhere else the test folds to a constant and costs nothing */
+#ifdef STDL_BLIT_STATS
+#define STDL_BLIT_FORCED() (stdl_blit_force != 0)
+#else
+#define STDL_BLIT_FORCED() 0
+#endif
 /*
  * Is the BLiTTER worth it for an unmasked copy? Both costs are
  * linear and the comparison is one multiply, which is nothing

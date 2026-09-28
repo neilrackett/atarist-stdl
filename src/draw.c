@@ -121,7 +121,8 @@ static void fill_rows(STDL_Surface *s, int x1, int x2, int y1,
         pw[p] = (col & (1 << p)) ? 0xFFFFu : 0;
     }
 
-    if (stdl_row_off(ng, (uint16_t)rows) >= STDL_BLIT_FILL_MIN_CELLS
+    if ((STDL_BLIT_FORCED()
+         || stdl_row_off(ng, (uint16_t)rows) >= STDL_BLIT_FILL_MIN_CELLS)
         && stdl_blitter_active()) {
         uintptr_t base = (uintptr_t)(row + g0 * 8);
         int16_t yinc = (int16_t)(s->stride - (ng - 1) * 8);

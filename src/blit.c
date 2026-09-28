@@ -316,14 +316,18 @@ STDL_PLANE_INLINE void blit_rows_shift(const uint8_t *srow,
  * summed over a frame or a run.
  */
 unsigned long stdl_blit_calls;      /* entries                    */
-unsigned long stdl_blit_blitter;    /* took the BLiTTER           */
+unsigned long stdl_blit_blitter;    /* rows through the BLiTTER   */
 unsigned long stdl_blit_inline;     /* short rows copied inline   */
 unsigned long stdl_blit_memcpy;     /* rows through memcpy        */
+unsigned long stdl_blit_merge;      /* same-phase rows merged per
+                                     * group: masked, partial edge
+                                     * groups, or composition flags */
 unsigned long stdl_blit_shift;      /* the unaligned shift path   */
 unsigned long stdl_blit_unaligned;  /* rows that wanted the inline
                                      * copy and could not have it */
 unsigned long stdl_blit_rows;       /* rows, whichever path       */
 unsigned long stdl_blit_ticks;      /* 200Hz ticks inside         */
+int stdl_blit_force;                /* ignore the size thresholds */
 #endif
 
 /*
@@ -506,13 +510,15 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                                   * mask upkeep; UNDER/MARK go the CPU
                                   * route */
             && stdl_blitter_active()
-            && (masked
-                ? stdl_row_off(ng, (uint16_t)h)
-                  >= STDL_BLIT_MASKED_MIN_CELLS
-                : stdl_row_off(h, (uint16_t)(STDL_BLIT_CPU_ROW
-                       + STDL_BLIT_CPU_CELL * ng)) > STDL_BLIT_SETUP)) {
+            && (STDL_BLIT_FORCED()
+                || (masked
+                    ? stdl_row_off(ng, (uint16_t)h)
+                      >= STDL_BLIT_MASKED_MIN_CELLS
+                    : stdl_row_off(h, (uint16_t)(STDL_BLIT_CPU_ROW
+                           + STDL_BLIT_CPU_CELL * ng))
+                      > STDL_BLIT_SETUP))) {
 #ifdef STDL_BLIT_STATS
-            stdl_blit_blitter++;
+            stdl_blit_blitter += (unsigned long)h;
             stdl_blit_rows += (unsigned long)h;
 #endif
             /*
@@ -684,7 +690,7 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                 }
             } else {
 #ifdef STDL_BLIT_STATS
-                stdl_blit_shift += (unsigned long)h;
+                stdl_blit_merge += (unsigned long)h;
                 stdl_blit_rows += (unsigned long)h;
 #endif
 #define BLIT_ALIGNED_F(np, fl) \
@@ -722,6 +728,10 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                 sw0 = -((-sp0 + 15) >> 4);
                 r = sp0 - sw0 * 16;
             }
+#ifdef STDL_BLIT_STATS
+            stdl_blit_shift += (unsigned long)h;
+            stdl_blit_rows += (unsigned long)h;
+#endif
 #define BLIT_SHIFT_F(np, fl) \
             blit_rows_shift(srow, drow, smrow, dmrow, \
                             src->stride, dst->stride, \

@@ -126,12 +126,26 @@ extern unsigned long stdl_blit_calls;    /* entries              */
 extern unsigned long stdl_blit_blitter;  /* rows via the BLiTTER */
 extern unsigned long stdl_blit_inline;   /* rows copied inline   */
 extern unsigned long stdl_blit_memcpy;   /* rows via memcpy      */
+extern unsigned long stdl_blit_merge;    /* same-phase rows that
+                                          * merge group by group
+                                          * (masked, edges, flags) */
 extern unsigned long stdl_blit_shift;    /* rows via the shifter */
 extern unsigned long stdl_blit_unaligned; /* rows that lost the
                                           * inline copy to a
                                           * word-aligned buffer  */
 extern unsigned long stdl_blit_rows;     /* rows, any path       */
 extern unsigned long stdl_blit_ticks;    /* 200Hz ticks inside   */
+extern unsigned long stdl_spr_calls;     /* STDL_BlitSprite entries */
+extern unsigned long stdl_spr_rows;      /* sprite rows drawn    */
+extern unsigned long stdl_spr_shift;     /* ... of which through
+                                          * the runtime shift    */
+/* Non-zero sends every operation the BLiTTER *could* do to it,
+ * ignoring the size thresholds that normally keep small ones on the
+ * CPU - never the exclusions that correctness depends on. It exists
+ * so BLITCHK reaches the corner cases (one-word rows, clipped
+ * edges) that a threshold would otherwise keep off the path it is
+ * checking. */
+extern int stdl_blit_force;
 #endif
 
 #define STDL_TRANSPARENT 16

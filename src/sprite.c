@@ -315,6 +315,13 @@ STDL_PLANE_INLINE void blit_sprite_rows(const uint16_t *srow,
     }
 }
 
+#ifdef STDL_BLIT_STATS
+/* see stdl_types.h; a normal build has none of these */
+unsigned long stdl_spr_calls;       /* entries                    */
+unsigned long stdl_spr_rows;        /* rows drawn, any path       */
+unsigned long stdl_spr_shift;       /* rows through runtime shift */
+#endif
+
 void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
                      int x, int y)
 {
@@ -323,6 +330,9 @@ void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
     const uint16_t *fdata;
     uint32_t rowwords;
 
+#ifdef STDL_BLIT_STATS
+    stdl_spr_calls++;
+#endif
     if (spr == NULL || dst == NULL || frame < 0
         || frame >= spr->nframes) {
         return;
@@ -397,6 +407,12 @@ void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
             cover1 = cover0;
         }
 
+#ifdef STDL_BLIT_STATS
+        stdl_spr_rows += (unsigned long)(row1 - row0);
+        if (runtime_shift) {
+            stdl_spr_shift += (unsigned long)(row1 - row0);
+        }
+#endif
         np = stdl_planes;
 #define SPRITE_ROWS(np) \
         blit_sprite_rows(srow, drow, rowwords, dst->stride, \

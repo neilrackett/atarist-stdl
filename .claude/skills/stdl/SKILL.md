@@ -366,8 +366,11 @@ first.
   the port's own code saw to that. The commit changed the size of an
   object file, which moved everything after it, and the port's frame
   sat on a vertical-blank boundary. Build the library with
-  `-DSTDL_BLIT_STATS` and read `stdl_blit_calls`: a counter that
-  says zero ends the investigation in one run. A frame time that
+  `-DSTDL_BLIT_STATS` and read `stdl_blit_calls` (and
+  `stdl_spr_calls` for `STDL_BlitSprite`): a counter that
+  says zero ends the investigation in one run. The row counters
+  beside them say which path the rows took - BLiTTER, inline copy,
+  memcpy, per-group merge, or the unaligned shift chain. A frame time that
   steps by exactly one frame period is a missed boundary, not a
   slowdown - look for what waits, not for what got slower.
 - **With a border open, the BLiTTER loses to the CPU.** Measured on

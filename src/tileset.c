@@ -111,12 +111,83 @@ void STDL_FreeTileset(STDL_Tileset *ts)
  * group with the planes clear under the mask. The mask is read first:
  * a transparent group's planes are never fetched, and an opaque one -
  * the inside of most tiles - is plain stores with no read of the
- * destination. Instantiated per plane budget.
+ * destination. The rest merge a plane pair at a time as
+ * (d & mask) | s, the mask in both halves of a register.
+ *
+ * Hand-written for the 68000: gcc 4.6 kept the mask and the loop
+ * counts on the stack and merged a word at a time, 737us for a 16x16
+ * tile on a plain ST. n >= 1 groups a row, rows >= 1; the skips are
+ * the source and destination strides less what a row walked. Budget
+ * 2 merges and copies planes 0 and 1 only. Out of line so that the
+ * unmasked tile's path through STDL_BlitTile keeps its registers.
+ * The C twin below is what tests/host exercises; PIXCHK runs the
+ * same tests on the target.
  */
-STDL_PLANE_INLINE void tile_rows_masked(const uint16_t *src, uint8_t *drow,
-                                        int dstride, int rows, int n,
-                                        uint32_t srcadv, const int np)
+#ifdef __m68k__
+#define TILE_PAIR \
+    "move.l (%[d]),%%d2\n\t" \
+    "and.l  %%d1,%%d2\n\t" \
+    "or.l   (%[s])+,%%d2\n\t" \
+    "move.l %%d2,(%[d])+\n\t"
+#define TILE_SKIP2 \
+    "addq.l #4,%[s]\n\t" \
+    "addq.l #4,%[d]\n\t"
+#define TILE_ROWS(MERGE, COPY) \
+    "1:\n\t" \
+    "move.w %[n],%%d3\n" \
+    "2:\n\t" \
+    "move.w (%[s])+,%%d0\n\t" \
+    "beq.s  5f\n\t" \
+    "cmp.w  #-1,%%d0\n\t" \
+    "beq.s  6f\n\t" \
+    "move.w %%d0,%%d1\n\t" \
+    "swap   %%d1\n\t" \
+    "move.w %%d0,%%d1\n\t" \
+    MERGE \
+    "bra.s  7f\n" \
+    "5:\n\t" \
+    COPY \
+    "bra.s  7f\n" \
+    "6:\n\t" \
+    "addq.l #8,%[s]\n\t" \
+    "addq.l #8,%[d]\n" \
+    "7:\n\t" \
+    "dbf    %%d3,2b\n\t" \
+    "adda.l %[sk],%[s]\n\t" \
+    "adda.l %[dk],%[d]\n\t" \
+    "subq.w #1,%[h]\n\t" \
+    "bne.s  1b"
+#endif
+
+static __attribute__((noinline)) void tile_rows_masked(
+        const uint16_t *src, uint8_t *drow, int dstride, int rows, int n,
+        uint32_t srcadv, const int np)
 {
+#ifdef __m68k__
+    int16_t h = (int16_t)rows;
+    const int16_t cnt = (int16_t)(n - 1);
+    const int32_t sskip = (int32_t)(srcadv * 2) - n * 10;
+    const int32_t dskip = (int32_t)dstride - n * 8;
+
+    if (np > 2) {
+        __asm__ volatile(
+            TILE_ROWS(TILE_PAIR TILE_PAIR,
+                      "move.l (%[s])+,(%[d])+\n\t"
+                      "move.l (%[s])+,(%[d])+\n\t")
+            : [s] "+a"(src), [d] "+a"(drow), [h] "+d"(h)
+            : [n] "d"(cnt), [sk] "a"(sskip), [dk] "a"(dskip)
+            : "d0", "d1", "d2", "d3", "cc", "memory");
+    } else {
+        __asm__ volatile(
+            TILE_ROWS(TILE_PAIR TILE_SKIP2,
+                      "move.l (%[s])+,(%[d])+\n\t"
+                      TILE_SKIP2)
+            : [s] "+a"(src), [d] "+a"(drow), [h] "+d"(h)
+            : [n] "d"(cnt), [sk] "a"(sskip), [dk] "a"(dskip)
+            : "d0", "d1", "d2", "d3", "cc", "memory");
+    }
+#else
+    /* C twin - what tests/host exercises and the asm must match */
     int yy, k;
 
     for (yy = 0; yy < rows; yy++) {
@@ -128,14 +199,14 @@ STDL_PLANE_INLINE void tile_rows_masked(const uint16_t *src, uint8_t *drow,
 
             if (m == 0) {
                 d[0] = sg[1];
-                if (np > 1) d[1] = sg[2];
+                d[1] = sg[2];
                 if (np > 2) d[2] = sg[3];
-                if (np > 3) d[3] = sg[4];
+                if (np > 2) d[3] = sg[4];
             } else if (m != 0xFFFFu) {
                 d[0] = (uint16_t)((d[0] & m) | sg[1]);
-                if (np > 1) d[1] = (uint16_t)((d[1] & m) | sg[2]);
+                d[1] = (uint16_t)((d[1] & m) | sg[2]);
                 if (np > 2) d[2] = (uint16_t)((d[2] & m) | sg[3]);
-                if (np > 3) d[3] = (uint16_t)((d[3] & m) | sg[4]);
+                if (np > 2) d[3] = (uint16_t)((d[3] & m) | sg[4]);
             }
             sg += 5;
             d += 4;
@@ -143,6 +214,7 @@ STDL_PLANE_INLINE void tile_rows_masked(const uint16_t *src, uint8_t *drow,
         src += srcadv;
         drow += dstride;
     }
+#endif
 }
 
 /*
@@ -203,14 +275,10 @@ void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,
                               (int32_t)dst->stride - n * 8);
     } else {
         const uint32_t srcadv = (uint32_t)ts->groups * 5;
-        int np = stdl_planes;
 
         src = ts->data + stdl_row_off(index, (uint16_t)ts->tilesize)
             + stdl_row_off(row0, (uint16_t)srcadv) + g0 * 5;
-#define TILE_MASKED(np) \
-        tile_rows_masked(src, drow, dst->stride, row1 - row0, n, \
-                         srcadv, (np))
-        STDL_PLANE_DISPATCH(np, TILE_MASKED);
-#undef TILE_MASKED
+        tile_rows_masked(src, drow, dst->stride, row1 - row0, n,
+                         srcadv, stdl_planes);
     }
 }

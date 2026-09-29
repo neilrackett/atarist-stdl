@@ -462,7 +462,25 @@ extern void (*stdl_timer_hook)(void);
  * are modelled: it asserts on anything else (NFSR among them - see
  * AGENTS.md).
  */
-int  stdl_blitter_active(void);
+/*
+ * Whether this blit may use the BLiTTER: the machine has one and
+ * STDL_UseBlitter has not refused it. Inline, because every same-
+ * phase blit and every fill asks - on a plain ST as well, where the
+ * answer is always no and a call to find that out was the dearest
+ * part of asking.
+ */
+extern uint8_t stdl_blit_user;
+static __inline__ int stdl_blitter_active(void)
+{
+    return stdl_blit_user && stdl.mach.has_blitter;
+}
+/*
+ * The same test as a call. STDL_BlitSurfaceEx uses this one: inlined
+ * there, the test measured faster on the paths that ask and 1% slower
+ * on unaligned blits that never do - gcc allocating that function's
+ * registers differently around it.
+ */
+int stdl_blitter_allowed(void);
 /* the invariant registers once, then one call per plane: a
  * four-plane copy was writing eleven identical registers four times
  * over, half the fitted setup cost */

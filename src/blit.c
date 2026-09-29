@@ -548,7 +548,7 @@ blit_whole(STDL_Surface *src, STDL_Surface *dst, STDL_Rect *dstrect)
         || (src->org_x | src->org_y | dst->org_x | dst->org_y) != 0
         || dst->clip.x != 0 || dst->clip.y != 0
         || dst->clip.w < dst->w || dst->clip.h < dst->h
-        || stdl_planes != 4 || stdl_blitter_active()) {
+        || stdl_planes != 4 || stdl_blitter_allowed()) {
         return STDL_BlitSurfaceEx(src, NULL, dst, dstrect, 0);
     }
 #ifdef STDL_BLIT_STATS
@@ -697,7 +697,7 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
             && flags == 0        /* the BLiTTER passes below fix the
                                   * mask upkeep; UNDER/MARK go the CPU
                                   * route */
-            && stdl_blitter_active()
+            && stdl_blitter_allowed()
             && (STDL_BLIT_FORCED()
                 || (masked
                     ? stdl_row_off(ng, (uint16_t)h)

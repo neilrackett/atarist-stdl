@@ -55,7 +55,14 @@ typedef stdl_host_blitregs_t blitregs_t;
 #define BLIT_STARTED() stdl_host_blitter_exec()
 #endif
 
-static int user_enable = 1;
+/* STDL_UseBlitter's setting; stdl_blitter_active() reads it inline */
+uint8_t stdl_blit_user = 1;
+
+/* the same test out of line, for blit.c: see stdl_internal.h */
+int stdl_blitter_allowed(void)
+{
+    return stdl_blitter_active();
+}
 
 /* 16x16 -> 32 signed multiply on the 68000's own instruction:
  * promoted to int, gcc 4.6 calls __mulsi3 for it */
@@ -71,17 +78,12 @@ static __inline__ int32_t blit_muls(int16_t a, int16_t b)
 #endif
 }
 
-int stdl_blitter_active(void)
-{
-    return user_enable && stdl.mach.has_blitter;
-}
-
 int STDL_UseBlitter(int enable)
 {
-    int old = user_enable;
+    int old = stdl_blit_user;
 
     if (enable >= 0) {
-        user_enable = (enable != 0);
+        stdl_blit_user = (uint8_t)(enable != 0);
     }
     return old;
 }

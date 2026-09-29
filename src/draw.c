@@ -18,12 +18,14 @@
  * by row through the span loop, whose middle gcc 4.6 compiles to a
  * store at (a0), a store at 4(a0), an addq and a dbf: 46 cycles a
  * group, 36ms for a full screen on a plain ST against the memset's
- * 10. Post-increment stores four groups to a pass are 26.5.
+ * 10. Post-increment stores four groups to a pass were 26.5 (14.1ms
+ * a screen); eight registers holding the pattern, stored downward by
+ * movem.l twice a pass, are 19.25 - the memset's own rate.
  *
  * Out of line on purpose: inlined into the span loop, the same asm
  * made small fills 5-8% slower through register allocation alone.
- * Long aligned only; the caller checks. The count is 32-bit, since a
- * whole screen is more groups than dbf can count in one go.
+ * The caller checks for long alignment, though a 68000 would take
+ * any even address. The count is 32-bit, since dbf counts 16.
  */
 static __attribute__((noinline)) void fill_longpairs(uint32_t *lp,
                                                      uint32_t n,
@@ -31,36 +33,41 @@ static __attribute__((noinline)) void fill_longpairs(uint32_t *lp,
                                                      uint32_t l23)
 {
 #ifdef __m68k__
+    lp += n << 1;                     /* filled from the end down */
     __asm__ volatile(
-        "move.l %1,%%d0\n\t"
-        "lsr.l  #2,%%d0\n\t"          /* passes of four groups */
-        "and.w  #3,%1\n\t"            /* groups left over      */
-        "subq.w #1,%1\n\t"
+        "moveq  #7,%%d0\n\t"
+        "and.w  %1,%%d0\n\t"          /* groups left over       */
+        "lsr.l  #3,%1\n\t"            /* passes of eight groups */
+        "subq.w #1,%%d0\n\t"
         "bmi.s  2f\n"
         "1:\n\t"
-        "move.l %2,(%0)+\n\t"
-        "move.l %3,(%0)+\n\t"
-        "dbf    %1,1b\n"
+        "move.l %3,-(%0)\n\t"
+        "move.l %2,-(%0)\n\t"
+        "dbf    %%d0,1b\n"
         "2:\n\t"
-        "subq.l #1,%%d0\n\t"
-        "bmi.s  4f\n"
+        "subq.l #1,%1\n\t"
+        "bmi.s  4f\n\t"
+        /* predecrement movem puts d0 lowest and a4 highest */
+        "move.l %2,%%d0\n\t"
+        "move.l %3,%%d1\n\t"
+        "move.l %2,%%d2\n\t"
+        "move.l %3,%%d3\n\t"
+        "move.l %2,%%a1\n\t"
+        "move.l %3,%%a2\n\t"
+        "move.l %2,%%a3\n\t"
+        "move.l %3,%%a4\n"
         "3:\n\t"
-        "move.l %2,(%0)+\n\t"
-        "move.l %3,(%0)+\n\t"
-        "move.l %2,(%0)+\n\t"
-        "move.l %3,(%0)+\n\t"
-        "move.l %2,(%0)+\n\t"
-        "move.l %3,(%0)+\n\t"
-        "move.l %2,(%0)+\n\t"
-        "move.l %3,(%0)+\n\t"
-        "dbf    %%d0,3b\n\t"
-        "clr.w  %%d0\n\t"             /* dbf counts 16 bits:   */
-        "subq.l #1,%%d0\n\t"          /* carry into the high   */
-        "bcc.s  3b\n"                  /* word, as gcc does     */
+        "movem.l %%d0-%%d3/%%a1-%%a4,-(%0)\n\t"
+        "movem.l %%d0-%%d3/%%a1-%%a4,-(%0)\n\t"
+        "dbf    %1,3b\n\t"
+        "clr.w  %1\n\t"               /* dbf counts 16 bits:    */
+        "subq.l #1,%1\n\t"            /* carry into the high    */
+        "bcc.s  3b\n"                   /* word, as gcc does      */
         "4:"
         : "+a"(lp), "+d"(n)
         : "d"(l01), "d"(l23)
-        : "d0", "cc", "memory");
+        : "d0", "d1", "d2", "d3", "a1", "a2", "a3", "a4", "cc",
+          "memory");
 #else
     /* C twin - what tests/host exercises and the asm must match */
     while (n-- != 0) {

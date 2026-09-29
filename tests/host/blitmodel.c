@@ -66,6 +66,16 @@ static uint16_t logic(uint8_t op, uint16_t s, uint16_t d)
     }
 }
 
+/*
+ * The chip's 32-bit source buffer. It is never cleared: the first word
+ * of a line - of an operation, too - shifts in beside whatever the
+ * last fetch left, so a skewed line's first write carries stale bits
+ * that only endmask 1 keeps off the screen. Seeded with a pattern no
+ * picture would hold, so a path that leaks them fails here rather
+ * than on hardware.
+ */
+static uint32_t src_buffer = 0xA5C3A5C3UL;
+
 void stdl_host_blitter_exec(void)
 {
     volatile stdl_host_blitregs_t *b = &stdl_host_blit;
@@ -86,11 +96,11 @@ void stdl_host_blitter_exec(void)
     assert((src & 1) == 0 && (dst & 1) == 0);
 
     while (yc != 0) {
-        uint32_t buf = 0;
+        uint32_t buf = src_buffer;
         unsigned x;
 
         if (use_src && fxsr) {
-            buf = *(const uint16_t *)src;
+            buf = (buf << 16) | *(const uint16_t *)src;
             src += (intptr_t)b->src_xinc;
         }
         for (x = 0; x < xc; x++) {
@@ -109,6 +119,7 @@ void stdl_host_blitter_exec(void)
             *(uint16_t *)dst = (uint16_t)((r & m) | (d & (uint16_t)~m));
             dst += (intptr_t)(last ? b->dst_yinc : b->dst_xinc);
         }
+        src_buffer = buf;
         yc--;
     }
     b->src_addr = src;

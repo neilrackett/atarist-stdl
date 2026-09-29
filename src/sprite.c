@@ -439,7 +439,11 @@ static __attribute__((noinline)) int
 spr_blitter(const uint16_t *fdata, uint32_t rowwords, int xbase, int x,
             int w, int y, int row0, int row1, STDL_Surface *dst)
 {
-    const int np = stdl_planes;
+    /* the planes the CPU loops draw (STDL_PLANE_DISPATCH rounds 1 up
+     * to 2 and 3 to 4): sprite art is not normalised to the budget
+     * when it is loaded, so a sprite with colours past it must come
+     * out the same whichever path draws it */
+    const int np = (stdl_planes + 1) & ~1;
     const int cx1 = dst->clip.x, cx2 = dst->clip.x + dst->clip.w;
     const int h = row1 - row0;
     int vx1 = x > cx1 ? x : cx1;
@@ -561,10 +565,13 @@ void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
             runtime_shift = 1;
             r = phase;
         }
+        /* one mulu.w while both fit sixteen bits; past that - a sheet
+         * of thousands of frames - the rare plain multiply, whose
+         * __mulsi3 is still exact where a 32x16 would cut idx */
         fdata = spr->data
               + ((spr->framesize | idx) <= 0xFFFFu
                  ? stdl_row_off((int)idx, (uint16_t)spr->framesize)
-                 : stdl_mul32x16(spr->framesize, (uint16_t)idx));
+                 : spr->framesize * idx);
     }
     rowwords = (uint32_t)spr->groups * SPR_WORDS;
 

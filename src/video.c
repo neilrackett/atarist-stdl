@@ -45,6 +45,45 @@ const STDL_MachineInfo *STDL_GetMachineInfo(void)
 
 /* ---------------------------------------------------------------- */
 
+/*
+ * Whether this machine has RAM the BLiTTER cannot reach, asked in
+ * supervisor mode. Presence, not what happens to be free: a program
+ * loaded there (ALTLOAD) can hold all of it, and the surfaces it then
+ * allocates are exactly the ones that must stay off the chip. Any one
+ * of these says yes. Mxalloc on a GEMDOS without it returns -32 (no
+ * such function), which reads as none.
+ */
+static int altram_present(uintptr_t phystop)
+{
+    long *jar = *(long **)0x5A0UL;
+    void *probe;
+    int found = 0;
+
+    if (Mxalloc(-1L, 1) > 0) {
+        return 1;                       /* free alt-RAM now */
+    }
+    if ((uintptr_t)&stdl >= phystop) {
+        return 1;                       /* this program lives there */
+    }
+    if (*(volatile uint32_t *)0x5A8UL == 0x1357BD13UL   /* ramvalid */
+        && *(volatile uint32_t *)0x5A4UL > phystop) {   /* ramtop */
+        return 1;                       /* TOS's own fast-RAM record */
+    }
+    if (jar != NULL) {
+        for (; jar[0] != 0; jar += 2) {
+            if (jar[0] == 0x5F465242L) {                /* '_FRB' */
+                return 1;               /* a driver's DMA bounce buffer */
+            }
+        }
+    }
+    probe = malloc(16);                 /* where the heap is now */
+    if (probe != NULL) {
+        found = (uintptr_t)probe >= phystop;
+        free(probe);
+    }
+    return found;
+}
+
 static void detect_machine(void)
 {
     long *jar = *(long **)0x5A0UL;
@@ -264,11 +303,9 @@ int STDL_Init(uint32_t flags)
         stdl.mach.has_blitter = (bm >= 0 && (bm & 2)) ? 1 : 0;
     }
     /* PHYSTOP, in supervisor mode: what the BLiTTER can reach; and
-     * whether there is anything beyond it at all - Mxalloc(-1, 1) is
-     * the largest free alt-RAM block, and arrived with TOS 1.04,
-     * before which there was no alt-RAM to have */
+     * whether there is anything beyond it at all */
     stdl.stram_top = (uintptr_t)*(volatile uint32_t *)0x42EUL;
-    stdl.altram = (uint8_t)(Sversion() >= 0x1900 && Mxalloc(-1L, 1) > 0);
+    stdl.altram = (uint8_t)altram_present(stdl.stram_top);
 
     stdl.initialised = 1;
     old_term = (void (*)(void))Setexc(0x102, (void *)term_handler);

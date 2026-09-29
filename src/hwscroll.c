@@ -129,6 +129,7 @@ static void hws_vbl(void)
     if (req.seq != armed.seq) {
         /* what the counter was reloaded from, three lines ago */
         const uint32_t reloaded = read_base();
+        uint16_t sr;
 
         write_base(req.base);
         /*
@@ -137,13 +138,21 @@ static void hws_vbl(void)
          * too, the offsets go in beside it, and the request is on
          * this frame whole. Otherwise its offsets wait for the next
          * VBL, as above.
+         *
+         * The test and the writes are one masked step. This runs at
+         * the VBL's level 4, and an MFP interrupt taken between them
+         * - TOS's Timer C holds the CPU for two scanlines - could let
+         * the fetch begin first, and the counter would then move
+         * under a frame already being drawn. About 120 cycles masked.
          */
+        sr = stdl_int_off();
         if (read_counter() == reloaded) {
             write_counter(req.base);
             VID_LINEWIDTH = req.lw;
             VID_HSCROLL = req.hs;
             done_seq = req.seq;
         }
+        stdl_int_restore(sr);
         armed = req;
     }
 }

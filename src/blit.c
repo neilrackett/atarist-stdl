@@ -849,7 +849,9 @@ int stdl_blit_force;                /* ignore the size thresholds */
  * moved nothing). Out of line, and only reached without a source
  * rectangle, so a blit that names one pays a single test; anything
  * else it passes on to the general path. With a BLiTTER the general
- * path is faster still (17ms on an STE), so it keeps the copy.
+ * path is faster still (17ms on an STE), so it keeps the copy - when
+ * the chip can reach both surfaces; one in alt-RAM stays here, where
+ * the general path would copy it a row at a time.
  */
 static __attribute__((noinline)) int
 blit_whole(STDL_Surface *src, STDL_Surface *dst, STDL_Rect *dstrect)
@@ -866,7 +868,8 @@ blit_whole(STDL_Surface *src, STDL_Surface *dst, STDL_Rect *dstrect)
         || (src->org_x | src->org_y | dst->org_x | dst->org_y) != 0
         || dst->clip.x != 0 || dst->clip.y != 0
         || dst->clip.w < dst->w || dst->clip.h < dst->h
-        || stdl_planes != 4 || stdl_blitter_allowed()) {
+        || stdl_planes != 4
+        || (stdl_blitter_allowed() && STDL_BLIT_REACHES(src, dst))) {
         return STDL_BlitSurfaceEx(src, NULL, dst, dstrect, 0);
     }
 #ifdef STDL_BLIT_STATS

@@ -97,13 +97,20 @@ static void test_model(void)
     run_model(src, 2, 2, dst, 2, 2, 0x0F0F, 0xFFFF, 0xFFFF, 1, 1, 2, 3, 0);
     CHECK(dst[0] == 0x0101, "one word: %04x", dst[0]);
 
-    /* skew 4, no FXSR: the image moves right four pixels, the first
-     * word taking zeros from the empty buffer on its left */
+    /* skew 4, no FXSR: the image moves right four pixels; the first
+     * word's top four bits are whatever the buffer last held, so
+     * endmask 1 trims them */
     src[0] = 0x1234; src[1] = 0x5678;
     dst[0] = dst[1] = 0;
-    run_model(src, 2, 2, dst, 2, 2, 0xFFFF, 0xFFFF, 0xFFFF, 2, 1, 2, 3, 4);
+    run_model(src, 2, 2, dst, 2, 2, 0x0FFF, 0xFFFF, 0xFFFF, 2, 1, 2, 3, 4);
     CHECK(dst[0] == 0x0123 && dst[1] == 0x4567,
           "skew right: %04x %04x", dst[0], dst[1]);
+    /* ...and they are there: open endmask 1 and the last word fetched
+     * (0x5678) shows its low four bits */
+    dst[0] = dst[1] = 0;
+    run_model(src, 2, 2, dst, 2, 2, 0xFFFF, 0xFFFF, 0xFFFF, 2, 1, 2, 3, 4);
+    CHECK(dst[0] == 0x8123 && dst[1] == 0x4567,
+          "skew carry: %04x %04x", dst[0], dst[1]);
 
     /* FXSR with skew 12 is a move four pixels left: the priming
      * fetch supplies the first word's high half */
@@ -277,7 +284,10 @@ static void library_pass(int budget, int split)
  * ASan this is also the check that a skewed pass reading one word
  * past a sprite's last row stays inside the data's slack.
  */
-static void sprite_pass(int budget)
+/* wide_art: the sprite is built at budget 4 from all sixteen colours
+ * and drawn at `budget` - bank art is not normalised when it loads, so
+ * the BLiTTER must draw the planes the CPU does, not just the budget */
+static void sprite_pass(int budget, int wide_art)
 {
     const int maxcol = 1 << budget;
     unsigned long ops0 = stdl_host_blit_ops;
@@ -297,8 +307,14 @@ static void sprite_pass(int budget)
         int x = (int)(rnd() % (160 + w + 16)) - w - 8;
         int y = (int)(rnd() % (64 + h + 8)) - h - 4;
 
-        randomise(img, maxcol);
-        STDL_SetColourKey(img, 1, (uint8_t)(maxcol - 2));
+        if (wide_art) {
+            STDL_SetPlaneBudget(4);
+            randomise(img, 16);
+            STDL_SetColourKey(img, 1, 14);
+        } else {
+            randomise(img, maxcol);
+            STDL_SetColourKey(img, 1, (uint8_t)(maxcol - 2));
+        }
         randomise(da, maxcol);
         copy_into(db, da);
         clip.x = (int16_t)(rnd() % 40);
@@ -308,6 +324,7 @@ static void sprite_pass(int budget)
         STDL_SetClipRect(da, &clip);
         STDL_SetClipRect(db, &clip);
         spr = STDL_SpriteFromSurface(img, w, pre ? STDL_PRESHIFT : 0);
+        STDL_SetPlaneBudget(budget);
         if (spr == NULL) {
             CHECK(0, "sprite build");
             break;
@@ -318,8 +335,9 @@ static void sprite_pass(int budget)
         STDL_BlitSprite(spr, frame, db, x, y);
         if (!same(da, db)) {
             bad++;
-            CHECK(0, "sprite budget %d w=%d h=%d f=%d/%d pre=%d x=%d y=%d "
-                  "clip=%d,%d %ux%u differs", budget, w, h, frame,
+            CHECK(0, "sprite budget %d%s w=%d h=%d f=%d/%d pre=%d x=%d "
+                  "y=%d clip=%d,%d %ux%u differs", budget,
+                  wide_art ? " (art past it)" : "", w, h, frame,
                   nframes, pre, x, y, clip.x, clip.y, clip.w, clip.h);
         }
         STDL_FreeSprite(spr);
@@ -343,9 +361,11 @@ int main(void)
     library_pass(2, 0);
     library_pass(3, 0);
     library_pass(4, 1);
-    sprite_pass(4);
-    sprite_pass(2);
-    sprite_pass(3);
+    sprite_pass(4, 0);
+    sprite_pass(2, 0);
+    sprite_pass(3, 0);
+    sprite_pass(3, 1);
+    sprite_pass(1, 1);
     stdl_blit_force = 0;
     library_pass(4, 0);         /* the thresholds' own choices */
 

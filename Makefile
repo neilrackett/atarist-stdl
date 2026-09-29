@@ -97,9 +97,17 @@ all: $(LIB) sizecheck $(EXAMPLES) assets
 # draws sprites without them stops paying for them; those two are
 # opt-in objects like surfacefrom.o and drawchar.o and are not
 # counted here, which is where the room this made came from.
+#
+# Raised 33740 -> 34700 the same day, deliberately: STDL_BlitSprite on
+# the BLiTTER (sprite.o +828 bytes, only in programs that draw
+# sprites). Measured on an emulated STE, unshifted sprites averaged
+# over phases are 2.4-3.5x faster (32x32 6.5ms -> 1.8ms) and
+# pre-shifted ones 1.2-1.7x; on a BLiTTER machine PRESHIFT's 16x RAM
+# then buys nothing, which is worth far more than the code to a port
+# that pre-shifted to be fast. A plain ST is unchanged within 1%.
 PIXEL_OBJS = $(addprefix $(OBJDIR)/src/,draw.o blit.o sprite.o \
              surface.o blitter.o)
-PIXEL_MAX  = 33740
+PIXEL_MAX  = 34700
 
 sizecheck: $(PIXEL_OBJS)
 	@n=`$(CROSS)size $(PIXEL_OBJS) | awk 'NR>1 {t+=$$1} END {print t}'`; \
@@ -186,7 +194,8 @@ dist/SFXDEMO.TOS: examples/sfxdemo.c $(LIB)
 # stdl_blit_force is how it reaches the small corner cases the size
 # thresholds would keep on the CPU. Everything else is the normal
 # library.
-STATSOBJS = $(addprefix $(OBJDIR)/stats/src/,blit.o sprite.o draw.o)
+STATSOBJS = $(addprefix $(OBJDIR)/stats/src/,blit.o sprite.o draw.o \
+            blitter.o)
 
 $(OBJDIR)/stats/%.o: %.c
 	@mkdir -p $(dir $@)

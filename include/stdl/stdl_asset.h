@@ -51,7 +51,9 @@ struct STDL_Font {
     uint8_t  *bits;         /* 1bpp glyph rows, glyph-major           */
 };
 
-#define STDL_PRESHIFT 0x0001u  /* 16x RAM for zero-cost unaligned use */
+/* 16x RAM for zero-cost unaligned use on a plain ST; with a BLiTTER
+ * the chip shifts sprites itself and pre-shifting only costs RAM */
+#define STDL_PRESHIFT 0x0001u
 
 /* Build sprites/tilesets in RAM from a surface (mask from colourkey
  * when the surface has one). */

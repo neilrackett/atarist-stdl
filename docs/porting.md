@@ -12,10 +12,13 @@ time, not at runtime.
    enumerate the work.
 3. Replace unsupported calls with STDL primitives.
 4. Replace per-pixel drawing with spans or pre-rendered sprites.
-5. Align sprites to 16px or enable `STDL_PRESHIFT`.
-6. Profile on Mega STE (`dist/TBLITSPD.TOS` gives the baseline;
-   the blitter accelerates large same-phase fills/blits
-   automatically - align to 16px to benefit).
+5. Align sprites to 16px or enable `STDL_PRESHIFT` - on a plain ST.
+   With a BLiTTER the chip shifts sprites and unaligned blits itself
+   and pre-shifting only costs RAM, so a port can pre-shift only when
+   `STDL_GetMachineInfo()->has_blitter` is 0.
+6. Profile on a plain ST first (`MACHINE=st`), then an STE and a Mega
+   STE; `dist/TBLITSPD.TOS` gives a baseline, and the BLiTTER takes
+   large fills, blits and sprites automatically.
 * **Known to affect an open border.** None of these stops a port
   doing any of it - they are measured costs, so you can decide
   what the border is worth in your frame. All are invisible in

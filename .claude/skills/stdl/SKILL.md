@@ -111,7 +111,16 @@ will render wrong. Grep the port for every colour literal before
 choosing N - the maximum index used decides it, not the palette.
 
 Pre-shifted sprites (`STDL_PRESHIFT`) cost 16x RAM and make
-unaligned blits as cheap as aligned ones. Fills and blits are
+unaligned sprites as cheap as aligned ones - on a plain ST. With a
+BLiTTER, `STDL_BlitSprite` hands sprites to the chip, which shifts
+them itself: unshifted sprites averaged over positions measured
+2.4-3.5x faster on an emulated STE (a 32x32 6.5ms -> 1.8ms) and cost
+the same as pre-shifted ones, so there pre-shifting only spends RAM
+(a 32x32 sprite is 15KB pre-shifted, 640 bytes not). A port that
+must run on a plain ST and fit in its RAM can decide at init:
+pre-shift only when `STDL_GetMachineInfo()->has_blitter` is 0. With
+a border open, pre-shifted sprites stay on the CPU, where they are
+faster. Fills and blits are
 BLiTTER-accelerated automatically when the hardware has one and the
 operation is big enough to repay its set-up - unaligned blits too,
 which the BLiTTER shifts itself: on an emulated STE a 64x32

@@ -509,6 +509,14 @@ void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
                      uint16_t em1, uint16_t em3,
                      uint16_t nwords, uint16_t nlines,
                      uint8_t hop, uint8_t op, uint8_t skew);
+
+/* sprites: cells (destination words x rows) from which the BLiTTER
+ * is worth it - pre-shifted or phase 0, shifted by the chip, and
+ * shifted with a border open (pre-shifted ones then stay on the
+ * CPU); see spr_blitter in sprite.c */
+#define STDL_SPR_MIN_CELLS         9
+#define STDL_SPR_SHIFT_MIN_CELLS   4
+#define STDL_SPR_BORDER_MIN_CELLS 32
 /* whether a clipped blit is worth the BLiTTER (blitter.c) */
 int stdl_blitter_wants(int sx, int dx, int w, int h, int masked);
 /*
@@ -550,6 +558,62 @@ extern volatile stdl_host_blitregs_t stdl_host_blit;
 /* runs the operation the registers describe (tests/host/blitmodel.c) */
 void stdl_host_blitter_exec(void);
 #endif
+
+/*
+ * The BLiTTER's registers, and one pass written inline: blitter.c and
+ * sprite.c's BLiTTER path both drive the chip. A pass with no border
+ * policy installed - the usual case - is a handful of register writes
+ * and a poll, written where a caller issues several in a row; with a
+ * policy it may have to be split around a border window, which is
+ * stdl_blitter_run's job.
+ */
+#ifdef __m68k__
+typedef struct {
+    uint16_t halftone[16];
+    int16_t  src_xinc;
+    int16_t  src_yinc;
+    uint32_t src_addr;
+    uint16_t endmask1;
+    uint16_t endmask2;
+    uint16_t endmask3;
+    int16_t  dst_xinc;
+    int16_t  dst_yinc;
+    uint32_t dst_addr;
+    uint16_t xcount;
+    uint16_t ycount;
+    uint8_t  hop;
+    uint8_t  op;
+    volatile uint8_t ctrl;
+    uint8_t  skew;
+} stdl_blitregs_t;
+#define STDL_BLITREGS ((volatile stdl_blitregs_t *)0xFFFF8A00UL)
+/* the chip runs by itself once started */
+#define STDL_BLIT_STARTED() ((void)0)
+#else
+typedef stdl_host_blitregs_t stdl_blitregs_t;
+#define STDL_BLITREGS (&stdl_host_blit)
+#define STDL_BLIT_STARTED() stdl_host_blitter_exec()
+#endif
+
+static __inline__ __attribute__((always_inline))
+void stdl_blit_pass(uintptr_t src, uintptr_t dst, uint16_t nwords,
+                    uint16_t nlines, uint8_t hop)
+{
+    volatile stdl_blitregs_t *b = STDL_BLITREGS;
+
+    if (stdl_blit_policy != NULL) {
+        stdl_blitter_run(src, dst, nwords, nlines, hop);
+        return;
+    }
+    b->src_addr = src;
+    b->dst_addr = dst;
+    b->xcount = nwords;
+    b->ycount = nlines;
+    b->ctrl = 0xC0;                     /* start, hog */
+    STDL_BLIT_STARTED();
+    while ((b->ctrl & 0x80) || b->ycount != 0)
+        ;
+}
 
 #define STDL_BLIT_HOP_ONES 0
 #define STDL_BLIT_HOP_SRC  2

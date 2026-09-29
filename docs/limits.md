@@ -177,5 +177,6 @@ stop trying and redesign instead.
   `STDL_UseBlitter(0)` forces the CPU paths, and BLITCHK.TOS proves
   both paths byte-identical on target. The BLiTTER reads only ST
   RAM: on a machine with alt-RAM, a surface allocated there takes
-  the CPU paths. On a plain ST, pre-shifted sprites remain the
-  designed answer for free positioning.
+  the CPU paths. Sprites go to the BLiTTER too, shifted by the chip,
+  so pre-shifting pays only on a plain ST, where pre-shifted sprites
+  remain the designed answer for free positioning.

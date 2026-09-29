@@ -52,6 +52,50 @@ static STDL_Surface *make_src(int keyed)
     return s;
 }
 
+/*
+ * Sprites for the comparison: widths that land differently on groups
+ * (5, 16, 23, 32, 48, 64, 80), a three-frame strip, and each both
+ * unshifted - the BLiTTER shifts those itself - and pre-shifted.
+ */
+#define NSPR 16
+static STDL_Sprite *sprs[NSPR];
+static int nspr;
+
+static void make_sprites(void)
+{
+    static const int ws[8] = { 5, 16, 23, 32, 48, 64, 80, 16 };
+    int k, pre;
+
+    nspr = 0;
+    for (k = 0; k < 8; k++) {
+        int nframes = (k == 7) ? 3 : 1;
+        int w = ws[k], h = 3 + (int)(rnd() % 28);
+        STDL_Surface *s = STDL_CreateSurface(w * nframes, h);
+        int x, y;
+
+        for (y = 0; y < h; y++) {
+            for (x = 0; x < w * nframes; x++) {
+                STDL_PutPixel(s, x, y, (uint8_t)(rnd() % maxcol));
+            }
+        }
+        STDL_SetColourKey(s, 1, 0);
+        for (pre = 0; pre <= 1; pre++) {
+            sprs[nspr++] = STDL_SpriteFromSurface(s, w,
+                                                  pre ? STDL_PRESHIFT : 0);
+        }
+        STDL_FreeSurface(s);
+    }
+}
+
+static void free_sprites(void)
+{
+    int k;
+    for (k = 0; k < nspr; k++) {
+        STDL_FreeSprite(sprs[k]);
+    }
+    nspr = 0;
+}
+
 static int compare(const STDL_Surface *a, const STDL_Surface *b)
 {
     if (memcmp(a->pixels, b->pixels,
@@ -88,13 +132,36 @@ static int compare_pass(void)
 
 #ifdef STDL_BLIT_STATS
     stdl_blit_blitter = 0;
+    stdl_spr_blitter = 0;
 #endif
+    make_sprites();
     for (i = 0; i < ITERATIONS; i++) {
-        int op = (int)(rnd() % 4);
+        int op = (int)(rnd() % 5);
         int phase = (int)(rnd() & 15);
         STDL_Rect r, r2;
 
-        if (op == 3) {
+        if (op == 4) {
+            /* a sprite, anywhere near the surface, through a random
+             * clip rectangle */
+            STDL_Sprite *spr = sprs[rnd() % (unsigned)nspr];
+            int frame = (int)(rnd() % spr->nframes);
+            int x = (int)(rnd() % 420) - 90;
+            int y = (int)(rnd() % 200) - 30;
+            STDL_Rect clip, all = { 0, 0, 320, 160 };
+
+            clip.x = (int16_t)(rnd() % 60);
+            clip.y = (int16_t)(rnd() % 30);
+            clip.w = (uint16_t)(20 + rnd() % 260);
+            clip.h = (uint16_t)(20 + rnd() % 130);
+            STDL_SetClipRect(da, &clip);
+            STDL_SetClipRect(db, &clip);
+            STDL_UseBlitter(0);
+            STDL_BlitSprite(spr, frame, da, x, y);
+            STDL_UseBlitter(1);
+            STDL_BlitSprite(spr, frame, db, x, y);
+            STDL_SetClipRect(da, &all);
+            STDL_SetClipRect(db, &all);
+        } else if (op == 3) {
             /* whole groups: the fills whose plane words are all the
              * same (0, 15) take their own routes on both paths */
             static const uint8_t cols[4] = { 0, 15, 0, 5 };
@@ -172,13 +239,15 @@ static int compare_pass(void)
      * much of the work it did, and fail a forced pass on a machine
      * that has one if it did none.
      */
-    printf("  BLiTTER blit rows: %lu\n", stdl_blit_blitter);
+    printf("  BLiTTER blit rows: %lu, sprite rows: %lu\n",
+           stdl_blit_blitter, stdl_spr_blitter);
     if (stdl_blit_force && STDL_GetMachineInfo()->has_blitter
-        && stdl_blit_blitter == 0) {
-        printf("FAIL: forced pass, but no blit reached the BLiTTER\n");
+        && (stdl_blit_blitter == 0 || stdl_spr_blitter == 0)) {
+        printf("FAIL: forced pass, but the BLiTTER was never used\n");
         failures++;
     }
 #endif
+    free_sprites();
 
     STDL_FreeSurface(src_plain);
     STDL_FreeSurface(src_keyed);

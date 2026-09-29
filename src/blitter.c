@@ -23,65 +23,16 @@
 
 #include "stdl_internal.h"
 
-#ifdef __m68k__
-typedef struct {
-    uint16_t halftone[16];
-    int16_t  src_xinc;
-    int16_t  src_yinc;
-    uint32_t src_addr;
-    uint16_t endmask1;
-    uint16_t endmask2;
-    uint16_t endmask3;
-    int16_t  dst_xinc;
-    int16_t  dst_yinc;
-    uint32_t dst_addr;
-    uint16_t xcount;
-    uint16_t ycount;
-    uint8_t  hop;
-    uint8_t  op;
-    volatile uint8_t ctrl;
-    uint8_t  skew;
-} blitregs_t;
-
-#define BLIT ((volatile blitregs_t *)0xFFFF8A00UL)
-/* the chip runs by itself once started */
-#define BLIT_STARTED() ((void)0)
-#else
-/* host: the registers are a struct, and starting an operation runs
- * the software model to completion (see stdl_internal.h) */
-typedef stdl_host_blitregs_t blitregs_t;
-#define BLIT (&stdl_host_blit)
-#define BLIT_STARTED() stdl_host_blitter_exec()
-#endif
+/* the registers and the inline pass live in stdl_internal.h, shared
+ * with sprite.c's BLiTTER path */
+typedef stdl_blitregs_t blitregs_t;
+#define BLIT STDL_BLITREGS
+#define BLIT_STARTED() STDL_BLIT_STARTED()
 
 /* STDL_UseBlitter's setting; stdl_blitter_active() reads it inline */
 uint8_t stdl_blit_user = 1;
 
-/*
- * One pass when no border policy is installed - the usual case -
- * written inline where a caller issues several in a row. With a
- * policy the pass may have to be split around a border window, and
- * that is stdl_blitter_run's job.
- */
-static __inline__ __attribute__((always_inline))
-void blit_pass(uintptr_t src, uintptr_t dst, uint16_t nwords,
-               uint16_t nlines, uint8_t hop)
-{
-    volatile blitregs_t *b = BLIT;
-
-    if (stdl_blit_policy != NULL) {
-        stdl_blitter_run(src, dst, nwords, nlines, hop);
-        return;
-    }
-    b->src_addr = src;
-    b->dst_addr = dst;
-    b->xcount = nwords;
-    b->ycount = nlines;
-    b->ctrl = 0xC0;                     /* start, hog */
-    BLIT_STARTED();
-    while ((b->ctrl & 0x80) || b->ycount != 0)
-        ;
-}
+#define blit_pass stdl_blit_pass
 
 /*
  * Whether a clipped blit is worth the BLiTTER, by its shape (the

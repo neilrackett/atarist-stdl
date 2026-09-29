@@ -411,11 +411,117 @@ STDL_PLANE_INLINE void spr_rows_shift(const uint16_t *srow,
     }
 }
 
+/*
+ * A sprite on the BLiTTER, or 0 to leave it to the CPU.
+ *
+ * STDL's sprite layout is what the chip wants already: per group
+ * [mask][p0][p1][p2][p3], planes clear under the mask, so with a
+ * source x increment of 10 the mask words form one plane of their own
+ * and each colour plane another. Two passes a plane: AND the mask in
+ * (the destination keeps what the mask keeps), then - the operation
+ * switched to OR, every other register as it was - OR the colour in.
+ * An unshifted sprite at an odd x is shifted by the chip (SKEW, FXSR
+ * for a left shift, never NFSR) exactly as a surface blit is; a
+ * pre-shifted variant needs no shift at all. The one source word a
+ * skewed line may read past its span is in the next group or, on the
+ * last row, the slack every sprite's data carries (SPR_SLACK).
+ *
+ * x and w are the sprite's own pixels on the destination; xbase is
+ * where the data's pixel 0 lands (x itself, or the group edge for a
+ * pre-shifted variant). Rows row0..row1 are already clipped.
+ *
+ * Here with the sprites rather than in blitter.c, which every program
+ * that blits or fills links: only a program that draws sprites pays
+ * for this. Out of line, so the CPU loops in STDL_BlitSprite are
+ * compiled as if it were not there.
+ */
+static __attribute__((noinline)) int
+spr_blitter(const uint16_t *fdata, uint32_t rowwords, int xbase, int x,
+            int w, int y, int row0, int row1, STDL_Surface *dst)
+{
+    const int np = stdl_planes;
+    const int cx1 = dst->clip.x, cx2 = dst->clip.x + dst->clip.w;
+    const int h = row1 - row0;
+    int vx1 = x > cx1 ? x : cx1;
+    int vx2 = x + w < cx2 ? x + w : cx2;
+    int sx, dx, sph, dph, dn, fxsr, reads, p;
+    uint8_t skew;
+    uint16_t lm, rm;
+    uintptr_t sbase, dbase;
+    int16_t s_yinc, d_yinc;
+
+    /* with a border open an aligned sprite stays on the CPU (below):
+     * say so before working anything out - aligned exactly when the
+     * data's pixel 0 lands on a group edge */
+    if (stdl_blit_policy != NULL && (xbase & 15) == 0
+        && !STDL_BLIT_FORCED()) {
+        return 0;
+    }
+    if (vx1 >= vx2) {
+        return 1;                       /* nothing to draw either way */
+    }
+    w = vx2 - vx1;
+    sx = vx1 - xbase;
+    dx = vx1;
+    sph = sx & 15;
+    dph = dx & 15;
+    dn = (dph + w + 15) >> 4;
+    /*
+     * Measured on an emulated STE, the BLiTTER wins every sprite
+     * SPRCOST draws, down to 16x16 at phase 0 (796us against 947),
+     * and unshifted ones by 2.7-3.7x; the fit puts the crossover near
+     * eight cells. With a border open every pass first asks the
+     * placement policy, which a pre-shifted sprite's eight passes do
+     * not repay (13% slower than the CPU at 32x32), while an
+     * unshifted one still wins by 1.8x from the CPU's shift chain.
+     */
+    if (!STDL_BLIT_FORCED()) {
+        const uint32_t cells = stdl_row_off(dn, (uint16_t)h);
+
+        if (stdl_blit_policy != NULL
+            ? (sph == dph || cells < STDL_SPR_BORDER_MIN_CELLS)
+            : cells < (sph != dph ? STDL_SPR_SHIFT_MIN_CELLS
+                                  : STDL_SPR_MIN_CELLS)) {
+            return 0;
+        }
+    }
+    if (stdl.altram && (!stdl_blit_reach(fdata)
+                        || !stdl_blit_reach(dst->pixels))) {
+        return 0;
+    }
+    fxsr = sph > dph;
+    reads = dn + fxsr;
+    skew = (uint8_t)((fxsr << 7) | ((dph - sph) & 15));
+    lm = (uint16_t)(0xFFFFu >> dph);
+    rm = (uint16_t)(0xFFFFu << (15 - ((dph + w - 1) & 15)));
+    sbase = (uintptr_t)(fdata + stdl_row_off(row0, (uint16_t)rowwords))
+          + (uintptr_t)((sx >> 4) * 10);
+    dbase = (uintptr_t)(dst->pixels + stdl_row_off(y + row0, dst->stride))
+          + (uintptr_t)((dx >> 4) * 8);
+    s_yinc = (int16_t)(rowwords * 2 - (reads - 1) * 10);
+    d_yinc = (int16_t)(dst->stride - (dn - 1) * 8);
+
+    stdl_blitter_setup(10, s_yinc, 8, d_yinc, lm, rm, (uint16_t)dn,
+                       STDL_BLIT_HOP_SRC, STDL_BLIT_OP_AND, skew);
+    for (p = 0; p < np; p++) {
+        stdl_blit_pass(sbase, dbase + (uintptr_t)(p * 2), (uint16_t)dn,
+                  (uint16_t)h, STDL_BLIT_HOP_SRC);
+    }
+    STDL_BLIT_SET_OP(STDL_BLIT_OP_OR);
+    for (p = 0; p < np; p++) {
+        stdl_blit_pass(sbase + (uintptr_t)(2 + p * 2),
+                  dbase + (uintptr_t)(p * 2), (uint16_t)dn, (uint16_t)h,
+                  STDL_BLIT_HOP_SRC);
+    }
+    return 1;
+}
+
 #ifdef STDL_BLIT_STATS
 /* see stdl_types.h; a normal build has none of these */
 unsigned long stdl_spr_calls;       /* entries                    */
 unsigned long stdl_spr_rows;        /* rows drawn, any path       */
 unsigned long stdl_spr_shift;       /* rows through runtime shift */
+unsigned long stdl_spr_blitter;     /* rows through the BLiTTER   */
 #endif
 
 void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
@@ -473,6 +579,22 @@ void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
     if (y < cy1) row0 = cy1 - y;
     if (y + row1 > cy2) row1 = cy2 - y;
     if (row0 >= row1) {
+        return;
+    }
+
+    /*
+     * The BLiTTER, where there is one: it clips horizontally itself,
+     * shifts an unshifted sprite, and decides from the size whether
+     * to take it at all (spr_blitter). Out of line, so this function
+     * holds a byte test and a call for it and nothing else.
+     */
+    if (stdl_blitter_active()
+        && spr_blitter(fdata, rowwords,
+                               spr->nvariants == 16 ? x - phase : x, x,
+                               spr->w, y, row0, row1, dst)) {
+#ifdef STDL_BLIT_STATS
+        stdl_spr_blitter += (unsigned long)(row1 - row0);
+#endif
         return;
     }
 

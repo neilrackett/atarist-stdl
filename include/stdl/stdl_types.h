@@ -139,6 +139,7 @@ extern unsigned long stdl_spr_calls;     /* STDL_BlitSprite entries */
 extern unsigned long stdl_spr_rows;      /* sprite rows drawn    */
 extern unsigned long stdl_spr_shift;     /* ... of which through
                                           * the runtime shift    */
+extern unsigned long stdl_spr_blitter;   /* ... through the BLiTTER */
 /* Non-zero sends every operation the BLiTTER *could* do to it,
  * ignoring the size thresholds that normally keep small ones on the
  * CPU - never the exclusions that correctness depends on. It exists

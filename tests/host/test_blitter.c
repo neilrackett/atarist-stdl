@@ -270,6 +270,69 @@ static void library_pass(int budget, int split)
     STDL_FreeSurface(db);
 }
 
+/*
+ * Sprites: the CPU loops against the BLiTTER's two passes a plane,
+ * unshifted (the chip shifts) and pre-shifted, widths 1-80 with
+ * multi-frame strips, random positions and clip rectangles. Under
+ * ASan this is also the check that a skewed pass reading one word
+ * past a sprite's last row stays inside the data's slack.
+ */
+static void sprite_pass(int budget)
+{
+    const int maxcol = 1 << budget;
+    unsigned long ops0 = stdl_host_blit_ops;
+    int i, bad = 0;
+
+    STDL_SetPlaneBudget(budget);
+    for (i = 0; i < 150 && bad < 4; i++) {
+        int w = 1 + (int)(rnd() % 80), h = 1 + (int)(rnd() % 24);
+        int nframes = ((w & 15) == 0 && (rnd() & 1)) ? 3 : 1;
+        int frame = (int)(rnd() % nframes);
+        int pre = (int)(rnd() & 1);
+        STDL_Surface *img = STDL_CreateSurface(w * nframes, h);
+        STDL_Surface *da = STDL_CreateSurface(160, 64);
+        STDL_Surface *db = STDL_CreateSurface(160, 64);
+        STDL_Sprite *spr;
+        STDL_Rect clip;
+        int x = (int)(rnd() % (160 + w + 16)) - w - 8;
+        int y = (int)(rnd() % (64 + h + 8)) - h - 4;
+
+        randomise(img, maxcol);
+        STDL_SetColourKey(img, 1, (uint8_t)(maxcol - 2));
+        randomise(da, maxcol);
+        copy_into(db, da);
+        clip.x = (int16_t)(rnd() % 40);
+        clip.y = (int16_t)(rnd() % 20);
+        clip.w = (uint16_t)(10 + rnd() % 120);
+        clip.h = (uint16_t)(5 + rnd() % 44);
+        STDL_SetClipRect(da, &clip);
+        STDL_SetClipRect(db, &clip);
+        spr = STDL_SpriteFromSurface(img, w, pre ? STDL_PRESHIFT : 0);
+        if (spr == NULL) {
+            CHECK(0, "sprite build");
+            break;
+        }
+        STDL_UseBlitter(0);
+        STDL_BlitSprite(spr, frame, da, x, y);
+        STDL_UseBlitter(1);
+        STDL_BlitSprite(spr, frame, db, x, y);
+        if (!same(da, db)) {
+            bad++;
+            CHECK(0, "sprite budget %d w=%d h=%d f=%d/%d pre=%d x=%d y=%d "
+                  "clip=%d,%d %ux%u differs", budget, w, h, frame,
+                  nframes, pre, x, y, clip.x, clip.y, clip.w, clip.h);
+        }
+        STDL_FreeSprite(spr);
+        STDL_FreeSurface(img);
+        STDL_FreeSurface(da);
+        STDL_FreeSurface(db);
+    }
+    CHECK(stdl_host_blit_ops > ops0 + 40,
+          "sprites budget %d: only %lu BLiTTER operations ran", budget,
+          stdl_host_blit_ops - ops0);
+    STDL_SetPlaneBudget(4);
+}
+
 int main(void)
 {
     test_model();
@@ -280,6 +343,9 @@ int main(void)
     library_pass(2, 0);
     library_pass(3, 0);
     library_pass(4, 1);
+    sprite_pass(4);
+    sprite_pass(2);
+    sprite_pass(3);
     stdl_blit_force = 0;
     library_pass(4, 0);         /* the thresholds' own choices */
 

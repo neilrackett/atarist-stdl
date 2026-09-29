@@ -705,7 +705,7 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                     : stdl_row_off(h, (uint16_t)(STDL_BLIT_CPU_ROW
                            + STDL_BLIT_CPU_CELL * ng))
                       > STDL_BLIT_SETUP))
-            && stdl_blit_surf_reach(src) && stdl_blit_surf_reach(dst)) {
+            && STDL_BLIT_REACHES(src, dst)) {
 #ifdef STDL_BLIT_STATS
             stdl_blit_blitter += (unsigned long)h;
             stdl_blit_rows += (unsigned long)h;

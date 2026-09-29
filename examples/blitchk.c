@@ -86,12 +86,32 @@ static int compare_pass(void)
     STDL_CreateMask(da, 1);
     STDL_CreateMask(db, 1);
 
+#ifdef STDL_BLIT_STATS
+    stdl_blit_blitter = 0;
+#endif
     for (i = 0; i < ITERATIONS; i++) {
-        int op = (int)(rnd() % 3);
+        int op = (int)(rnd() % 4);
         int phase = (int)(rnd() & 15);
         STDL_Rect r, r2;
 
-        if (op == 0) {
+        if (op == 3) {
+            /* whole groups: the fills whose plane words are all the
+             * same (0, 15) take their own routes on both paths */
+            static const uint8_t cols[4] = { 0, 15, 0, 5 };
+            uint8_t col = cols[rnd() & 3];
+            if (col >= maxcol) {
+                col = 0;
+            }
+            r.x = (int16_t)(16 * (int)(rnd() % 22) - 16);
+            r.y = (int16_t)((int)(rnd() % 180) - 10);
+            r.w = (uint16_t)(16 * (1 + rnd() % 21));
+            r.h = (uint16_t)(1 + rnd() % 100);
+            r2 = r;
+            STDL_UseBlitter(0);
+            STDL_FillRect(da, &r, col);
+            STDL_UseBlitter(1);
+            STDL_FillRect(db, &r2, col);
+        } else if (op == 0) {
             /* fill: random rect, random colour or transparent */
             uint8_t col = (uint8_t)(rnd() % (maxcol + 1));
             if (col == maxcol) {
@@ -143,6 +163,20 @@ static int compare_pass(void)
     printf(failures == 0 ? "PASS: %d operations identical\n"
                          : "FAIL: %d mismatches in %d ops\n",
            failures == 0 ? ITERATIONS : failures, ITERATIONS);
+#ifdef STDL_BLIT_STATS
+    /*
+     * A comparison the BLiTTER never took part in compares the CPU
+     * with itself and passes whatever the BLiTTER code does. Say how
+     * much of the work it did, and fail a forced pass on a machine
+     * that has one if it did none.
+     */
+    printf("  BLiTTER blit rows: %lu\n", stdl_blit_blitter);
+    if (stdl_blit_force && STDL_GetMachineInfo()->has_blitter
+        && stdl_blit_blitter == 0) {
+        printf("FAIL: forced pass, but no blit reached the BLiTTER\n");
+        failures++;
+    }
+#endif
 
     STDL_FreeSurface(src_plain);
     STDL_FreeSurface(src_keyed);
@@ -220,17 +254,46 @@ int main(void)
      * as a mismatch against the CPU path immediately. The timing
      * lines show what the budget is worth on this machine.
      */
-    printf("plane budget 4:\n");
-    failures = compare_pass();
-    timing_pass("budget 4:");
+    /*
+     * Each budget twice: once as the library chooses, and once with
+     * every operation the BLiTTER could do sent to it whatever its
+     * size (stdl_blit_force, a stats-build variable), so the corner
+     * cases a size threshold keeps on the CPU - one-word rows, clipped
+     * edges - are compared too. Budget 3 as well as 2: the CPU rounds
+     * it up to four planes while the BLiTTER loops over three.
+     */
+    failures = 0;
+    {
+        static const int budgets[3] = { 4, 2, 3 };
+        int b, forced;
 
-    printf("plane budget 2:\n");
-    STDL_SetPlaneBudget(2);
-    maxcol = 4;
-    failures += compare_pass();
-    timing_pass("budget 2:");
-    STDL_SetPlaneBudget(4);
-    maxcol = 16;
+        for (b = 0; b < 3; b++) {
+            STDL_SetPlaneBudget(budgets[b]);
+            maxcol = 1 << budgets[b];
+            for (forced = 0; forced <= 1; forced++) {
+                printf("plane budget %d%s:\n", budgets[b],
+                       forced ? ", BLiTTER forced" : "");
+#ifdef STDL_BLIT_STATS
+                stdl_blit_force = forced;
+#else
+                if (forced) {
+                    continue;
+                }
+#endif
+                failures += compare_pass();
+            }
+#ifdef STDL_BLIT_STATS
+            stdl_blit_force = 0;
+#endif
+            if (budgets[b] != 3) {
+                char label[16];
+                sprintf(label, "budget %d:", budgets[b]);
+                timing_pass(label);
+            }
+        }
+        STDL_SetPlaneBudget(4);
+        maxcol = 16;
+    }
 
     /*
      * On a Mega STE, what the 16MHz clock and its cache are worth

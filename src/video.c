@@ -263,8 +263,12 @@ int STDL_Init(uint32_t flags)
         long bm = Blitmode(-1);
         stdl.mach.has_blitter = (bm >= 0 && (bm & 2)) ? 1 : 0;
     }
-    /* PHYSTOP, in supervisor mode: what the BLiTTER can reach */
+    /* PHYSTOP, in supervisor mode: what the BLiTTER can reach; and
+     * whether there is anything beyond it at all - Mxalloc(-1, 1) is
+     * the largest free alt-RAM block, and arrived with TOS 1.04,
+     * before which there was no alt-RAM to have */
     stdl.stram_top = (uintptr_t)*(volatile uint32_t *)0x42EUL;
+    stdl.altram = (uint8_t)(Sversion() >= 0x1900 && Mxalloc(-1L, 1) > 0);
 
     stdl.initialised = 1;
     old_term = (void (*)(void))Setexc(0x102, (void *)term_handler);

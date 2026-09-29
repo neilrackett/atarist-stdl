@@ -186,22 +186,37 @@ static void fill_rows(STDL_Surface *s, int x1, int x2, int y1,
         && (STDL_BLIT_FORCED()
             || stdl_row_off(ng, (uint16_t)rows)
                >= STDL_BLIT_FILL_MIN_CELLS)
-        /* inline, not stdl_blit_surf_reach(): a call in this test
-         * made small CPU fills 1-2% slower on a plain ST, where it is
-         * never even reached, through register allocation */
-        && stdl_blit_reach(STDL_PIX_END(s))
-        && (mrow == NULL || stdl_blit_reach(STDL_MASK_END(s)))) {
+        && STDL_BLIT_REACHES(s, s)) {
         uintptr_t base = (uintptr_t)(row + g0 * 8);
         int16_t yinc = (int16_t)(s->stride - (ng - 1) * 8);
 
-        for (p = 0; p < np; p++) {
-            /* HOP all-ones: OP_SRC writes ones, OP_ZERO zeros */
-            stdl_blitter_go(0, 0, 0, base + (uintptr_t)(p * 2),
-                            8, yinc, lm, rm,
-                            (uint16_t)ng, (uint16_t)rows,
+        if ((lm & rm) == 0xFFFFu
+            && (col == 0 || (col == 15 && np == 4))) {
+            /*
+             * Whole groups in 0 or 15: every plane word the same, so
+             * one operation walks all four planes of each group (x
+             * increment 2) - the BLiTTER's version of the memset
+             * below. Out-of-budget planes get zeros they already hold.
+             */
+            const uint16_t nw = (uint16_t)(ng * 4);
+            stdl_blitter_go(0, 0, 0, base, 2,
+                            (int16_t)(s->stride - (nw - 1) * 2),
+                            0xFFFFu, 0xFFFFu, nw, (uint16_t)rows,
                             STDL_BLIT_HOP_ONES,
-                            pw[p] ? STDL_BLIT_OP_SRC
-                                  : STDL_BLIT_OP_ZERO, 0);
+                            col ? STDL_BLIT_OP_ONES : STDL_BLIT_OP_ZERO,
+                            0);
+        } else {
+            /* one setup; each plane changes only the operation -
+             * HOP all-ones: OP_ONES writes ones, OP_ZERO zeros */
+            stdl_blitter_setup(0, 0, 8, yinc, lm, rm, (uint16_t)ng,
+                               STDL_BLIT_HOP_ONES, STDL_BLIT_OP_ZERO, 0);
+            for (p = 0; p < np; p++) {
+                STDL_BLIT_SET_OP(pw[p] ? STDL_BLIT_OP_ONES
+                                       : STDL_BLIT_OP_ZERO);
+                stdl_blitter_run(0, base + (uintptr_t)(p * 2),
+                                 (uint16_t)ng, (uint16_t)rows,
+                                 STDL_BLIT_HOP_ONES);
+            }
         }
         if (mrow != NULL) {
             stdl_blitter_go(0, 0, 0, (uintptr_t)(mrow + g0 * 2),

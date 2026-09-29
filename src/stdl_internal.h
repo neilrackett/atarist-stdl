@@ -246,6 +246,9 @@ typedef struct {
     /* PHYSTOP at STDL_Init: the top of ST RAM, the only memory the
      * BLiTTER (and the Shifter, and the sound DMA) can reach */
     uintptr_t        stram_top;
+    /* whether the machine has alt-RAM at all; without it nothing a
+     * program allocates can be out of the BLiTTER's reach */
+    uint8_t          altram;
 } stdl_state_t;
 
 extern stdl_state_t stdl;
@@ -552,21 +555,22 @@ void stdl_host_blitter_exec(void);
 #endif
 
 /*
- * Whether a block ending at `end` is somewhere the BLiTTER can
+ * Whether a block starting at `p` is somewhere the BLiTTER can
  * reach. It sits on the ST bus and sees ST RAM only; a surface a
  * program allocated with plain malloc on a machine with alt-RAM (an
  * STE with an accelerator, say) may not be there, and the chip would
  * then read and write whatever ST RAM aliases it - garbage, with no
- * error. ST RAM starts at 0, so a block whose end is at or below
- * PHYSTOP lies wholly inside it: one compare. Everywhere the library
- * chooses the BLiTTER asks this first and takes the CPU path if not.
+ * error. The start is enough: ST RAM ends at 14MB at most and alt-RAM
+ * begins at 16MB, so no allocation straddles the two. One compare,
+ * made only once an operation has chosen the BLiTTER; the CPU path
+ * takes whatever it refuses.
  */
-static __inline__ int stdl_blit_reach(const void *end)
+static __inline__ int stdl_blit_reach(const void *p)
 {
 #ifdef __m68k__
-    return (uintptr_t)end <= stdl.stram_top;
+    return (uintptr_t)p < stdl.stram_top;
 #else
-    (void)end;
+    (void)p;
     return 1;
 #endif
 }
@@ -579,12 +583,20 @@ static __inline__ int stdl_blit_reach(const void *end)
  */
 #define SPR_SLACK 10
 
-/* a surface's pixels and mask both within reach (blitter.c) */
-int stdl_blit_surf_reach(const STDL_Surface *s);
-/* the end of a surface's pixel block, and of its mask block */
-#define STDL_PIX_END(s) ((s)->pixels + stdl_row_off((s)->h, (s)->stride))
-#define STDL_MASK_END(s) \
-    ((s)->mask + stdl_row_off((s)->h, (s)->maskstride))
+/* a surface's pixels and mask both within reach */
+#define STDL_SURF_REACH(s) \
+    (stdl_blit_reach((s)->pixels) \
+     && ((s)->mask == NULL || stdl_blit_reach((s)->mask)))
+/*
+ * Whether the BLiTTER may take an operation on these surfaces, as
+ * far as memory goes. Almost every machine with a BLiTTER has no
+ * alt-RAM, and there the answer is yes without looking at the
+ * surfaces: asked of every surface, the four compares cost BLiTTER
+ * blits 3% on an STE, through what they did to the register
+ * allocation around them.
+ */
+#define STDL_BLIT_REACHES(a, b) \
+    (!stdl.altram || (STDL_SURF_REACH(a) && STDL_SURF_REACH(b)))
 
 #define STDL_BLIT_FILL_MIN_CELLS   32   /* fill: ng * rows          */
 

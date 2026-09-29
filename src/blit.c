@@ -581,51 +581,68 @@ static __inline__ void blit_merge4(uint16_t *dg, const uint16_t *sp,
 }
 
 /*
- * An opaque group of the shifted blit - every middle group of an
- * unmasked blit, and the solid inside of a masked one: the same
- * windows and shifts as blit_merge4, stored without reading the
- * destination or masking, which is five instructions a plane fewer.
- * The CPU's version of the BLiTTER skipping the destination read
- * wherever its endmask is all ones.
+ * The opaque middle of a shifted row - every middle group of an
+ * unmasked blit: n >= 1 groups, each built from the same windows and
+ * shifts as blit_merge4 but stored without reading the destination or
+ * masking, the CPU's version of the BLiTTER skipping the destination
+ * read wherever its endmask is all ones. One loop with both pointers
+ * post-incrementing - the second word of each window is 6(a1) once the
+ * first has been taken with (a1)+ - where a one-group store per call
+ * added two pointer bumps and a loop test to every group. The pointers
+ * come back at the group after the run.
  */
-static __inline__ void blit_store4(uint16_t *dg, const uint16_t *sp,
-                                   int rr)
+static __inline__ void blit_store_run(uint16_t **dgp,
+                                      const uint16_t **spp, int rr, int n)
 {
 #ifdef __m68k__
+    uint16_t *dg = *dgp;
+    const uint16_t *sp = *spp;
+    int16_t cnt = (int16_t)(n - 1);
+
     __asm__ volatile(
-        "move.w (%1),%%d0\n\t"
+        "1:\n\t"
+        "move.w (%1)+,%%d0\n\t"
         "swap   %%d0\n\t"
-        "move.w 8(%1),%%d0\n\t"
-        "lsr.l  %2,%%d0\n\t"
-        "move.w %%d0,(%0)\n\t"
-
-        "move.w 2(%1),%%d0\n\t"
-        "swap   %%d0\n\t"
-        "move.w 10(%1),%%d0\n\t"
-        "lsr.l  %2,%%d0\n\t"
-        "move.w %%d0,2(%0)\n\t"
-
-        "move.w 4(%1),%%d0\n\t"
-        "swap   %%d0\n\t"
-        "move.w 12(%1),%%d0\n\t"
-        "lsr.l  %2,%%d0\n\t"
-        "move.w %%d0,4(%0)\n\t"
-
         "move.w 6(%1),%%d0\n\t"
+        "lsr.l  %3,%%d0\n\t"
+        "move.w %%d0,(%0)+\n\t"
+        "move.w (%1)+,%%d0\n\t"
         "swap   %%d0\n\t"
-        "move.w 14(%1),%%d0\n\t"
-        "lsr.l  %2,%%d0\n\t"
-        "move.w %%d0,6(%0)"
-        :
-        : "a"(dg), "a"(sp), "d"(rr)
+        "move.w 6(%1),%%d0\n\t"
+        "lsr.l  %3,%%d0\n\t"
+        "move.w %%d0,(%0)+\n\t"
+        "move.w (%1)+,%%d0\n\t"
+        "swap   %%d0\n\t"
+        "move.w 6(%1),%%d0\n\t"
+        "lsr.l  %3,%%d0\n\t"
+        "move.w %%d0,(%0)+\n\t"
+        "move.w (%1)+,%%d0\n\t"
+        "swap   %%d0\n\t"
+        "move.w 6(%1),%%d0\n\t"
+        "lsr.l  %3,%%d0\n\t"
+        "move.w %%d0,(%0)+\n\t"
+        "dbf    %2,1b"
+        : "+a"(dg), "+a"(sp), "+d"(cnt)
+        : "d"(rr)
         : "d0", "memory", "cc");
+    *dgp = dg;
+    *spp = sp;
 #else
     /* C twin - what tests/host exercises and the asm must match */
-    const uint16_t *s2 = sp + 4;
-    int p;
-    for (p = 0; p < 4; p++) {
-        dg[p] = (uint16_t)((((uint32_t)sp[p] << 16) | s2[p]) >> rr);
-    }
+    uint16_t *dg = *dgp;
+    const uint16_t *sp = *spp;
+
+    do {
+        int p;
+        for (p = 0; p < 4; p++) {
+            dg[p] = (uint16_t)((((uint32_t)sp[p] << 16) | sp[p + 4])
+                               >> rr);
+        }
+        dg += 4;
+        sp += 4;
+    } while (--n != 0);
+    *dgp = dg;
+    *spp = sp;
 #endif
 }
 
@@ -708,7 +725,7 @@ STDL_PLANE_INLINE void blit_rows_shift(const uint8_t *srow,
  * The shift chain for the commonest case - no source mask, no
  * composition flags - with its edge groups peeled: only the first
  * and last groups of a row can be partial, so every group between
- * them is opaque and is stored outright (blit_store4), with no mask
+ * them is opaque and is stored outright (blit_store_run), with no mask
  * window, no per-group edge tests and no read of the destination.
  * Keyed blits and flagged ones keep the general loop above, which
  * this leaves exactly as it was: testing for an opaque group there
@@ -746,20 +763,22 @@ STDL_PLANE_INLINE void blit_rows_shift_plain(const uint8_t *srow,
             dm[0] &= (uint16_t)~lm;
         }
         if (mid >= 0) {
-            for (n = mid; n > 0; n--) {
-                sp += 4;
-                dg += 4;
-                if (np == 4) {
-                    blit_store4(dg, sp, rr);
-                } else {
+            sp += 4;
+            dg += 4;
+            if (np == 4) {
+                if (mid > 0) {
+                    blit_store_run(&dg, &sp, rr, mid);
+                }
+            } else {
+                for (n = mid; n > 0; n--) {
                     for (p = 0; p < np; p++) {
                         dg[p] = (uint16_t)
                             ((((uint32_t)sp[p] << 16) | sp[p + 4]) >> rr);
                     }
+                    sp += 4;
+                    dg += 4;
                 }
             }
-            sp += 4;
-            dg += 4;
             if (np == 4) {
                 blit_merge4(dg, sp, rm, rr);
             } else {

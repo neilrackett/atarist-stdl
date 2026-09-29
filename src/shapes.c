@@ -11,11 +11,14 @@
  * a plain ST, 400us a row for a filled circle. They now collect what
  * they would have drawn and hand it to STDL_Points or STDL_HSpans in
  * batches, which pay that set-up once for the batch - the same
- * pixels, in the same order where order could matter. Each point or
- * span is clipped before it goes in, which also keeps it inside the
- * batch's 16-bit coordinates whatever the caller's ints were.
- * Measured on a plain ST: a 100x60 line 15.0ms to 10.0, a radius-20
- * circle 16.7 to 10.6, a radius-12 filled circle 14.5 to 6.2.
+ * pixels, in the same order where order could matter. A shape whose
+ * bounding box is inside the clip rectangle goes in unclipped - the
+ * batch calls clip anyway - and one that is not has each point or span
+ * clipped before it goes in, which also keeps it inside the batch's
+ * 16-bit coordinates whatever the caller's ints were. Measured on a
+ * plain ST against drawing a pixel or a row at a time: a 100x60 line
+ * 15.0ms to 7.6, a radius-20 circle 16.7 to 7.9, a radius-12 filled
+ * circle 14.5 to 4.7.
  *
  * Their own translation unit: a program that draws no lines or
  * circles does not carry them.
@@ -25,51 +28,72 @@
 
 #define SHAPE_BATCH 64
 
-typedef struct {
-    STDL_Surface *dst;
-    uint8_t col;
-    int cx0, cy0, cx1, cy1;     /* the clip rectangle, inclusive */
-    int n;
-    STDL_Point pts[SHAPE_BATCH];
-} point_batch_t;
+/*
+ * Points and spans collect in an array on the stack through a walking
+ * pointer, and go to the batch call when it is full. The clip edges
+ * (cx0..cx1, cy0..cy1, inclusive) are locals of the caller, so they
+ * stay in registers where a struct of them did not.
+ */
+#define POINT_PUT(xx, yy) \
+    do { \
+        p->x = (int16_t)(xx); \
+        p->y = (int16_t)(yy); \
+        if (++p == pts + SHAPE_BATCH) { \
+            STDL_Points(dst, pts, SHAPE_BATCH, col); \
+            p = pts; \
+        } \
+    } while (0)
+/* each axis one unsigned compare: below the edge wraps above it */
+#define POINT_ADD(xx, yy) \
+    do { \
+        const int px_ = (xx), py_ = (yy); \
+        if (!clipped || ((unsigned)(px_ - cx0) <= cw \
+                         && (unsigned)(py_ - cy0) <= ch)) { \
+            POINT_PUT(px_, py_); \
+        } \
+    } while (0)
 
-static void batch_open(point_batch_t *b, STDL_Surface *dst, uint8_t col)
-{
-    b->dst = dst;
-    b->col = col;
-    b->cx0 = dst->clip.x;
-    b->cy0 = dst->clip.y;
-    b->cx1 = dst->clip.x + dst->clip.w - 1;
-    b->cy1 = dst->clip.y + dst->clip.h - 1;
-    b->n = 0;
-}
+/* the clip rectangle's edges, inclusive, as locals */
+#define CLIP_EDGES(dst) \
+    const int cx0 = (dst)->clip.x, cx1 = (dst)->clip.x + (dst)->clip.w - 1; \
+    const int cy0 = (dst)->clip.y, cy1 = (dst)->clip.y + (dst)->clip.h - 1
+/* its origin and the last offsets inside it, for POINT_ADD's unsigned
+ * compares */
+#define CLIP_OFFSETS(dst) \
+    const int cx0 = (dst)->clip.x, cy0 = (dst)->clip.y; \
+    const unsigned cw = (unsigned)(dst)->clip.w - 1u; \
+    const unsigned ch = (unsigned)(dst)->clip.h - 1u
 
-static void batch_flush(point_batch_t *b)
+/* Bresenham, x1 != x2 and y1 != y2; `clipped` false when the whole
+ * line is inside the clip rectangle */
+static void line_run(STDL_Surface *dst, int x1, int y1, int x2, int y2,
+                     uint8_t col, const int clipped)
 {
-    if (b->n > 0) {
-        STDL_Points(b->dst, b->pts, b->n, b->col);
-        b->n = 0;
+    STDL_Point pts[SHAPE_BATCH], *p = pts;
+    const int dx = x2 > x1 ? x2 - x1 : x1 - x2;
+    const int dy = y2 > y1 ? y1 - y2 : y2 - y1;  /* negative magnitude */
+    const int sx = x1 < x2 ? 1 : -1;
+    const int sy = y1 < y2 ? 1 : -1;
+    int err = dx + dy, e2;
+    CLIP_OFFSETS(dst);
+
+    for (;;) {
+        POINT_ADD(x1, y1);
+        if (x1 == x2 && y1 == y2) {
+            break;
+        }
+        e2 = err * 2;
+        if (e2 >= dy) { err += dy; x1 += sx; }
+        if (e2 <= dx) { err += dx; y1 += sy; }
     }
-}
-
-static __inline__ void batch_add(point_batch_t *b, int x, int y)
-{
-    if (x < b->cx0 || x > b->cx1 || y < b->cy0 || y > b->cy1) {
-        return;
-    }
-    b->pts[b->n].x = (int16_t)x;
-    b->pts[b->n].y = (int16_t)y;
-    if (++b->n == SHAPE_BATCH) {
-        batch_flush(b);
+    if (p != pts) {
+        STDL_Points(dst, pts, (int)(p - pts), col);
     }
 }
 
 void STDL_Line(STDL_Surface *dst, int x1, int y1, int x2, int y2,
                uint8_t col)
 {
-    int dx, dy, sx, sy, err, e2;
-    point_batch_t b;
-
     if (dst == NULL) {
         return;
     }
@@ -81,42 +105,33 @@ void STDL_Line(STDL_Surface *dst, int x1, int y1, int x2, int y2,
         STDL_VLine(dst, x1, y1, y2, col);
         return;
     }
-    batch_open(&b, dst, col);
-    dx = x2 > x1 ? x2 - x1 : x1 - x2;
-    dy = y2 > y1 ? y1 - y2 : y2 - y1;   /* negative magnitude */
-    sx = x1 < x2 ? 1 : -1;
-    sy = y1 < y2 ? 1 : -1;
-    err = dx + dy;
-    for (;;) {
-        batch_add(&b, x1, y1);
-        if (x1 == x2 && y1 == y2) {
-            break;
-        }
-        e2 = err * 2;
-        if (e2 >= dy) { err += dy; x1 += sx; }
-        if (e2 <= dx) { err += dx; y1 += sy; }
+    {
+        CLIP_EDGES(dst);
+
+        line_run(dst, x1, y1, x2, y2, col,
+                 !((x1 < x2 ? x1 : x2) >= cx0 && (x1 > x2 ? x1 : x2) <= cx1
+                   && (y1 < y2 ? y1 : y2) >= cy0
+                   && (y1 > y2 ? y1 : y2) <= cy1));
     }
-    batch_flush(&b);
 }
 
-void STDL_Circle(STDL_Surface *dst, int cx, int cy, int r, uint8_t col)
+/* the midpoint circle's eight points a step; `clipped` as line_run */
+static void circle_run(STDL_Surface *dst, int cx, int cy, int r,
+                       uint8_t col, const int clipped)
 {
+    STDL_Point pts[SHAPE_BATCH], *p = pts;
     int x = r, y = 0, err = 1 - r;
-    point_batch_t b;
+    CLIP_OFFSETS(dst);
 
-    if (dst == NULL || r < 0) {
-        return;
-    }
-    batch_open(&b, dst, col);
     while (x >= y) {
-        batch_add(&b, cx + x, cy + y);
-        batch_add(&b, cx - x, cy + y);
-        batch_add(&b, cx + x, cy - y);
-        batch_add(&b, cx - x, cy - y);
-        batch_add(&b, cx + y, cy + x);
-        batch_add(&b, cx - y, cy + x);
-        batch_add(&b, cx + y, cy - x);
-        batch_add(&b, cx - y, cy - x);
+        POINT_ADD(cx + x, cy + y);
+        POINT_ADD(cx - x, cy + y);
+        POINT_ADD(cx + x, cy - y);
+        POINT_ADD(cx - x, cy - y);
+        POINT_ADD(cx + y, cy + x);
+        POINT_ADD(cx - y, cy + x);
+        POINT_ADD(cx + y, cy - x);
+        POINT_ADD(cx - y, cy - x);
         y++;
         if (err < 0) {
             err += 2 * y + 1;
@@ -125,31 +140,44 @@ void STDL_Circle(STDL_Surface *dst, int cx, int cy, int r, uint8_t col)
             err += 2 * (y - x) + 1;
         }
     }
-    batch_flush(&b);
+    if (p != pts) {
+        STDL_Points(dst, pts, (int)(p - pts), col);
+    }
 }
 
-/* one row of a filled circle, clipped, into a span batch */
-static void span_add(STDL_Span *sp, int *n, STDL_Surface *dst, int x1,
-                     int x2, int y, uint8_t col)
+void STDL_Circle(STDL_Surface *dst, int cx, int cy, int r, uint8_t col)
 {
-    const int cx0 = dst->clip.x, cx1 = dst->clip.x + dst->clip.w - 1;
+    if (dst == NULL || r < 0) {
+        return;
+    }
+    {
+        CLIP_EDGES(dst);
 
-    if (y < dst->clip.y || y >= dst->clip.y + dst->clip.h) {
-        return;
-    }
-    if (x1 < cx0) x1 = cx0;
-    if (x2 > cx1) x2 = cx1;
-    if (x1 > x2) {
-        return;
-    }
-    sp[*n].x = (int16_t)x1;
-    sp[*n].y = (int16_t)y;
-    sp[*n].len = (int16_t)(x2 - x1 + 1);
-    if (++*n == SHAPE_BATCH) {
-        STDL_HSpans(dst, sp, *n, col);
-        *n = 0;
+        circle_run(dst, cx, cy, r, col,
+                   !(cx - r >= cx0 && cx + r <= cx1 && cy - r >= cy0
+                     && cy + r <= cy1));
     }
 }
+
+/* one row of a filled circle, clipped, into the span batch */
+#define SPAN_ADD(xa, xb, yy) \
+    do { \
+        const int sy_ = (yy); \
+        int sa_ = (xa), sb_ = (xb); \
+        if (sy_ >= cy0 && sy_ <= cy1) { \
+            if (sa_ < cx0) sa_ = cx0; \
+            if (sb_ > cx1) sb_ = cx1; \
+            if (sa_ <= sb_) { \
+                q->x = (int16_t)sa_; \
+                q->y = (int16_t)sy_; \
+                q->len = (int16_t)(sb_ - sa_ + 1); \
+                if (++q == sp + SHAPE_BATCH) { \
+                    STDL_HSpans(dst, sp, SHAPE_BATCH, col); \
+                    q = sp; \
+                } \
+            } \
+        } \
+    } while (0)
 
 /*
  * The midpoint circle draws each row several times over (the rows at
@@ -164,12 +192,15 @@ static void span_add(STDL_Span *sp, int *n, STDL_Surface *dst, int x1,
 void STDL_FillCircle(STDL_Surface *dst, int cx, int cy, int r,
                      uint8_t col)
 {
-    STDL_Span sp[SHAPE_BATCH];
-    int x = r, y = 0, err = 1 - r, n = 0;
+    STDL_Span sp[SHAPE_BATCH], *q = sp;
+    int x = r, y = 0, err = 1 - r;
 
     if (dst == NULL || r < 0) {
         return;
     }
+    {
+    CLIP_EDGES(dst);
+
     if (r < FILL_HW_MAX) {
         int16_t hw[FILL_HW_MAX];
         int dy;
@@ -192,18 +223,17 @@ void STDL_FillCircle(STDL_Surface *dst, int cx, int cy, int r,
             if (hw[dy] < 0) {
                 continue;
             }
-            span_add(sp, &n, dst, cx - hw[dy], cx + hw[dy], cy + dy, col);
+            SPAN_ADD(cx - hw[dy], cx + hw[dy], cy + dy);
             if (dy != 0) {
-                span_add(sp, &n, dst, cx - hw[dy], cx + hw[dy], cy - dy,
-                         col);
+                SPAN_ADD(cx - hw[dy], cx + hw[dy], cy - dy);
             }
         }
     } else {
         while (x >= y) {
-            span_add(sp, &n, dst, cx - x, cx + x, cy + y, col);
-            span_add(sp, &n, dst, cx - x, cx + x, cy - y, col);
-            span_add(sp, &n, dst, cx - y, cx + y, cy + x, col);
-            span_add(sp, &n, dst, cx - y, cx + y, cy - x, col);
+            SPAN_ADD(cx - x, cx + x, cy + y);
+            SPAN_ADD(cx - x, cx + x, cy - y);
+            SPAN_ADD(cx - y, cx + y, cy + x);
+            SPAN_ADD(cx - y, cx + y, cy - x);
             y++;
             if (err < 0) {
                 err += 2 * y + 1;
@@ -213,7 +243,8 @@ void STDL_FillCircle(STDL_Surface *dst, int cx, int cy, int r,
             }
         }
     }
-    if (n > 0) {
-        STDL_HSpans(dst, sp, n, col);
+    }
+    if (q != sp) {
+        STDL_HSpans(dst, sp, (int)(q - sp), col);
     }
 }

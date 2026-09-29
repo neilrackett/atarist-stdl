@@ -483,6 +483,21 @@ warnings** with the Makefile's `-Wall -Wextra`.
   registers, a subsystem rather than a change. The probe is on the
   local branch `exp/ems`. Compare techniques by the slope - the same
   width at two heights - not by one total.
+- **Possible future improvement: what a declined BLiTTER costs.** On
+  a machine with a BLiTTER, every blit the size rules give the CPU
+  still pays for asking: `stdl_blitter_wants` is out of line, and the
+  call with its five arguments measured about 80us on an STE - a
+  16x16 aligned restore 14% slower with the BLiTTER allowed than
+  refused, a 16x1 blit 21%. A plain ST never asks. Tried and
+  reverted (2026-09-29): an inline no-multiply test in front of the
+  call for the shapes that are certainly the CPU's (same phase, h <=
+  16, whole groups up to 128 wide, or keyed up to 33). It won exactly
+  those two (0.91, 0.89) and cost everything else in
+  `STDL_BlitSurfaceEx` 1-3% on both machines through register
+  allocation - the entry 3.1% on a plain ST - and 96 bytes past the
+  size budget. The answer probably has to come from outside that
+  function (a caller that knows its shapes, or a decision made once
+  per surface pair), not from another test inside it.
 - **Possible future improvement: the blit policy's per-operation
   cost.** With a border open, BLiTTER throughput is 1.14-1.28x the
   no-border time for full-width operations (mostly the split and

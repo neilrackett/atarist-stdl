@@ -131,6 +131,12 @@ planes 0-filled at the edges. Variants are stored variant-major:
 variant -> frame -> row -> group -> 5 words
 ```
 
+Sprite data the library allocates (`STDL_SpriteFromSurface`,
+`STDL_LoadSprite`) is followed by one group - 10 bytes - of slack
+that is not part of the layout: a skewed BLiTTER pass reads one
+source word beyond the span it copies, and on a sprite's last row
+that word lies past the data. The slack is read, never used.
+
 ## 4. Tileset storage
 
 Like sprites but per-tile, with the mask word optional

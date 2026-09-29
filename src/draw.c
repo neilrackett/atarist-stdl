@@ -185,7 +185,12 @@ static void fill_rows(STDL_Surface *s, int x1, int x2, int y1,
     if (stdl_blitter_active()
         && (STDL_BLIT_FORCED()
             || stdl_row_off(ng, (uint16_t)rows)
-               >= STDL_BLIT_FILL_MIN_CELLS)) {
+               >= STDL_BLIT_FILL_MIN_CELLS)
+        /* inline, not stdl_blit_surf_reach(): a call in this test
+         * made small CPU fills 1-2% slower on a plain ST, where it is
+         * never even reached, through register allocation */
+        && stdl_blit_reach(STDL_PIX_END(s))
+        && (mrow == NULL || stdl_blit_reach(STDL_MASK_END(s)))) {
         uintptr_t base = (uintptr_t)(row + g0 * 8);
         int16_t yinc = (int16_t)(s->stride - (ng - 1) * 8);
 
@@ -196,7 +201,7 @@ static void fill_rows(STDL_Surface *s, int x1, int x2, int y1,
                             (uint16_t)ng, (uint16_t)rows,
                             STDL_BLIT_HOP_ONES,
                             pw[p] ? STDL_BLIT_OP_SRC
-                                  : STDL_BLIT_OP_ZERO);
+                                  : STDL_BLIT_OP_ZERO, 0);
         }
         if (mrow != NULL) {
             stdl_blitter_go(0, 0, 0, (uintptr_t)(mrow + g0 * 2),
@@ -204,7 +209,7 @@ static void fill_rows(STDL_Surface *s, int x1, int x2, int y1,
                             lm, rm, (uint16_t)ng, (uint16_t)rows,
                             STDL_BLIT_HOP_ONES,
                             transparent ? STDL_BLIT_OP_SRC
-                                        : STDL_BLIT_OP_ZERO);
+                                        : STDL_BLIT_OP_ZERO, 0);
             s->opaque_state = 0;
         }
         return;

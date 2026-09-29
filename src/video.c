@@ -263,6 +263,8 @@ int STDL_Init(uint32_t flags)
         long bm = Blitmode(-1);
         stdl.mach.has_blitter = (bm >= 0 && (bm & 2)) ? 1 : 0;
     }
+    /* PHYSTOP, in supervisor mode: what the BLiTTER can reach */
+    stdl.stram_top = (uintptr_t)*(volatile uint32_t *)0x42EUL;
 
     stdl.initialised = 1;
     old_term = (void (*)(void))Setexc(0x102, (void *)term_handler);

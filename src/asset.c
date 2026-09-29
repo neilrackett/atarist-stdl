@@ -220,7 +220,7 @@ STDL_Sprite *STDL_LoadSprite(const char *bank, int id, uint32_t flags)
         free(spr);
         return NULL;
     }
-    spr->data = malloc(datawords * 2);
+    spr->data = malloc(datawords * 2 + SPR_SLACK);
     if (spr->data == NULL) {
         STDL_SetError("out of memory");
         free(p);

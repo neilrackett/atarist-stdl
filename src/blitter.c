@@ -58,6 +58,15 @@ typedef stdl_host_blitregs_t blitregs_t;
 /* STDL_UseBlitter's setting; stdl_blitter_active() reads it inline */
 uint8_t stdl_blit_user = 1;
 
+/* see stdl_blit_reach: the pixels, and the mask if there is one.
+ * Out of line, and asked only once an operation has chosen the
+ * BLiTTER, so the paths that never use it do not carry the test. */
+int stdl_blit_surf_reach(const STDL_Surface *s)
+{
+    return stdl_blit_reach(STDL_PIX_END(s))
+        && (s->mask == NULL || stdl_blit_reach(STDL_MASK_END(s)));
+}
+
 /* the same test out of line, for blit.c: see stdl_internal.h */
 int stdl_blitter_allowed(void)
 {
@@ -103,21 +112,25 @@ int STDL_UseBlitter(int enable)
  * numbers going back into the same registers. Callers that issue
  * one plane still use stdl_blitter_go, which is this plus a run.
  */
-/* the increments, kept for the split path below: the BLiTTER is one
- * global device and these mirror registers it already holds */
-static int16_t bl_sxinc, bl_syinc, bl_dxinc, bl_dyinc;
+/*
+ * How far one line moves the source and destination addresses, for
+ * the split path below: every fetch and every write adds the x
+ * increment but the last of a line, which adds the y increment, and
+ * with FXSR a line fetches one word more than it writes. Worked out
+ * once here, for all the runs that share this setup.
+ */
+static int16_t bl_sline, bl_dline;
 
 void stdl_blitter_setup(int16_t sxinc, int16_t syinc,
                         int16_t dxinc, int16_t dyinc,
                         uint16_t em1, uint16_t em3, uint16_t nwords,
-                        uint8_t hop, uint8_t op)
+                        uint8_t hop, uint8_t op, uint8_t skew)
 {
     volatile blitregs_t *b = BLIT;
+    const int16_t reads = (int16_t)(nwords + ((skew & 0x80) ? 1 : 0));
 
-    bl_sxinc = sxinc;
-    bl_syinc = syinc;
-    bl_dxinc = dxinc;
-    bl_dyinc = dyinc;
+    bl_sline = (int16_t)(blit_muls((int16_t)(reads - 1), sxinc) + syinc);
+    bl_dline = (int16_t)(blit_muls((int16_t)(nwords - 1), dxinc) + dyinc);
 
     b->src_xinc = sxinc;
     b->src_yinc = syinc;
@@ -128,17 +141,17 @@ void stdl_blitter_setup(int16_t sxinc, int16_t syinc,
     b->dst_yinc = dyinc;
     b->hop = hop;
     b->op = op;
-    b->skew = 0;
+    b->skew = skew;
 }
 
 void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
                      uintptr_t dst, int16_t dxinc, int16_t dyinc,
                      uint16_t em1, uint16_t em3,
                      uint16_t nwords, uint16_t nlines,
-                     uint8_t hop, uint8_t op)
+                     uint8_t hop, uint8_t op, uint8_t skew)
 {
     stdl_blitter_setup(sxinc, syinc, dxinc, dyinc, em1, em3, nwords,
-                       hop, op);
+                       hop, op, skew);
     stdl_blitter_run(src, dst, nwords, nlines, hop);
 }
 
@@ -199,15 +212,12 @@ void stdl_blitter_run(uintptr_t src, uintptr_t dst, uint16_t nwords,
             ;
         nlines = (uint16_t)(nlines - n);
         if (nlines != 0) {
-            /* advance to the first unblitted line: n lines of
-             * (nwords-1) x steps and one y step each. 16-bit
-             * multiplies - the 32-bit kind is a library call */
-            const int16_t sl = (int16_t)(blit_muls((int16_t)(nwords - 1),
-                                                   bl_sxinc) + bl_syinc);
-            const int16_t dl = (int16_t)(blit_muls((int16_t)(nwords - 1),
-                                                   bl_dxinc) + bl_dyinc);
-            src = (uintptr_t)((intptr_t)src + blit_muls((int16_t)n, sl));
-            dst = (uintptr_t)((intptr_t)dst + blit_muls((int16_t)n, dl));
+            /* advance to the first unblitted line; 16-bit multiplies,
+             * the 32-bit kind being a library call */
+            src = (uintptr_t)((intptr_t)src + blit_muls((int16_t)n,
+                                                        bl_sline));
+            dst = (uintptr_t)((intptr_t)dst + blit_muls((int16_t)n,
+                                                        bl_dline));
         }
     }
 }

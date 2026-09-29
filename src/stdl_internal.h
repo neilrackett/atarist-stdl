@@ -242,6 +242,10 @@ typedef struct {
 
     /* logical palette for the screen */
     STDL_Colour      colours[16];
+
+    /* PHYSTOP at STDL_Init: the top of ST RAM, the only memory the
+     * BLiTTER (and the Shifter, and the sound DMA) can reach */
+    uintptr_t        stram_top;
 } stdl_state_t;
 
 extern stdl_state_t stdl;
@@ -484,17 +488,24 @@ int stdl_blitter_allowed(void);
 /* the invariant registers once, then one call per plane: a
  * four-plane copy was writing eleven identical registers four times
  * over, half the fitted setup cost */
+/*
+ * skew is the SKEW register as written: bit 7 FXSR, low four bits
+ * the shift. NFSR (bit 6) is never set - on the real chip it does not
+ * behave as the commonly quoted description says, and with one-word
+ * lines it gives wrong results; an FXSR-only scheme costs at most one
+ * extra source read a line (AGENTS.md).
+ */
 void stdl_blitter_setup(int16_t sxinc, int16_t syinc,
                         int16_t dxinc, int16_t dyinc,
                         uint16_t em1, uint16_t em3, uint16_t nwords,
-                        uint8_t hop, uint8_t op);
+                        uint8_t hop, uint8_t op, uint8_t skew);
 void stdl_blitter_run(uintptr_t src, uintptr_t dst, uint16_t nwords,
                       uint16_t nlines, uint8_t hop);
 void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
                      uintptr_t dst, int16_t dxinc, int16_t dyinc,
                      uint16_t em1, uint16_t em3,
                      uint16_t nwords, uint16_t nlines,
-                     uint8_t hop, uint8_t op);
+                     uint8_t hop, uint8_t op, uint8_t skew);
 #ifndef __m68k__
 /* the host's BLiTTER registers: the chip's layout, except that the
  * two address registers hold host pointers */
@@ -527,6 +538,53 @@ void stdl_host_blitter_exec(void);
 #define STDL_BLIT_OP_AND   1    /* src AND dst  */
 #define STDL_BLIT_OP_SRC   3
 #define STDL_BLIT_OP_XOR   6    /* src XOR dst  */
+#define STDL_BLIT_OP_OR    7    /* src OR dst   */
+#define STDL_BLIT_OP_ONES 15
+
+/* Change only the logic operation between runs that share every
+ * other register - the AND and OR passes of a sprite, a fill's
+ * planes. One byte write instead of a whole setup. */
+#ifdef __m68k__
+#define STDL_BLIT_SET_OP(o) \
+    (*(volatile uint8_t *)0xFFFF8A3BUL = (uint8_t)(o))
+#else
+#define STDL_BLIT_SET_OP(o) (stdl_host_blit.op = (uint8_t)(o))
+#endif
+
+/*
+ * Whether a block ending at `end` is somewhere the BLiTTER can
+ * reach. It sits on the ST bus and sees ST RAM only; a surface a
+ * program allocated with plain malloc on a machine with alt-RAM (an
+ * STE with an accelerator, say) may not be there, and the chip would
+ * then read and write whatever ST RAM aliases it - garbage, with no
+ * error. ST RAM starts at 0, so a block whose end is at or below
+ * PHYSTOP lies wholly inside it: one compare. Everywhere the library
+ * chooses the BLiTTER asks this first and takes the CPU path if not.
+ */
+static __inline__ int stdl_blit_reach(const void *end)
+{
+#ifdef __m68k__
+    return (uintptr_t)end <= stdl.stram_top;
+#else
+    (void)end;
+    return 1;
+#endif
+}
+/*
+ * Bytes allocated past the end of every sprite's data: one group. A
+ * skewed BLiTTER pass fetches at most one source word beyond the
+ * span it copies, and on a sprite's last row that is past the data.
+ * The words are never used, only read, but they must be there -
+ * the host model reads them under AddressSanitizer.
+ */
+#define SPR_SLACK 10
+
+/* a surface's pixels and mask both within reach (blitter.c) */
+int stdl_blit_surf_reach(const STDL_Surface *s);
+/* the end of a surface's pixel block, and of its mask block */
+#define STDL_PIX_END(s) ((s)->pixels + stdl_row_off((s)->h, (s)->stride))
+#define STDL_MASK_END(s) \
+    ((s)->mask + stdl_row_off((s)->h, (s)->maskstride))
 
 #define STDL_BLIT_FILL_MIN_CELLS   32   /* fill: ng * rows          */
 

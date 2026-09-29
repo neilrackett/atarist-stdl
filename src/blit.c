@@ -704,7 +704,8 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                       >= STDL_BLIT_MASKED_MIN_CELLS
                     : stdl_row_off(h, (uint16_t)(STDL_BLIT_CPU_ROW
                            + STDL_BLIT_CPU_CELL * ng))
-                      > STDL_BLIT_SETUP))) {
+                      > STDL_BLIT_SETUP))
+            && stdl_blit_surf_reach(src) && stdl_blit_surf_reach(dst)) {
 #ifdef STDL_BLIT_STATS
             stdl_blit_blitter += (unsigned long)h;
             stdl_blit_rows += (unsigned long)h;
@@ -734,7 +735,7 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
             if (!masked) {
                 stdl_blitter_setup(8, s_yinc, 8, d_yinc, lm, rm,
                                    (uint16_t)ng, STDL_BLIT_HOP_SRC,
-                                   STDL_BLIT_OP_SRC);
+                                   STDL_BLIT_OP_SRC, 0);
                 for (p = 0; p < np; p++) {
                     stdl_blitter_run(sbase + (uintptr_t)(p * 2),
                                      dbase + (uintptr_t)(p * 2),
@@ -746,7 +747,7 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                  * planes, so each shape's registers are set once */
                 stdl_blitter_setup(8, s_yinc, 8, d_yinc, lm, rm,
                                    (uint16_t)ng, STDL_BLIT_HOP_SRC,
-                                   STDL_BLIT_OP_XOR);
+                                   STDL_BLIT_OP_XOR, 0);
                 for (p = 0; p < np; p++) {
                     stdl_blitter_run(sbase + (uintptr_t)(p * 2),
                                      dbase + (uintptr_t)(p * 2),
@@ -755,7 +756,7 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                 }
                 stdl_blitter_setup(2, sm_yinc, 8, d_yinc, lm, rm,
                                    (uint16_t)ng, STDL_BLIT_HOP_SRC,
-                                   STDL_BLIT_OP_AND);
+                                   STDL_BLIT_OP_AND, 0);
                 for (p = 0; p < np; p++) {
                     stdl_blitter_run(smbase,
                                      dbase + (uintptr_t)(p * 2),
@@ -764,7 +765,7 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                 }
                 stdl_blitter_setup(8, s_yinc, 8, d_yinc, lm, rm,
                                    (uint16_t)ng, STDL_BLIT_HOP_SRC,
-                                   STDL_BLIT_OP_XOR);
+                                   STDL_BLIT_OP_XOR, 0);
                 for (p = 0; p < np; p++) {
                     stdl_blitter_run(sbase + (uintptr_t)(p * 2),
                                      dbase + (uintptr_t)(p * 2),
@@ -781,13 +782,13 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                                     (uintptr_t)dmrow, 2, dm_yinc,
                                     lm, rm, (uint16_t)ng, (uint16_t)h,
                                     STDL_BLIT_HOP_SRC,
-                                    STDL_BLIT_OP_AND);
+                                    STDL_BLIT_OP_AND, 0);
                 } else {
                     stdl_blitter_go(0, 0, 0,
                                     (uintptr_t)dmrow, 2, dm_yinc,
                                     lm, rm, (uint16_t)ng, (uint16_t)h,
                                     STDL_BLIT_HOP_ONES,
-                                    STDL_BLIT_OP_ZERO);
+                                    STDL_BLIT_OP_ZERO, 0);
                 }
             }
             return 0;

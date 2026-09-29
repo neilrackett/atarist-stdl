@@ -93,7 +93,8 @@ static uint16_t *preshift_expand(const uint16_t *v0, int groups,
     int srcrow = groups * SPR_WORDS;     /* words per input row      */
     uint32_t rowsz = (uint32_t)pg * SPR_WORDS;
     uint32_t vsize = stdl_row_off(rows_total, (uint16_t)rowsz);
-    uint16_t *data = malloc(vsize << 5);
+    /* one group of slack past the last variant: see SPR_SLACK */
+    uint16_t *data = malloc((vsize << 5) + SPR_SLACK);
     uint16_t *dst = data;
     int v, y, g, p;
 
@@ -167,7 +168,7 @@ STDL_Sprite *STDL_SpriteFromSurface(const STDL_Surface *s,
     groups = (frame_w + 15) >> 4;
     framesize = (uint32_t)groups * SPR_WORDS * s->h;
 
-    v0 = malloc(framesize * (uint32_t)nframes * 2);
+    v0 = malloc(framesize * (uint32_t)nframes * 2 + SPR_SLACK);
     if (v0 == NULL) {
         STDL_SetError("out of memory");
         return NULL;

@@ -242,74 +242,168 @@ STDL_Sprite *stdl_sprite_preshift(STDL_Sprite *spr)
  * Draw one frame with its top-left at (x, y), clipped to dst->clip.
  * Pre-shifted sprites select the x & 15 variant and run the aligned
  * loop; unshifted sprites at odd phases go through the runtime
- * shift chain (the documented slow path).
- */
-/*
- * Sprite row loop, instantiated once per plane budget: with np a
+ * shift (the documented slow path).
+ *
+ * Both row loops are instantiated once per plane budget: with np a
  * compile-time constant the per-group plane merges unroll and the
- * out-of-budget words are never fetched from the sprite either.
+ * out-of-budget words are never fetched from the sprite either. The
+ * choice between them is made once per sprite, outside the loops -
+ * gcc 4.6 does not unswitch a loop-invariant test, and the single
+ * loop this replaced asked "shifted?" for every group of every row.
  */
-STDL_PLANE_INLINE void blit_sprite_rows(const uint16_t *srow,
-                              uint8_t *drow, uint32_t rowwords,
-                              int dstride, int rows,
-                              int g0, int g1, int sprgroups,
-                              uint16_t cover0, uint16_t cover1,
-                              int runtime_shift, int r, const int np)
+
+/*
+ * Merge one group: mask bit set = destination kept, and the plane
+ * words are already clear under the mask, so the draw is
+ * d = (d & m) | w. A transparent group writes nothing; an opaque
+ * one (a mask of zero, the inside of most sprites) is plain stores
+ * with no read of the destination - the CPU's version of the
+ * BLiTTER never reading a destination word its endmask replaces.
+ */
+STDL_PLANE_INLINE void spr_merge(uint16_t *d, uint16_t m, uint16_t w0,
+                                 uint16_t w1, uint16_t w2, uint16_t w3,
+                                 const int np)
 {
-    int yy, g, p;
+    if (m == 0) {
+        stdl_put_planes(d, w0, w1, w2, w3, np);
+    } else if (m != 0xFFFFu) {
+        d[0] = (uint16_t)((d[0] & m) | w0);
+        if (np > 1) d[1] = (uint16_t)((d[1] & m) | w1);
+        if (np > 2) d[2] = (uint16_t)((d[2] & m) | w2);
+        if (np > 3) d[3] = (uint16_t)((d[3] & m) | w3);
+    }
+}
+
+/* one stored group, cut by a clip cover (bits outside it are kept) */
+STDL_PLANE_INLINE void spr_group_cover(uint16_t *d, const uint16_t *sg,
+                                       uint16_t cover, const int np)
+{
+    uint16_t m = (uint16_t)(sg[0] | (uint16_t)~cover);
+
+    if (m != 0xFFFFu) {
+        spr_merge(d, m, (uint16_t)(sg[1] & cover),
+                  np > 1 ? (uint16_t)(sg[2] & cover) : 0,
+                  np > 2 ? (uint16_t)(sg[3] & cover) : 0,
+                  np > 3 ? (uint16_t)(sg[4] & cover) : 0, np);
+    }
+}
+
+/*
+ * Stored groups straight onto the destination: a pre-shifted variant,
+ * or an unshifted sprite at phase 0. The first and last groups carry
+ * the clip covers and are peeled out, so the middle runs with no
+ * edge tests; unclipped, the covers are all ones and cost a couple
+ * of instructions a row. The mask is read first, and a transparent
+ * group's plane words are never fetched.
+ */
+STDL_PLANE_INLINE void spr_rows_aligned(const uint16_t *srow,
+                              uint8_t *drow, uint32_t rowwords,
+                              int dstride, int rows, int g0, int g1,
+                              uint16_t cover0, uint16_t cover1,
+                              const int np)
+{
+    const int mid = g1 - g0 - 2;        /* groups between the edges */
+    int yy;
+
+    srow += g0 * SPR_WORDS;
+    for (yy = 0; yy < rows; yy++) {
+        const uint16_t *sg = srow;
+        uint16_t *d = (uint16_t *)drow;
+
+        spr_group_cover(d, sg, cover0, np);
+        if (mid >= 0) {
+            int n = mid;
+
+            sg += SPR_WORDS;
+            d += 4;
+            while (n-- > 0) {
+                uint16_t m = sg[0];
+
+                if (m != 0xFFFFu) {
+                    spr_merge(d, m, sg[1], np > 1 ? sg[2] : 0,
+                              np > 2 ? sg[3] : 0, np > 3 ? sg[4] : 0,
+                              np);
+                }
+                sg += SPR_WORDS;
+                d += 4;
+            }
+            spr_group_cover(d, sg, cover1, np);
+        }
+        srow += rowwords;
+        drow += dstride;
+    }
+}
+
+/* the group beyond either end of an unshifted sprite: transparent */
+static const uint16_t spr_edge[SPR_WORDS] = { 0xFFFFu, 0, 0, 0, 0 };
+
+/*
+ * One output group of the runtime shift: source groups a (left) and
+ * b (right) through a 32-bit window each, one variable shift per
+ * word - the form blit.c's shift chain uses. The two-shift form
+ * this replaced, (a << (16 - r)) | (b >> r), paid the shift's fixed
+ * cost twice per word, ten times per four-plane group.
+ */
+STDL_PLANE_INLINE void spr_group_shift(uint16_t *d, const uint16_t *a,
+                                       const uint16_t *b, int r,
+                                       uint16_t cover, const int np)
+{
+    uint16_t m = (uint16_t)((((uint32_t)a[0] << 16) | b[0]) >> r);
+
+    m |= (uint16_t)~cover;
+    if (m != 0xFFFFu) {
+        spr_merge(d, m,
+            (uint16_t)(((((uint32_t)a[1] << 16) | b[1]) >> r) & cover),
+            np > 1 ? (uint16_t)(((((uint32_t)a[2] << 16) | b[2]) >> r)
+                                & cover) : 0,
+            np > 2 ? (uint16_t)(((((uint32_t)a[3] << 16) | b[3]) >> r)
+                                & cover) : 0,
+            np > 3 ? (uint16_t)(((((uint32_t)a[4] << 16) | b[4]) >> r)
+                                & cover) : 0,
+            np);
+    }
+}
+
+/*
+ * An unshifted sprite at phase r: output group g takes source groups
+ * g-1 and g, so the output is one group wider than the sprite. Only
+ * the first and last output groups can reach past the sprite's ends
+ * (they take spr_edge there) or carry a clip cover, so they are
+ * peeled out; every group between them has a real source on both
+ * sides, walked with a pointer.
+ */
+STDL_PLANE_INLINE void spr_rows_shift(const uint16_t *srow,
+                              uint8_t *drow, uint32_t rowwords,
+                              int dstride, int rows, int g0, int g1,
+                              int sprgroups, uint16_t cover0,
+                              uint16_t cover1, int r, const int np)
+{
+    const int mid = g1 - g0 - 2;
+    const int first_a = g0 - 1, last_b = g1 - 1;
+    int yy;
 
     for (yy = 0; yy < rows; yy++) {
-        uint16_t *dgrp = (uint16_t *)drow;
-        const uint16_t *src = srow;
+        uint16_t *d = (uint16_t *)drow;
+        const uint16_t *a = first_a >= 0
+            ? srow + first_a * SPR_WORDS : spr_edge;
+        const uint16_t *b = g0 < sprgroups
+            ? srow + g0 * SPR_WORDS : spr_edge;
 
-        for (g = g0; g < g1; g++) {
-            uint16_t mask, w[4];
-            uint16_t cover = (g == g0) ? cover0
-                           : (g == g1 - 1) ? cover1 : 0xFFFFu;
+        spr_group_shift(d, a, b, r, cover0, np);
+        if (mid >= 0) {
+            const uint16_t *sg = srow + g0 * SPR_WORDS;
+            int n = mid;
 
-            /* w[p] above the plane budget is never read: every use
-             * below is guarded by the same np test that fills it,
-             * so the three zero stores this loop used to make were
-             * dead - three stores a group, a row, a sprite. */
-            if (!runtime_shift) {
-                const uint16_t *sg = src + g * SPR_WORDS;
-                mask = sg[0];
-                w[0] = sg[1];
-                if (np > 1) w[1] = sg[2];
-                if (np > 2) w[2] = sg[3];
-                if (np > 3) w[3] = sg[4];
-            } else {
-                const uint16_t *a =
-                    (g > 0) ? src + (g - 1) * SPR_WORDS : NULL;
-                const uint16_t *b =
-                    (g < sprgroups) ? src + g * SPR_WORDS : NULL;
-                uint16_t am = a ? a[0] : 0xFFFFu;
-                uint16_t bm = b ? b[0] : 0xFFFFu;
-                mask = (uint16_t)((am << (16 - r)) | (bm >> r));
-                for (p = 0; p < np; p++) {
-                    uint16_t aw = a ? a[1 + p] : 0;
-                    uint16_t bw = b ? b[1 + p] : 0;
-                    w[p] = (uint16_t)((aw << (16 - r)) | (bw >> r));
-                }
+            d += 4;
+            while (n-- > 0) {
+                spr_group_shift(d, sg, sg + SPR_WORDS, r, 0xFFFFu, np);
+                sg += SPR_WORDS;
+                d += 4;
             }
-
-            if (cover != 0xFFFFu) {
-                mask |= (uint16_t)~cover;
-                w[0] &= cover;
-                if (np > 1) w[1] &= cover;
-                if (np > 2) w[2] &= cover;
-                if (np > 3) w[3] &= cover;
-            }
-            if (mask != 0xFFFFu) {
-                dgrp[0] = (uint16_t)((dgrp[0] & mask) | w[0]);
-                if (np > 1)
-                    dgrp[1] = (uint16_t)((dgrp[1] & mask) | w[1]);
-                if (np > 2)
-                    dgrp[2] = (uint16_t)((dgrp[2] & mask) | w[2]);
-                if (np > 3)
-                    dgrp[3] = (uint16_t)((dgrp[3] & mask) | w[3]);
-            }
-            dgrp += 4;
+            spr_group_shift(d, sg,
+                            last_b < sprgroups ? sg + SPR_WORDS
+                                               : spr_edge,
+                            r, cover1, np);
         }
         srow += rowwords;
         drow += dstride;
@@ -342,20 +436,28 @@ void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
     runtime_shift = 0;
     r = 0;
 
-    if (spr->nvariants == 16) {
+    /*
+     * The frame's offset: variant v's frame f is frame v * nframes + f
+     * of one long run, so one product of the frame size does it. Both
+     * factors fit sixteen bits for any sprite a game draws often, and
+     * then it is a single mulu.w; the 32-bit form is kept for sheets
+     * larger than that.
+     */
+    {
+        uint32_t idx = (uint32_t)frame;
+
+        ng = spr->groups;
+        if (spr->nvariants == 16) {
+            idx += stdl_row_off(phase, spr->nframes);
+        } else if (phase != 0) {
+            ng = spr->groups + 1;   /* output covers one extra group */
+            runtime_shift = 1;
+            r = phase;
+        }
         fdata = spr->data
-              + stdl_mul32x16(stdl_mul32x16(spr->framesize, spr->nframes),
-                              (uint16_t)phase)
-              + stdl_mul32x16(spr->framesize, (uint16_t)frame);
-        ng = spr->groups;
-    } else if (phase == 0) {
-        fdata = spr->data + stdl_mul32x16(spr->framesize, (uint16_t)frame);
-        ng = spr->groups;
-    } else {
-        fdata = spr->data + stdl_mul32x16(spr->framesize, (uint16_t)frame);
-        ng = spr->groups + 1;       /* output covers one extra group */
-        runtime_shift = 1;
-        r = phase;
+              + ((spr->framesize | idx) <= 0xFFFFu
+                 ? stdl_row_off((int)idx, (uint16_t)spr->framesize)
+                 : stdl_mul32x16(spr->framesize, (uint16_t)idx));
     }
     rowwords = (uint32_t)spr->groups * SPR_WORDS;
 
@@ -415,11 +517,19 @@ void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
         }
 #endif
         np = stdl_planes;
-#define SPRITE_ROWS(np) \
-        blit_sprite_rows(srow, drow, rowwords, dst->stride, \
-                         row1 - row0, g0, g1, spr->groups, \
-                         cover0, cover1, runtime_shift, r, (np))
-        STDL_PLANE_DISPATCH(np, SPRITE_ROWS);
-#undef SPRITE_ROWS
+        if (!runtime_shift) {
+#define SPRITE_ALIGNED(np) \
+            spr_rows_aligned(srow, drow, rowwords, dst->stride, \
+                             row1 - row0, g0, g1, cover0, cover1, (np))
+            STDL_PLANE_DISPATCH(np, SPRITE_ALIGNED);
+#undef SPRITE_ALIGNED
+        } else {
+#define SPRITE_SHIFT(np) \
+            spr_rows_shift(srow, drow, rowwords, dst->stride, \
+                           row1 - row0, g0, g1, spr->groups, \
+                           cover0, cover1, r, (np))
+            STDL_PLANE_DISPATCH(np, SPRITE_SHIFT);
+#undef SPRITE_SHIFT
+        }
     }
 }

@@ -973,6 +973,92 @@ static void test_sprites(void)
     }
 }
 
+/*
+ * Sprites against the keyed blit of the same frame, across the shapes
+ * the row loops treat differently: widths 1-80 (a partial last group,
+ * one group, several), multi-frame strips, both loops (unshifted and
+ * pre-shifted, every phase), random clip rectangles cutting either
+ * edge or both, and plane budgets 4, 2 and 3 - the loops are
+ * instantiated per budget.
+ */
+static void test_sprites_wide(void)
+{
+    static const int budgets[3] = { 4, 2, 3 };
+    int iter;
+
+    for (iter = 0; iter < 360; iter++) {
+        const int budget = budgets[iter % 3];
+        const int maxcol = 1 << budget;
+        const uint8_t key = (uint8_t)(maxcol - 2);
+        int w = 1 + (int)(rnd() % 80);
+        int h = 1 + (int)(rnd() % 24);
+        int nframes = 1, frame = 0, pre = (int)(rnd() & 1);
+        STDL_Surface *img, *a, *b;
+        STDL_Sprite *spr;
+        STDL_Rect clip, sr, d;
+        int x, y, xx, yy, bad = 0;
+
+        if ((w & 15) == 0 && (rnd() & 1)) {
+            nframes = 1 + (int)(rnd() % 3);
+            frame = (int)(rnd() % nframes);
+        }
+        STDL_SetPlaneBudget(budget);
+        img = STDL_CreateSurface(w * nframes, h);
+        a = STDL_CreateSurface(120, 60);
+        b = STDL_CreateSurface(120, 60);
+        randomise(img, maxcol);
+        STDL_SetColourKey(img, 1, key);
+        randomise(a, maxcol);
+        STDL_BlitSurface(a, NULL, b, NULL);
+
+        clip.x = (int16_t)(rnd() % 40);
+        clip.y = (int16_t)(rnd() % 20);
+        clip.w = (uint16_t)(10 + rnd() % 90);
+        clip.h = (uint16_t)(5 + rnd() % 45);
+        STDL_SetClipRect(a, &clip);
+        STDL_SetClipRect(b, &clip);
+
+        spr = STDL_SpriteFromSurface(img, w, pre ? STDL_PRESHIFT : 0);
+        CHECK(spr != NULL, "wide sprite build w=%d", w);
+        if (spr == NULL) {
+            return;
+        }
+        x = (int)(rnd() % (120 + w + 16)) - w - 8;
+        y = (int)(rnd() % (60 + h + 8)) - h - 4;
+
+        sr.x = (int16_t)(frame * w);
+        sr.y = 0;
+        sr.w = (uint16_t)w;
+        sr.h = (uint16_t)h;
+        d.x = (int16_t)x;
+        d.y = (int16_t)y;
+        STDL_BlitSurface(img, &sr, a, &d);
+        STDL_BlitSprite(spr, frame, b, x, y);
+
+        for (yy = 0; yy < 60 && bad < 4; yy++) {
+            for (xx = 0; xx < 120 && bad < 4; xx++) {
+                uint8_t va = STDL_GetPixel(a, xx, yy);
+                uint8_t vb = STDL_GetPixel(b, xx, yy);
+                if (va != vb) {
+                    printf("  wide sprite (%d,%d): blit=%d sprite=%d "
+                           "[w=%d h=%d f=%d/%d x=%d y=%d pre=%d np=%d "
+                           "clip=%d,%d %ux%u]\n", xx, yy, va, vb, w, h,
+                           frame, nframes, x, y, pre, budget, clip.x,
+                           clip.y, clip.w, clip.h);
+                    bad++;
+                    failures++;
+                }
+            }
+        }
+        STDL_FreeSprite(spr);
+        STDL_FreeSurface(img);
+        STDL_FreeSurface(a);
+        STDL_FreeSurface(b);
+        STDL_SetPlaneBudget(4);
+        if (failures > 3) return;
+    }
+}
+
 static void test_1bpp(void)
 {
     static const uint8_t bits[] = {
@@ -1028,6 +1114,7 @@ int main(void)
     test_whole_blit_writeback();
     test_whole_copy();
     test_sprites();
+    test_sprites_wide();
     test_1bpp();
     test_tiles();
     if (failures == 0) {

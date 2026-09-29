@@ -616,6 +616,19 @@ typedef stdl_host_blitregs_t stdl_blitregs_t;
 #define STDL_BLIT_OP_OR    7    /* src OR dst   */
 #define STDL_BLIT_OP_ONES 15
 
+/*
+ * The SKEW register for a copy from source phase sph to destination
+ * phase dph: the shift, plus FXSR (bit 7) for a left shift, when a
+ * line must fetch one source word before its first write
+ * (STDL_BLIT_FXSR, which the caller also needs for its fetch count). NFSR is
+ * never set - on the real chip it misbehaves with one-word lines - so
+ * a line reads at most one word past its span (surface guards and
+ * sprite slack cover it). The caller's y increment counts that word.
+ */
+#define STDL_BLIT_FXSR(sph, dph) ((sph) > (dph))
+#define STDL_BLIT_SKEW(fxsr, sph, dph) \
+    ((uint8_t)(((fxsr) << 7) | (((dph) - (sph)) & 15)))
+
 /* one pass of a source copy whose other registers are set, inline;
  * through stdl_blitter_run when a border's placement policy is in */
 static __inline__ __attribute__((always_inline))

@@ -498,6 +498,18 @@ warnings** with the Makefile's `-Wall -Wextra`.
   size budget. The answer probably has to come from outside that
   function (a caller that knows its shapes, or a decision made once
   per surface pair), not from another test inside it.
+- **Possible future improvement: BLiTTER fills a plane at a time.**
+  A fill the chip does in several passes (a colour other than 0 or
+  15, or partial edge groups) calls `stdl_blitter_run` once a plane,
+  saving and restoring eight registers each time. Making those passes
+  inline (`stdl_blit_pass`, out of line as a group) measured 15-21%
+  faster for such fills on an STE (2026-09-29) - and cost the
+  single-operation clears in 0 and 15, and the small fills the CPU
+  keeps, 0.6-1.4%, through fill_rows' register allocation, with its
+  entry code unchanged; moving the whole BLiTTER fill out of line
+  instead cost those clears 3-9%. Reverted for the regression.
+  Worth another arrangement if a port's frame shows multi-plane
+  BLiTTER fills.
 - **Possible future improvement: the blit policy's per-operation
   cost.** With a border open, BLiTTER throughput is 1.14-1.28x the
   no-border time for full-width operations (mostly the split and

@@ -245,9 +245,9 @@ void stdl_blitter_blit(const STDL_Surface *src, STDL_Surface *dst,
     const int np = stdl_planes;
     const int sph = sx & 15, dph = dx & 15;
     const int dn = (dph + w + 15) >> 4;         /* destination words  */
-    const int fxsr = sph > dph;
+    const int fxsr = STDL_BLIT_FXSR(sph, dph);
     const int reads = dn + fxsr;                /* source words/line  */
-    const uint8_t skew = (uint8_t)((fxsr << 7) | ((dph - sph) & 15));
+    const uint8_t skew = STDL_BLIT_SKEW(fxsr, sph, dph);
     const uint16_t lm = (uint16_t)(0xFFFFu >> dph);
     const uint16_t rm = (uint16_t)(0xFFFFu << (15 - ((dph + w - 1) & 15)));
     const uintptr_t sbase = (uintptr_t)(src->pixels

@@ -489,9 +489,9 @@ spr_blitter(const uint16_t *fdata, uint32_t rowwords, int xbase, int x,
                         || !stdl_blit_reach(dst->pixels))) {
         return 0;
     }
-    fxsr = sph > dph;
+    fxsr = STDL_BLIT_FXSR(sph, dph);
     reads = dn + fxsr;
-    skew = (uint8_t)((fxsr << 7) | ((dph - sph) & 15));
+    skew = STDL_BLIT_SKEW(fxsr, sph, dph);
     lm = (uint16_t)(0xFFFFu >> dph);
     rm = (uint16_t)(0xFFFFu << (15 - ((dph + w - 1) & 15)));
     sbase = (uintptr_t)(fdata + stdl_row_off(row0, (uint16_t)rowwords))

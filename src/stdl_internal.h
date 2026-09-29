@@ -119,6 +119,36 @@ unsigned stdl_host_ym_at(unsigned sel);
 #endif
 
 /*
+ * A long at an even address that need not be a multiple of four - a
+ * group of a surface borrowed through STDL_CreateSurfaceFrom, which
+ * promises words. A 68000 takes it in one move.l. Host C calls the
+ * same access undefined and the host tests' alignment sanitizer says
+ * so, so there it goes through memcpy: the same bytes either way.
+ */
+#ifndef __m68k__
+#include <string.h>
+#endif
+static __inline__ uint32_t stdl_ld32(const void *p)
+{
+#ifdef __m68k__
+    return *(const uint32_t *)p;
+#else
+    uint32_t v;
+    memcpy(&v, p, 4);
+    return v;
+#endif
+}
+
+static __inline__ void stdl_st32(void *p, uint32_t v)
+{
+#ifdef __m68k__
+    *(uint32_t *)p = v;
+#else
+    memcpy(p, &v, 4);
+#endif
+}
+
+/*
  * Plane budget (planes.c): the number of low bitplanes the drawing
  * paths maintain. 4 is the default and means "all of them" - the
  * behaviour of every build before the budget existed. A lower value

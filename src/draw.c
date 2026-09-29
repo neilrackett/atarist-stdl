@@ -473,22 +473,6 @@ void STDL_HLine(STDL_Surface *dst, int x1, int x2, int y, uint8_t col)
     }
 }
 
-/* set/clear one pixel's bit in the low np planes of a group */
-STDL_PLANE_INLINE void put_bit_planes(uint16_t *grp, uint8_t col,
-                                      uint16_t bit, const int np)
-{
-    uint16_t nb = (uint16_t)~bit;
-
-    grp[0] = (col & 1) ? (uint16_t)(grp[0] | bit)
-                       : (uint16_t)(grp[0] & nb);
-    if (np > 1) grp[1] = (col & 2) ? (uint16_t)(grp[1] | bit)
-                                   : (uint16_t)(grp[1] & nb);
-    if (np > 2) grp[2] = (col & 4) ? (uint16_t)(grp[2] | bit)
-                                   : (uint16_t)(grp[2] & nb);
-    if (np > 3) grp[3] = (col & 8) ? (uint16_t)(grp[3] | bit)
-                                   : (uint16_t)(grp[3] & nb);
-}
-
 /*
  * One column of pixels, the plane words merged a pair at a time the
  * way points_fast does it: the colour as two longs and the bit in
@@ -567,11 +551,40 @@ void STDL_VLine(STDL_Surface *dst, int x, int y1, int y2, uint8_t col)
     }
 }
 
+static const uint32_t stdl_bit32[16] = {
+    0x80008000UL, 0x40004000UL, 0x20002000UL, 0x10001000UL,
+    0x08000800UL, 0x04000400UL, 0x02000200UL, 0x01000100UL,
+    0x00800080UL, 0x00400040UL, 0x00200020UL, 0x00100010UL,
+    0x00080008UL, 0x00040004UL, 0x00020002UL, 0x00010001UL
+};
+
+/* a colour index as the two long plane pairs a group merge wants */
+#define STDL_PLANEPAIR(c) \
+    { STDL_PACK2((c) & 1 ? 0xFFFFu : 0u, (c) & 2 ? 0xFFFFu : 0u), \
+      STDL_PACK2((c) & 4 ? 0xFFFFu : 0u, (c) & 8 ? 0xFFFFu : 0u) }
+static const uint32_t stdl_planepair[16][2] = {
+    STDL_PLANEPAIR(0),  STDL_PLANEPAIR(1),  STDL_PLANEPAIR(2),
+    STDL_PLANEPAIR(3),  STDL_PLANEPAIR(4),  STDL_PLANEPAIR(5),
+    STDL_PLANEPAIR(6),  STDL_PLANEPAIR(7),  STDL_PLANEPAIR(8),
+    STDL_PLANEPAIR(9),  STDL_PLANEPAIR(10), STDL_PLANEPAIR(11),
+    STDL_PLANEPAIR(12), STDL_PLANEPAIR(13), STDL_PLANEPAIR(14),
+    STDL_PLANEPAIR(15)
+};
+#undef STDL_PLANEPAIR
+
+/*
+ * One pixel as two plane-pair merges, g ^= (g ^ colour) & bit, the
+ * colour and the bit from the tables above: no plane-budget dispatch
+ * and no per-plane test - a plane beyond the budget is zero in both
+ * the colour and the destination. The per-plane form it replaced cost
+ * 146us a call on a plain ST.
+ */
 void STDL_PutPixel(STDL_Surface *dst, int x, int y, uint8_t col)
 {
-    uint16_t *grp;
-    uint16_t bit;
-    int np, transparent;
+    uint8_t *g;
+    uint32_t m, t;
+    const uint32_t *pl;
+    int transparent;
 
     if (dst == NULL
         || x < dst->clip.x || x >= dst->clip.x + dst->clip.w
@@ -579,21 +592,20 @@ void STDL_PutPixel(STDL_Surface *dst, int x, int y, uint8_t col)
         return;
     }
     transparent = (col >= STDL_TRANSPARENT && dst->mask != NULL);
-    col = transparent ? 0 : (uint8_t)(col & STDL_COL_MASK);
-    bit = (uint16_t)(0x8000u >> (x & 15));
-    grp = (uint16_t *)(dst->pixels + stdl_row_off(y, dst->stride)
-                       + ((x >> 4) * 8));
-    np = stdl_planes;
-#define PUT_BITS(np) put_bit_planes(grp, col, bit, (np))
-    STDL_PLANE_DISPATCH(np, PUT_BITS);
-#undef PUT_BITS
+    pl = stdl_planepair[transparent ? 0 : (col & STDL_COL_MASK)];
+    m = stdl_bit32[x & 15];
+    g = dst->pixels + stdl_row_off(y, dst->stride) + ((x >> 1) & ~7);
+    t = stdl_ld32(g);
+    stdl_st32(g, t ^ ((t ^ pl[0]) & m));
+    t = stdl_ld32(g + 4);
+    stdl_st32(g + 4, t ^ ((t ^ pl[1]) & m));
     if (dst->mask != NULL) {
-        uint16_t *m = (uint16_t *)(dst->mask
+        uint16_t *mw = (uint16_t *)(dst->mask
             + stdl_row_off(y, dst->maskstride)) + (x >> 4);
         if (transparent) {
-            *m |= bit;
+            *mw |= (uint16_t)m;
         } else {
-            *m &= (uint16_t)~bit;
+            *mw &= (uint16_t)~m;
         }
         dst->opaque_state = 0;
     }
@@ -1040,26 +1052,6 @@ STDL_PLANE_INLINE int hspans_run(STDL_Surface *dst,
  * long operation and replaces a variable shift with a load; both
  * halves are equal, so it needs no byte-order form.
  */
-static const uint32_t stdl_bit32[16] = {
-    0x80008000UL, 0x40004000UL, 0x20002000UL, 0x10001000UL,
-    0x08000800UL, 0x04000400UL, 0x02000200UL, 0x01000100UL,
-    0x00800080UL, 0x00400040UL, 0x00200020UL, 0x00100010UL,
-    0x00080008UL, 0x00040004UL, 0x00020002UL, 0x00010001UL
-};
-
-/* a colour index as the two long plane pairs a group merge wants */
-#define STDL_PLANEPAIR(c) \
-    { STDL_PACK2((c) & 1 ? 0xFFFFu : 0u, (c) & 2 ? 0xFFFFu : 0u), \
-      STDL_PACK2((c) & 4 ? 0xFFFFu : 0u, (c) & 8 ? 0xFFFFu : 0u) }
-static const uint32_t stdl_planepair[16][2] = {
-    STDL_PLANEPAIR(0),  STDL_PLANEPAIR(1),  STDL_PLANEPAIR(2),
-    STDL_PLANEPAIR(3),  STDL_PLANEPAIR(4),  STDL_PLANEPAIR(5),
-    STDL_PLANEPAIR(6),  STDL_PLANEPAIR(7),  STDL_PLANEPAIR(8),
-    STDL_PLANEPAIR(9),  STDL_PLANEPAIR(10), STDL_PLANEPAIR(11),
-    STDL_PLANEPAIR(12), STDL_PLANEPAIR(13), STDL_PLANEPAIR(14),
-    STDL_PLANEPAIR(15)
-};
-#undef STDL_PLANEPAIR
 
 /*
  * Batched single pixels, unmasked destination clipped at its own

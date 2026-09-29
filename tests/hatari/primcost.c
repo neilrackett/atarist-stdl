@@ -6,7 +6,8 @@
  * The other half of SPRCOST: the primitives a game draws besides
  * sprites, restores and rectangles - tiles, keyed blits at aligned
  * x (the SDL port's sprite), text and single glyphs, lines and
- * circles, span and point batches, chunky frames, single pixels.
+ * circles, span and point batches, chunky frames, single pixels,
+ * the XOR forms.
  * Same method and output format, so tests/hatari/sccmp.py compares
  * two logs: each case runs until it has taken MINTICKS of the 200Hz
  * clock, twice per process (passes A and B, the same-binary floor),
@@ -115,6 +116,11 @@ static void op_i8_32(int i)
 {
     STDL_BlitIndexed8(dst, chunky, 32, 67 + (i & 7), 40, 32, 32, map, 0);
 }
+static void op_xvspans3(int i) { (void)i; STDL_XorVSpans(dst, vsp, 32, 3); }
+static void op_xvspans5(int i) { (void)i; STDL_XorVSpans(dst, vsp, 32, 5); }
+static void op_xvline(int i)   { (void)i; STDL_XorVLine(dst, 77, 20, 69, 5); }
+static void op_xvline3(int i)  { (void)i; STDL_XorVLine(dst, 77, 20, 69, 3); }
+static void op_xhline(int i)   { (void)i; STDL_XorHLine(dst, 37, 68, 60, 5); }
 static void op_xor(int i)
 {
     STDL_Rect r = { 37, 30, 32, 32 };
@@ -238,6 +244,11 @@ int main(void)
         report("indexed8 16x16", op_i8_16);
         report("indexed8 32x32", op_i8_32);
         report("xorrect 32x32", op_xor);
+        report("xorvspans 32 x 8 c3", op_xvspans3);
+        report("xorvspans 32 x 8 c5", op_xvspans5);
+        report("xorvline 50", op_xvline);
+        report("xorvline 50 c3", op_xvline3);
+        report("xorhline 32", op_xhline);
     }
     printf("SC:done\n");
     fflush(stdout);

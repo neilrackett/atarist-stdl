@@ -622,36 +622,87 @@ uint8_t STDL_GetPixel(const STDL_Surface *src, int x, int y)
 /* XOR raster op                                                    */
 
 /*
- * XOR one group's plane words with m. The colour's bits arrive as
- * four scalars so the tests are loop-invariant branches, not an
- * indexed loop: planes whose bit is clear are never touched, which
- * is both the XOR identity and the plane budget (col comes in
- * masked with STDL_COL_MASK, so out-of-budget planes never appear).
+ * XOR a plane pair at a time: the colour as two longs, each half
+ * 0xFFFF where its plane's bit is set, ANDed with the pixels' mask in
+ * both halves - g ^= colour & mask. A plane whose bit is clear XORs
+ * with zero, the identity, so out-of-budget planes (col arrives
+ * masked with STDL_COL_MASK) are never changed. The word-at-a-time
+ * form this replaced tested the colour's four bits for every group:
+ * 2.2ms for a 32x32 XorRect on a plain ST.
+ *
+ * The column forms keep a second instantiation for colour 3, the
+ * terrain outline a port draws a column at a time: there the colour
+ * is a constant, the loop's one long is the pixel's bit in both
+ * halves and nothing else stays live. Given the colour as a variable
+ * the same loop spilled the bit and the stride around it, 6% slower
+ * than the special case it replaced. `both` is false only there.
  */
-STDL_PLANE_INLINE void xor_group(uint16_t *grp, uint16_t m,
-                                 int c0, int c1, int c2, int c3)
+#define XOR_COL3(col, BODY) \
+    do {                        \
+        if ((col) == 3) {       \
+            BODY(0xFFFFFFFFu, 0u, 0); \
+        } else {                \
+            BODY(XOR_L01(col), XOR_L23(col), 1); \
+        }                       \
+    } while (0)
+
+/* one row: g the first group, n the groups after it */
+STDL_PLANE_INLINE void xor_row(uint32_t *g, int n, uint16_t lm,
+                               uint16_t rm, uint32_t l01, uint32_t l23,
+                               const int both)
 {
-    if (c0) grp[0] ^= m;
-    if (c1) grp[1] ^= m;
-    if (c2) grp[2] ^= m;
-    if (c3) grp[3] ^= m;
+    uint32_t m;
+
+    if (n == 0) {
+        lm &= rm;
+    }
+    m = ((uint32_t)lm << 16) | lm;
+    g[0] ^= l01 & m;
+    if (both) {
+        g[1] ^= l23 & m;
+    }
+    if (n == 0) {
+        return;
+    }
+    g += 2;
+    while (--n != 0) {
+        g[0] ^= l01;
+        if (both) {
+            g[1] ^= l23;
+        }
+        g += 2;
+    }
+    m = ((uint32_t)rm << 16) | rm;
+    g[0] ^= l01 & m;
+    if (both) {
+        g[1] ^= l23 & m;
+    }
 }
 
-/* one row of a horizontal span: groups g0..g1 with edge masks */
-STDL_PLANE_INLINE void xor_row_groups(uint8_t *row, int g0, int g1,
-                                      uint16_t lm, uint16_t rm,
-                                      int c0, int c1, int c2, int c3)
+/* one column, rows >= 1, the colour's pairs masked to the pixel's bit
+ * here, beside the loop, where it costs no register across the
+ * caller's address arithmetic */
+STDL_PLANE_INLINE void xor_column(uint8_t *p, uint16_t stride, int rows,
+                                  uint16_t bit, uint32_t l01, uint32_t l23,
+                                  const int both)
 {
-    int g;
+    const uint32_t m = ((uint32_t)bit << 16) | bit;
+    const uint32_t a = l01 & m, b = l23 & m;
 
-    xor_group((uint16_t *)(row + g0 * 8), lm, c0, c1, c2, c3);
-    for (g = g0 + 1; g < g1; g++) {
-        xor_group((uint16_t *)(row + g * 8), 0xFFFFu, c0, c1, c2, c3);
-    }
-    if (g1 != g0) {
-        xor_group((uint16_t *)(row + g1 * 8), rm, c0, c1, c2, c3);
-    }
+    do {
+        ((uint32_t *)p)[0] ^= a;
+        if (both) {
+            ((uint32_t *)p)[1] ^= b;
+        }
+        p += stride;
+    } while (--rows != 0);
 }
+
+/* the colour's plane pairs */
+#define XOR_L01(col) STDL_PACK2(((col) & 1) ? 0xFFFFu : 0u, \
+                                ((col) & 2) ? 0xFFFFu : 0u)
+#define XOR_L23(col) STDL_PACK2(((col) & 4) ? 0xFFFFu : 0u, \
+                                ((col) & 8) ? 0xFFFFu : 0u)
 
 /* the same row's mask words: XOR marks what it touches opaque */
 STDL_PLANE_INLINE void xor_mask_row(uint8_t *mrow, int g0, int g1,
@@ -681,28 +732,28 @@ STDL_PLANE_INLINE void xor_mask_row(uint8_t *mrow, int g0, int g1,
 static void xor_rows(STDL_Surface *s, int x1, int x2, int y1,
                      int y2, uint8_t col)
 {
-    uint16_t stride = s->stride;
-    uint8_t *row = s->pixels + stdl_row_off(y1, stride);
-    uint8_t *mrow = (s->mask != NULL)
-        ? s->mask + stdl_row_off(y1, s->maskstride) : NULL;
-    int g0 = x1 >> 4, g1 = x2 >> 4, y;
-    int c0 = col & 1, c1 = col & 2, c2 = col & 4, c3 = col & 8;
-    uint16_t lm = (uint16_t)(0xFFFFu >> (x1 & 15));
-    uint16_t rm = (uint16_t)(0xFFFFu << (15 - (x2 & 15)));
+    const uint16_t stride = s->stride;
+    const int g0 = x1 >> 4, g1 = x2 >> 4, n = g1 - g0;
+    const uint16_t lm = (uint16_t)(0xFFFFu >> (x1 & 15));
+    const uint16_t rm = (uint16_t)(0xFFFFu << (15 - (x2 & 15)));
+    const uint32_t l01 = XOR_L01(col), l23 = XOR_L23(col);
+    uint8_t *row = s->pixels + stdl_row_off(y1, stride) + g0 * 8;
+    int y;
 
-    if (g0 == g1) {
-        lm &= rm;
-        rm = lm;
-    }
+    /* both pairs always: a row's second XOR with zero costs less
+     * than a second copy of the loop costs the size budget */
     for (y = y1; y <= y2; y++) {
-        xor_row_groups(row, g0, g1, lm, rm, c0, c1, c2, c3);
-        if (mrow != NULL) {
-            xor_mask_row(mrow, g0, g1, lm, rm);
-            mrow += s->maskstride;
-        }
+        xor_row((uint32_t *)row, n, lm, rm, l01, l23, 1);
         row += stride;
     }
     if (s->mask != NULL) {
+        uint8_t *mrow = s->mask + stdl_row_off(y1, s->maskstride);
+        const uint16_t elm = (g0 == g1) ? (uint16_t)(lm & rm) : lm;
+
+        for (y = y1; y <= y2; y++) {
+            xor_mask_row(mrow, g0, g1, elm, rm);
+            mrow += s->maskstride;
+        }
         s->opaque_state = 0;
     }
 }
@@ -772,9 +823,8 @@ void STDL_XorHLine(STDL_Surface *dst, int x1, int x2, int y,
 void STDL_XorVLine(STDL_Surface *dst, int x, int y1, int y2,
                    uint8_t col)
 {
-    int t, y, p;
-    uint16_t bit;
-    uint8_t *base;
+    STDL_Span sp;
+    int t;
 
     if (dst == NULL) {
         return;
@@ -786,42 +836,16 @@ void STDL_XorVLine(STDL_Surface *dst, int x, int y1, int y2,
     if (y1 < dst->clip.y) y1 = dst->clip.y;
     if (y2 >= dst->clip.y + dst->clip.h)
         y2 = dst->clip.y + dst->clip.h - 1;
-    col &= STDL_COL_MASK;
-    if (y1 > y2 || col == 0) {
+    if (y1 > y2) {
         return;
     }
-    bit = (uint16_t)(0x8000u >> (x & 15));
-    base = dst->pixels + stdl_row_off(y1, dst->stride) + ((x >> 4) * 8);
-
-    /* Planes 0 and 1 are adjacent words, so the common two-plane
-     * case is one long XOR per row instead of two word ones. */
-    if ((col & 12) == 0 && (col & 3) == 3
-        && ((uintptr_t)base & 3) == 0) {
-        uint32_t lm = ((uint32_t)bit << 16) | bit;
-        for (y = y1; y <= y2; y++) {
-            *(uint32_t *)base ^= lm;
-            base += dst->stride;
-        }
-    } else {
-        for (y = y1; y <= y2; y++) {
-            uint16_t *grp = (uint16_t *)base;
-            for (p = 0; p < 4; p++) {
-                if (col & (1 << p)) grp[p] ^= bit;
-            }
-            base += dst->stride;
-        }
-    }
-
-    if (dst->mask != NULL) {
-        uint8_t *mbase = dst->mask
-                       + stdl_row_off(y1, dst->maskstride)
-                       + ((x >> 4) * 2);
-        for (y = y1; y <= y2; y++) {
-            *(uint16_t *)mbase &= (uint16_t)~bit;
-            mbase += dst->maskstride;
-        }
-        dst->opaque_state = 0;
-    }
+    /* clipped, so it fits a span's 16 bits: one span through the
+     * batched form, whose column loops (colour 3's among them) it
+     * would otherwise carry a second copy of */
+    sp.x = (int16_t)x;
+    sp.y = (int16_t)y1;
+    sp.len = (int16_t)(y2 - y1 + 1);
+    STDL_XorVSpans(dst, &sp, 1, col);
 }
 
 void STDL_XorPixel(STDL_Surface *dst, int x, int y, uint8_t col)
@@ -1297,15 +1321,12 @@ void STDL_HSpans(STDL_Surface *dst, const STDL_Span *spans,
 }
 
 /*
- * Vertical XOR spans. `pair` is a compile-time flag for the common
- * two-plane colour: planes 0 and 1 are adjacent words, so one long
- * XOR does both. It is decided once for the whole list - the group
- * address is a multiple of 8 from the surface base, so if the base
- * is long-aligned every span is.
+ * Vertical XOR spans: a column each, the colour's plane pairs masked
+ * to the span's bit once per span (see xor_row).
  */
 STDL_PLANE_INLINE int xor_vspans_run(STDL_Surface *dst,
-        const STDL_Span *spans, int count, uint8_t col,
-        const int pair)
+        const STDL_Span *spans, int count, uint32_t l01, uint32_t l23,
+        const int both)
 {
     int drew = 0;
     uint8_t *pixels = dst->pixels;
@@ -1315,14 +1336,12 @@ STDL_PLANE_INLINE int xor_vspans_run(STDL_Surface *dst,
     int cx0 = dst->clip.x, cy0 = dst->clip.y;
     int cx1 = cx0 + dst->clip.w - 1;
     int cy1 = cy0 + dst->clip.h - 1;
-    int c0 = col & 1, c1 = col & 2, c2 = col & 4, c3 = col & 8;
     const STDL_Span *s = spans;
     int i;
 
     for (i = 0; i < count; i++, s++) {
         int x = s->x, y = s->y, rows = s->len, n;
         uint16_t bit;
-        uint8_t *p;
 
         if (rows <= 0 || x < cx0 || x > cx1) {
             continue;
@@ -1342,30 +1361,18 @@ STDL_PLANE_INLINE int xor_vspans_run(STDL_Surface *dst,
         bit = (uint16_t)(0x8000u >> (x & 15));
         /* (x >> 4) * 8 without the shift pair; x is clipped, so
          * never negative */
-        p = pixels + stdl_row_off(y, stride) + ((x >> 1) & ~7);
-        n = rows;
-        if (pair) {
-            uint32_t lw = ((uint32_t)bit << 16) | bit;
-            do {
-                *(uint32_t *)p ^= lw;
-                p += stride;
-            } while (--n);
-        } else {
-            do {
-                xor_group((uint16_t *)p, bit, c0, c1, c2, c3);
-                p += stride;
-            } while (--n);
-        }
+        xor_column(pixels + stdl_row_off(y, stride) + ((x >> 1) & ~7),
+                   stride, rows, bit, l01, l23, both);
 
         if (maskbase != NULL) {
-            uint8_t *m = maskbase + stdl_row_off(y, maskstride)
-                       + ((x >> 4) * 2);
+            uint8_t *mp = maskbase + stdl_row_off(y, maskstride)
+                        + ((x >> 4) * 2);
             uint16_t nb = (uint16_t)~bit;
 
             n = rows;
             do {
-                *(uint16_t *)m &= nb;
-                m += maskstride;
+                *(uint16_t *)mp &= nb;
+                mp += maskstride;
             } while (--n);
         }
     }
@@ -1384,12 +1391,10 @@ void STDL_XorVSpans(STDL_Surface *dst, const STDL_Span *spans,
     if (col == 0 || dst->clip.w == 0 || dst->clip.h == 0) {
         return;
     }
-    if (col == 3 && ((uintptr_t)dst->pixels & 3) == 0
-        && (dst->stride & 3) == 0) {
-        drew = xor_vspans_run(dst, spans, count, col, 1);
-    } else {
-        drew = xor_vspans_run(dst, spans, count, col, 0);
-    }
+#define XOR_VSPANS(l01, l23, both) \
+    drew = xor_vspans_run(dst, spans, count, (l01), (l23), (both))
+    XOR_COL3(col, XOR_VSPANS);
+#undef XOR_VSPANS
     if (drew && dst->mask != NULL) {
         dst->opaque_state = 0;
     }
@@ -1400,7 +1405,8 @@ void STDL_XorHSpans(STDL_Surface *dst, const STDL_Span *spans,
 {
     uint8_t *pixels, *maskbase;
     uint16_t stride, maskstride;
-    int cx0, cx1, cy0, cy1, c0, c1, c2, c3, i, drew = 0;
+    int cx0, cx1, cy0, cy1, i, drew = 0;
+    uint32_t l01, l23;
     const STDL_Span *s = spans;
 
     if (dst == NULL || spans == NULL || count <= 0) {
@@ -1418,7 +1424,8 @@ void STDL_XorHSpans(STDL_Surface *dst, const STDL_Span *spans,
     cy0 = dst->clip.y;
     cx1 = cx0 + dst->clip.w - 1;
     cy1 = cy0 + dst->clip.h - 1;
-    c0 = col & 1; c1 = col & 2; c2 = col & 4; c3 = col & 8;
+    l01 = XOR_L01(col);
+    l23 = XOR_L23(col);
 
     for (i = 0; i < count; i++, s++) {
         int x1 = s->x, y = s->y, x2, g0, g1;
@@ -1442,8 +1449,8 @@ void STDL_XorHSpans(STDL_Surface *dst, const STDL_Span *spans,
             rm = lm;
         }
         drew = 1;
-        xor_row_groups(pixels + stdl_row_off(y, stride), g0, g1,
-                       lm, rm, c0, c1, c2, c3);
+        xor_row((uint32_t *)(pixels + stdl_row_off(y, stride) + g0 * 8),
+                g1 - g0, lm, rm, l01, l23, 1);
         if (maskbase != NULL) {
             xor_mask_row(maskbase + stdl_row_off(y, maskstride),
                          g0, g1, lm, rm);

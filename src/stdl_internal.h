@@ -825,6 +825,56 @@ static __inline__ uint32_t stdl_mul32x16(uint32_t a, uint16_t b)
          + stdl_row_off((int)(a & 0xFFFFu), b);
 }
 
+/*
+ * Rows of whole groups, no mask: tiles and background restores, the
+ * hottest small loop in the library. Written out because gcc 4.6 has
+ * kept its strides and row count on the stack in some builds of its
+ * callers and in registers in others - the same C measured 7% apart
+ * on a 16x16 restore depending on unrelated code elsewhere in the
+ * function. Here they are registers by construction. ng >= 1,
+ * h >= 1; the skips are each row's stride less the bytes copied.
+ * A 68000 needs only an even address for a long move, so word-aligned
+ * data is fine; the C twin copies words, which the host's alignment
+ * sanitizer accepts at any even address too.
+ */
+static __inline__ void stdl_copy_rows_groups(uint8_t *dp,
+                                             const uint8_t *sp,
+                                             int ng, int h,
+                                             int32_t sskip,
+                                             int32_t dskip)
+{
+#ifdef __m68k__
+    int16_t rows = (int16_t)h;
+    const int16_t n = (int16_t)(ng - 1);
+
+    __asm__ volatile(
+        "1:\n\t"
+        "move.w %[n],%%d0\n"
+        "2:\n\t"
+        "move.l (%[s])+,(%[d])+\n\t"
+        "move.l (%[s])+,(%[d])+\n\t"
+        "dbf    %%d0,2b\n\t"
+        "adda.l %[sk],%[s]\n\t"
+        "adda.l %[dk],%[d]\n\t"
+        "subq.w #1,%[h]\n\t"
+        "bne.s  1b"
+        : [d] "+a"(dp), [s] "+a"(sp), [h] "+d"(rows)
+        : [n] "d"(n), [sk] "d"(sskip), [dk] "d"(dskip)
+        : "d0", "cc", "memory");
+#else
+    /* C twin - what tests/host exercises and the asm must match */
+    int y, i;
+
+    for (y = 0; y < h; y++) {
+        for (i = 0; i < ng * 8; i += 2) {
+            *(uint16_t *)(dp + i) = *(const uint16_t *)(sp + i);
+        }
+        dp += ng * 8 + dskip;
+        sp += ng * 8 + sskip;
+    }
+#endif
+}
+
 /* case-normalising fopen for GEMDOS: retries with an uppercased
  * basename so lowercase asset names in ported code just work */
 void *stdl_fopen_ci(const char *path, const char *mode);

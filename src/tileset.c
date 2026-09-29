@@ -106,55 +106,69 @@ void STDL_FreeTileset(STDL_Tileset *ts)
     }
 }
 
-/* x is rounded down to a group boundary: tiles are the aligned fast
- * path by definition. Use sprites for free positioning. */
-STDL_PLANE_INLINE void blit_tile_rows(const uint16_t *src,
-                              uint8_t *drow, int dstride, int rows,
-                              int gx0, int g0, int g1, int tsgroups,
-                              int words, int masked, const int np)
+/*
+ * A masked tile's rows: stored like a sprite's, [mask][p0..p3] per
+ * group with the planes clear under the mask. The mask is read first:
+ * a transparent group's planes are never fetched, and an opaque one -
+ * the inside of most tiles - is plain stores with no read of the
+ * destination. Instantiated per plane budget.
+ */
+STDL_PLANE_INLINE void tile_rows_masked(const uint16_t *src, uint8_t *drow,
+                                        int dstride, int rows, int n,
+                                        uint32_t srcadv, const int np)
 {
-    /* every product here is 16x16 (groups, words per group): as
-     * plain int arithmetic gcc 4.6 makes each a __mulsi3 call, per
-     * group per row */
-    const uint32_t srcadv = stdl_row_off(tsgroups, (uint16_t)words);
-    const uint16_t *sg0 = src + stdl_row_off(g0, (uint16_t)words);
-    int yy, g;
+    int yy, k;
 
     for (yy = 0; yy < rows; yy++) {
-        const uint16_t *sg = sg0;
-        uint16_t *dgrp = (uint16_t *)(drow + (gx0 + g0) * 8);
-        for (g = g0; g < g1; g++, sg += words, dgrp += 4) {
-            if (masked) {
-                uint16_t m = sg[0];
-                dgrp[0] = (uint16_t)((dgrp[0] & m) | sg[1]);
-                if (np > 1) dgrp[1] = (uint16_t)((dgrp[1] & m) | sg[2]);
-                if (np > 2) dgrp[2] = (uint16_t)((dgrp[2] & m) | sg[3]);
-                if (np > 3) dgrp[3] = (uint16_t)((dgrp[3] & m) | sg[4]);
-            } else {
-                dgrp[0] = sg[0];
-                if (np > 1) dgrp[1] = sg[1];
-                if (np > 2) dgrp[2] = sg[2];
-                if (np > 3) dgrp[3] = sg[3];
+        const uint16_t *sg = src;
+        uint16_t *d = (uint16_t *)drow;
+
+        for (k = n; k > 0; k--) {
+            const uint16_t m = sg[0];
+
+            if (m == 0) {
+                d[0] = sg[1];
+                if (np > 1) d[1] = sg[2];
+                if (np > 2) d[2] = sg[3];
+                if (np > 3) d[3] = sg[4];
+            } else if (m != 0xFFFFu) {
+                d[0] = (uint16_t)((d[0] & m) | sg[1]);
+                if (np > 1) d[1] = (uint16_t)((d[1] & m) | sg[2]);
+                if (np > 2) d[2] = (uint16_t)((d[2] & m) | sg[3]);
+                if (np > 3) d[3] = (uint16_t)((d[3] & m) | sg[4]);
             }
+            sg += 5;
+            d += 4;
         }
-        sg0 += srcadv;
+        src += srcadv;
         drow += dstride;
     }
 }
 
+/*
+ * x is rounded down to a group boundary: tiles are the aligned fast
+ * path by definition. Use sprites for free positioning.
+ *
+ * An unmasked tile is rows of whole groups, and they go through the
+ * library's register-only row copy (stdl_copy_rows_groups) - all four
+ * planes at any budget, since a plane beyond it is zero both in the
+ * tile and on the destination, and zeros over zeros are what a budget
+ * allows. It replaced a loop that stored the planes a word at a time
+ * and asked, for every group of every row, whether the tile was
+ * masked: 654us for a 16x16 tile on a plain ST.
+ */
 void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,
                    int x, int y)
 {
-    int row0, row1, g0, g1, gx0, words, np;
-    const uint16_t *tdata;
+    int row0, row1, g0, g1, gx0, n;
+    const uint16_t *src;
+    uint8_t *drow;
 
     if (ts == NULL || dst == NULL || index < 0
         || index >= ts->ntiles) {
         return;
     }
-    x &= ~15;
     gx0 = x >> 4;
-    words = ts->masked ? 5 : 4;
 
     row0 = 0;
     row1 = ts->th;
@@ -164,6 +178,7 @@ void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,
     if (row0 >= row1) {
         return;
     }
+    /* whole groups only: one cut by the clip rectangle is dropped */
     g0 = 0;
     g1 = ts->groups;
     while (g0 < g1 && (gx0 + g0) * 16 < dst->clip.x) g0++;
@@ -173,19 +188,29 @@ void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,
     if (g0 >= g1) {
         return;
     }
+    n = g1 - g0;
+    drow = dst->pixels + stdl_row_off(y + row0, dst->stride)
+         + (gx0 + g0) * 8;
 
-    tdata = ts->data + stdl_row_off(index, (uint16_t)ts->tilesize);
-    {
-    const uint16_t *src =
-        tdata + stdl_row_off(row0, (uint16_t)stdl_row_off(ts->groups, (uint16_t)words));
-    uint8_t *drow =
-        dst->pixels + stdl_row_off(y + row0, dst->stride);
+    if (!ts->masked) {
+        /* a tile row is groups * 4 words, rows back to back */
+        const int rowbytes = ts->groups * 8;
 
-    np = stdl_planes;
-#define TILE_ROWS(np) \
-    blit_tile_rows(src, drow, dst->stride, row1 - row0, gx0, g0, g1, \
-                   ts->groups, words, ts->masked, (np))
-    STDL_PLANE_DISPATCH(np, TILE_ROWS);
-#undef TILE_ROWS
+        src = ts->data + stdl_row_off(index, (uint16_t)ts->tilesize)
+            + stdl_row_off(row0, (uint16_t)(ts->groups * 4)) + g0 * 4;
+        stdl_copy_rows_groups(drow, (const uint8_t *)src, n,
+                              row1 - row0, (int32_t)(rowbytes - n * 8),
+                              (int32_t)dst->stride - n * 8);
+    } else {
+        const uint32_t srcadv = (uint32_t)ts->groups * 5;
+        int np = stdl_planes;
+
+        src = ts->data + stdl_row_off(index, (uint16_t)ts->tilesize)
+            + stdl_row_off(row0, (uint16_t)srcadv) + g0 * 5;
+#define TILE_MASKED(np) \
+        tile_rows_masked(src, drow, dst->stride, row1 - row0, n, \
+                         srcadv, (np))
+        STDL_PLANE_DISPATCH(np, TILE_MASKED);
+#undef TILE_MASKED
     }
 }

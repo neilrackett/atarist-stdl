@@ -1220,6 +1220,96 @@ static void test_tiles(void)
     STDL_FreeSurface(dst);
 }
 
+/*
+ * Tiles against a per-pixel model of their contract: x rounds down to
+ * a group, a group the clip rectangle cuts is dropped whole, masked
+ * tiles keep the destination under the key. Four tile shapes, masked
+ * and plain, random positions and clips, plane budgets 4, 2 and 3.
+ */
+static void test_tiles_wide(void)
+{
+    static const int shapes[4][2] = { { 16, 8 }, { 16, 16 }, { 32, 16 },
+                                      { 48, 12 } };
+    static const int budgets[3] = { 4, 2, 3 };
+    int iter;
+
+    for (iter = 0; iter < 300; iter++) {
+        const int budget = budgets[iter % 3];
+        const int maxcol = 1 << budget;
+        const int tw = shapes[iter & 3][0], th = shapes[iter & 3][1];
+        const int masked = (iter >> 2) & 1;
+        const uint8_t key = (uint8_t)(maxcol - 2);
+        STDL_Surface *img, *dst;
+        STDL_Tileset *ts;
+        STDL_Rect clip;
+        Ref *want;
+        int index, x, y, px, py, gx, bad = 0;
+
+        STDL_SetPlaneBudget(budget);
+        img = STDL_CreateSurface(tw * 2, th * 2);
+        dst = STDL_CreateSurface(120, 60);
+        randomise(img, maxcol);
+        randomise(dst, maxcol);
+        if (masked) {
+            STDL_SetColourKey(img, 1, key);
+        }
+        ts = STDL_TilesetFromSurface(img, tw, th);
+        if (ts == NULL) {
+            CHECK(0, "tileset build");
+            return;
+        }
+        index = (int)(rnd() % 4);
+        x = (int)(rnd() % (120 + tw + 16)) - tw - 8;
+        y = (int)(rnd() % (60 + th + 8)) - th - 4;
+        clip.x = (int16_t)(rnd() % 40);
+        clip.y = (int16_t)(rnd() % 20);
+        clip.w = (uint16_t)(10 + rnd() % 90);
+        clip.h = (uint16_t)(5 + rnd() % 45);
+        STDL_SetClipRect(dst, &clip);
+        want = ref_new(120, 60);
+        surf_to_ref(dst, want);
+
+        gx = (x >> 4) * 16;
+        for (py = y; py < y + th; py++) {
+            for (px = gx; px < gx + tw; px++) {
+                int g0x = gx + ((px - gx) & ~15);
+                int sx = (index % 2) * tw + (px - gx);
+                int sy = (index / 2) * th + (py - y);
+                uint8_t c = STDL_GetPixel(img, sx, sy);
+                if (py < clip.y || py >= clip.y + clip.h
+                    || g0x < clip.x || g0x + 15 >= clip.x + clip.w
+                    || px < 0 || px >= 120 || py < 0 || py >= 60) {
+                    continue;
+                }
+                if (masked && c == key) {
+                    continue;
+                }
+                want->px[py * 120 + px] = c;
+            }
+        }
+        STDL_BlitTile(ts, index, dst, x, y);
+        for (py = 0; py < 60 && bad < 4; py++) {
+            for (px = 0; px < 120 && bad < 4; px++) {
+                if (STDL_GetPixel(dst, px, py) != want->px[py * 120 + px]) {
+                    printf("  tile (%d,%d): got %d want %d [tw=%d th=%d "
+                           "masked=%d np=%d x=%d y=%d clip=%d,%d %ux%u]\n",
+                           px, py, STDL_GetPixel(dst, px, py),
+                           want->px[py * 120 + px], tw, th, masked,
+                           budget, x, y, clip.x, clip.y, clip.w, clip.h);
+                    bad++;
+                    failures++;
+                }
+            }
+        }
+        ref_free(want);
+        STDL_FreeTileset(ts);
+        STDL_FreeSurface(img);
+        STDL_FreeSurface(dst);
+        STDL_SetPlaneBudget(4);
+        if (failures > 3) return;
+    }
+}
+
 int main(void)
 {
     test_putget();
@@ -1238,6 +1328,7 @@ int main(void)
     test_sprites_wide();
     test_1bpp();
     test_tiles();
+    test_tiles_wide();
     if (failures == 0) {
         printf("all pixel-path tests passed\n");
         return 0;

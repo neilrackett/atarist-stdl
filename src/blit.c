@@ -49,52 +49,6 @@ void copy_row_short(uint8_t *dp, const uint8_t *sp, int bytes, int lng)
     }
 }
 
-/*
- * Rows of whole groups, long aligned, no mask: tiles and background
- * restores. Written out because it is the hottest small loop in the
- * library and gcc 4.6 has kept its strides and row count on the stack
- * in some builds of STDL_BlitSurfaceEx and in registers in others -
- * the same C measured 7% apart on a 16x16 restore depending on
- * unrelated code elsewhere in the function. Here they are registers
- * by construction. ng >= 1, h >= 1; the skips are the strides less
- * the row's own bytes.
- */
-static __inline__ void copy_rows_groups(uint8_t *dp, const uint8_t *sp,
-                                        int ng, int h, int32_t sskip,
-                                        int32_t dskip)
-{
-#ifdef __m68k__
-    int16_t rows = (int16_t)h;
-    const int16_t n = (int16_t)(ng - 1);
-
-    __asm__ volatile(
-        "1:\n\t"
-        "move.w %[n],%%d0\n"
-        "2:\n\t"
-        "move.l (%[s])+,(%[d])+\n\t"
-        "move.l (%[s])+,(%[d])+\n\t"
-        "dbf    %%d0,2b\n\t"
-        "adda.l %[sk],%[s]\n\t"
-        "adda.l %[dk],%[d]\n\t"
-        "subq.w #1,%[h]\n\t"
-        "bne.s  1b"
-        : [d] "+a"(dp), [s] "+a"(sp), [h] "+d"(rows)
-        : [n] "d"(n), [sk] "d"(sskip), [dk] "d"(dskip)
-        : "d0", "cc", "memory");
-#else
-    /* C twin - what tests/host exercises and the asm must match */
-    int y, i;
-
-    for (y = 0; y < h; y++) {
-        for (i = 0; i < ng * 8; i += 4) {
-            *(uint32_t *)(dp + i) = *(const uint32_t *)(sp + i);
-        }
-        dp += ng * 8 + dskip;
-        sp += ng * 8 + sskip;
-    }
-#endif
-}
-
 /* n mask words cleared, n >= 1; mask rows are word aligned always */
 static __inline__ __attribute__((always_inline))
 void clear_mask_short(uint16_t *m, int n)
@@ -810,7 +764,7 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                      * unswitch), which cost more than a 16-pixel
                      * row's two moves. Here they are asked once.
                      */
-                    copy_rows_groups(dp, sp, ng, h,
+                    stdl_copy_rows_groups(dp, sp, ng, h,
                                      (int32_t)src->stride - bytes,
                                      (int32_t)dst->stride - bytes);
                     return 0;

@@ -450,6 +450,20 @@ warnings** with the Makefile's `-Wall -Wextra`.
   branch `exp/sprite-wide-asm`; revisit if a port without the RAM
   for PRESHIFT draws wide sprites on a plain ST and the size budget
   has room.
+- **Measured and rejected: "endmask" sprites on the BLiTTER.** One
+  copy per sprite row, YCOUNT walking the planes and the row's mask
+  in EM1-EM3, halves the chip's bus traffic against the two passes a
+  plane `STDL_BlitSprite` makes - and costs more, because the CPU
+  programs the chip once a row instead of once a pass. In its best
+  case (masks precomputed, no clipping) the extra cost per row was
+  38.7us against 24.6 on an STE for a 16px sprite, 42.6 against 37.1
+  at 32px, and 31 against 12 on a Mega STE; the real thing adds a
+  mask shift per row. Its total looked 40% faster only because the
+  probe had no entry cost to pay. The engine it comes from makes it
+  pay with generated code and the chip's registers held in address
+  registers, a subsystem rather than a change. The probe is on the
+  local branch `exp/ems`. Compare techniques by the slope - the same
+  width at two heights - not by one total.
 - **Possible future improvement: the blit policy's per-operation
   cost.** With a border open, BLiTTER throughput is 1.14-1.28x the
   no-border time for full-width operations (mostly the split and

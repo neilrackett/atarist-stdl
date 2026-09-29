@@ -227,7 +227,7 @@ static void tile_rows_low(uint8_t *drow, const uint8_t *srow, int n,
         int k = n;
 
         do {
-            stdl_st32(d, stdl_ld32(sp));
+            *(stdl_wlong *)d = *(const stdl_wlong *)sp;
             d += 8;
             sp += 8;
         } while (--k != 0);

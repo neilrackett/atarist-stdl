@@ -1324,6 +1324,78 @@ static void test_tiles(void)
 }
 
 /*
+ * Every drawing primitive on a surface whose rows are word aligned
+ * and never long aligned - one borrowed through STDL_CreateSurfaceFrom
+ * - against the same calls on a library surface, byte for byte. The
+ * plane-pair paths read and write longs there; a 68000 takes a long at
+ * any even address, and stdl_wlong tells the alignment sanitizer so,
+ * so this fails on a wrong result or an odd address, never on the
+ * host's own alignment rule.
+ */
+static void test_word_aligned_views(void)
+{
+    enum { W = 96, H = 24, STRIDE = W / 2 };
+    static uint8_t buf[STRIDE * H + 8];
+    static const int budgets[2] = { 4, 2 };
+    static const STDL_Point pts[4] = { { 3, 2 }, { 50, 7 }, { 95, 23 },
+                                       { 17, 11 } };
+    static const uint8_t cols[4] = { 5, 9, 14, 3 };
+    static const STDL_Span sp[3] = { { 5, 3, 40 }, { 33, 9, 7 },
+                                     { 70, 1, 20 } };
+    int b;
+
+    for (b = 0; b < 2; b++) {
+        uint8_t *a = buf;
+        STDL_Surface *v, *r;
+        STDL_Rect rc;
+        int k;
+
+        STDL_SetPlaneBudget(budgets[b]);
+        memset(buf, 0, sizeof(buf));
+        while (((uintptr_t)a & 3) != 2) { a++; }
+        v = STDL_CreateSurfaceFrom(a, W, H, STRIDE, NULL, 0);
+        r = STDL_CreateSurface(W, H);
+        if (v == NULL || r == NULL) {
+            CHECK(0, "word-aligned view setup");
+            return;
+        }
+        for (k = 0; k < 2; k++) {
+            STDL_Surface *s = k ? r : v;
+            rc.x = 3; rc.y = 1; rc.w = 70; rc.h = 9;
+            STDL_FillRect(s, &rc, 5);
+            STDL_HLine(s, 7, 90, 12, 6);
+            STDL_VLine(s, 33, 0, 23, 9);
+            STDL_HSpans(s, sp, 3, 11);
+            STDL_VSpans(s, sp, 3, 4);
+            STDL_Points(s, pts, 4, 13);
+            STDL_PointsC(s, pts, cols, 4);
+            STDL_PutPixel(s, 41, 17, 7);
+            STDL_Line(s, 0, 23, 95, 2, 10);
+            STDL_Circle(s, 48, 12, 9, 12);
+            STDL_FillCircle(s, 20, 16, 6, 3);
+            rc.x = 21; rc.y = 4; rc.w = 50; rc.h = 13;
+            STDL_XorRect(s, &rc, 15);
+            STDL_XorHLine(s, 2, 80, 20, 5);
+            STDL_XorVLine(s, 60, 3, 22, 3);
+            STDL_XorVSpans(s, sp, 3, 6);
+            STDL_XorHSpans(s, sp, 3, 9);
+            STDL_XorPixel(s, 44, 5, 12);
+        }
+        for (k = 0; k < H; k++) {
+            if (memcmp(v->pixels + k * STRIDE, r->pixels + k * r->stride,
+                       STRIDE) != 0) {
+                break;
+            }
+        }
+        CHECK(k == H, "word-aligned view differs at row %d, budget %d",
+              k, budgets[b]);
+        STDL_FreeSurface(v);
+        STDL_FreeSurface(r);
+    }
+    STDL_SetPlaneBudget(4);
+}
+
+/*
  * Tile art is not normalised to the plane budget when a tileset is
  * built or loaded, so a tileset made with colours 4-15 and drawn at
  * budget 2 must still draw each colour masked to the budget, as
@@ -1765,6 +1837,7 @@ int main(void)
     test_tiles();
     test_tiles_wide();
     test_tiles_budget();
+    test_word_aligned_views();
     test_text_model();
     test_shapes_ref();
     if (failures == 0) {

@@ -505,13 +505,13 @@ spr_blitter(const uint16_t *fdata, uint32_t rowwords, int xbase, int x,
                        STDL_BLIT_HOP_SRC, STDL_BLIT_OP_AND, skew);
     for (p = 0; p < np; p++) {
         stdl_blit_pass(sbase, dbase + (uintptr_t)(p * 2), (uint16_t)dn,
-                  (uint16_t)h, STDL_BLIT_HOP_SRC);
+                       (uint16_t)h);
     }
     STDL_BLIT_SET_OP(STDL_BLIT_OP_OR);
     for (p = 0; p < np; p++) {
         stdl_blit_pass(sbase + (uintptr_t)(2 + p * 2),
-                  dbase + (uintptr_t)(p * 2), (uint16_t)dn, (uint16_t)h,
-                  STDL_BLIT_HOP_SRC);
+                       dbase + (uintptr_t)(p * 2), (uint16_t)dn,
+                       (uint16_t)h);
     }
     return 1;
 }

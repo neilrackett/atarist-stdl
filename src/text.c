@@ -57,19 +57,19 @@ STDL_PLANE_INLINE void draw_text_glyphs(uint8_t *pixels, int stride,
      * a 32-bit multiply into a __mulsi3 call (~270 cycles measured on
      * an 8MHz 68000), and the obvious form of this loop makes four of
      * them per character - `(c - first) * bpr * ch` is two on its own.
-     * What is left is one mulu.w: glyphsize is at most 16*32/8 and
-     * c - first at most 255, so both operands fit 16 bits.
+     * What is left is one mulu.w a glyph: glyphsize is at most 16*32/8
+     * and c - first at most 255, so both operands fit 16 bits. The row
+     * address is a mulu.w too; it was the call's last __mulsi3.
      */
     glyphsize = (uint16_t)(bpr * ch);
     bits0 = font->bits + stdl_row_off(row0, (uint16_t)bpr);
-    rowbase = pixels + (uint32_t)(y + row0) * stride;
+    rowbase = pixels + stdl_row_off(y + row0, (uint16_t)stride);
 
     for (i = 0; text[i] != '\0'; i++, x += cw) {
         uint8_t c = (uint8_t)text[i];
         const uint8_t *glyph;
         uint16_t clipmask;
         int shift, gx, cl, cr;
-        uint16_t *g1w;
 
         if (c < font->first || c > font->last) {
             continue;
@@ -89,9 +89,7 @@ STDL_PLANE_INLINE void draw_text_glyphs(uint8_t *pixels, int stride,
         shift = x & 15;
         gx = x >> 4;
         glyph = bits0 + stdl_row_off(c - font->first, glyphsize);
-        g1w = (uint16_t *)(rowbase + gx * 8);
-
-        stdl_glyph_rows((uint8_t *)g1w, stride, glyph, bpr, row1 - row0,
+        stdl_glyph_rows(rowbase + gx * 8, stride, glyph, bpr, row1 - row0,
                         clipmask, shift, pw0, pw1, pw2, pw3, np);
     }
 }

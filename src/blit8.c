@@ -51,10 +51,10 @@ static void b8tab_build(void)
         uint16_t bit = (uint16_t)(0x8000u >> i);
         for (v = 0; v < 16; v++) {
             b8cell *e = &b8tab[i][v];
-            e->d01 = ((v & 1) ? (uint32_t)bit << 16 : 0)
-                   | ((v & 2) ? bit : 0);
-            e->d23 = ((v & 4) ? (uint32_t)bit << 16 : 0)
-                   | ((v & 8) ? bit : 0);
+            /* in memory order, so the long merge below is right on
+             * a little-endian host too */
+            e->d01 = STDL_PACK2((v & 1) ? bit : 0u, (v & 2) ? bit : 0u);
+            e->d23 = STDL_PACK2((v & 4) ? bit : 0u, (v & 8) ? bit : 0u);
             e->dr = bit;
         }
     }
@@ -234,27 +234,14 @@ void STDL_BlitIndexed8(STDL_Surface *dst, const uint8_t *src,
                     drawn &= (uint16_t)~*mw;
                 }
                 if (drawn) {
-                    uint16_t keep = (uint16_t)~drawn;
-#ifdef __m68k__
+                    const uint16_t keep = (uint16_t)~drawn;
                     /* a plane pair a long: g ^= (g ^ planes) & drawn,
                      * which needs no complement and stays in registers
                      * (a 68000 takes a long at any even address) */
-                    uint32_t *g = (uint32_t *)grp;
+                    stdl_wlong *g = (stdl_wlong *)grp;
                     const uint32_t m = ((uint32_t)drawn << 16) | drawn;
                     g[0] ^= (g[0] ^ a01) & m;
                     g[1] ^= (g[1] ^ a23) & m;
-#else
-                    /* C twin, a word at a time for the host's alignment
-                     * sanitizer */
-                    grp[0] = (uint16_t)((grp[0] & keep)
-                                        | ((uint16_t)(a01 >> 16) & drawn));
-                    grp[1] = (uint16_t)((grp[1] & keep)
-                                        | ((uint16_t)a01 & drawn));
-                    grp[2] = (uint16_t)((grp[2] & keep)
-                                        | ((uint16_t)(a23 >> 16) & drawn));
-                    grp[3] = (uint16_t)((grp[3] & keep)
-                                        | ((uint16_t)a23 & drawn));
-#endif
                     if (mw != NULL) {
                         if (flags & STDL_I8_MARK) {
                             *mw |= drawn;

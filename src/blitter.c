@@ -23,16 +23,11 @@
 
 #include "stdl_internal.h"
 
-/* the registers and the inline pass live in stdl_internal.h, shared
- * with sprite.c's BLiTTER path */
-typedef stdl_blitregs_t blitregs_t;
-#define BLIT STDL_BLITREGS
-#define BLIT_STARTED() STDL_BLIT_STARTED()
+/* the registers and the inline pass (stdl_blit_pass) live in
+ * stdl_internal.h, shared with sprite.c's BLiTTER path */
 
 /* STDL_UseBlitter's setting; stdl_blitter_active() reads it inline */
 uint8_t stdl_blit_user = 1;
-
-#define blit_pass stdl_blit_pass
 
 /*
  * Whether a clipped blit is worth the BLiTTER, by its shape (the
@@ -76,20 +71,6 @@ int stdl_blitter_allowed(void)
     return stdl_blitter_active();
 }
 
-/* 16x16 -> 32 signed multiply on the 68000's own instruction:
- * promoted to int, gcc 4.6 calls __mulsi3 for it */
-static __inline__ int32_t blit_muls(int16_t a, int16_t b)
-{
-#ifdef __m68k__
-    int32_t r = a;
-
-    __asm__("muls.w %1,%0" : "+d"(r) : "d"(b));
-    return r;
-#else
-    return (int32_t)a * b;
-#endif
-}
-
 int STDL_UseBlitter(int enable)
 {
     int old = stdl_blit_user;
@@ -100,12 +81,6 @@ int STDL_UseBlitter(int enable)
     return old;
 }
 
-/*
- * One plane-rectangle operation, then wait for completion.
- * endmask1 masks the first word of each line, endmask3 the last
- * (merged when the line is a single word). hop: 0 = all ones,
- * 2 = source. op: 0 zeros, 1 src AND dst, 3 src, 6 src XOR dst.
- */
 /*
  * Everything the BLiTTER needs that does not change between the
  * planes of one operation. A four-plane copy used to write these
@@ -132,7 +107,7 @@ void stdl_blitter_setup(int16_t sxinc, int16_t syinc,
                         uint16_t em1, uint16_t em3, uint16_t nwords,
                         uint8_t hop, uint8_t op, uint8_t skew)
 {
-    volatile blitregs_t *b = BLIT;
+    volatile stdl_blitregs_t *b = STDL_BLITREGS;
 
     bl_sxinc = sxinc;
     bl_syinc = syinc;
@@ -152,6 +127,13 @@ void stdl_blitter_setup(int16_t sxinc, int16_t syinc,
     b->skew = skew;
 }
 
+/*
+ * One plane-rectangle operation, then wait for completion.
+ * endmask1 masks the first word of each line, endmask3 the last
+ * (merged when the line is a single word). hop: 0 = all ones,
+ * 2 = source. op: 0 zeros, 1 src AND dst, 3 src, 6 src XOR dst,
+ * 7 src OR dst, 15 ones.
+ */
 void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
                      uintptr_t dst, int16_t dxinc, int16_t dyinc,
                      uint16_t em1, uint16_t em3,
@@ -166,7 +148,7 @@ void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
 void stdl_blitter_run(uintptr_t src, uintptr_t dst, uint16_t nwords,
                       uint16_t nlines, uint8_t hop)
 {
-    volatile blitregs_t *b = BLIT;
+    volatile stdl_blitregs_t *b = STDL_BLITREGS;
     /* bus cycles per line: ~4.5 a word for a fill, ~9 for a copy,
      * plus a little per line (measured on an STE, and the same on
      * a Mega STE - the blitter runs on the 8MHz bus whatever the
@@ -215,19 +197,19 @@ void stdl_blitter_run(uintptr_t src, uintptr_t dst, uint16_t nwords,
         b->xcount = nwords;
         b->ycount = n;
         b->ctrl = ctrl;
-        BLIT_STARTED();
+        STDL_BLIT_STARTED();
         while ((b->ctrl & 0x80) || b->ycount != 0)
             ;
         nlines = (uint16_t)(nlines - n);
         if (nlines != 0) {
             /* advance to the first unblitted line; 16-bit multiplies,
              * the 32-bit kind being a library call */
-            const int16_t sl = (int16_t)(blit_muls(
+            const int16_t sl = (int16_t)(stdl_mul16(
                 (int16_t)(nwords - 1 + bl_fxsr), bl_sxinc) + bl_syinc);
-            const int16_t dl = (int16_t)(blit_muls(
+            const int16_t dl = (int16_t)(stdl_mul16(
                 (int16_t)(nwords - 1), bl_dxinc) + bl_dyinc);
-            src = (uintptr_t)((intptr_t)src + blit_muls((int16_t)n, sl));
-            dst = (uintptr_t)((intptr_t)dst + blit_muls((int16_t)n, dl));
+            src = (uintptr_t)((intptr_t)src + stdl_mul16((int16_t)n, sl));
+            dst = (uintptr_t)((intptr_t)dst + stdl_mul16((int16_t)n, dl));
         }
     }
 }
@@ -251,7 +233,7 @@ void stdl_blitter_run(uintptr_t src, uintptr_t dst, uint16_t nwords,
  * path always wrote: skew 0, no extra fetch.
  *
  * Here rather than in blit.c so that each plane's pass is written
- * inline (blit_pass): as a call to stdl_blitter_run, every pass saved
+ * inline (stdl_blit_pass): as a call to stdl_blitter_run, every pass saved
  * and restored eight registers, four passes to a copy and thirteen
  * to a keyed blit. And out of STDL_BlitSurfaceEx, whose CPU paths
  * are compiled the same whatever the BLiTTER code does.
@@ -285,17 +267,15 @@ void stdl_blitter_blit(const STDL_Surface *src, STDL_Surface *dst,
         stdl_blitter_setup(8, s_yinc, 8, d_yinc, lm, rm, (uint16_t)dn,
                            STDL_BLIT_HOP_SRC, STDL_BLIT_OP_XOR, skew);
         for (p = 0; p < np; p++) {
-            blit_pass(sbase + (uintptr_t)(p * 2),
-                             dbase + (uintptr_t)(p * 2),
-                             (uint16_t)dn, (uint16_t)h,
-                             STDL_BLIT_HOP_SRC);
+            stdl_blit_pass(sbase + (uintptr_t)(p * 2),
+                           dbase + (uintptr_t)(p * 2),
+                           (uint16_t)dn, (uint16_t)h);
         }
         stdl_blitter_setup(2, sm_yinc, 8, d_yinc, lm, rm, (uint16_t)dn,
                            STDL_BLIT_HOP_SRC, STDL_BLIT_OP_AND, skew);
         for (p = 0; p < np; p++) {
-            blit_pass(smbase, dbase + (uintptr_t)(p * 2),
-                             (uint16_t)dn, (uint16_t)h,
-                             STDL_BLIT_HOP_SRC);
+            stdl_blit_pass(smbase, dbase + (uintptr_t)(p * 2),
+                           (uint16_t)dn, (uint16_t)h);
         }
     }
     /* the copy, or the masked blit's second XOR: same registers */
@@ -303,9 +283,9 @@ void stdl_blitter_blit(const STDL_Surface *src, STDL_Surface *dst,
                        STDL_BLIT_HOP_SRC,
                        masked ? STDL_BLIT_OP_XOR : STDL_BLIT_OP_SRC, skew);
     for (p = 0; p < np; p++) {
-        blit_pass(sbase + (uintptr_t)(p * 2),
-                         dbase + (uintptr_t)(p * 2),
-                         (uint16_t)dn, (uint16_t)h, STDL_BLIT_HOP_SRC);
+        stdl_blit_pass(sbase + (uintptr_t)(p * 2),
+                       dbase + (uintptr_t)(p * 2),
+                       (uint16_t)dn, (uint16_t)h);
     }
     if (dst->mask != NULL) {
         const uintptr_t dmbase = (uintptr_t)(dst->mask

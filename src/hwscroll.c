@@ -50,10 +50,6 @@
 #define VID_BASE_LO   (*(volatile uint8_t *)0xFFFF820DUL)
 #define VID_LINEWIDTH (*(volatile uint8_t *)0xFFFF820FUL)
 #define VID_HSCROLL   (*(volatile uint8_t *)0xFFFF8265UL)
-/* the video counter, writable on an STE Shifter */
-#define VID_CNT_HI    (*(volatile uint8_t *)0xFFFF8205UL)
-#define VID_CNT_MID   (*(volatile uint8_t *)0xFFFF8207UL)
-#define VID_CNT_LO    (*(volatile uint8_t *)0xFFFF8209UL)
 #else
 /* host builds: the registers are plain bytes, so the sequencing
  * below can be exercised natively if a test ever wants to */
@@ -63,9 +59,6 @@ static volatile uint8_t host_vid[5];
 #define VID_BASE_LO   host_vid[2]
 #define VID_LINEWIDTH host_vid[3]
 #define VID_HSCROLL   host_vid[4]
-#define VID_CNT_HI    stdl_host_vidcnt[0]
-#define VID_CNT_MID   stdl_host_vidcnt[1]
-#define VID_CNT_LO    stdl_host_vidcnt[2]
 #endif
 
 /* the plain STE and the Mega STE: the TT and Falcon read as STE-class
@@ -109,9 +102,9 @@ static uint32_t read_base(void)
 
 static void write_counter(uint32_t b)
 {
-    VID_CNT_HI = (uint8_t)(b >> 16);
-    VID_CNT_MID = (uint8_t)(b >> 8);
-    VID_CNT_LO = (uint8_t)b;
+    STDL_VC_HI = (uint8_t)(b >> 16);
+    STDL_VC_MID = (uint8_t)(b >> 8);
+    STDL_VC_LO = (uint8_t)b;
 }
 
 /*

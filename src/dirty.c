@@ -70,10 +70,7 @@ void STDL_DirtyQuit(void)
 {
     free(lists[0].rects);
     free(lists[1].rects);
-    lists[0].rects = lists[1].rects = NULL;
-    lists[0].key = lists[1].key = NULL;
-    lists[0].n = lists[1].n = 0;
-    lists[0].overflowed = lists[1].overflowed = 0;
+    memset(lists, 0, sizeof(lists));
     cur = 0;
     memset(owes, 0, sizeof(owes));
     owes_next = 0;
@@ -128,9 +125,7 @@ static int list_for(const uint8_t *key)
             STDL_SetError("out of memory for a second dirty list");
             shared = 1;
             cur = 0;
-            lists[0].key = key;
-            lists[0].overflowed = 1;
-            return 0;
+            return list_for(key);
         }
     } else if (lists[other].key != NULL) {
         /* a third page: the other list's page was restored least
@@ -169,12 +164,11 @@ void STDL_DirtyRestore(STDL_Surface *dst)
             STDL_BlitSurfaceEx(bg, &l->rects[i], dst, &d, 0);
         }
     }
-    l->n = 0;
-    l->overflowed = shared;     /* a shared list stays whole */
+    STDL_DirtyReset();          /* cur is this page's list */
 }
 
 void STDL_DirtyReset(void)
 {
     lists[cur].n = 0;
-    lists[cur].overflowed = shared;
+    lists[cur].overflowed = shared;     /* a shared list stays whole */
 }

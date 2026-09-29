@@ -26,8 +26,12 @@
  * A short row, copied inline rather than through memcpy (see
  * BLIT_INLINE_MAX). bytes is a whole number of groups, from 8 up to
  * BLIT_INLINE_MAX; lng says both pointers are long aligned, which a
- * surface from STDL_CreateSurfaceFrom need not be - and a long move
- * to an odd word is an address error on a 68000.
+ * surface from STDL_CreateSurfaceFrom need not be. A 68000 would take
+ * the long moves at any even address - only an odd one faults - so
+ * the word loop is a speed cost for those surfaces, not a safety net;
+ * it stays because a change to STDL_BlitSurfaceEx moves the timings
+ * of every blit (see AGENTS.md), and a borrowed word-aligned surface
+ * is rare.
  */
 static __inline__ __attribute__((always_inline))
 void copy_row_short(uint8_t *dp, const uint8_t *sp, int bytes, int lng)
@@ -1032,11 +1036,10 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                  *
                  * The alignment test hoists: a stride is a whole
                  * number of groups, so if the first row is long
-                 * aligned every row is. It has to be asked rather
-                 * than assumed, because STDL_CreateSurfaceFrom
-                 * promises word alignment and no more, and a long
-                 * move to an odd word is an address error on a
-                 * 68000.
+                 * aligned every row is. STDL_CreateSurfaceFrom
+                 * promises word alignment and no more; such a
+                 * surface takes the word loop (see copy_row_short
+                 * on why, when a 68000 would take the longs).
                  */
                 const int shortrow = bytes <= BLIT_INLINE_MAX;
                 const int lng = (((uintptr_t)sp | (uintptr_t)dp) & 3) == 0;

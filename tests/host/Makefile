@@ -18,10 +18,10 @@
 
 #
 # -fsanitize=alignment earns its place on a library whose fast paths
-# read plane pairs as longs: the host would happily do a misaligned
-# 32-bit load, a 68000 takes an address error. It turns "the guard
-# that keeps a misaligned surface off the long path is missing" from
-# an on-target crash into a host-test failure.
+# read plane pairs as longs. Plane memory is accessed through
+# stdl_wlong (stdl_internal.h), aligned to two as a 68000 long is, so
+# the sanitizer checks the target's rule: an odd address, the one a
+# 68000 faults on, fails here instead of crashing a machine.
 
 CC      = cc
 CFLAGS  = -std=gnu99 -O1 -g -fsanitize=address,alignment \
@@ -50,82 +50,39 @@ all: $(TESTS)
 # every suite compiles library sources against these; without them a
 # header-only change (a macro, a threshold) leaves the binaries stale
 # and the suite passes on the old code
-$(TESTS): $(SRC)/stdl_internal.h $(wildcard ../../include/stdl/*.h)
+HDRS    = $(wildcard $(SRC)/*.h ../../include/stdl/*.h \
+                     ../../include/compat/*.h *.h)
 
-test_pixel: test_pixel.c $(CORE) $(SRC)/surfacefrom.c $(SRC)/drawchar.c
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
+# one recipe: a suite is its own .c, the core, and the extra sources
+# listed for it below
+$(TESTS): %: %.c $(CORE) $(HDRS)
+	$(CC) $(CFLAGS) $(XFLAGS) -o $@ $(filter %.c,$^)
 
-test_dirty: test_dirty.c $(CORE) $(SRC)/dirty.c
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
+test_pixel:     $(SRC)/surfacefrom.c $(SRC)/drawchar.c
+test_dirty:     $(SRC)/dirty.c
 # built with the counters, for stdl_blit_force: every operation the
 # BLiTTER could take goes to it, whatever its size
-test_blitter: test_blitter.c $(CORE)
-	$(CC) $(CFLAGS) -DSTDL_BLIT_STATS -o $@ $(filter %.c,$^)
-
-test_compose: test_compose.c $(CORE) $(SRC)/bmp.c $(SRC)/degas.c \
-              $(SRC)/asset.c
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
-test_cursor: test_cursor.c $(CORE) $(SRC)/cursor.c
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
-test_assets: test_assets.c $(CORE) $(SRC)/bmp.c $(SRC)/asset.c \
-             $(SRC)/degas.c
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
-test_planes: test_planes.c $(CORE)
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
-test_footprint: test_footprint.c $(CORE)
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
-test_indexed: test_indexed.c $(CORE)
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
-test_glyph: test_glyph.c $(CORE) $(SRC)/drawchar.c
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
-test_underleak: test_underleak.c $(CORE) $(SRC)/surfacefrom.c
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
-test_vbl: test_vbl.c $(CORE) $(SRC)/vbl.c
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
-test_blit8: test_blit8.c $(CORE) $(SRC)/blit8.c $(SRC)/surfacefrom.c
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
-test_voice: test_voice.c $(CORE) $(SRC)/voice.c $(SRC)/vbl.c
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
-test_refresh: test_refresh.c $(CORE) $(SRC)/refresh.c $(SRC)/music.c \
-              $(SRC)/ym.c $(SRC)/asset.c
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
-test_ym: test_ym.c $(CORE) $(SRC)/ym.c
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
-test_tone: test_tone.c $(CORE) $(SRC)/ym.c $(SRC)/tone.c $(SRC)/sfx.c
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
-test_wav: test_wav.c $(CORE) $(SRC)/wav.c $(SRC)/asset.c
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
+test_blitter:   XFLAGS = -DSTDL_BLIT_STATS
+test_compose:   $(SRC)/bmp.c $(SRC)/degas.c $(SRC)/asset.c
+test_cursor:    $(SRC)/cursor.c
+test_assets:    $(SRC)/bmp.c $(SRC)/asset.c $(SRC)/degas.c
+test_glyph:     $(SRC)/drawchar.c
+test_underleak: $(SRC)/surfacefrom.c
+test_vbl:       $(SRC)/vbl.c
+test_blit8:     $(SRC)/blit8.c $(SRC)/surfacefrom.c
+test_voice:     $(SRC)/voice.c $(SRC)/vbl.c
+test_refresh:   $(SRC)/refresh.c $(SRC)/music.c $(SRC)/ym.c $(SRC)/asset.c
+test_ym:        $(SRC)/ym.c
+test_tone:      $(SRC)/ym.c $(SRC)/tone.c $(SRC)/sfx.c
+test_wav:       $(SRC)/wav.c $(SRC)/asset.c
 # the SDL_mixer layer on the voice mixer, through its own API
-test_mixer: test_mixer.c $(CORE) $(SRC)/mixer.c $(SRC)/voice.c $(SRC)/vbl.c \
-            $(SRC)/wav.c $(SRC)/music.c $(SRC)/ym.c $(SRC)/asset.c
-	$(CC) $(CFLAGS) -I../../include/compat -o $@ $(filter %.c,$^)
-
+test_mixer:     XFLAGS = -I../../include/compat
+test_mixer:     $(SRC)/mixer.c $(SRC)/voice.c $(SRC)/vbl.c $(SRC)/wav.c \
+                $(SRC)/music.c $(SRC)/ym.c $(SRC)/asset.c
 # the ring device's refill, both paths, pumped by hand
-test_ring: test_ring.c $(CORE) $(SRC)/ring.c $(SRC)/wav.c $(SRC)/asset.c
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
-test_sfx: test_sfx.c $(CORE) $(SRC)/ym.c $(SRC)/sfx.c
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
-
-test_opl: test_opl.c $(CORE) $(SRC)/ym.c $(SRC)/tone.c $(SRC)/sfx.c \
-          $(SRC)/opl.c
-	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^)
+test_ring:      $(SRC)/ring.c $(SRC)/wav.c $(SRC)/asset.c
+test_sfx:       $(SRC)/ym.c $(SRC)/sfx.c
+test_opl:       $(SRC)/ym.c $(SRC)/tone.c $(SRC)/sfx.c $(SRC)/opl.c
 
 # Runs every binary in TESTS rather than a second hand-kept list:
 # a test added to TESTS alone still built, still linked and still

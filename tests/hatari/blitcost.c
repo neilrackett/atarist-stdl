@@ -44,7 +44,8 @@ int main(int argc, char *argv[])
     static const int ws[] = { 16, 32, 64, 128, 192, 320 };
     static const int hs[] = { 8, 16, 32 };
     /* kinds: same-phase plain, same-phase keyed, unaligned plain,
-     * unaligned keyed - each has its own threshold */
+     * unaligned keyed, and same phase with both edges partial - each
+     * has its own threshold */
     static const char *const kind[5] = { "aligned", "aligned keyed",
                                          "shift", "shift keyed",
                                          "edges" };

@@ -605,10 +605,14 @@ warnings** with the Makefile's `-Wall -Wextra`.
   fast path called it once per row, which for a 16x16 tile is eight
   bytes a call: measured about 650 cycles at 16MHz to move what two
   `move.l` do in thirty. Rows up to `BLIT_INLINE_MAX` are copied
-  inline now. A long move needs the pointers long-aligned, which
-  `STDL_CreateSurfaceFrom` does not promise (word only), so the test
-  is made once per blit - a stride is a whole number of groups, so
-  what holds for the first row holds for all of them.
+  inline now, with a long-alignment test made once per blit (a
+  stride is a whole number of groups, so what holds for the first row
+  holds for all of them). The test is not a safety net: a 68000 takes
+  a long at any even address and faults only on an odd one, so a
+  word-aligned borrowed surface merely takes the slower word loop.
+  Code that shares plane memory as longs uses `stdl_wlong`
+  (stdl_internal.h), which is `uint32_t` on the target and tells the
+  host's alignment sanitizer the 68000's rule.
   `memset` is the same story at a larger size: mintlib's costs about
   70us a call on a plain ST before it stores anything, so the fill
   path that cleared each row of a 0 or 15 fill with one lost to a

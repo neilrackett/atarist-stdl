@@ -119,34 +119,16 @@ unsigned stdl_host_ym_at(unsigned sel);
 #endif
 
 /*
- * A long at an even address that need not be a multiple of four - a
- * group of a surface borrowed through STDL_CreateSurfaceFrom, which
- * promises words. A 68000 takes it in one move.l. Host C calls the
- * same access undefined and the host tests' alignment sanitizer says
- * so, so there it goes through memcpy: the same bytes either way.
+ * A long in plane memory: at an even address that need not be a
+ * multiple of four - a group of a surface borrowed through
+ * STDL_CreateSurfaceFrom, which promises words. A 68000 takes a long
+ * at any even address, and its ABI already aligns uint32_t to two,
+ * so on the target this is uint32_t exactly. On the host it tells the
+ * tests' alignment sanitizer the 68000's rule rather than the host's:
+ * an odd address still fails, a word-aligned one is fine. Every
+ * plane-pair access in C goes through it.
  */
-#ifndef __m68k__
-#include <string.h>
-#endif
-static __inline__ uint32_t stdl_ld32(const void *p)
-{
-#ifdef __m68k__
-    return *(const uint32_t *)p;
-#else
-    uint32_t v;
-    memcpy(&v, p, 4);
-    return v;
-#endif
-}
-
-static __inline__ void stdl_st32(void *p, uint32_t v)
-{
-#ifdef __m68k__
-    *(uint32_t *)p = v;
-#else
-    memcpy(p, &v, 4);
-#endif
-}
+typedef uint32_t stdl_wlong __attribute__((aligned(2)));
 
 /*
  * Plane budget (planes.c): the number of low bitplanes the drawing
@@ -625,14 +607,25 @@ typedef stdl_host_blitregs_t stdl_blitregs_t;
 #define STDL_BLIT_STARTED() stdl_host_blitter_exec()
 #endif
 
+#define STDL_BLIT_HOP_ONES 0
+#define STDL_BLIT_HOP_SRC  2
+#define STDL_BLIT_OP_ZERO  0
+#define STDL_BLIT_OP_AND   1    /* src AND dst  */
+#define STDL_BLIT_OP_SRC   3
+#define STDL_BLIT_OP_XOR   6    /* src XOR dst  */
+#define STDL_BLIT_OP_OR    7    /* src OR dst   */
+#define STDL_BLIT_OP_ONES 15
+
+/* one pass of a source copy whose other registers are set, inline;
+ * through stdl_blitter_run when a border's placement policy is in */
 static __inline__ __attribute__((always_inline))
 void stdl_blit_pass(uintptr_t src, uintptr_t dst, uint16_t nwords,
-                    uint16_t nlines, uint8_t hop)
+                    uint16_t nlines)
 {
     volatile stdl_blitregs_t *b = STDL_BLITREGS;
 
     if (stdl_blit_policy != NULL) {
-        stdl_blitter_run(src, dst, nwords, nlines, hop);
+        stdl_blitter_run(src, dst, nwords, nlines, STDL_BLIT_HOP_SRC);
         return;
     }
     b->src_addr = src;
@@ -645,14 +638,6 @@ void stdl_blit_pass(uintptr_t src, uintptr_t dst, uint16_t nwords,
         ;
 }
 
-#define STDL_BLIT_HOP_ONES 0
-#define STDL_BLIT_HOP_SRC  2
-#define STDL_BLIT_OP_ZERO  0
-#define STDL_BLIT_OP_AND   1    /* src AND dst  */
-#define STDL_BLIT_OP_SRC   3
-#define STDL_BLIT_OP_XOR   6    /* src XOR dst  */
-#define STDL_BLIT_OP_OR    7    /* src OR dst   */
-#define STDL_BLIT_OP_ONES 15
 
 /* Change only the logic operation between runs that share every
  * other register - the AND and OR passes of a sprite, a fill's

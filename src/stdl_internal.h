@@ -790,6 +790,15 @@ static __inline__ int stdl_blit_reach(const void *p)
  * from 16 cells (26x8 at x&15=5: BLiTTER 1035, CPU 1210); a Mega
  * STE's CPU would keep up to 32-64 cells */
 #define STDL_BLIT_EDGE_MIN_CELLS        16
+/* same phase while a border is open: every BLiTTER operation is then
+ * placed against the beam first, and the CPU's same-phase paths - a
+ * row copy in registers, the edge and keyed merges - beat it at the
+ * sizes a game restores (STE, bottom border open: a 32x32 restore
+ * 981us on the CPU against 1069 on the chip, 2002 against 2080 at
+ * x&15=5; one port's play with both borders open ran 4% slower with
+ * the chip allowed than refused). Shifted blits and fills keep their
+ * own rules: the chip still wins those by 2-5x under a border. */
+#define STDL_BLIT_BORDER_SAME_MIN_CELLS 256
 
 /*
  * Row offset y * stride. gcc 4.6 compiles a plain 32-bit multiply

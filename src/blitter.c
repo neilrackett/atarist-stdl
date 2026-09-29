@@ -51,6 +51,9 @@ int stdl_blitter_wants(int sx, int dx, int w, int h, int masked)
         return cells >= (masked ? STDL_BLIT_SHIFT_KEYED_MIN_CELLS
                                 : STDL_BLIT_SHIFT_MIN_CELLS);
     }
+    if (stdl_blit_policy != NULL) {
+        return cells >= STDL_BLIT_BORDER_SAME_MIN_CELLS;
+    }
     if (masked) {
         return cells >= STDL_BLIT_MASKED_MIN_CELLS;
     }

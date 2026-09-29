@@ -743,16 +743,24 @@ static __inline__ int stdl_blit_reach(const void *p)
 #define STDL_BLIT_MEM_ROW     70    /* memcpy rows              */
 #define STDL_BLIT_MEM_CELL     2
 #define STDL_BLIT_SETUP      460
-#define STDL_BLIT_MASKED_MIN_CELLS 64   /* masked: 3 passes/plane   */
+/* masked, same phase: 3 passes a plane against a CPU loop that
+ * skips transparent groups and copies opaque ones. Re-measured after
+ * that loop went to registers (2026-09-29, STE): 64x16 keyed 3140
+ * against the CPU's 3255, 128x8 a tie, 32x16 the CPU's - still 64.
+ * A Mega STE's CPU would keep up to ~96 cells; see the note above
+ * on why these are the 8MHz numbers. */
+#define STDL_BLIT_MASKED_MIN_CELLS 64
 /* different phases: the CPU's shift chain is dear enough that the
  * BLiTTER wins far sooner than for a same-phase copy - from 16
  * cells unmasked, 32 keyed (measured: a keyed 16x8 lost 16% on the
  * BLiTTER, a 16x16 won 26%) */
 #define STDL_BLIT_SHIFT_MIN_CELLS       16
 #define STDL_BLIT_SHIFT_KEYED_MIN_CELLS 32
-/* same phase with a partial edge group: the CPU merges its edges a
- * group at a time - every restore at an unaligned x - and loses to
- * the BLiTTER almost as early as the shift chain does */
+/* same phase with a partial edge group - every restore at an
+ * unaligned x. The CPU merges its edges a plane pair at a time in
+ * registers now, twice as fast as it was, and on an STE still loses
+ * from 16 cells (26x8 at x&15=5: BLiTTER 1035, CPU 1210); a Mega
+ * STE's CPU would keep up to 32-64 cells */
 #define STDL_BLIT_EDGE_MIN_CELLS        16
 
 /*

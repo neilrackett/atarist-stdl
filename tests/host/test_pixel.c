@@ -798,22 +798,33 @@ static void test_partial_middle(void)
     enum { W = 192, H = 12, STRIDE = W / 2, MSTRIDE = W / 8 };
     static uint8_t bufs[2][STRIDE * H + 8];
     static uint16_t mbuf[MSTRIDE * H / 2];
-    int view, withmask, phase, ng;
+    int view, withmask, phase, ng, budget;
 
+    /* budgets 4 and 2, and from one group up: an unmasked blit into
+     * an unmasked destination takes its own edge routine for every
+     * width, a single group included */
+    for (budget = 4; budget >= 2; budget -= 2) {
+    STDL_SetPlaneBudget(budget);
     for (view = 0; view <= 1; view++) {
         for (withmask = 0; withmask <= 1; withmask++) {
             for (phase = 0; phase < 16; phase++) {
-                for (ng = 3; ng <= 10; ng++) {
+                for (ng = 1; ng <= 10; ng++) {
                     STDL_Surface *src, *dst;
                     Ref *rs, *rd;
                     STDL_Rect sr, dr;
-                    int w = ng * 16 - phase - (int)(rnd() % 15) - 1;
+                    /* any width that needs exactly ng groups here */
+                    const int lo = ng == 1 ? 1 : (ng - 1) * 16 - phase + 1;
+                    const int hi = ng * 16 - phase;
+                    int w = lo + (int)(rnd() % (unsigned)(hi - lo + 1));
                     int x, y, bad = 0;
 
                     if (view) {
                         /* word aligned, never long aligned; a
                          * borrowed view brings its own mask */
                         uint8_t *a = bufs[0], *b = bufs[1];
+                        /* static, so clear what an earlier budget
+                         * left in the planes this one never writes */
+                        memset(bufs, 0, sizeof(bufs));
                         while (((uintptr_t)a & 3) != 2) { a++; }
                         while (((uintptr_t)b & 3) != 2) { b++; }
                         src = STDL_CreateSurfaceFrom(a, W, H, STRIDE,
@@ -832,8 +843,8 @@ static void test_partial_middle(void)
                         CHECK(0, "partial-middle setup");
                         return;
                     }
-                    randomise(src, 16);
-                    randomise(dst, 16);
+                    randomise(src, 1 << budget);
+                    randomise(dst, 1 << budget);
                     /* after randomise: PutPixel maintains the mask,
                      * so drawing the background made it all opaque */
                     if (withmask && view) {
@@ -857,8 +868,8 @@ static void test_partial_middle(void)
                              0, 0, &dst->clip);
                     STDL_BlitSurface(src, &sr, dst, &dr);
                     CHECK(ref_cmp(dst, rd, "partial middle"),
-                          "partial middle view=%d mask=%d phase=%d w=%d",
-                          view, withmask, phase, w);
+                          "partial middle view=%d mask=%d phase=%d w=%d "
+                          "np=%d", view, withmask, phase, w, budget);
                     if (withmask) {
                         /* opaque exactly where the blit landed */
                         for (y = 0; y < H; y++) {
@@ -882,10 +893,101 @@ static void test_partial_middle(void)
                     ref_free(rd);
                     STDL_FreeSurface(src);
                     STDL_FreeSurface(dst);
-                    if (failures > 3) return;
+                    if (failures > 3) {
+                        STDL_SetPlaneBudget(4);
+                        return;
+                    }
                 }
             }
         }
+    }
+    }
+    STDL_SetPlaneBudget(4);
+}
+
+/*
+ * Colour-keyed blits at the same phase: into an unmasked destination
+ * they take their own routine, which reads each group's mask word
+ * first - nothing visible skips the group, everything visible copies
+ * it. The source is painted a group at a time as all key, no key or
+ * mixed so all three branches run, at budgets 4 and 2, one group to
+ * eight, with and without a destination mask (the general loop).
+ */
+static void test_keyed_same_phase(void)
+{
+    enum { W = 160, H = 20 };
+#ifdef __m68k__
+    const int iters = 120;
+#else
+    const int iters = 600;
+#endif
+    int iter;
+
+    for (iter = 0; iter < iters; iter++) {
+        const int budget = (iter & 1) ? 2 : 4;
+        const int maxcol = 1 << budget;
+        const uint8_t key = (uint8_t)(rnd() % (unsigned)maxcol);
+        const int phase = (int)(rnd() % 16);
+        const int ng = 1 + (int)(rnd() % 8);
+        const int lo = ng == 1 ? 1 : (ng - 1) * 16 - phase + 1;
+        const int hi = ng * 16 - phase;
+        const int w = lo + (int)(rnd() % (unsigned)(hi - lo + 1));
+        const int dmask = (iter % 5) == 0;
+        STDL_Surface *src, *dst;
+        Ref *rs, *rd;
+        STDL_Rect sr, dr, clip;
+        int x, y;
+
+        STDL_SetPlaneBudget(budget);
+        src = STDL_CreateSurface(W, H);
+        dst = STDL_CreateSurface(W, H);
+        for (y = 0; y < H; y++) {
+            for (x = 0; x < W; x += 16) {
+                const int mode = (int)(rnd() % 3);  /* key, none, mixed */
+                int k;
+                for (k = 0; k < 16; k++) {
+                    uint8_t c = (uint8_t)(rnd() % (unsigned)maxcol);
+                    if (mode == 0) {
+                        c = key;
+                    } else if (mode == 1 && c == key) {
+                        c = (uint8_t)((key + 1) % maxcol);
+                    }
+                    STDL_PutPixel(src, x + k, y, c);
+                }
+            }
+        }
+        randomise(dst, maxcol);
+        if (dmask) {
+            STDL_CreateMask(dst, 1);
+        }
+        STDL_SetColourKey(src, 1, key);
+        rs = ref_new(W, H);
+        rd = ref_new(W, H);
+        surf_to_ref(src, rs);
+        surf_to_ref(dst, rd);
+        clip.x = (int16_t)(rnd() % 24);
+        clip.y = (int16_t)(rnd() % 4);
+        clip.w = (uint16_t)(40 + rnd() % 120);
+        clip.h = (uint16_t)(8 + rnd() % 12);
+        STDL_SetClipRect(dst, &clip);
+        sr.x = (int16_t)(16 * (int)(rnd() % 3) + phase);
+        sr.y = (int16_t)(rnd() % 4);
+        sr.w = (uint16_t)w;
+        sr.h = (uint16_t)(1 + rnd() % 14);
+        dr.x = (int16_t)(16 * (int)(rnd() % 4) + phase);
+        dr.y = (int16_t)(rnd() % 6);
+        ref_blit(rs, sr.x, sr.y, sr.w, sr.h, rd, dr.x, dr.y, 1, key,
+                 &dst->clip);
+        STDL_BlitSurface(src, &sr, dst, &dr);
+        CHECK(ref_cmp(dst, rd, "keyed same phase"),
+              "keyed same phase np=%d phase=%d w=%d key=%d dmask=%d",
+              budget, phase, w, key, dmask);
+        ref_free(rs);
+        ref_free(rd);
+        STDL_FreeSurface(src);
+        STDL_FreeSurface(dst);
+        STDL_SetPlaneBudget(4);
+        if (failures > 3) return;
     }
 }
 
@@ -1267,6 +1369,7 @@ static void test_tiles_wide(void)
         clip.w = (uint16_t)(10 + rnd() % 90);
         clip.h = (uint16_t)(5 + rnd() % 45);
         STDL_SetClipRect(dst, &clip);
+        clip = dst->clip;           /* as clamped to the surface */
         want = ref_new(120, 60);
         surf_to_ref(dst, want);
 
@@ -1595,6 +1698,7 @@ int main(void)
     test_points();
     test_blits();
     test_partial_middle();
+    test_keyed_same_phase();
     test_shift_plain();
     test_whole_blit_writeback();
     test_whole_copy();

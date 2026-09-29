@@ -808,6 +808,16 @@ warnings** with the Makefile's `-Wall -Wextra`.
   32-bit window needs one: `(((uint32_t)hi << 16) | lo) >> n` rather
   than `(hi << r) | (lo >> n)`, because the `<< 16` half compiles to
   a free `swap`. Worth 1ms/frame in the unaligned blit path.
+- **In `STDL_BlitSurfaceEx`, take code out rather than add a call.**
+  The function is large enough that gcc's register allocation for
+  the whole of it - including the clip every blit pays - moves with
+  any change. Routing unaligned restores to a new out-of-line routine
+  cost every blit's fixed path 1.2-1.9% with the call added beside
+  the inlined loops, and 3-5% with the test at the head of the
+  same-phase block; moving the flag-free inlined loops out into the
+  new function, so the big one lost code instead of gaining a call,
+  left it within 0.3%. Measure the entry ("blit clipped out") and a
+  16x1 blit on `st` for any edit there.
 - Do not hand-unroll a four-iteration plane loop hoping to save the
   loop overhead: four live plane words spill, and it measured slower
   than the rolled version.

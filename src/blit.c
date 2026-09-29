@@ -58,6 +58,135 @@ void clear_mask_short(uint16_t *m, int n)
     } while (--n != 0);
 }
 
+/*
+ * Same-phase rows with partial edge groups, no source mask, no
+ * destination mask, no flags: every restore of a sprite's background
+ * at an x that is not a multiple of 16. The generic loop merged the
+ * edges a plane word at a time as (d & ~vis) | (s & vis), with the
+ * complement and the four words spilled to the stack: about 87
+ * cycles a word on a plain ST, which made a 16x16 restore at x&15=5
+ * three and a half times the aligned one. Here the edges merge a
+ * plane pair at a time as d ^= (s ^ d) & mask, with the mask in both
+ * halves of a register - 30 cycles a word - and the groups between
+ * are move.l (a0)+,(a1)+. ng >= 1, h >= 1; the skips are each row's
+ * stride less the ng groups walked. A 68000 needs only an even
+ * address for a long access.
+ */
+#ifdef __m68k__
+#define BLIT_EDGE_PAIR(m) \
+    "move.l (%[s])+,%%d0\n\t" \
+    "move.l (%[d]),%%d1\n\t" \
+    "eor.l  %%d1,%%d0\n\t" \
+    "and.l  %[" m "],%%d0\n\t" \
+    "eor.l  %%d0,(%[d])+\n\t"
+#define BLIT_EDGE_SKIP2 \
+    "addq.l #4,%[s]\n\t" \
+    "addq.l #4,%[d]\n\t"
+#endif
+
+static __attribute__((noinline)) void blit_rows_edges(uint8_t *dp,
+        const uint8_t *sp, int ng, int h, uint16_t sstride,
+        uint16_t dstride, uint32_t lrm)
+{
+    const int np = stdl_planes;
+    const int32_t sskip = (int32_t)sstride - ng * 8;
+    const int32_t dskip = (int32_t)dstride - ng * 8;
+    uint16_t lm = (uint16_t)(lrm >> 16), rm = (uint16_t)lrm;
+#ifdef __m68k__
+    int16_t rows = (int16_t)h;
+    const int16_t n = (int16_t)(ng - 2);   /* -1: one group only */
+    uint32_t l32, r32;
+
+    if (ng == 1) {
+        lm &= rm;
+    }
+    l32 = ((uint32_t)lm << 16) | lm;
+    r32 = ((uint32_t)rm << 16) | rm;
+    /*
+     * n < 0 leaves after the left group; n == 0 goes straight to the
+     * right one. Counted out, the two tests and the dbf starting one
+     * lower cost what a bra into the dbf did, so a single group rides
+     * in the same loop for nothing.
+     */
+    if (np > 2) {
+        __asm__ volatile(
+            "1:\n\t"
+            BLIT_EDGE_PAIR("lm")
+            BLIT_EDGE_PAIR("lm")
+            "move.w %[n],%%d2\n\t"
+            "bmi.s  4f\n\t"
+            "subq.w #1,%%d2\n\t"
+            "bmi.s  3f\n"
+            "2:\n\t"
+            "move.l (%[s])+,(%[d])+\n\t"
+            "move.l (%[s])+,(%[d])+\n\t"
+            "dbf    %%d2,2b\n"
+            "3:\n\t"
+            BLIT_EDGE_PAIR("rm")
+            BLIT_EDGE_PAIR("rm")
+            "4:\n\t"
+            "adda.l %[sk],%[s]\n\t"
+            "adda.l %[dk],%[d]\n\t"
+            "subq.w #1,%[h]\n\t"
+            "bne.s  1b"
+            : [d] "+a"(dp), [s] "+a"(sp), [h] "+d"(rows)
+            : [n] "d"(n), [lm] "d"(l32), [rm] "d"(r32),
+              [sk] "a"(sskip), [dk] "a"(dskip)
+            : "d0", "d1", "d2", "cc", "memory");
+    } else {
+        __asm__ volatile(
+            "1:\n\t"
+            BLIT_EDGE_PAIR("lm")
+            BLIT_EDGE_SKIP2
+            "move.w %[n],%%d2\n\t"
+            "bmi.s  4f\n\t"
+            "subq.w #1,%%d2\n\t"
+            "bmi.s  3f\n"
+            "2:\n\t"
+            "move.l (%[s])+,(%[d])+\n\t"
+            BLIT_EDGE_SKIP2
+            "dbf    %%d2,2b\n"
+            "3:\n\t"
+            BLIT_EDGE_PAIR("rm")
+            BLIT_EDGE_SKIP2
+            "4:\n\t"
+            "adda.l %[sk],%[s]\n\t"
+            "adda.l %[dk],%[d]\n\t"
+            "subq.w #1,%[h]\n\t"
+            "bne.s  1b"
+            : [d] "+a"(dp), [s] "+a"(sp), [h] "+d"(rows)
+            : [n] "d"(n), [lm] "d"(l32), [rm] "d"(r32),
+              [sk] "a"(sskip), [dk] "a"(dskip)
+            : "d0", "d1", "d2", "cc", "memory");
+    }
+#else
+    /* C twin - what tests/host exercises and the asm must match; a
+     * word at a time, which the host's alignment sanitizer accepts at
+     * any even address */
+    int y, g, p;
+
+    if (ng == 1) {
+        lm &= rm;
+    }
+    for (y = 0; y < h; y++) {
+        for (g = 0; g < ng; g++) {
+            uint16_t *d = (uint16_t *)dp;
+            const uint16_t *s = (const uint16_t *)sp;
+            const uint16_t m = (g == 0) ? lm
+                             : (g == ng - 1) ? rm : 0xFFFFu;
+
+            for (p = 0; p < np; p++) {
+                d[p] = (uint16_t)(d[p] ^ ((s[p] ^ d[p]) & m));
+            }
+            dp += 8;
+            sp += 8;
+        }
+        dp += dskip;
+        sp += sskip;
+    }
+#endif
+}
+
 /* one group: dst = (dst & ~vis) | (src & vis), mask upkeep. np is
  * the plane budget and is a compile-time constant in every
  * instantiation, so the guarded plane writes vanish. */
@@ -186,6 +315,178 @@ STDL_PLANE_INLINE void blit_rows_aligned(const uint8_t *srow,
             dmrow += dmstride;
         }
     }
+}
+
+/*
+ * Same-phase rows of a colour-keyed source into an unmasked
+ * destination, no flags: the SDL port's sprite at an aligned x. Each
+ * group's mask word is read first (bit set = keep the destination):
+ * a group with nothing visible is skipped, one with everything
+ * visible is two long moves, and the rest merge a plane pair at a
+ * time as d ^= (s ^ d) & vis, the same register-only merge as
+ * blit_rows_edges. lrm holds the left edge mask in its high word and
+ * the right in its low (for one group, both in the low word); the
+ * skips are each row's stride less what the row walked.
+ */
+#ifdef __m68k__
+/* one group. An edge group inverts its mask word and trims it with
+ * the edge mask before testing; a middle group tests the word itself
+ * first - zero is all visible - which saves an eight-cycle compare */
+#define BLIT_KEY_EDGE \
+    "move.w (%[m])+,%%d0\n\t" \
+    "not.w  %%d0\n\t" \
+    "and.w  %[lr],%%d0\n\t" \
+    "beq.s  8f\n\t" \
+    "cmp.w  #-1,%%d0\n\t" \
+    "beq.s  7f\n\t"
+#define BLIT_KEY_MID \
+    "move.w (%[m])+,%%d0\n\t" \
+    "beq.s  7f\n\t" \
+    "not.w  %%d0\n\t" \
+    "beq.s  8f\n\t"
+#define BLIT_KEY_GROUP(head, pairs) \
+    head \
+    "move.w %%d0,%%d1\n\t" \
+    "swap   %%d1\n\t" \
+    "move.w %%d0,%%d1\n\t" \
+    pairs \
+    "bra.s  9f\n" \
+    "7:\n\t"
+#define BLIT_KEY_PAIR \
+    "move.l (%[s])+,%%d2\n\t" \
+    "move.l (%[d]),%%d0\n\t" \
+    "eor.l  %%d0,%%d2\n\t" \
+    "and.l  %%d1,%%d2\n\t" \
+    "eor.l  %%d2,(%[d])+\n\t"
+#define BLIT_KEY4(head) \
+    BLIT_KEY_GROUP(head, BLIT_KEY_PAIR BLIT_KEY_PAIR) \
+    "move.l (%[s])+,(%[d])+\n\t" \
+    "move.l (%[s])+,(%[d])+\n\t" \
+    "bra.s  9f\n" \
+    "8:\n\t" \
+    "addq.l #8,%[s]\n\t" \
+    "addq.l #8,%[d]\n" \
+    "9:\n\t"
+#define BLIT_KEY2(head) \
+    BLIT_KEY_GROUP(head, BLIT_KEY_PAIR BLIT_EDGE_SKIP2) \
+    "move.l (%[s])+,(%[d])+\n\t" \
+    BLIT_EDGE_SKIP2 \
+    "bra.s  9f\n" \
+    "8:\n\t" \
+    "addq.l #8,%[s]\n\t" \
+    "addq.l #8,%[d]\n" \
+    "9:\n\t"
+#define BLIT_KEY_ROWS(GROUP) \
+    "1:\n\t" \
+    "swap   %[lr]\n\t" \
+    GROUP(BLIT_KEY_EDGE) \
+    "swap   %[lr]\n\t" \
+    "move.w %[n],%%d3\n\t" \
+    "bmi.s  4f\n\t" \
+    "subq.w #1,%%d3\n\t" \
+    "bmi.s  3f\n" \
+    "2:\n\t" \
+    GROUP(BLIT_KEY_MID) \
+    "dbf    %%d3,2b\n" \
+    "3:\n\t" \
+    GROUP(BLIT_KEY_EDGE) \
+    "4:\n\t" \
+    "adda.l %[sk],%[s]\n\t" \
+    "adda.l %[dk],%[d]\n\t" \
+    "adda.l %[mk],%[m]\n\t" \
+    "subq.w #1,%[h]\n\t" \
+    "bne    1b"
+#endif
+
+static __attribute__((noinline)) void blit_rows_keyed(uint8_t *dp,
+        const uint8_t *sp, const uint8_t *mp, int ng, int h,
+        uint16_t sstride, uint16_t dstride, int mstride, uint32_t lrm)
+{
+    const int np = stdl_planes;
+    const int32_t sskip = (int32_t)sstride - ng * 8;
+    const int32_t dskip = (int32_t)dstride - ng * 8;
+    const int32_t mskip = (int32_t)mstride - ng * 2;
+#ifdef __m68k__
+    int16_t rows = (int16_t)h;
+    const int16_t n = (int16_t)(ng - 2);   /* -1: one group only */
+    uint32_t lr = lrm;
+
+    if (ng == 1) {
+        lr &= (lrm << 16) | 0xFFFFu;    /* the left mask takes the right */
+    }
+#define KEY_ASM(body) \
+    __asm__ volatile(body \
+        : [d] "+a"(dp), [s] "+a"(sp), [m] "+a"(mp), [h] "+d"(rows), \
+          [lr] "+d"(lr) \
+        : [n] "d"(n), [sk] "a"(sskip), [dk] "a"(dskip), \
+          [mk] "a"(mskip) \
+        : "d0", "d1", "d2", "d3", "cc", "memory")
+    if (np > 2) {
+        KEY_ASM(BLIT_KEY_ROWS(BLIT_KEY4));
+    } else {
+        KEY_ASM(BLIT_KEY_ROWS(BLIT_KEY2));
+    }
+#undef KEY_ASM
+#else
+    /* C twin - what tests/host exercises and the asm must match */
+    const uint16_t lm = (uint16_t)(lrm >> 16), rm = (uint16_t)lrm;
+    int y, g, p;
+
+    for (y = 0; y < h; y++) {
+        for (g = 0; g < ng; g++) {
+            uint16_t *d = (uint16_t *)dp;
+            const uint16_t *s = (const uint16_t *)sp;
+            uint16_t vis = (uint16_t)~*(const uint16_t *)mp;
+
+            if (g == 0) vis &= lm;
+            if (g == ng - 1) vis &= rm;
+            for (p = 0; p < np; p++) {
+                d[p] = (uint16_t)(d[p] ^ ((s[p] ^ d[p]) & vis));
+            }
+            dp += 8;
+            sp += 8;
+            mp += 2;
+        }
+        dp += dskip;
+        sp += sskip;
+        mp += mskip;
+    }
+#endif
+}
+
+/*
+ * The same-phase blit with no flags, out of line: an unmasked copy
+ * into an unmasked destination goes to blit_rows_edges, anything else
+ * to the general loop. Taking these instantiations out of
+ * STDL_BlitSurfaceEx rather than adding a call beside them is what
+ * leaves that function's own code - the clip, the entry every blit
+ * pays - as it was; a call site added there moved the fixed cost of
+ * every blit by one to five percent through register allocation.
+ */
+static __attribute__((noinline)) void blit_aligned_plain(
+        const uint8_t *srow, uint8_t *drow,
+        const uint8_t *smrow, uint8_t *dmrow,
+        uint16_t sstride, uint16_t dstride,
+        int smstride, int dmstride, int ng, int h, uint32_t lrm, int lng)
+{
+    const uint16_t lm = (uint16_t)(lrm >> 16), rm = (uint16_t)lrm;
+    const int np = stdl_planes;
+
+    if (dmrow == NULL) {
+        if (smrow == NULL) {
+            blit_rows_edges(drow, srow, ng, h, sstride, dstride, lrm);
+        } else {
+            blit_rows_keyed(drow, srow, smrow, ng, h, sstride, dstride,
+                            smstride, lrm);
+        }
+        return;
+    }
+#define BLIT_ALIGNED_PLAIN(np) \
+    blit_rows_aligned(srow, drow, smrow, dmrow, sstride, dstride, \
+                      smstride, dmstride, ng, h, lm, rm, \
+                      smrow != NULL, lng, 0, (np))
+    STDL_PLANE_DISPATCH(np, BLIT_ALIGNED_PLAIN);
+#undef BLIT_ALIGNED_PLAIN
 }
 
 /* --- shift chain ------------------------------------------------ */
@@ -805,16 +1106,29 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                                   src->stride, dst->stride, \
                                   smstride, dmstride, \
                                   ng, h, lm, rm, masked, lng, (fl), (np))
-#define BLIT_ALIGNED_N2(fl) BLIT_ALIGNED_F(2, (fl))
-#define BLIT_ALIGNED_N4(fl) BLIT_ALIGNED_F(4, (fl))
-                if (np <= 2) {
-                    STDL_FLAG_DISPATCH(flags, BLIT_ALIGNED_N2);
+/* the three flag sets other than none; none is blit_aligned_plain */
+#define BLIT_ALIGNED_FLAGS(np) \
+                do { \
+                    if ((flags & STDL_BLIT_MARK) == 0) { \
+                        BLIT_ALIGNED_F((np), STDL_BLIT_UNDER); \
+                    } else if ((flags & STDL_BLIT_UNDER) == 0) { \
+                        BLIT_ALIGNED_F((np), STDL_BLIT_MARK); \
+                    } else { \
+                        BLIT_ALIGNED_F((np), \
+                                       STDL_BLIT_UNDER | STDL_BLIT_MARK); \
+                    } \
+                } while (0)
+                if ((flags & (STDL_BLIT_UNDER | STDL_BLIT_MARK)) == 0) {
+                    blit_aligned_plain(srow + sg0 * 8, drow,
+                                       masked ? smrow + sg0 * 2 : NULL,
+                                       dmrow, src->stride, dst->stride,
+                                       smstride, dmstride, ng, h,
+                                       ((uint32_t)lm << 16) | rm, lng);
                 } else {
-                    STDL_FLAG_DISPATCH(flags, BLIT_ALIGNED_N4);
+                    STDL_PLANE_DISPATCH(np, BLIT_ALIGNED_FLAGS);
                 }
 #undef BLIT_ALIGNED_F
-#undef BLIT_ALIGNED_N2
-#undef BLIT_ALIGNED_N4
+#undef BLIT_ALIGNED_FLAGS
             }
         } else {
             /*

@@ -130,9 +130,10 @@ extern unsigned long stdl_blit_merge;    /* same-phase rows that
                                           * merge group by group
                                           * (masked, edges, flags) */
 extern unsigned long stdl_blit_shift;    /* rows via the shifter */
-extern unsigned long stdl_blit_unaligned; /* rows that lost the
-                                          * inline copy to a
-                                          * word-aligned buffer  */
+extern unsigned long stdl_blit_unaligned; /* always 0: a word-
+                                          * aligned buffer no
+                                          * longer loses the
+                                          * inline copy          */
 extern unsigned long stdl_blit_rows;     /* rows, any path       */
 extern unsigned long stdl_blit_ticks;    /* 200Hz ticks inside   */
 extern unsigned long stdl_spr_calls;     /* STDL_BlitSprite entries */

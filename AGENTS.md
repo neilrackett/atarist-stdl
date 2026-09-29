@@ -619,7 +619,8 @@ warnings** with the Makefile's `-Wall -Wextra`.
   asserts it across sizes and allocation orders, and
   `tests/hatari/blitcost.c` prints the alignment before the timings.
   Any new fast path with a run-time condition wants the same three:
-  guarantee what you can, assert it, and print it.
+  guarantee what you can, assert it, and print it. (This predicate
+  has since gone - see the next note - but the lesson stands.)
 
   Be careful where the assert lives. A host test asserting that
   `STDL_CreateSurface` returns long-aligned rows passes whether or
@@ -629,18 +630,24 @@ warnings** with the Makefile's `-Wall -Wextra`.
   `tests/hatari/blitcost.c` prints it. What the host *can* test is
   the other side: `tests/host/test_blit8.c` hands
   `STDL_CreateSurfaceFrom` a deliberately word-aligned block and
-  compares the result against an aligned one, which fails if the
-  word-copy fallback is wrong. A test that cannot fail is worse
+  compares the result against an aligned one, which fails if a
+  copy mishandles a word-aligned block. A test that cannot fail is worse
   than no test, because it is counted.
 - **`memcpy` for a tile row is nearly all prologue.** The aligned
   fast path called it once per row, which for a 16x16 tile is eight
   bytes a call: measured about 650 cycles at 16MHz to move what two
   `move.l` do in thirty. Rows up to `BLIT_INLINE_MAX` are copied
-  inline now, with a long-alignment test made once per blit (a
-  stride is a whole number of groups, so what holds for the first row
-  holds for all of them). The test is not a safety net: a 68000 takes
-  a long at any even address and faults only on an odd one, so a
-  word-aligned borrowed surface merely takes the slower word loop.
+  inline now, as longs at any even address: a 68000 faults only on
+  an odd one. There was a long-alignment test here once, sending
+  word-aligned borrowed surfaces to a word loop, and it cost more
+  than it saved. A change elsewhere in the function made gcc compile
+  that loop to indexed moves with a stack compare a word, and a port
+  whose tiles are carved from one bank at word offsets found every
+  16x16 tile blit a quarter slower on a plain ST than the release
+  before. Dropping the test made its frames 18% faster than that
+  release. A fallback that exists only for speed is a second path
+  whose code nobody measures; when the machine does not need it,
+  delete it.
   Code that shares plane memory as longs uses `stdl_wlong`
   (stdl_internal.h), which is `uint32_t` on the target and tells the
   host's alignment sanitizer the 68000's rule.

@@ -648,11 +648,15 @@ warnings** with the Makefile's `-Wall -Wextra`.
 - **Inline asm in a pixel path is paired with its C twin.** blit8.c
   is the pattern: the hand-written 68000 gather sits under
   `#ifdef __m68k__` with the identical loop in C as the `#else` -
-  the C build is what tests/host exercises, and an on-target run
-  comparing both against a per-pixel model gates the asm (gcc 4.6
-  earned this: it compiled the C loop at ~210 cycles/pixel by
-  spilling accumulators and calling __mulsi3 per group). Remember
-  the 68000's (d8,An,Xn) mode takes an 8-BIT displacement only.
+  the C build is what tests/host exercises, and the same host tests
+  run on the target gate the asm: `tests/hatari/pixchk.c` for
+  test_pixel.c, `tests/hatari/i8chk.c` for test_blit8.c. A pixel
+  file with asm and no such runner has its asm checked by nobody -
+  blit8.c's was, until I8CHK, and a deliberately broken gather now
+  fails it with 26 differences. (gcc 4.6 earned the asm: it
+  compiled the C loop at ~210 cycles/pixel by spilling accumulators
+  and calling __mulsi3 per group.) Remember the 68000's (d8,An,Xn)
+  mode takes an 8-BIT displacement only.
 - **Audio/music**: record Hatari output (`hatari-shortcut recsound`,
   path from the `szYMCaptureFileName` config key) and verify
   spectrally; PLAYMUS's DEMO.STM is note-exact by construction. The

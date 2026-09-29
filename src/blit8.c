@@ -165,15 +165,39 @@ void STDL_BlitIndexed8(STDL_Surface *dst, const uint8_t *src,
              * the source pointer with a __mulsi3 call per group -
              * measured at ~210 cycles per pixel against ~100 for
              * this. The C build below is the reference the host
-             * tests exercise; BENCH8-style on-target runs compare
-             * the two.
+             * tests exercise; tests/hatari/i8chk.c runs those same
+             * tests on the target, against this.
              */
-            if (n > 0) {
+            if (n > 0 && step == 1) {
+                /* the usual walk, a row left to right: the source
+                 * pointer post-increments. No moveq before the byte
+                 * load in either loop - and.w #15 clears the rest,
+                 * and the zero test reads only the byte */
                 int cnt = n - 1;
                 uint32_t vdr = 0;
                 __asm__ volatile(
                     "1:\n\t"
-                    "moveq #0,%%d0\n\t"
+                    "move.b (%0)+,%%d0\n\t"
+                    "jeq 2f\n\t"
+                    "and.w #15,%%d0\n\t"
+                    "add.w %%d0,%%d0\n\t"
+                    "move.w (%6,%%d0.w),%%d0\n\t"
+                    "or.l (%1,%%d0.w),%2\n\t"
+                    "or.l 4(%1,%%d0.w),%3\n\t"
+                    "or.w 8(%1,%%d0.w),%4\n\t"
+                    "2:\n\t"
+                    "lea 256(%1),%1\n\t"
+                    "dbra %5,1b"
+                    : "+a"(p), "+a"(cell), "+d"(a01), "+d"(a23),
+                      "+d"(vdr), "+d"(cnt)
+                    : "a"(smap)
+                    : "d0", "cc", "memory");
+                drawn = (uint16_t)vdr;
+            } else if (n > 0) {
+                int cnt = n - 1;
+                uint32_t vdr = 0;
+                __asm__ volatile(
+                    "1:\n\t"
                     "move.b (%0),%%d0\n\t"
                     "adda.l %6,%0\n\t"
                     "jeq 2f\n\t"
@@ -206,19 +230,31 @@ void STDL_BlitIndexed8(STDL_Surface *dst, const uint8_t *src,
             }
 #endif
             if (drawn) {
-                uint16_t d0 = (uint16_t)(a01 >> 16);
-                uint16_t d1 = (uint16_t)a01;
-                uint16_t d2 = (uint16_t)(a23 >> 16);
-                uint16_t d3 = (uint16_t)a23;
                 if (flags & STDL_I8_UNDER) {
                     drawn &= (uint16_t)~*mw;
                 }
                 if (drawn) {
                     uint16_t keep = (uint16_t)~drawn;
-                    grp[0] = (uint16_t)((grp[0] & keep) | (d0 & drawn));
-                    grp[1] = (uint16_t)((grp[1] & keep) | (d1 & drawn));
-                    grp[2] = (uint16_t)((grp[2] & keep) | (d2 & drawn));
-                    grp[3] = (uint16_t)((grp[3] & keep) | (d3 & drawn));
+#ifdef __m68k__
+                    /* a plane pair a long: g ^= (g ^ planes) & drawn,
+                     * which needs no complement and stays in registers
+                     * (a 68000 takes a long at any even address) */
+                    uint32_t *g = (uint32_t *)grp;
+                    const uint32_t m = ((uint32_t)drawn << 16) | drawn;
+                    g[0] ^= (g[0] ^ a01) & m;
+                    g[1] ^= (g[1] ^ a23) & m;
+#else
+                    /* C twin, a word at a time for the host's alignment
+                     * sanitizer */
+                    grp[0] = (uint16_t)((grp[0] & keep)
+                                        | ((uint16_t)(a01 >> 16) & drawn));
+                    grp[1] = (uint16_t)((grp[1] & keep)
+                                        | ((uint16_t)a01 & drawn));
+                    grp[2] = (uint16_t)((grp[2] & keep)
+                                        | ((uint16_t)(a23 >> 16) & drawn));
+                    grp[3] = (uint16_t)((grp[3] & keep)
+                                        | ((uint16_t)a23 & drawn));
+#endif
                     if (mw != NULL) {
                         if (flags & STDL_I8_MARK) {
                             *mw |= drawn;

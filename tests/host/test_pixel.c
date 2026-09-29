@@ -155,6 +155,52 @@ static void test_fills(void)
     }
 }
 
+/*
+ * Fills of whole rows on surfaces whose rows have no padding - one
+ * contiguous block, which colours 0 and 15 fill with memset and the
+ * others with a single long-pair store run. Every colour, full
+ * surface and row bands, plus a masked surface and a clip that
+ * narrows the rows, both of which must take the ordinary paths.
+ */
+static void test_fill_blocks(void)
+{
+    static const int widths[3] = { 16, 48, 320 };
+    int i;
+
+    for (i = 0; i < 120; i++) {
+        int w = widths[i % 3], h = 1 + (int)(rnd() % 40);
+        STDL_Surface *s = STDL_CreateSurface(w, h);
+        Ref *r = ref_new(w, h);
+        uint8_t c = (uint8_t)(rnd() & 15);
+        STDL_Rect band;
+        int kind = (int)(rnd() % 4);
+
+        randomise(s, 16);
+        surf_to_ref(s, r);
+        if (kind == 3) {
+            STDL_CreateMask(s, 1);
+        }
+        if (kind == 2) {
+            STDL_Rect clip = { 3, 0, 0, 0 };
+            clip.w = (uint16_t)(w - 3);
+            clip.h = (uint16_t)h;
+            STDL_SetClipRect(s, &clip);
+        }
+        band.x = 0;
+        band.y = (int16_t)(kind == 1 ? (int)(rnd() % h) : 0);
+        band.w = (uint16_t)w;
+        band.h = (uint16_t)(kind == 1 ? 1 + (int)(rnd() % h) : h);
+        ref_fill(r, kind == 2 ? 3 : 0, band.y,
+                 kind == 2 ? w - 3 : w, band.h, c);
+        STDL_FillRect(s, kind == 0 ? NULL : &band, c);
+        CHECK(ref_cmp(s, r, "fill block"),
+              "fill block w=%d h=%d c=%d kind=%d", w, h, c, kind);
+        ref_free(r);
+        STDL_FreeSurface(s);
+        if (failures > 3) return;
+    }
+}
+
 static void test_hvlines(void)
 {
     STDL_Surface *s = STDL_CreateSurface(70, 30);
@@ -1178,6 +1224,7 @@ int main(void)
 {
     test_putget();
     test_fills();
+    test_fill_blocks();
     test_hvlines();
     test_xor();
     test_spans();

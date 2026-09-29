@@ -447,6 +447,18 @@ first.
   Measured that way the same change came out -3.97% against a
   -0.29% floor - real, about fourteen times the noise, and twice
   what eyeballing a handful of matched log lines had suggested.
+  Where that noise comes from is narrower than "layout", though: the
+  library's own timing sweep (SPRCOST), built from the same objects
+  linked forwards and in reverse on `--machine st`, timed identically
+  to the tenth of a microsecond on all 85 cases. A 68000 with no
+  cache does not care where an instruction sits, so the per-scene
+  movement a whole game sees comes through something the link order
+  moves along with the code - where the heap's blocks land, which
+  side of a VBL a frame finishes on. Keep running the control; the
+  floor it measures is real, only its cause is not the code's
+  address. And a change inside a big C function is not a layout
+  change: it can move that function's timings by several percent
+  through register allocation alone, which the control cannot see.
 - **Run the same binary twice as well, and quote neither result
   without both floors.** The cheaper control is the one that gets
   skipped, because a deterministic demo is assumed to repeat

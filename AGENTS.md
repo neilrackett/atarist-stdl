@@ -33,6 +33,25 @@ warnings** with the Makefile's `-Wall -Wextra`.
   hardware and m68k asm when `__m68k__` is undefined. Run this
   before any emulator debugging - it is far faster and catches
   guard-band overreads. Keep it warning-free too.
+  The BLiTTER paths run there too: `blitter.c` drives a register
+  struct on the host and `tests/host/blitmodel.c` executes each
+  operation, word by word, against real pointers - so a skewed pass
+  reading past a surface's guard or a sprite's slack is an ASan
+  failure, not a silent fetch. `test_blitter` sets
+  `stdl.mach.has_blitter` and `stdl_blit_force` and compares every
+  BLiTTER blit, fill and sprite with the CPU byte for byte. The model
+  is written from the chip's documented behaviour and asserts on
+  what STDL does not use; extend it, never copy Hatari's (GPL).
+- **On-target probes for the pixel paths.** `tests/hatari/pixchk.c`
+  runs the host pixel suite on the machine - the only check of the
+  asm on a plain ST, where BLITCHK has nothing to compare against.
+  `tests/hatari/sprcost.c` times sprites, restores, blits and fills
+  (with the fixed cost of a call taken apart), twice per run so each
+  run carries its own noise floor, and `tests/hatari/sccmp.py`
+  compares two logs by geometric mean. `tests/hatari/blitcost.c`
+  sweeps the BLiTTER's choice against the CPU forced across five
+  kinds of blit - refit its thresholds from it whenever either path
+  changes.
 - **CI runs both builds on every push** (`.github/workflows/ci.yml`):
   the host tests, then the cross build with `sizecheck`, then the
   libcmini archive. Two things it sees that a developer's Mac does
@@ -578,7 +597,48 @@ warnings** with the Makefile's `-Wall -Wextra`.
 - **After touching blit/fill paths**: run `dist/BLITCHK.TOS` - it
   randomises fills/blits and compares the CPU and BLiTTER paths
   byte-for-byte on target. Both paths must stay identical;
-  `STDL_UseBlitter(0)` forces CPU.
+  `STDL_UseBlitter(0)` forces CPU. It runs every plane budget twice,
+  once with `stdl_blit_force` sending every eligible operation to the
+  BLiTTER whatever its size (it links the counted build of the pixel
+  objects for that), and fails a forced pass the BLiTTER never took
+  part in - a comparison of the CPU with itself passes whatever the
+  BLiTTER code does.
+- **The BLiTTER never gets NFSR.** On the real chip NFSR does not
+  behave as commonly described, and with one-word lines it gives
+  wrong results. Unaligned blits and sprites use SKEW alone for a
+  right shift and SKEW with FXSR for a left one, so a line reads at
+  most one source word past its span; surfaces carry guard bytes and
+  sprite data one group of slack (`SPR_SLACK`) for that word. With
+  FXSR a line fetches one word more than it writes, and the source's
+  y increment and the border policy's split path both count it.
+- **The BLiTTER sees ST RAM only.** A surface a program allocated with
+  plain malloc on a machine with alt-RAM may not be there, and the
+  chip would read and write whatever ST RAM aliases it. `STDL_Init`
+  records whether any alt-RAM exists; only then are a surface's
+  addresses compared with PHYSTOP before the BLiTTER is chosen, and
+  the CPU takes whatever is out of reach. Asking every surface on
+  every machine cost BLiTTER blits 3% on an STE. Hatari cannot give
+  an STE alt-RAM, so the refusal is untested on the case it guards.
+- **Code added inside STDL_BlitSurfaceEx moves its CPU paths.** gcc
+  4.6 allocates registers for the whole function at once, and every
+  arrangement of the BLiTTER's decision and work tried inside it -
+  inline, as a call from the shift chain, folded into one out-of-line
+  worker - made some plain-ST CPU blit 1-7% slower, a machine that
+  never reaches the new code. What survived: the size rules
+  (`stdl_blitter_wants`) and the work (`stdl_blitter_blit`) both out of
+  line in blitter.c, behind an inline two-byte test; and the hottest
+  small loop (whole-group row copies) as asm with register operands,
+  which gcc cannot spill whatever else changes. Moving every row loop
+  out of line behind a job struct was also tried and made small
+  blits 5-25% slower - the function's fixed cost is its own clip and
+  set-up, not register pressure from the loops. Measure every change
+  to that function on `st`, all 85 SPRCOST cases, not the one you
+  meant to change.
+- **Refit a threshold against every shape it decides between.** The
+  first BLiTTER refit measured only whole-group copies, handed
+  partial-edge restores to the CPU, and made them 2-3x slower on an
+  STE: the CPU merges edge groups a group at a time and the BLiTTER
+  wins those from 26x8. `blitcost.c` sweeps five kinds for this.
 - **Inline asm in a pixel path is paired with its C twin.** blit8.c
   is the pattern: the hand-written 68000 gather sits under
   `#ifdef __m68k__` with the identical loop in C as the `#else` -

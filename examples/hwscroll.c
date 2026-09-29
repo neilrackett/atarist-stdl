@@ -10,9 +10,10 @@
  * larger than the screen) into an ordinary surface whose width is
  * at least 336, then once per frame call STDL_SetScrollOrigin with
  * the window's top-left pixel and wait for the VBL. The library
- * programs the three STE registers in the order the Shifter needs -
- * the base a frame ahead of the offsets - so the picture never
- * jumps when the fine scroll crosses a group boundary. The chequer
+ * programs the three STE registers at the VBL together with the video
+ * counter, before the Shifter starts fetching, so base and offsets
+ * always change on the same frame and the picture never jumps when
+ * the fine scroll crosses a group boundary. The chequer
  * is drawn with 1-pixel black grid lines every 16 pixels: watching
  * them creep proves the scroll is pixel-exact, and their position
  * in a screenshot reads the offset back.

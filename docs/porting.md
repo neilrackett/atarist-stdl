@@ -244,7 +244,11 @@ time, not at runtime.
   fallback. Do not mix with `STDL_Flip`: both program the
   base; `STDL_ResetScrollWindow` puts the stock registers back for a
   program that returns to page flipping mid-run (`STDL_Quit` and the
-  terminate path do it anyway). See `examples/hwscroll.c`.
+  terminate path do it anyway). See `examples/hwscroll.c`, and the
+  skill's scrolling notes for three ways to lay out the play field -
+  strips spread over the frames that uncover them, a base that walks
+  forward instead of wrapping, and a page duplicated below itself for
+  endless vertical scrolling.
 * **Splash screens**: `STDL_ShowDegas("SPLASH.PI1")` after
   SetVideoMode shows a Degas picture with its palette while the
   game loads (`stdlconv pi1` converts, `stdlconv embed` makes C

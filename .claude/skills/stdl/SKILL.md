@@ -628,6 +628,31 @@ first.
   the pixel, redraw only the strip that scrolls in. Test
   `STDL_HasHwScroll` at init and keep a copy fallback for the plain
   ST; do not mix with `STDL_Flip`. `examples/hwscroll.c`.
+  Three ways to arrange the play field, all with the existing calls
+  (patterns from a mature STE engine, not measured in STDL - time
+  your own frame before and after):
+  - **Spread the strip across the frames that uncover it.** Redrawing
+    a whole 16-pixel strip at each tile boundary is a spike every
+    16 pixels. Keep one tile of margin and draw, each frame, only the
+    part the scroll has uncovered since last time: scanlines
+    `[old_fine, new_fine)` of every tile in the incoming row, or a
+    band of the incoming column's tiles (whole-group blits, so the
+    aligned fast paths). The strip is complete as it comes into view,
+    and the work per frame follows the distance moved. Double-
+    buffered, each page keeps its own last position, so its update
+    covers two frames of movement.
+  - **Horizontal scan-walk, no wrap.** Give the buffer a fixed stride
+    (say 168 bytes, 21 groups) and let the window's base walk forward
+    8 bytes per 16 pixels: `STDL_SetScrollWindow(buf + (x >> 4) * 8,
+    stride, x & 15)`. Tile column `c` of tile row `ty` then lives at
+    group `c % 21` of surface row `16 * ty + c / 21` - the bytes past a
+    row's end are the next row's start, which has already scrolled
+    off. Unlimited scrolling to the right for about half a byte of
+    padding per pixel of total travel, and no copy ever.
+  - **Vertical loop-back.** Keep a duplicate of the page directly
+    below it and write every tile row to both; the window may then
+    straddle the join, and scrolling vertically never ends. Twice
+    the memory and twice the row writes.
 - Erasing sprites: `STDL_DirtyInit(background, max)` once, then each
   frame `STDL_DirtyRestore(screen)`, draw, and `STDL_DirtyPush` each
   rectangle drawn. Restores come from the clean background, so pushing

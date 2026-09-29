@@ -838,6 +838,29 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                 }
                 stdl_blit_rows += (unsigned long)h;
 #endif
+                if (shortrow && lng && dmrow == NULL) {
+                    /*
+                     * Tiles and restores: short rows, long aligned,
+                     * no mask to keep. The loop below asks all three
+                     * of those again for every row (gcc 4.6 does not
+                     * unswitch), which cost more than a 16-pixel
+                     * row's two moves. Here they are asked once.
+                     */
+                    const int nl = bytes >> 2;
+                    const int sstr = src->stride, dstr = dst->stride;
+
+                    for (y = 0; y < h; y++) {
+                        const uint32_t *s4 = (const uint32_t *)sp;
+                        uint32_t *d4 = (uint32_t *)dp;
+                        int n = nl;
+                        do {
+                            *d4++ = *s4++;
+                        } while (--n != 0);
+                        sp += sstr;
+                        dp += dstr;
+                    }
+                    return 0;
+                }
                 for (y = 0; y < h; y++) {
                     if (shortrow) {
                         /* word aligned only - a borrowed block may be

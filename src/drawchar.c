@@ -25,46 +25,6 @@
 
 #include "stdl_internal.h"
 
-/*
- * Draw the glyph rows. Instantiated once per plane budget so the
- * merges unroll with a constant plane count, exactly as
- * STDL_DrawText's loop is.
- */
-STDL_PLANE_INLINE void draw_char_rows(uint8_t *g1p, int stride,
-                   const uint8_t *glyph, int bpr, int rows,
-                   uint16_t clipmask, int shift,
-                   uint16_t pw0, uint16_t pw1, uint16_t pw2,
-                   uint16_t pw3, const int np)
-{
-    int wstride = stride >> 1;
-    uint16_t *g1w = (uint16_t *)g1p;
-    uint16_t *g2w = g1w + 4;
-    int row;
-
-    for (row = 0; row < rows;
-         row++, glyph += bpr, g1w += wstride, g2w += wstride) {
-        uint16_t bits = (uint16_t)(glyph[0] << 8);
-        uint16_t hi, lo;
-
-        if (bpr > 1) {
-            bits |= glyph[1];
-        }
-        bits &= clipmask;
-        if (bits == 0) {
-            continue;
-        }
-        hi = (uint16_t)(bits >> shift);
-        lo = (shift != 0) ? (uint16_t)(bits << (16 - shift)) : 0;
-
-        if (hi != 0) {
-            stdl_merge_planes(g1w, hi, pw0, pw1, pw2, pw3, np);
-        }
-        if (lo != 0) {
-            stdl_merge_planes(g2w, lo, pw0, pw1, pw2, pw3, np);
-        }
-    }
-}
-
 void STDL_DrawChar(STDL_Surface *dst, const STDL_Font *font,
                    int x, int y, int ch, uint8_t col)
 {
@@ -139,8 +99,8 @@ void STDL_DrawChar(STDL_Surface *dst, const STDL_Font *font,
 
     np = stdl_planes;
 #define CHAR_ROWS(np) \
-    draw_char_rows(g1p, dst->stride, glyph, bpr, row1 - row0, \
-                   clipmask, x & 15, pw0, pw1, pw2, pw3, (np))
+    stdl_glyph_rows(g1p, dst->stride, glyph, bpr, row1 - row0, \
+                    clipmask, x & 15, pw0, pw1, pw2, pw3, (np))
     STDL_PLANE_DISPATCH(np, CHAR_ROWS);
 #undef CHAR_ROWS
 }

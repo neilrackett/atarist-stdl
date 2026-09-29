@@ -1310,6 +1310,105 @@ static void test_tiles_wide(void)
     }
 }
 
+/*
+ * Text against a per-pixel model: fonts 5, 8, 11 and 16 pixels wide
+ * (one and two bytes a glyph row) and 6 to 13 high, strings at every
+ * phase and partly off the surface, random clip rectangles, colours
+ * above the budget (truncated), budgets 4, 2 and 3 - through
+ * STDL_DrawText and STDL_DrawChar both, which share their row loop.
+ */
+static void test_text_model(void)
+{
+    static const int cws[4] = { 5, 8, 11, 16 };
+    static const int chs[3] = { 6, 8, 13 };
+    static const int budgets[3] = { 4, 2, 3 };
+    int iter;
+
+    for (iter = 0; iter < 240; iter++) {
+        const int budget = budgets[iter % 3];
+        const int cw = cws[(iter / 3) & 3], ch = chs[iter % 3];
+        const int bpr = (cw + 7) >> 3;
+        const int viachar = (iter >> 4) & 1;
+        STDL_Font font;
+        STDL_Surface *dst = STDL_CreateSurface(112, 48);
+        Ref *want = ref_new(112, 48);
+        STDL_Rect clip;
+        char text[6];
+        int k, x, y, col, px, py, bad = 0;
+
+        font.cw = (int16_t)cw;
+        font.ch = (int16_t)ch;
+        font.first = 'A';
+        font.last = 'Z';
+        font.bytes_per_row = (uint16_t)bpr;
+        font.bits = malloc((size_t)26 * ch * bpr);
+        for (k = 0; k < 26 * ch * bpr; k++) {
+            font.bits[k] = (uint8_t)rnd();
+        }
+        for (k = 0; k < 5; k++) {
+            text[k] = (char)('A' + rnd() % 26);
+        }
+        text[5] = '\0';
+        STDL_SetPlaneBudget(budget);
+        randomise(dst, 1 << budget);
+        clip.x = (int16_t)(rnd() % 30);
+        clip.y = (int16_t)(rnd() % 12);
+        clip.w = (uint16_t)(10 + rnd() % 90);
+        clip.h = (uint16_t)(4 + rnd() % 36);
+        STDL_SetClipRect(dst, &clip);
+        clip = dst->clip;           /* as stored: within the surface */
+        surf_to_ref(dst, want);
+        x = (int)(rnd() % 130) - 20;
+        y = (int)(rnd() % 60) - 10;
+        col = (int)(rnd() % 16);
+
+        for (k = 0; k < 5; k++) {
+            const uint8_t *g = font.bits
+                + (size_t)(text[k] - 'A') * ch * bpr;
+            int r, c;
+            for (r = 0; r < ch; r++) {
+                for (c = 0; c < cw; c++) {
+                    px = x + k * cw + c;
+                    py = y + r;
+                    if (!((g[r * bpr + (c >> 3)] >> (7 - (c & 7))) & 1)
+                        || px < clip.x || px >= clip.x + clip.w
+                        || py < clip.y || py >= clip.y + clip.h) {
+                        continue;
+                    }
+                    want->px[py * 112 + px] =
+                        (uint8_t)(col & ((1 << budget) - 1));
+                }
+            }
+        }
+        if (viachar) {
+            for (k = 0; k < 5; k++) {
+                STDL_DrawChar(dst, &font, x + k * cw, y, text[k],
+                              (uint8_t)col);
+            }
+        } else {
+            STDL_DrawText(dst, &font, x, y, text, (uint8_t)col);
+        }
+        for (py = 0; py < 48 && bad < 4; py++) {
+            for (px = 0; px < 112 && bad < 4; px++) {
+                if (STDL_GetPixel(dst, px, py) != want->px[py * 112 + px]) {
+                    printf("  text (%d,%d): got %d want %d [cw=%d ch=%d "
+                           "x=%d y=%d col=%d np=%d char=%d]\n", px, py,
+                           STDL_GetPixel(dst, px, py),
+                           want->px[py * 112 + px], cw, ch, x, y, col,
+                           budget, viachar);
+                    bad++;
+                    failures++;
+                }
+            }
+        }
+        free(font.bits);
+        ref_free(want);
+        STDL_FreeSurface(dst);
+        STDL_SetPlaneBudget(4);
+        if (failures > 3) return;
+    }
+}
+
 int main(void)
 {
     test_putget();
@@ -1329,6 +1428,7 @@ int main(void)
     test_1bpp();
     test_tiles();
     test_tiles_wide();
+    test_text_model();
     if (failures == 0) {
         printf("all pixel-path tests passed\n");
         return 0;

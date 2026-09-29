@@ -47,7 +47,7 @@ TESTS   = test_pixel test_compose test_cursor test_assets test_planes \
 
 all: $(TESTS)
 
-test_pixel: test_pixel.c $(CORE) $(SRC)/surfacefrom.c
+test_pixel: test_pixel.c $(CORE) $(SRC)/surfacefrom.c $(SRC)/drawchar.c
 	$(CC) $(CFLAGS) -o $@ $^
 
 test_dirty: test_dirty.c $(CORE) $(SRC)/dirty.c

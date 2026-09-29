@@ -41,12 +41,11 @@ STDL_PLANE_INLINE void draw_text_glyphs(uint8_t *pixels, int stride,
                    uint16_t pw3, int row0, int row1,
                    int cx1, int cx2, const int np)
 {
-    int i, cw, ch, bpr, wstride;
+    int i, cw, ch, bpr;
     uint16_t widthmask, glyphsize;
     const uint8_t *bits0;
     uint8_t *rowbase;
 
-    wstride = stride >> 1;
     cw = font->cw;
     ch = font->ch;
     bpr = font->bytes_per_row;
@@ -69,8 +68,8 @@ STDL_PLANE_INLINE void draw_text_glyphs(uint8_t *pixels, int stride,
         uint8_t c = (uint8_t)text[i];
         const uint8_t *glyph;
         uint16_t clipmask;
-        int row, shift, gx, cl, cr;
-        uint16_t *g1w, *g2w;
+        int shift, gx, cl, cr;
+        uint16_t *g1w;
 
         if (c < font->first || c > font->last) {
             continue;
@@ -91,32 +90,9 @@ STDL_PLANE_INLINE void draw_text_glyphs(uint8_t *pixels, int stride,
         gx = x >> 4;
         glyph = bits0 + stdl_row_off(c - font->first, glyphsize);
         g1w = (uint16_t *)(rowbase + gx * 8);
-        g2w = g1w + 4;
 
-        for (row = row0; row < row1;
-             row++, glyph += bpr, g1w += wstride, g2w += wstride) {
-            uint16_t bits = (uint16_t)(glyph[0] << 8);
-            uint16_t hi, lo;
-
-            if (bpr > 1) {
-                bits |= glyph[1];
-            }
-            bits &= clipmask;
-            if (bits == 0) {
-                continue;
-            }
-
-            /* place the 16-bit strip across up to two groups */
-            hi = (uint16_t)(bits >> shift);
-            lo = (shift != 0) ? (uint16_t)(bits << (16 - shift)) : 0;
-
-            if (hi != 0) {
-                stdl_merge_planes(g1w, hi, pw0, pw1, pw2, pw3, np);
-            }
-            if (lo != 0) {
-                stdl_merge_planes(g2w, lo, pw0, pw1, pw2, pw3, np);
-            }
-        }
+        stdl_glyph_rows((uint8_t *)g1w, stride, glyph, bpr, row1 - row0,
+                        clipmask, shift, pw0, pw1, pw2, pw3, np);
     }
 }
 

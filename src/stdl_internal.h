@@ -875,6 +875,159 @@ static __inline__ void stdl_copy_rows_groups(uint8_t *dp,
 #endif
 }
 
+/*
+ * The rows of one glyph of a 1bpp font, set in colour pw0..pw3 (each
+ * 0 or 0xFFFF) where its bits are set: the loop STDL_DrawText and
+ * STDL_DrawChar share. g1p is the destination group holding the
+ * glyph's first pixel on its first row; the glyph may spill into the
+ * next group. clipmask trims the cell (bit 15 = the cell's first
+ * pixel), shift is the cell's x & 15.
+ *
+ * Hand-written for the 68000. The row's bits go into the top word of
+ * a long and one lsr.l places them: the high word is what lands in
+ * the first group, the low word what spills into the second - one
+ * variable shift where the C took two. Each group is updated as two
+ * plane pairs, a long each, with old ^= (old ^ colour) & mask, which
+ * is (old & ~mask) | (colour & mask) without the inverted mask and
+ * with the colour held in two registers. gcc 4.6 compiled the merge
+ * a word at a time and spilled the row's masks to the stack: about
+ * 740us for an 8x8 glyph on a plain ST. Four variants: plane budget
+ * 2 or 4, one or two bytes a glyph row. The C twin below is what
+ * tests/host exercises; PIXCHK runs the same checks on the target.
+ */
+#ifdef __m68k__
+/* one group: the mask in d1 (both halves), the pair's colour in pw */
+#define STDL_GLYPH_PAIR(off, pw) \
+    "move.l " off "(%%a1),%%d3\n\t" \
+    "eor.l  " pw ",%%d3\n\t" \
+    "and.l  %%d1,%%d3\n\t" \
+    "eor.l  %%d3," off "(%%a1)\n\t"
+#define STDL_GLYPH_MASK \
+    "move.w %%d0,%%d1\n\t" \
+    "swap   %%d1\n\t" \
+    "move.w %%d0,%%d1\n\t"
+/* fetch a row into d0's top bits: one byte, or two */
+#define STDL_GLYPH_FETCH1 \
+    "moveq  #0,%%d0\n\t" \
+    "move.b (%[g]),%%d0\n\t" \
+    "ror.l  #8,%%d0\n\t"
+#define STDL_GLYPH_FETCH2 \
+    "moveq  #0,%%d0\n\t" \
+    "move.b (%[g]),%%d0\n\t" \
+    "lsl.w  #8,%%d0\n\t" \
+    "move.b 1(%[g]),%%d0\n\t" \
+    "swap   %%d0\n\t"
+#define STDL_GLYPH_LOOP(FETCH, PAIRS1, PAIRS2) \
+    "1:\n\t" \
+    FETCH \
+    "and.l  %[clip],%%d0\n\t" \
+    "beq.s  4f\n\t" \
+    "lsr.l  %[sh],%%d0\n\t" \
+    "swap   %%d0\n\t" \
+    "tst.w  %%d0\n\t" \
+    "beq.s  2f\n\t" \
+    STDL_GLYPH_MASK \
+    PAIRS1 \
+    "2:\n\t" \
+    "swap   %%d0\n\t" \
+    "tst.w  %%d0\n\t" \
+    "beq.s  4f\n\t" \
+    STDL_GLYPH_MASK \
+    PAIRS2 \
+    "4:\n\t" \
+    "adda.l %[bpr],%[g]\n\t" \
+    "adda.l %[stride],%%a1\n\t" \
+    "dbf    %[rows],1b"
+#endif
+
+static __inline__ __attribute__((always_inline))
+void stdl_glyph_rows(uint8_t *g1p, int stride, const uint8_t *glyph,
+                     int bpr, int rows, uint16_t clipmask, int shift,
+                     uint16_t pw0, uint16_t pw1, uint16_t pw2,
+                     uint16_t pw3, const int np)
+{
+#ifdef __m68k__
+    const uint32_t clip = (uint32_t)clipmask << 16;
+    const uint32_t pw01 = ((uint32_t)pw0 << 16) | pw1;
+    const uint32_t pw23 = ((uint32_t)pw2 << 16) | pw3;
+    int16_t n = (int16_t)(rows - 1);
+    register uint8_t *a1 __asm__("a1") = g1p;
+
+    if (rows <= 0) {
+        return;
+    }
+    if (np > 2 && bpr == 1) {
+        __asm__ volatile(
+            STDL_GLYPH_LOOP(STDL_GLYPH_FETCH1,
+                STDL_GLYPH_PAIR("0", "%[p01]") STDL_GLYPH_PAIR("4", "%[p23]"),
+                STDL_GLYPH_PAIR("8", "%[p01]") STDL_GLYPH_PAIR("12", "%[p23]"))
+            : [g] "+a"(glyph), "+a"(a1), [rows] "+d"(n)
+            : [clip] "d"(clip), [sh] "d"(shift), [p01] "d"(pw01),
+              [p23] "d"(pw23), [bpr] "a"((int32_t)bpr),
+              [stride] "a"((int32_t)stride)
+            : "d0", "d1", "d3", "memory", "cc");
+    } else if (np > 2) {
+        __asm__ volatile(
+            STDL_GLYPH_LOOP(STDL_GLYPH_FETCH2,
+                STDL_GLYPH_PAIR("0", "%[p01]") STDL_GLYPH_PAIR("4", "%[p23]"),
+                STDL_GLYPH_PAIR("8", "%[p01]") STDL_GLYPH_PAIR("12", "%[p23]"))
+            : [g] "+a"(glyph), "+a"(a1), [rows] "+d"(n)
+            : [clip] "d"(clip), [sh] "d"(shift), [p01] "d"(pw01),
+              [p23] "d"(pw23), [bpr] "a"((int32_t)bpr),
+              [stride] "a"((int32_t)stride)
+            : "d0", "d1", "d3", "memory", "cc");
+    } else if (bpr == 1) {
+        (void)pw23;
+        __asm__ volatile(
+            STDL_GLYPH_LOOP(STDL_GLYPH_FETCH1,
+                STDL_GLYPH_PAIR("0", "%[p01]"),
+                STDL_GLYPH_PAIR("8", "%[p01]"))
+            : [g] "+a"(glyph), "+a"(a1), [rows] "+d"(n)
+            : [clip] "d"(clip), [sh] "d"(shift), [p01] "d"(pw01),
+              [bpr] "a"((int32_t)bpr), [stride] "a"((int32_t)stride)
+            : "d0", "d1", "d3", "memory", "cc");
+    } else {
+        __asm__ volatile(
+            STDL_GLYPH_LOOP(STDL_GLYPH_FETCH2,
+                STDL_GLYPH_PAIR("0", "%[p01]"),
+                STDL_GLYPH_PAIR("8", "%[p01]"))
+            : [g] "+a"(glyph), "+a"(a1), [rows] "+d"(n)
+            : [clip] "d"(clip), [sh] "d"(shift), [p01] "d"(pw01),
+              [bpr] "a"((int32_t)bpr), [stride] "a"((int32_t)stride)
+            : "d0", "d1", "d3", "memory", "cc");
+    }
+#else
+    /* C twin - what tests/host exercises and the asm must match */
+    const uint16_t pw[4] = { pw0, pw1, pw2, pw3 };
+    int row, p;
+
+    for (row = 0; row < rows; row++, glyph += bpr, g1p += stride) {
+        uint16_t bits = (uint16_t)(glyph[0] << 8);
+        uint32_t w;
+        uint16_t *g = (uint16_t *)g1p;
+        int half;
+
+        if (bpr > 1) {
+            bits |= glyph[1];
+        }
+        bits &= clipmask;
+        if (bits == 0) {
+            continue;
+        }
+        w = ((uint32_t)bits << 16) >> shift;
+        for (half = 0; half < 2; half++, g += 4) {
+            const uint16_t m = (uint16_t)(half ? w : w >> 16);
+            if (m == 0) {
+                continue;
+            }
+            for (p = 0; p < (np > 2 ? 4 : 2); p++) {
+                g[p] = (uint16_t)(g[p] ^ ((g[p] ^ pw[p]) & m));
+            }
+        }
+    }
+#endif
+}
+
 /* case-normalising fopen for GEMDOS: retries with an uppercased
  * basename so lowercase asset names in ported code just work */
 void *stdl_fopen_ci(const char *path, const char *mode);

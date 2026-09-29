@@ -357,6 +357,25 @@ warnings** with the Makefile's `-Wall -Wextra`.
   interrupts off long enough to make Timer B late). A hardware
   jitter that is not in the emulator is an environment question
   first: reproduce with nothing resident before touching the ISR.
+- **Ideas for a future stabilisation pass: how AGT opens its borders.**
+  Atari Game Tools (bitbucket.org/d_m_l/agtools) has an STE-only,
+  top-and-bottom display service (200, 240, 256 and 272 lines;
+  `agtsys/m68k/ste/dispcom.s`, `disp272.s`). Read, not measured, and
+  AGT has no licence, so techniques only, never code. Three things it
+  does that STDL does differently, worth trying if the borders need
+  steadying again:
+  - It pauses any running BLiTTER operation at the top of its VBL
+    handler, before arming the border timers, rather than placing
+    each operation against the beam.
+  - It does not trust when the top-border timer fires - a comment
+    says blits delay Timer A - and instead syncs to the scanline with
+    `move #$2100,sr` / `stop #$2100`, sleeping until the next HBL and
+    counting HBLs from there. STDL polls the video counter instead.
+  - The top-border timer is Timer A or Timer D, chosen at build time.
+  It also has a Timer B display list ("Nickel": per-line viewport
+  switches, palette bursts, register loads and callbacks), which is
+  its split-screen system. It has nothing for the plain ST - the STF
+  modes are only commented out - and no left or right borders.
 - **Hatari's GEMDOS drive maps names to 8.3.** A scratch binary
   named `BLITCOST2.TOS` beside `BLITCOST.TOS` silently runs
   `BLITCOST.TOS`; four runs of "the fix" measured the old binary.

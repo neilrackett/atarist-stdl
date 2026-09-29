@@ -435,6 +435,21 @@ warnings** with the Makefile's `-Wall -Wextra`.
   waiting for it, would let such a port draw through. Not designed,
   not measured - recorded so the next person meets the constraint
   before adopting the API rather than after.
+- **Parked, measured: an asm middle block for wide unshifted
+  sprites.** Carrying the previous source group's five words in the
+  high halves of d0-d4 (move.w (a0)+ into the low half, a copy
+  shifted by r, swap) fetches each source word once instead of
+  twice, and took 64x32 unshifted sprites at odd phases 12-19%
+  faster on a plain ST. It cost 1696 bytes of pixel-path text and
+  bought nothing below two groups between the edge columns - at one,
+  the call and the column split made 32x32 up to 8% slower, so it
+  had to be gated to wide sprites only, and inlined instead it made
+  phase-0 sprites 4-6% slower through register pressure alone. Wide
+  unshifted sprites are the case the docs already steer to PRESHIFT
+  or, on a BLiTTER machine, to the chip. The code is on the local
+  branch `exp/sprite-wide-asm`; revisit if a port without the RAM
+  for PRESHIFT draws wide sprites on a plain ST and the size budget
+  has room.
 - **Possible future improvement: the blit policy's per-operation
   cost.** With a border open, BLiTTER throughput is 1.14-1.28x the
   no-border time for full-width operations (mostly the split and

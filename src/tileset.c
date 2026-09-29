@@ -217,17 +217,42 @@ static __attribute__((noinline)) void tile_rows_masked(
 #endif
 }
 
+/* budget 1 or 2: the low plane pair of each group, a long each */
+static void tile_rows_low(uint8_t *drow, const uint8_t *srow, int n,
+                          int rows, int sstride, int dstride)
+{
+    do {
+        uint8_t *d = drow;
+        const uint8_t *sp = srow;
+        int k = n;
+
+        do {
+            stdl_st32(d, stdl_ld32(sp));
+            d += 8;
+            sp += 8;
+        } while (--k != 0);
+        drow += dstride;
+        srow += sstride;
+    } while (--rows != 0);
+}
+
 /*
  * x is rounded down to a group boundary: tiles are the aligned fast
  * path by definition. Use sprites for free positioning.
  *
  * An unmasked tile is rows of whole groups, and they go through the
- * library's register-only row copy (stdl_copy_rows_groups) - all four
- * planes at any budget, since a plane beyond it is zero both in the
- * tile and on the destination, and zeros over zeros are what a budget
- * allows. It replaced a loop that stored the planes a word at a time
- * and asked, for every group of every row, whether the tile was
- * masked: 654us for a 16x16 tile on a plain ST.
+ * library's register-only row copy (stdl_copy_rows_groups). It
+ * replaced a loop that stored the planes a word at a time and asked,
+ * for every group of every row, whether the tile was masked: 654us
+ * for a 16x16 tile on a plain ST.
+ *
+ * At budget 1 or 2 only the low plane pair is copied, as before that
+ * change. Tile art is not normalised to the budget when a tileset is
+ * built or loaded, so a tileset made with colours 4-15 still has
+ * planes 2 and 3 set, and copying them would draw colours the budget
+ * masks off everywhere else and leave bits in the destination that no
+ * later drawing at that budget clears. Budget 3 copies all four, as it
+ * always did.
  */
 void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,
                    int x, int y)
@@ -270,9 +295,15 @@ void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,
 
         src = ts->data + stdl_row_off(index, (uint16_t)ts->tilesize)
             + stdl_row_off(row0, (uint16_t)(ts->groups * 4)) + g0 * 4;
-        stdl_copy_rows_groups(drow, (const uint8_t *)src, n,
-                              row1 - row0, (int32_t)(rowbytes - n * 8),
-                              (int32_t)dst->stride - n * 8);
+        if (stdl_planes > 2) {
+            stdl_copy_rows_groups(drow, (const uint8_t *)src, n,
+                                  row1 - row0,
+                                  (int32_t)(rowbytes - n * 8),
+                                  (int32_t)dst->stride - n * 8);
+        } else {
+            tile_rows_low(drow, (const uint8_t *)src, n, row1 - row0,
+                          rowbytes, dst->stride);
+        }
     } else {
         const uint32_t srcadv = (uint32_t)ts->groups * 5;
 

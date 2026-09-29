@@ -1324,6 +1324,63 @@ static void test_tiles(void)
 }
 
 /*
+ * Tile art is not normalised to the plane budget when a tileset is
+ * built or loaded, so a tileset made with colours 4-15 and drawn at
+ * budget 2 must still draw each colour masked to the budget, as
+ * docs/format.md promises for every path, and leave the destination's
+ * planes 2 and 3 zero. Masked and unmasked.
+ */
+static void test_tiles_budget(void)
+{
+    int masked, x, y, bad = 0;
+
+    for (masked = 0; masked <= 1; masked++) {
+        const uint8_t key = 6;
+        STDL_Surface *img, *dst;
+        STDL_Tileset *ts;
+        Ref *want;
+
+        STDL_SetPlaneBudget(4);
+        img = STDL_CreateSurface(32, 16);
+        randomise(img, 16);
+        if (masked) {
+            STDL_SetColourKey(img, 1, key);
+        }
+        ts = STDL_TilesetFromSurface(img, 16, 16);
+        STDL_SetPlaneBudget(2);
+        dst = STDL_CreateSurface(64, 32);
+        randomise(dst, 4);
+        want = ref_new(64, 32);
+        surf_to_ref(dst, want);
+        for (y = 0; y < 16; y++) {
+            for (x = 0; x < 16; x++) {
+                const uint8_t c = STDL_GetPixel(img, 16 + x, y);
+                if (!(masked && c == key)) {
+                    want->px[(8 + y) * 64 + 16 + x] = (uint8_t)(c & 3);
+                }
+            }
+        }
+        STDL_BlitTile(ts, 1, dst, 16, 8);
+        for (y = 0; y < 32; y++) {
+            for (x = 0; x < 64; x++) {
+                if (STDL_GetPixel(dst, x, y) != want->px[y * 64 + x]
+                    && bad++ < 4) {
+                    printf("  tile budget (%d,%d): got %d want %d "
+                           "masked=%d\n", x, y, STDL_GetPixel(dst, x, y),
+                           want->px[y * 64 + x], masked);
+                }
+            }
+        }
+        ref_free(want);
+        STDL_FreeTileset(ts);
+        STDL_FreeSurface(img);
+        STDL_FreeSurface(dst);
+    }
+    STDL_SetPlaneBudget(4);
+    CHECK(bad == 0, "tiles past the budget drew %d wrong pixels", bad);
+}
+
+/*
  * Tiles against a per-pixel model of their contract: x rounds down to
  * a group, a group the clip rectangle cuts is dropped whole, masked
  * tiles keep the destination under the key. Four tile shapes, masked
@@ -1707,6 +1764,7 @@ int main(void)
     test_1bpp();
     test_tiles();
     test_tiles_wide();
+    test_tiles_budget();
     test_text_model();
     test_shapes_ref();
     if (failures == 0) {

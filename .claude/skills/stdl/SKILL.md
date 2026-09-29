@@ -62,11 +62,11 @@ Full contract: `docs/format.md`. Never invent a different layout.
 
 | Cheap - use freely | Careful | Avoid in loops |
 |---|---|---|
-| `STDL_FillRect`, `STDL_HLine` | `STDL_BlitSurface` unaligned (shift chain) | `STDL_PutPixel` / `STDL_GetPixel` |
+| `STDL_FillRect`, `STDL_HLine`, `STDL_VLine` | `STDL_BlitSurface` unaligned (shift chain) | `STDL_PutPixel` / `STDL_GetPixel` |
 | `STDL_XorVSpans` / `STDL_VSpans` (span lists) | `STDL_XorRect` (CPU only, no BLiTTER) | `STDL_XorPixel` in a loop |
 | `STDL_Points` / `STDL_PointsC` (particle fields) | | `STDL_PutPixel` in a loop |
 | `STDL_XorVLine` (a few spans) | `STDL_XorVLine` x100+ (batch it instead) | one `STDL_*Line` call per column |
-| aligned blits (same `x & 15` phase) | `STDL_VLine`, `STDL_Line` | `STDL_Circle` outline |
+| aligned blits (same `x & 15` phase) | `STDL_Line`, `STDL_Circle` (point batches underneath) | |
 | `STDL_BlitTile` (16px aligned) | masked blits (colour key) | any per-pixel loop |
 | pre-shifted `STDL_BlitSprite` | `STDL_SetColourKey` (rebuilds mask) | `SDL_MapRGB` per frame |
 | `STDL_BlitIndexed8` (chunky frames at draw time) | | per-frame `STDL_SurfaceFromIndexed8` |

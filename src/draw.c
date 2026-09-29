@@ -71,85 +71,128 @@ static __attribute__((noinline)) void fill_longpairs(uint32_t *lp,
 }
 
 /*
- * Generic CPU span fill, instantiated once per plane budget so the
- * per-group plane writes unroll (gcc 4.6 will not unswitch them).
- * The plane words arrive as scalars, not an array: an array
- * parameter escapes and is then reloaded after every destination
- * store.
+ * One row of a span: every CPU fill that is not a whole block in 0
+ * or 15 (FillRect's rows, STDL_HLine, each span of STDL_HSpans). The
+ * edge groups merge a plane pair at a time as XOR-AND-XOR -
+ * g ^= (g ^ colour) & edge - which needs the colour as two longs and
+ * the edge mask in both halves of a third, and so stays in registers
+ * where the per-plane form it replaced spilled to the stack; the
+ * groups between are plain long stores. g is the first group, n the
+ * number of groups after it. A 68000 long access needs only an even
+ * address. Measured on a plain ST against the per-plane form: fills
+ * of 16x16 to 64x32 at 0.56-0.85 of the time, a single HLine 0.52.
  */
-STDL_PLANE_INLINE void fill_span_rows(uint8_t *row, uint8_t *mrow,
-                                      int stride, int maskstride,
-                                      int g0, int g1, int rows,
-                                      uint16_t pw0, uint16_t pw1,
-                                      uint16_t pw2, uint16_t pw3,
-                                      uint16_t lm, uint16_t rm,
-                                      int transparent, const int np)
+STDL_PLANE_INLINE void span_row(uint32_t *g, int n, uint16_t lm,
+                                uint16_t rm, uint32_t l01, uint32_t l23,
+                                const int np)
 {
-    int g, y;
+    uint32_t m, t;
 
-    for (y = 0; y < rows; y++) {
-        uint16_t *grp = (uint16_t *)(row + g0 * 8);
-
-        if (lm == 0xFFFFu) {
-            stdl_put_planes(grp, pw0, pw1, pw2, pw3, np);
-        } else {
-            stdl_merge_planes(grp, lm, pw0, pw1, pw2, pw3, np);
-        }
-        /* walking pointer, whole longs where the budget pairs up:
-         * recomputing row + g * 8 per group costs more than the
-         * stores do */
-        if (g1 > g0 + 1) {
-            uint8_t *mid = row + (g0 + 1) * 8;
-            int n = g1 - g0 - 1;
-
-            if (np == 4 && ((uintptr_t)mid & 3) == 0) {
-                uint32_t l01 = STDL_PACK2(pw0, pw1);
-                uint32_t l23 = STDL_PACK2(pw2, pw3);
-                uint32_t *lp = (uint32_t *)mid;
-                while (n--) {
-                    *lp++ = l01;
-                    *lp++ = l23;
-                }
-            } else if (np == 2 && ((uintptr_t)mid & 3) == 0) {
-                uint32_t l01 = STDL_PACK2(pw0, pw1);
-                uint32_t *lp = (uint32_t *)mid;
-                while (n--) {
-                    *lp = l01;
-                    lp += 2;
-                }
-            } else {
-                uint16_t *wp = (uint16_t *)mid;
-                while (n--) {
-                    stdl_put_planes(wp, pw0, pw1, pw2, pw3, np);
-                    wp += 4;
-                }
-            }
-        }
-        if (g1 != g0) {
-            grp = (uint16_t *)(row + g1 * 8);
-            if (rm == 0xFFFFu) {
-                stdl_put_planes(grp, pw0, pw1, pw2, pw3, np);
-            } else {
-                stdl_merge_planes(grp, rm, pw0, pw1, pw2, pw3, np);
-            }
-        }
-
-        if (mrow != NULL) {
-            uint16_t *mw = (uint16_t *)mrow;
-            for (g = g0; g <= g1; g++) {
-                uint16_t m = 0xFFFFu;
-                if (g == g0) m &= lm;
-                if (g == g1) m &= rm;
-                if (transparent) {
-                    mw[g] |= m;
-                } else {
-                    mw[g] &= (uint16_t)~m;
-                }
-            }
-            mrow += maskstride;
-        }
-        row += stride;
+    if (n == 0) {
+        lm &= rm;
     }
+    m = ((uint32_t)lm << 16) | lm;
+    t = (g[0] ^ l01) & m;
+    g[0] ^= t;
+    if (np > 2) {
+        t = (g[1] ^ l23) & m;
+        g[1] ^= t;
+    }
+    if (n == 0) {
+        return;
+    }
+    g += 2;
+    if (--n != 0) {
+#ifdef __m68k__
+        /* post-increment and dbf: gcc's own loop stored at (a0) and
+         * 4(a0) and counted with subq/bne, 54 cycles a group to 34 */
+        if (np > 2) {
+            __asm__ volatile(
+                "subq.w #1,%1\n"
+                "1:\n\t"
+                "move.l %2,(%0)+\n\t"
+                "move.l %3,(%0)+\n\t"
+                "dbf    %1,1b"
+                : "+a"(g), "+d"(n)
+                : "d"(l01), "d"(l23)
+                : "cc", "memory");
+        } else {
+            __asm__ volatile(
+                "subq.w #1,%1\n"
+                "1:\n\t"
+                "move.l %2,(%0)\n\t"
+                "addq.l #8,%0\n\t"
+                "dbf    %1,1b"
+                : "+a"(g), "+d"(n)
+                : "d"(l01)
+                : "cc", "memory");
+        }
+#else
+        /* C twin - what tests/host exercises and the asm must match */
+        do {
+            g[0] = l01;
+            if (np > 2) {
+                g[1] = l23;
+            }
+            g += 2;
+        } while (--n != 0);
+#endif
+    }
+    m = ((uint32_t)rm << 16) | rm;
+    t = (g[0] ^ l01) & m;
+    g[0] ^= t;
+    if (np > 2) {
+        t = (g[1] ^ l23) & m;
+        g[1] ^= t;
+    }
+}
+
+/* the same row's mask words, from the group span_row started at */
+static void span_mask_row(uint16_t *mw, int n, uint16_t lm, uint16_t rm,
+                          int transparent)
+{
+    if (n == 0) {
+        lm &= rm;
+    }
+    if (transparent) {
+        *mw++ |= lm;
+        if (n == 0) {
+            return;
+        }
+        while (--n != 0) {
+            *mw++ = 0xFFFFu;
+        }
+        *mw |= rm;
+    } else {
+        *mw++ &= (uint16_t)~lm;
+        if (n == 0) {
+            return;
+        }
+        while (--n != 0) {
+            *mw++ = 0;
+        }
+        *mw &= (uint16_t)~rm;
+    }
+}
+
+/*
+ * The CPU fill's rows, one span_row each. Out of line so that the
+ * loop's registers are its own: inlined, every branch added to
+ * fill_rows moved these fills by several percent.
+ */
+static __attribute__((noinline)) void fill_block(uint32_t *g, int n,
+        int rows, uint16_t stride, uint16_t lm, uint16_t rm,
+        uint32_t l01, uint32_t l23)
+{
+    const int np = stdl_planes;
+
+#define FILL_BLOCK(np) \
+    do { \
+        span_row(g, n, lm, rm, l01, l23, (np)); \
+        g = (uint32_t *)((uint8_t *)g + stride); \
+    } while (--rows != 0)
+    STDL_PLANE_DISPATCH(np, FILL_BLOCK);
+#undef FILL_BLOCK
 }
 
 /*
@@ -242,6 +285,13 @@ static void fill_rows(STDL_Surface *s, int x1, int x2, int y1,
      * already hold, and one memset still beats a strided loop over
      * half the data. Colour 15 only has all four plane words equal
      * when all four planes are in budget.
+     *
+     * A memset per row is another matter: mintlib's costs about 70us
+     * a call before it stores anything, and span_row beats it at
+     * every width a screen has (measured on a plain ST, 32 rows: 16
+     * pixels 1347us against 745, 320 pixels 4687 against 4375). The
+     * slopes cross near 33 groups, so only rows that wide - a world
+     * surface - still take it.
      */
     if ((lm & rm) == 0xFFFFu && !(col == 0 || (col == 15 && np == 4))) {
         /* any other colour over a whole block of whole rows: see
@@ -254,7 +304,8 @@ static void fill_rows(STDL_Surface *s, int x1, int x2, int y1,
                            STDL_PACK2(pw[2], pw[3]));
             return;
         }
-    } else if ((lm & rm) == 0xFFFFu) {
+    } else if ((lm & rm) == 0xFFFFu
+               && (ng >= 32 || (uint16_t)(ng << 3) == s->stride)) {
         int fb = (col == 0) ? 0x00 : 0xFF;
         uint32_t span = (uint32_t)ng * 8;
 
@@ -284,14 +335,27 @@ static void fill_rows(STDL_Surface *s, int x1, int x2, int y1,
         return;
     }
 
-#define FILL_SPAN(np) \
-    fill_span_rows(row, mrow, s->stride, s->maskstride, g0, g1, \
-                   rows, pw[0], pw[1], pw[2], pw[3], lm, rm, \
-                   transparent, (np))
-    STDL_PLANE_DISPATCH(np, FILL_SPAN);
-#undef FILL_SPAN
+    if (rows == 1) {
+        /* one row: the call and its argument traffic are most of it */
+#define FILL_ONE(np) \
+        span_row((uint32_t *)(row + g0 * 8), g1 - g0, lm, rm, \
+                 STDL_PACK2(pw[0], pw[1]), STDL_PACK2(pw[2], pw[3]), (np))
+        STDL_PLANE_DISPATCH(np, FILL_ONE);
+#undef FILL_ONE
+    } else {
+        fill_block((uint32_t *)(row + g0 * 8), g1 - g0, rows, s->stride,
+                   lm, rm, STDL_PACK2(pw[0], pw[1]),
+                   STDL_PACK2(pw[2], pw[3]));
+    }
+    if (mrow != NULL) {
+        uint16_t *mw = (uint16_t *)mrow + g0;
+        const uint16_t maskstride = s->maskstride;
 
-    if (s->mask != NULL) {
+        y = rows;
+        do {
+            span_mask_row(mw, g1 - g0, lm, rm, transparent);
+            mw = (uint16_t *)((uint8_t *)mw + maskstride);
+        } while (--y != 0);
         s->opaque_state = 0;
     }
 }
@@ -365,6 +429,34 @@ void STDL_HLine(STDL_Surface *dst, int x1, int x2, int y, uint8_t col)
     if (x1 > x2) {
         return;
     }
+    /* a row too short for the BLiTTER skips fill_rows' set-up */
+    if ((x2 >> 4) - (x1 >> 4) < STDL_BLIT_FILL_MIN_CELLS - 1) {
+        const int transparent = (col >= STDL_TRANSPARENT
+                                 && dst->mask != NULL);
+        const int g0 = x1 >> 4, n = (x2 >> 4) - g0;
+        const uint16_t lm = (uint16_t)(0xFFFFu >> (x1 & 15));
+        const uint16_t rm = (uint16_t)(0xFFFFu << (15 - (x2 & 15)));
+        uint32_t *g = (uint32_t *)(dst->pixels
+            + stdl_row_off(y, dst->stride) + g0 * 8);
+        uint32_t l01, l23;
+        int np = stdl_planes;
+
+        col = transparent ? 0 : (uint8_t)(col & STDL_COL_MASK);
+        l01 = STDL_PACK2((col & 1) ? 0xFFFFu : 0u,
+                         (col & 2) ? 0xFFFFu : 0u);
+        l23 = STDL_PACK2((col & 4) ? 0xFFFFu : 0u,
+                         (col & 8) ? 0xFFFFu : 0u);
+#define SPAN_ROW(np) span_row(g, n, lm, rm, l01, l23, (np))
+        STDL_PLANE_DISPATCH(np, SPAN_ROW);
+#undef SPAN_ROW
+        if (dst->mask != NULL) {
+            span_mask_row((uint16_t *)(dst->mask
+                              + stdl_row_off(y, dst->maskstride)) + g0,
+                          n, lm, rm, transparent);
+            dst->opaque_state = 0;
+        }
+        return;
+    }
     {
         int transparent = (col >= STDL_TRANSPARENT
                            && dst->mask != NULL);
@@ -390,31 +482,35 @@ STDL_PLANE_INLINE void put_bit_planes(uint16_t *grp, uint8_t col,
                                    : (uint16_t)(grp[3] & nb);
 }
 
-STDL_PLANE_INLINE void vline_rows(uint8_t *base, uint8_t *mbase,
-                                  int stride, int maskstride,
-                                  int rows, uint8_t col, uint16_t bit,
-                                  int transparent, const int np)
+/*
+ * One column of pixels, the plane words merged a pair at a time the
+ * way points_fast does it: the colour as two longs and the bit in
+ * both halves of a third, so a row is two XOR-AND-XORs with nothing
+ * decided inside the loop. A 68000 long access needs only an even
+ * address, which every group is.
+ */
+STDL_PLANE_INLINE void vline_rows(uint8_t *base, uint16_t stride,
+                                  int rows, uint32_t l01, uint32_t l23,
+                                  uint32_t m, const int np)
 {
-    int y;
+    do {
+        uint32_t *g = (uint32_t *)base;
+        uint32_t t = (g[0] ^ l01) & m;
 
-    for (y = 0; y < rows; y++) {
-        put_bit_planes((uint16_t *)base, col, bit, np);
-        if (mbase != NULL) {
-            if (transparent) {
-                *(uint16_t *)mbase |= bit;
-            } else {
-                *(uint16_t *)mbase &= (uint16_t)~bit;
-            }
-            mbase += maskstride;
+        g[0] ^= t;
+        if (np > 2) {
+            t = (g[1] ^ l23) & m;
+            g[1] ^= t;
         }
         base += stride;
-    }
+    } while (--rows != 0);
 }
 
 void STDL_VLine(STDL_Surface *dst, int x, int y1, int y2, uint8_t col)
 {
-    int t;
+    int t, transparent, np, rows;
     uint16_t bit;
+    uint32_t l01, l23;
     uint8_t *base;
 
     if (dst == NULL) {
@@ -430,28 +526,37 @@ void STDL_VLine(STDL_Surface *dst, int x, int y1, int y2, uint8_t col)
     if (y1 > y2) {
         return;
     }
-    {
-        int transparent = (col >= STDL_TRANSPARENT
-                           && dst->mask != NULL);
-        uint8_t *mbase = (dst->mask != NULL)
-            ? dst->mask + stdl_row_off(y1, dst->maskstride)
-              + ((x >> 4) * 2)
-            : NULL;
-
-        int np = stdl_planes;
-
-        col = transparent ? 0 : (uint8_t)(col & STDL_COL_MASK);
-        bit = (uint16_t)(0x8000u >> (x & 15));
-        base = dst->pixels + stdl_row_off(y1, dst->stride)
-             + ((x >> 4) * 8);
+    transparent = (col >= STDL_TRANSPARENT && dst->mask != NULL);
+    col = transparent ? 0 : (uint8_t)(col & STDL_COL_MASK);
+    rows = y2 - y1 + 1;
+    bit = (uint16_t)(0x8000u >> (x & 15));
+    base = dst->pixels + stdl_row_off(y1, dst->stride) + ((x >> 4) * 8);
+    l01 = STDL_PACK2((col & 1) ? 0xFFFFu : 0u, (col & 2) ? 0xFFFFu : 0u);
+    l23 = STDL_PACK2((col & 4) ? 0xFFFFu : 0u, (col & 8) ? 0xFFFFu : 0u);
+    np = stdl_planes;
 #define VLINE_ROWS(np) \
-        vline_rows(base, mbase, dst->stride, dst->maskstride, \
-                   y2 - y1 + 1, col, bit, transparent, (np))
-        STDL_PLANE_DISPATCH(np, VLINE_ROWS);
+    vline_rows(base, dst->stride, rows, l01, l23, \
+               ((uint32_t)bit << 16) | bit, (np))
+    STDL_PLANE_DISPATCH(np, VLINE_ROWS);
 #undef VLINE_ROWS
-        if (dst->mask != NULL) {
-            dst->opaque_state = 0;
+    if (dst->mask != NULL) {
+        uint16_t maskstride = dst->maskstride;
+        uint8_t *m = dst->mask + stdl_row_off(y1, maskstride)
+                   + ((x >> 4) * 2);
+
+        if (transparent) {
+            do {
+                *(uint16_t *)m |= bit;
+                m += maskstride;
+            } while (--rows != 0);
+        } else {
+            const uint16_t nb = (uint16_t)~bit;
+            do {
+                *(uint16_t *)m &= nb;
+                m += maskstride;
+            } while (--rows != 0);
         }
+        dst->opaque_state = 0;
     }
 }
 
@@ -766,7 +871,7 @@ void STDL_XorPixel(STDL_Surface *dst, int x, int y, uint8_t col)
  * do inside a single STDL_VLine.
  */
 STDL_PLANE_INLINE int vspans_run(STDL_Surface *dst,
-        const STDL_Span *spans, int count, uint8_t col,
+        const STDL_Span *spans, int count, uint32_t l01, uint32_t l23,
         int transparent, const int np)
 {
     int drew = 0;
@@ -802,11 +907,8 @@ STDL_PLANE_INLINE int vspans_run(STDL_Surface *dst,
         drew = 1;
         bit = (uint16_t)(0x8000u >> (x & 15));
         p = pixels + stdl_row_off(y, stride) + ((x >> 1) & ~7);
-        n = rows;
-        do {
-            put_bit_planes((uint16_t *)p, col, bit, np);
-            p += stride;
-        } while (--n);
+        vline_rows(p, stride, rows, l01, l23,
+                   ((uint32_t)bit << 16) | bit, np);
 
         if (maskbase != NULL) {
             uint8_t *m = maskbase + stdl_row_off(y, maskstride)
@@ -833,6 +935,7 @@ void STDL_VSpans(STDL_Surface *dst, const STDL_Span *spans,
                  int count, uint8_t col)
 {
     int transparent, np, drew = 0;
+    uint32_t l01, l23;
 
     if (dst == NULL || spans == NULL || count <= 0
         || dst->clip.w == 0 || dst->clip.h == 0) {
@@ -840,9 +943,11 @@ void STDL_VSpans(STDL_Surface *dst, const STDL_Span *spans,
     }
     transparent = (col >= STDL_TRANSPARENT && dst->mask != NULL);
     col = transparent ? 0 : (uint8_t)(col & STDL_COL_MASK);
+    l01 = STDL_PACK2((col & 1) ? 0xFFFFu : 0u, (col & 2) ? 0xFFFFu : 0u);
+    l23 = STDL_PACK2((col & 4) ? 0xFFFFu : 0u, (col & 8) ? 0xFFFFu : 0u);
     np = stdl_planes;
 #define VSPANS_RUN(np) \
-    drew = vspans_run(dst, spans, count, col, transparent, (np))
+    drew = vspans_run(dst, spans, count, l01, l23, transparent, (np))
     STDL_PLANE_DISPATCH(np, VSPANS_RUN);
 #undef VSPANS_RUN
     if (drew && dst->mask != NULL) {
@@ -851,12 +956,11 @@ void STDL_VSpans(STDL_Surface *dst, const STDL_Span *spans,
 }
 
 /*
- * Horizontal fill spans: one row of fill_span_rows per span, with
- * the plane words and the budget dispatch hoisted out of the list.
+ * Horizontal fill spans: one span_row per span, with the plane words
+ * and the budget dispatch hoisted out of the list.
  */
 STDL_PLANE_INLINE int hspans_run(STDL_Surface *dst,
-        const STDL_Span *spans, int count,
-        uint16_t pw0, uint16_t pw1, uint16_t pw2, uint16_t pw3,
+        const STDL_Span *spans, int count, uint32_t l01, uint32_t l23,
         int transparent, const int np)
 {
     int drew = 0;
@@ -871,7 +975,7 @@ STDL_PLANE_INLINE int hspans_run(STDL_Surface *dst,
     int i;
 
     for (i = 0; i < count; i++, s++) {
-        int x1 = s->x, y = s->y, x2, g0, g1;
+        int x1 = s->x, y = s->y, x2, g0, n;
         uint16_t lm, rm;
 
         if (s->len <= 0 || y < cy0 || y > cy1) {
@@ -884,20 +988,17 @@ STDL_PLANE_INLINE int hspans_run(STDL_Surface *dst,
             continue;
         }
         g0 = x1 >> 4;
-        g1 = x2 >> 4;
+        n = (x2 >> 4) - g0;
         lm = (uint16_t)(0xFFFFu >> (x1 & 15));
         rm = (uint16_t)(0xFFFFu << (15 - (x2 & 15)));
-        if (g0 == g1) {
-            lm &= rm;
-            rm = lm;
-        }
         drew = 1;
-        fill_span_rows(pixels + stdl_row_off(y, stride),
-                       maskbase != NULL
-                           ? maskbase + stdl_row_off(y, maskstride)
-                           : NULL,
-                       stride, maskstride, g0, g1, 1,
-                       pw0, pw1, pw2, pw3, lm, rm, transparent, np);
+        span_row((uint32_t *)(pixels + stdl_row_off(y, stride) + g0 * 8),
+                 n, lm, rm, l01, l23, np);
+        if (maskbase != NULL) {
+            span_mask_row((uint16_t *)(maskbase
+                              + stdl_row_off(y, maskstride)) + g0,
+                          n, lm, rm, transparent);
+        }
     }
     return drew;
 }
@@ -1167,8 +1268,8 @@ void STDL_PointsC(STDL_Surface *dst, const STDL_Point *pts,
 void STDL_HSpans(STDL_Surface *dst, const STDL_Span *spans,
                  int count, uint8_t col)
 {
-    uint16_t pw[4];
-    int transparent, np, p, drew = 0;
+    int transparent, np, drew = 0;
+    uint32_t l01, l23;
 
     if (dst == NULL || spans == NULL || count <= 0
         || dst->clip.w == 0 || dst->clip.h == 0) {
@@ -1176,13 +1277,11 @@ void STDL_HSpans(STDL_Surface *dst, const STDL_Span *spans,
     }
     transparent = (col >= STDL_TRANSPARENT && dst->mask != NULL);
     col = transparent ? 0 : (uint8_t)(col & STDL_COL_MASK);
-    for (p = 0; p < 4; p++) {
-        pw[p] = (col & (1 << p)) ? 0xFFFFu : 0;
-    }
+    l01 = STDL_PACK2((col & 1) ? 0xFFFFu : 0u, (col & 2) ? 0xFFFFu : 0u);
+    l23 = STDL_PACK2((col & 4) ? 0xFFFFu : 0u, (col & 8) ? 0xFFFFu : 0u);
     np = stdl_planes;
 #define HSPANS_RUN(np) \
-    drew = hspans_run(dst, spans, count, pw[0], pw[1], pw[2], pw[3], \
-                      transparent, (np))
+    drew = hspans_run(dst, spans, count, l01, l23, transparent, (np))
     STDL_PLANE_DISPATCH(np, HSPANS_RUN);
 #undef HSPANS_RUN
     if (drew && dst->mask != NULL) {
@@ -1345,88 +1444,5 @@ void STDL_XorHSpans(STDL_Surface *dst, const STDL_Span *spans,
     }
     if (drew && dst->mask != NULL) {
         dst->opaque_state = 0;
-    }
-}
-
-/* ---------------------------------------------------------------- */
-
-void STDL_Line(STDL_Surface *dst, int x1, int y1, int x2, int y2,
-               uint8_t col)
-{
-    int dx, dy, sx, sy, err, e2;
-
-    if (dst == NULL) {
-        return;
-    }
-    if (y1 == y2) {
-        STDL_HLine(dst, x1, x2, y1, col);
-        return;
-    }
-    if (x1 == x2) {
-        STDL_VLine(dst, x1, y1, y2, col);
-        return;
-    }
-    dx = x2 > x1 ? x2 - x1 : x1 - x2;
-    dy = y2 > y1 ? y1 - y2 : y2 - y1;   /* negative magnitude */
-    sx = x1 < x2 ? 1 : -1;
-    sy = y1 < y2 ? 1 : -1;
-    err = dx + dy;
-    for (;;) {
-        STDL_PutPixel(dst, x1, y1, col);
-        if (x1 == x2 && y1 == y2) {
-            break;
-        }
-        e2 = err * 2;
-        if (e2 >= dy) { err += dy; x1 += sx; }
-        if (e2 <= dx) { err += dx; y1 += sy; }
-    }
-}
-
-void STDL_Circle(STDL_Surface *dst, int cx, int cy, int r, uint8_t col)
-{
-    int x = r, y = 0, err = 1 - r;
-
-    if (dst == NULL || r < 0) {
-        return;
-    }
-    while (x >= y) {
-        STDL_PutPixel(dst, cx + x, cy + y, col);
-        STDL_PutPixel(dst, cx - x, cy + y, col);
-        STDL_PutPixel(dst, cx + x, cy - y, col);
-        STDL_PutPixel(dst, cx - x, cy - y, col);
-        STDL_PutPixel(dst, cx + y, cy + x, col);
-        STDL_PutPixel(dst, cx - y, cy + x, col);
-        STDL_PutPixel(dst, cx + y, cy - x, col);
-        STDL_PutPixel(dst, cx - y, cy - x, col);
-        y++;
-        if (err < 0) {
-            err += 2 * y + 1;
-        } else {
-            x--;
-            err += 2 * (y - x) + 1;
-        }
-    }
-}
-
-void STDL_FillCircle(STDL_Surface *dst, int cx, int cy, int r,
-                     uint8_t col)
-{
-    int x = r, y = 0, err = 1 - r;
-
-    if (dst == NULL || r < 0) {
-        return;
-    }
-    while (x >= y) {
-        STDL_HLine(dst, cx - x, cx + x, cy + y, col);
-        STDL_HLine(dst, cx - x, cx + x, cy - y, col);
-        STDL_HLine(dst, cx - y, cx + y, cy + x, col);
-        STDL_HLine(dst, cx - y, cx + y, cy - x, col);
-        y++;
-        if (err < 0) {
-            err += 2 * y + 1;
-        } else {
-            x--;
-            err += 2 * (y - x) + 1;
-        }
     }
 }

@@ -450,7 +450,8 @@ static void test_points(void)
         int masked = (iter & 1);
         int clipped = (iter % 3) == 0;
         int percol = (iter & 2);
-        uint8_t col = (uint8_t)(rnd() % 17);   /* 16 = TRANSPARENT */
+        /* a third of them STDL_TRANSPARENT or above */
+        uint8_t col = (uint8_t)(rnd() % 24);
         int i;
 
         randomise(a, 16);
@@ -1409,6 +1410,180 @@ static void test_text_model(void)
     }
 }
 
+/* the algorithms STDL_Line/Circle/FillCircle replaced, as the
+ * reference: a pixel or a row at a time, through calls whose own
+ * semantics are tested elsewhere */
+static void old_line(STDL_Surface *d, int x1, int y1, int x2, int y2,
+                     uint8_t col)
+{
+    int dx, dy, sx, sy, err, e2;
+    if (y1 == y2 || x1 == x2) {
+        STDL_Rect r;
+        r.x = (int16_t)(x1 < x2 ? x1 : x2);
+        r.y = (int16_t)(y1 < y2 ? y1 : y2);
+        r.w = (uint16_t)((x1 < x2 ? x2 - x1 : x1 - x2) + 1);
+        r.h = (uint16_t)((y1 < y2 ? y2 - y1 : y1 - y2) + 1);
+        STDL_FillRect(d, &r, col);
+        return;
+    }
+    dx = x2 > x1 ? x2 - x1 : x1 - x2;
+    dy = y2 > y1 ? y1 - y2 : y2 - y1;
+    sx = x1 < x2 ? 1 : -1;
+    sy = y1 < y2 ? 1 : -1;
+    err = dx + dy;
+    for (;;) {
+        STDL_PutPixel(d, x1, y1, col);
+        if (x1 == x2 && y1 == y2) break;
+        e2 = err * 2;
+        if (e2 >= dy) { err += dy; x1 += sx; }
+        if (e2 <= dx) { err += dx; y1 += sy; }
+    }
+}
+
+static void old_row(STDL_Surface *d, int x1, int x2, int y, uint8_t col)
+{
+    STDL_Rect r;
+    r.x = (int16_t)x1;
+    r.y = (int16_t)y;
+    r.w = (uint16_t)(x2 - x1 + 1);
+    r.h = 1;
+    STDL_FillRect(d, &r, col);
+}
+
+static void old_circle(STDL_Surface *d, int cx, int cy, int r, int fill,
+                       uint8_t col)
+{
+    int x = r, y = 0, err = 1 - r;
+    while (x >= y) {
+        if (fill) {
+            old_row(d, cx - x, cx + x, cy + y, col);
+            old_row(d, cx - x, cx + x, cy - y, col);
+            old_row(d, cx - y, cx + y, cy + x, col);
+            old_row(d, cx - y, cx + y, cy - x, col);
+        } else {
+            STDL_PutPixel(d, cx + x, cy + y, col);
+            STDL_PutPixel(d, cx - x, cy + y, col);
+            STDL_PutPixel(d, cx + x, cy - y, col);
+            STDL_PutPixel(d, cx - x, cy - y, col);
+            STDL_PutPixel(d, cx + y, cy + x, col);
+            STDL_PutPixel(d, cx - y, cy + x, col);
+            STDL_PutPixel(d, cx + y, cy - x, col);
+            STDL_PutPixel(d, cx - y, cy - x, col);
+        }
+        y++;
+        if (err < 0) {
+            err += 2 * y + 1;
+        } else {
+            x--;
+            err += 2 * (y - x) + 1;
+        }
+    }
+}
+
+/*
+ * Lines and circles against the pixel-at-a-time algorithms they
+ * replaced, byte for byte, pixels and masks: endpoints and centres
+ * off the surface, random clips, colours including STDL_TRANSPARENT
+ * on a masked surface, budgets 4, 2 and 3, radii up to past the
+ * filled circle's half-width table.
+ */
+/* random pixels in the budget's planes, a byte at a time: PutPixel
+ * per pixel takes seconds a surface on the target */
+static void rand_planes(STDL_Surface *s, int budget)
+{
+    int y, k;
+
+    for (y = 0; y < s->h; y++) {
+        uint8_t *row = s->pixels + (size_t)y * s->stride;
+        for (k = 0; k < s->stride; k++) {
+            row[k] = ((k & 7) >> 1) < budget ? (uint8_t)rnd() : 0;
+        }
+    }
+}
+
+static void test_shapes_ref(void)
+{
+    static const int budgets[3] = { 4, 2, 3 };
+#ifdef __m68k__
+    const int iters = 150;      /* PIXCHK: minutes, not an hour */
+#else
+    const int iters = 600;
+#endif
+    int iter;
+
+    for (iter = 0; iter < iters; iter++) {
+        const int budget = budgets[iter % 3];
+        const int shape = (iter / 3) % 5;
+        /* rows wide enough for HLine's BLiTTER cut on the HLine
+         * passes */
+        const int sw = (shape == 3) ? 640 : 100;
+        STDL_Surface *a = STDL_CreateSurface(sw, 70);
+        STDL_Surface *b = STDL_CreateSurface(sw, 70);
+        STDL_Rect clip;
+        /* a third of them STDL_TRANSPARENT or above */
+        uint8_t col = (uint8_t)(rnd() % 24);
+        int k1 = (int)(rnd() % 160) - 30, k2 = (int)(rnd() % 120) - 25;
+        int k3 = (int)(rnd() % 160) - 30, k4 = (int)(rnd() % 120) - 25;
+        int r = (iter % 50 == 7) ? 300 + (int)(rnd() % 40)
+                                 : (int)(rnd() % 60);
+
+        STDL_SetPlaneBudget(budget);
+        rand_planes(a, budget);
+        if (iter & 1) {
+            size_t k;
+            STDL_CreateMask(a, 0);
+            for (k = 0; k < (size_t)a->maskstride * a->h; k++) {
+                a->mask[k] = (uint8_t)rnd();
+            }
+        }
+        /* a copy of a, mask included (DuplicateSurface rebuilds a
+         * mask from the colour key instead) */
+        memcpy(b->pixels, a->pixels, (size_t)a->stride * a->h);
+        if (a->mask != NULL) {
+            STDL_CreateMask(b, 0);
+            memcpy(b->mask, a->mask, (size_t)a->maskstride * a->h);
+        }
+        clip.x = (int16_t)(rnd() % 30);
+        clip.y = (int16_t)(rnd() % 20);
+        clip.w = (uint16_t)(5 + rnd() % (sw - 10));
+        clip.h = (uint16_t)(5 + rnd() % 60);
+        STDL_SetClipRect(a, &clip);
+        STDL_SetClipRect(b, &clip);
+        if (shape == 0) {
+            STDL_Line(a, k1, k2, k3, k4, col);
+            old_line(b, k1, k2, k3, k4, col);
+        } else if (shape == 3) {
+            /* ends either way round, widths past the BLiTTER cut */
+            int h1 = (int)(rnd() % 700) - 40, h2 = (int)(rnd() % 700) - 40;
+            STDL_HLine(a, h1, h2, k2, col);
+            old_row(b, h1 < h2 ? h1 : h2, h1 < h2 ? h2 : h1, k2, col);
+        } else if (shape == 4) {
+            STDL_VLine(a, k1, k2, k4, col);
+            old_line(b, k1, k2, k1, k4, col);
+        } else {
+            STDL_Circle(a, k1, k2, r, col);   /* replaced below */
+            if (shape == 2) {
+                memcpy(a->pixels, b->pixels, (size_t)b->stride * b->h);
+                if (a->mask != NULL) {
+                    memcpy(a->mask, b->mask, (size_t)b->maskstride * b->h);
+                }
+                STDL_FillCircle(a, k1, k2, r, col);
+            }
+            old_circle(b, k1, k2, r, shape == 2, col);
+        }
+        CHECK(memcmp(a->pixels, b->pixels, (size_t)a->stride * a->h) == 0
+              && (a->mask == NULL
+                  || memcmp(a->mask, b->mask,
+                            (size_t)a->maskstride * a->h) == 0),
+              "shape %d (%d,%d)-(%d,%d) r=%d col=%d np=%d mask=%d differs",
+              shape, k1, k2, k3, k4, r, col, budget, a->mask != NULL);
+        STDL_FreeSurface(a);
+        STDL_FreeSurface(b);
+        STDL_SetPlaneBudget(4);
+        if (failures > 3) return;
+    }
+}
+
 int main(void)
 {
     test_putget();
@@ -1429,6 +1604,7 @@ int main(void)
     test_tiles();
     test_tiles_wide();
     test_text_model();
+    test_shapes_ref();
     if (failures == 0) {
         printf("all pixel-path tests passed\n");
         return 0;

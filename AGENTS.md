@@ -594,6 +594,12 @@ warnings** with the Makefile's `-Wall -Wextra`.
   `STDL_CreateSurfaceFrom` does not promise (word only), so the test
   is made once per blit - a stride is a whole number of groups, so
   what holds for the first row holds for all of them.
+  `memset` is the same story at a larger size: mintlib's costs about
+  70us a call on a plain ST before it stores anything, so the fill
+  path that cleared each row of a 0 or 15 fill with one lost to a
+  plain store loop at every screen width (a 16x16 clear 1347us
+  against 745, 320x32 4687 against 4375). Only a contiguous block,
+  or rows of 32 groups and more, still take it.
 - **After touching blit/fill paths**: run `dist/BLITCHK.TOS` - it
   randomises fills/blits and compares the CPU and BLiTTER paths
   byte-for-byte on target. Both paths must stay identical;

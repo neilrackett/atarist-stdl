@@ -6,6 +6,19 @@
  * Background restore for sprite-over-background games: push the
  * rectangles you dirtied, restore repaints them from a background
  * surface before the next frame's draws.
+ *
+ * A frame is: STDL_DirtyRestore(page), draw, STDL_DirtyPush each
+ * rectangle drawn into that page. Each page keeps its own list, keyed
+ * by its pixels, so this works unchanged with STDL_DOUBLEBUF: restoring
+ * the back page erases what was drawn into that page the last time
+ * it was the back page, not what went into the page on screen.
+ * Pushes go to the list of the page restored last (before any
+ * restore, to the first page restored). STDL_DirtyReset forgets that
+ * list only. Two pages are tracked; a third evicts the one restored
+ * least recently, which is then restored whole when it next comes
+ * back. Restoring is always from the background, so a rectangle
+ * pushed twice or too many only costs time; overflowing max_rects
+ * restores that page whole.
  */
 
 #ifndef STDL_DIRTY_H

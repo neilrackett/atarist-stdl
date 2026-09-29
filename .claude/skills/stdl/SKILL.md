@@ -612,6 +612,15 @@ first.
   the pixel, redraw only the strip that scrolls in. Test
   `STDL_HasHwScroll` at init and keep a copy fallback for the plain
   ST; do not mix with `STDL_Flip`. `examples/hwscroll.c`.
+- Erasing sprites: `STDL_DirtyInit(background, max)` once, then each
+  frame `STDL_DirtyRestore(screen)`, draw, and `STDL_DirtyPush` each
+  rectangle drawn. Restores come from the clean background, so pushing
+  a rectangle twice or pushing too many costs time, never pixels (an
+  overflow restores the page whole). Each page keeps its own list, so
+  it works as-is with `STDL_DOUBLEBUF` - the back page is erased of
+  what was drawn into it two frames ago. Before that change (v1.13.2
+  and earlier) the single list erased the wrong page; a double-buffered
+  port that pushed both frames' rectangles to compensate can stop.
 - Composition: `STDL_TRANSPARENT` fills punch holes in masked
   surfaces; blits maintain destination masks; `STDL_SurfaceIsOpaque`
   (cached) skips backdrop under solid tiles; `STDL_PutGroup` for

@@ -243,25 +243,30 @@ void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,
 
 Dispatch strategy, in order of preference:
 
-1. Aligned, unmasked — `movem` block copy.
+1. Aligned, unmasked — whole-group rows copied inline when short,
+   `memcpy` when long, one `memcpy` for a whole padding-free surface.
 2. Aligned, masked — per-group mask/or.
 3. Unaligned, pre-shifted variant available — select variant, use (1) or (2).
-4. Unaligned, no variant — runtime shift chain (documented as the slow path).
+4. Unaligned, no variant — runtime shift chain (documented as the slow path);
+   an unmasked one stores its middle groups without reading the destination.
 5. Large aligned rect on STE/Mega STE — blitter, one pass per plane.
 
 ### 5.4 `STDL_Dirty` — background restore
 
-The module Koules will force into existence; neither FreeNukum nor Sopwith
-needed it.
-
 ```c
-void STDL_DirtyInit(STDL_Surface *background, int max_rects);
-void STDL_DirtyPush(const STDL_Rect *r);      /* mark for restore   */
-void STDL_DirtyRestore(void);                 /* repaint from background */
+int  STDL_DirtyInit(STDL_Surface *background, int max_rects);
+void STDL_DirtyQuit(void);
+void STDL_DirtyPush(const STDL_Rect *r);      /* mark for restore        */
+void STDL_DirtyRestore(STDL_Surface *dst);    /* repaint from background */
 void STDL_DirtyReset(void);
 ```
 
-Alternative save-under strategy under the same interface, chosen at init.
+Rectangles are restored from a clean background copy, never saved
+from under the sprite, so restoring more than needed is only time and
+the order of overlapping sprites does not matter. One list per page,
+keyed by the page's pixels: with `STDL_DOUBLEBUF` the back page is
+restored from what was drawn into it two frames ago, as a page-flipped
+engine's per-buffer restore list does.
 
 ### 5.5 `STDL_Palette`
 

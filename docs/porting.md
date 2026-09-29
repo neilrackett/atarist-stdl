@@ -398,7 +398,11 @@ truncates colours to the low N bits rather than rejecting them. See
   make sure defaults are sensible.
 * **Overlapping dirty-rect sprites** (testsprite-style erase/redraw)
   show tearing between overlapping sprites at ST frame rates; use
-  `STDL_Dirty` restore or a back buffer for real games.
+  `STDL_Dirty` restore or a back buffer for real games. The two
+  combine: `STDL_DirtyRestore(screen)` then draw and push, every
+  frame, and with `STDL_DOUBLEBUF` each page keeps its own list, so
+  the back page is erased of what was drawn into it last time rather
+  than of what is on screen.
 * **Key repeat**: the IKBD sends no auto-repeats; STDL synthesises
   them only after `SDL_EnableKeyRepeat`, matching SDL.
 * **Slow frames swallow key presses**: when a frame takes longer

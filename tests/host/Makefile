@@ -41,13 +41,16 @@ CORE    = stubs.c blitmodel.c $(SRC)/surface.c $(SRC)/indexed.c \
 
 TESTS   = test_pixel test_compose test_cursor test_assets test_planes \
           test_footprint test_indexed test_glyph test_vbl test_blit8 \
-          test_underleak test_blitter \
+          test_underleak test_blitter test_dirty \
           test_voice test_ym test_tone test_sfx test_opl test_refresh \
           test_wav test_mixer test_ring
 
 all: $(TESTS)
 
 test_pixel: test_pixel.c $(CORE) $(SRC)/surfacefrom.c
+	$(CC) $(CFLAGS) -o $@ $^
+
+test_dirty: test_dirty.c $(CORE) $(SRC)/dirty.c
 	$(CC) $(CFLAGS) -o $@ $^
 
 # built with the counters, for stdl_blit_force: every operation the

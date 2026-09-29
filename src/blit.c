@@ -14,14 +14,8 @@
  * Masks follow the format contract: bit set = destination preserved.
  */
 
-/*
- * Rows up to this many bytes are copied inline rather than through
- * memcpy. The call costs about 650 cycles before it moves anything,
- * which is most of the cost of a tile-sized row; past this size the
- * library call's own loop is the better bet. Tuned by measurement -
- * see the numbers in tests/hatari/blitcost.c.
- */
-#define BLIT_INLINE_MAX 64
+/* BLIT_INLINE_MAX is in stdl_internal.h, shared with the BLiTTER's
+ * size rules */
 
 #include <string.h>
 #include "stdl_internal.h"
@@ -53,6 +47,52 @@ void copy_row_short(uint8_t *dp, const uint8_t *sp, int bytes, int lng)
             *d2++ = *s2++;
         } while (--n != 0);
     }
+}
+
+/*
+ * Rows of whole groups, long aligned, no mask: tiles and background
+ * restores. Written out because it is the hottest small loop in the
+ * library and gcc 4.6 has kept its strides and row count on the stack
+ * in some builds of STDL_BlitSurfaceEx and in registers in others -
+ * the same C measured 7% apart on a 16x16 restore depending on
+ * unrelated code elsewhere in the function. Here they are registers
+ * by construction. ng >= 1, h >= 1; the skips are the strides less
+ * the row's own bytes.
+ */
+static __inline__ void copy_rows_groups(uint8_t *dp, const uint8_t *sp,
+                                        int ng, int h, int32_t sskip,
+                                        int32_t dskip)
+{
+#ifdef __m68k__
+    int16_t rows = (int16_t)h;
+    const int16_t n = (int16_t)(ng - 1);
+
+    __asm__ volatile(
+        "1:\n\t"
+        "move.w %[n],%%d0\n"
+        "2:\n\t"
+        "move.l (%[s])+,(%[d])+\n\t"
+        "move.l (%[s])+,(%[d])+\n\t"
+        "dbf    %%d0,2b\n\t"
+        "adda.l %[sk],%[s]\n\t"
+        "adda.l %[dk],%[d]\n\t"
+        "subq.w #1,%[h]\n\t"
+        "bne.s  1b"
+        : [d] "+a"(dp), [s] "+a"(sp), [h] "+d"(rows)
+        : [n] "d"(n), [sk] "d"(sskip), [dk] "d"(dskip)
+        : "d0", "cc", "memory");
+#else
+    /* C twin - what tests/host exercises and the asm must match */
+    int y, i;
+
+    for (y = 0; y < h; y++) {
+        for (i = 0; i < ng * 8; i += 4) {
+            *(uint32_t *)(dp + i) = *(const uint32_t *)(sp + i);
+        }
+        dp += ng * 8 + dskip;
+        sp += ng * 8 + sskip;
+    }
+#endif
 }
 
 /* n mask words cleared, n >= 1; mask rows are word aligned always */
@@ -666,6 +706,30 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
     if (dst->mask == NULL) {
         flags &= ~(unsigned)(STDL_BLIT_UNDER | STDL_BLIT_MARK);
     }
+    /*
+     * The BLiTTER, when the machine has one. Both the choice
+     * (stdl_blitter_wants, the size rules) and the work
+     * (stdl_blitter_blit) are out of line in blitter.c, so what this
+     * function holds for them is two byte tests and two calls: with
+     * the rules written inline here, a plain ST - which fails the
+     * byte test and never reaches them - ran its unaligned CPU blits
+     * 1-2% slower, through what they did to this function's register
+     * allocation. The passes fix the mask upkeep themselves; UNDER
+     * and MARK go the CPU route.
+     */
+    if (flags == 0 && stdl_blitter_active()
+        && (STDL_BLIT_FORCED() || stdl_blitter_wants(sx, dx, w, h, masked))
+        && STDL_BLIT_REACHES(src, dst)) {
+#ifdef STDL_BLIT_STATS
+        stdl_blit_blitter += (unsigned long)h;
+        stdl_blit_rows += (unsigned long)h;
+#endif
+        stdl_blitter_blit(src, dst, sx, sy, dx, dy, w, h, masked);
+        if (dst->mask != NULL) {
+            dst->opaque_state = 0;
+        }
+        return 0;
+    }
 
     {
         int sphase = sx & 15;
@@ -691,107 +755,6 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
 
         if (dst->mask != NULL) {
             dst->opaque_state = 0;
-        }
-
-        if (sphase == dphase
-            && flags == 0        /* the BLiTTER passes below fix the
-                                  * mask upkeep; UNDER/MARK go the CPU
-                                  * route */
-            && stdl_blitter_allowed()
-            && (STDL_BLIT_FORCED()
-                || (masked
-                    ? stdl_row_off(ng, (uint16_t)h)
-                      >= STDL_BLIT_MASKED_MIN_CELLS
-                    : stdl_row_off(h, (uint16_t)(STDL_BLIT_CPU_ROW
-                           + STDL_BLIT_CPU_CELL * ng))
-                      > STDL_BLIT_SETUP))
-            && STDL_BLIT_REACHES(src, dst)) {
-#ifdef STDL_BLIT_STATS
-            stdl_blit_blitter += (unsigned long)h;
-            stdl_blit_rows += (unsigned long)h;
-#endif
-            /*
-             * BLiTTER path, one plane rectangle per pass. Masked
-             * blits use XOR-AND-XOR: d ^= s; d &= mask; d ^= s
-             * computes (d & mask) | (s & ~mask) exactly, without
-             * needing zeroed source pixels under the mask.
-             */
-            uintptr_t sbase = (uintptr_t)(srow + sg0 * 8);
-            uintptr_t dbase = (uintptr_t)drow;
-            uintptr_t smbase =
-                masked ? (uintptr_t)(smrow + sg0 * 2) : 0;
-            int16_t s_yinc = (int16_t)(src->stride - (ng - 1) * 8);
-            int16_t d_yinc = (int16_t)(dst->stride - (ng - 1) * 8);
-            int16_t sm_yinc = masked
-                ? (int16_t)(src->maskstride - (ng - 1) * 2) : 0;
-            int p;
-
-            /*
-             * The registers that do not change between planes are
-             * written once. An unmasked four-plane copy issued
-             * eleven of them per plane and a masked one per pass,
-             * which measured as about half the BLiTTER's setup.
-             */
-            if (!masked) {
-                stdl_blitter_setup(8, s_yinc, 8, d_yinc, lm, rm,
-                                   (uint16_t)ng, STDL_BLIT_HOP_SRC,
-                                   STDL_BLIT_OP_SRC, 0);
-                for (p = 0; p < np; p++) {
-                    stdl_blitter_run(sbase + (uintptr_t)(p * 2),
-                                     dbase + (uintptr_t)(p * 2),
-                                     (uint16_t)ng, (uint16_t)h,
-                                     STDL_BLIT_HOP_SRC);
-                }
-            } else {
-                /* XOR-AND-XOR, one pass shape at a time across all
-                 * planes, so each shape's registers are set once */
-                stdl_blitter_setup(8, s_yinc, 8, d_yinc, lm, rm,
-                                   (uint16_t)ng, STDL_BLIT_HOP_SRC,
-                                   STDL_BLIT_OP_XOR, 0);
-                for (p = 0; p < np; p++) {
-                    stdl_blitter_run(sbase + (uintptr_t)(p * 2),
-                                     dbase + (uintptr_t)(p * 2),
-                                     (uint16_t)ng, (uint16_t)h,
-                                     STDL_BLIT_HOP_SRC);
-                }
-                stdl_blitter_setup(2, sm_yinc, 8, d_yinc, lm, rm,
-                                   (uint16_t)ng, STDL_BLIT_HOP_SRC,
-                                   STDL_BLIT_OP_AND, 0);
-                for (p = 0; p < np; p++) {
-                    stdl_blitter_run(smbase,
-                                     dbase + (uintptr_t)(p * 2),
-                                     (uint16_t)ng, (uint16_t)h,
-                                     STDL_BLIT_HOP_SRC);
-                }
-                stdl_blitter_setup(8, s_yinc, 8, d_yinc, lm, rm,
-                                   (uint16_t)ng, STDL_BLIT_HOP_SRC,
-                                   STDL_BLIT_OP_XOR, 0);
-                for (p = 0; p < np; p++) {
-                    stdl_blitter_run(sbase + (uintptr_t)(p * 2),
-                                     dbase + (uintptr_t)(p * 2),
-                                     (uint16_t)ng, (uint16_t)h,
-                                     STDL_BLIT_HOP_SRC);
-                }
-            }
-            if (dmrow != NULL) {
-                int16_t dm_yinc =
-                    (int16_t)(dst->maskstride - (ng - 1) * 2);
-                if (masked) {
-                    /* dstmask &= srcmask inside the span */
-                    stdl_blitter_go(smbase, 2, sm_yinc,
-                                    (uintptr_t)dmrow, 2, dm_yinc,
-                                    lm, rm, (uint16_t)ng, (uint16_t)h,
-                                    STDL_BLIT_HOP_SRC,
-                                    STDL_BLIT_OP_AND, 0);
-                } else {
-                    stdl_blitter_go(0, 0, 0,
-                                    (uintptr_t)dmrow, 2, dm_yinc,
-                                    lm, rm, (uint16_t)ng, (uint16_t)h,
-                                    STDL_BLIT_HOP_ONES,
-                                    STDL_BLIT_OP_ZERO, 0);
-                }
-            }
-            return 0;
         }
 
         if (sphase == dphase) {
@@ -847,19 +810,9 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                      * unswitch), which cost more than a 16-pixel
                      * row's two moves. Here they are asked once.
                      */
-                    const int nl = bytes >> 2;
-                    const int sstr = src->stride, dstr = dst->stride;
-
-                    for (y = 0; y < h; y++) {
-                        const uint32_t *s4 = (const uint32_t *)sp;
-                        uint32_t *d4 = (uint32_t *)dp;
-                        int n = nl;
-                        do {
-                            *d4++ = *s4++;
-                        } while (--n != 0);
-                        sp += sstr;
-                        dp += dstr;
-                    }
+                    copy_rows_groups(dp, sp, ng, h,
+                                     (int32_t)src->stride - bytes,
+                                     (int32_t)dst->stride - bytes);
                     return 0;
                 }
                 for (y = 0; y < h; y++) {

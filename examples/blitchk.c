@@ -127,14 +127,16 @@ static int compare_pass(void)
             STDL_UseBlitter(1);
             STDL_FillRect(db, &r2, col);
         } else {
-            /* blit: same phase so the blitter path is exercised */
+            /* blit: half at the same phase, half at independent ones -
+             * the BLiTTER shifts those itself, left and right */
             STDL_Surface *src = (op == 1) ? src_plain : src_keyed;
+            int dphase = (rnd() & 1) ? phase : (int)(rnd() & 15);
             STDL_Rect sr;
             sr.x = (int16_t)(phase + 16 * (int)(rnd() % 3));
             sr.y = (int16_t)(rnd() % 20);
             sr.w = (uint16_t)(rnd() % 160);
             sr.h = (uint16_t)(rnd() % 64);
-            r.x = (int16_t)(phase + 16 * ((int)(rnd() % 14) - 1));
+            r.x = (int16_t)(dphase + 16 * ((int)(rnd() % 14) - 1));
             r.y = (int16_t)((int)(rnd() % 170) - 10);
             r2 = r;
             STDL_UseBlitter(0);

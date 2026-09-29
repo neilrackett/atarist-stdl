@@ -231,13 +231,16 @@ static void library_pass(int budget, int split)
         } else {
             STDL_Surface *src = (op == 1) ? src_plain : src_keyed;
             int phase = (int)(rnd() & 15);
+            /* half the blits at independent phases: the skewed
+             * BLiTTER passes, both shift directions */
+            int dphase = (rnd() & 1) ? phase : (int)(rnd() & 15);
             STDL_Rect sr;
 
             sr.x = (int16_t)(phase + 16 * (int)(rnd() % 3));
             sr.y = (int16_t)(rnd() % 20);
             sr.w = (uint16_t)(rnd() % 160);
             sr.h = (uint16_t)(rnd() % 48);
-            ra.x = (int16_t)(phase + 16 * ((int)(rnd() % 22) - 1));
+            ra.x = (int16_t)(dphase + 16 * ((int)(rnd() % 22) - 1));
             ra.y = (int16_t)((int)(rnd() % 130) - 10);
             rb = ra;
             STDL_UseBlitter(0);

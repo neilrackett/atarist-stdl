@@ -9,10 +9,9 @@
  * word-interleaved layout walks a plane with an x increment of 8
  * bytes (2 for the separate mask, whose words cover the same 16
  * pixels); spans are word-aligned by construction, so the CPU
- * paths' edge masks map directly onto endmask1/endmask3. Only
- * same-phase operations are accelerated - unaligned blits stay on
- * the CPU shift chain, and pre-shifted sprites are the designed
- * answer for free positioning.
+ * paths' edge masks map directly onto endmask1/endmask3. Unaligned
+ * blits use the chip's barrel shifter (SKEW, with FXSR for left
+ * shifts, never NFSR); see stdl_blitter_blit.
  *
  * Runs in hog mode with a busy-wait: operations are short and the
  * bus is ours. While a border is open, overscan.c installs a policy
@@ -57,6 +56,68 @@ typedef stdl_host_blitregs_t blitregs_t;
 
 /* STDL_UseBlitter's setting; stdl_blitter_active() reads it inline */
 uint8_t stdl_blit_user = 1;
+
+/*
+ * One pass when no border policy is installed - the usual case -
+ * written inline where a caller issues several in a row. With a
+ * policy the pass may have to be split around a border window, and
+ * that is stdl_blitter_run's job.
+ */
+static __inline__ __attribute__((always_inline))
+void blit_pass(uintptr_t src, uintptr_t dst, uint16_t nwords,
+               uint16_t nlines, uint8_t hop)
+{
+    volatile blitregs_t *b = BLIT;
+
+    if (stdl_blit_policy != NULL) {
+        stdl_blitter_run(src, dst, nwords, nlines, hop);
+        return;
+    }
+    b->src_addr = src;
+    b->dst_addr = dst;
+    b->xcount = nwords;
+    b->ycount = nlines;
+    b->ctrl = 0xC0;                     /* start, hog */
+    BLIT_STARTED();
+    while ((b->ctrl & 0x80) || b->ycount != 0)
+        ;
+}
+
+/*
+ * Whether a clipped blit is worth the BLiTTER, by its shape (the
+ * constants and how they were fitted are in stdl_internal.h). Same
+ * phase: whole groups copy fast on the CPU, inline up to
+ * BLIT_INLINE_MAX bytes a row and through memcpy beyond, and the
+ * BLiTTER wins once h * (ROW + CELL * ng) passes its set-up - with
+ * cells = ng * h that is ROW * h + CELL * cells, one multiply; a
+ * partial edge group costs the CPU a merge a row and the BLiTTER wins
+ * sooner; a keyed copy is a cell count. Different phases: the CPU's
+ * shift chain is dear enough that the BLiTTER wins from a handful of
+ * cells.
+ */
+int stdl_blitter_wants(int sx, int dx, int w, int h, int masked)
+{
+    const int bph = dx & 15;
+    const int bng = (bph + w + 15) >> 4;
+    const uint32_t cells = stdl_row_off(bng, (uint16_t)h);
+
+    if ((sx & 15) != bph) {
+        return cells >= (masked ? STDL_BLIT_SHIFT_KEYED_MIN_CELLS
+                                : STDL_BLIT_SHIFT_MIN_CELLS);
+    }
+    if (masked) {
+        return cells >= STDL_BLIT_MASKED_MIN_CELLS;
+    }
+    if ((bph | ((bph + w) & 15)) != 0) {
+        return cells >= STDL_BLIT_EDGE_MIN_CELLS;
+    }
+    if (bng * 8 <= BLIT_INLINE_MAX) {
+        return STDL_BLIT_CPU_ROW * (uint32_t)h
+             + STDL_BLIT_CPU_CELL * cells > STDL_BLIT_SETUP;
+    }
+    return STDL_BLIT_MEM_ROW * (uint32_t)h
+         + STDL_BLIT_MEM_CELL * cells > STDL_BLIT_SETUP;
+}
 
 /* the same test out of line, for blit.c: see stdl_internal.h */
 int stdl_blitter_allowed(void)
@@ -216,6 +277,100 @@ void stdl_blitter_run(uintptr_t src, uintptr_t dst, uint16_t nwords,
                 (int16_t)(nwords - 1), bl_dxinc) + bl_dyinc);
             src = (uintptr_t)((intptr_t)src + blit_muls((int16_t)n, sl));
             dst = (uintptr_t)((intptr_t)dst + blit_muls((int16_t)n, dl));
+        }
+    }
+}
+
+/*
+ * The BLiTTER path, one plane rectangle per pass, at any pair of
+ * phases, using its barrel shifter (SKEW) where they differ.
+ *
+ * A right shift (source phase below destination) fetches the words
+ * it needs as it goes; a left shift primes the source buffer with one
+ * extra fetch at the start of each line (FXSR). NFSR is never set (see
+ * stdl_blitter_setup), so a line can read one source word past the
+ * span it copies - within the next group of the row, or the guard
+ * bytes every surface carries past its last row. The endmasks are the
+ * destination's, as in the CPU paths, and the source's y increment
+ * accounts for the extra fetch, so each line starts one stride on.
+ * Masked blits are the same-phase path's XOR-AND-XOR with the mask
+ * pass shifted by the same skew.
+ *
+ * At equal phases all of this reduces to the registers the same-phase
+ * path always wrote: skew 0, no extra fetch.
+ *
+ * Here rather than in blit.c so that each plane's pass is written
+ * inline (blit_pass): as a call to stdl_blitter_run, every pass saved
+ * and restored eight registers, four passes to a copy and thirteen
+ * to a keyed blit. And out of STDL_BlitSurfaceEx, whose CPU paths
+ * are compiled the same whatever the BLiTTER code does.
+ */
+void stdl_blitter_blit(const STDL_Surface *src, STDL_Surface *dst,
+                       int sx, int sy, int dx, int dy, int w, int h,
+                       int masked)
+{
+    const int np = stdl_planes;
+    const int sph = sx & 15, dph = dx & 15;
+    const int dn = (dph + w + 15) >> 4;         /* destination words  */
+    const int fxsr = sph > dph;
+    const int reads = dn + fxsr;                /* source words/line  */
+    const uint8_t skew = (uint8_t)((fxsr << 7) | ((dph - sph) & 15));
+    const uint16_t lm = (uint16_t)(0xFFFFu >> dph);
+    const uint16_t rm = (uint16_t)(0xFFFFu << (15 - ((dph + w - 1) & 15)));
+    const uintptr_t sbase = (uintptr_t)(src->pixels
+        + stdl_row_off(sy, src->stride) + (sx >> 4) * 8);
+    const uintptr_t dbase = (uintptr_t)(dst->pixels
+        + stdl_row_off(dy, dst->stride) + (dx >> 4) * 8);
+    const int16_t s_yinc = (int16_t)(src->stride - (reads - 1) * 8);
+    const int16_t d_yinc = (int16_t)(dst->stride - (dn - 1) * 8);
+    uintptr_t smbase = 0;
+    int16_t sm_yinc = 0;
+    int p;
+
+    if (masked) {
+        smbase = (uintptr_t)(src->mask
+            + stdl_row_off(sy, src->maskstride) + (sx >> 4) * 2);
+        sm_yinc = (int16_t)(src->maskstride - (reads - 1) * 2);
+        stdl_blitter_setup(8, s_yinc, 8, d_yinc, lm, rm, (uint16_t)dn,
+                           STDL_BLIT_HOP_SRC, STDL_BLIT_OP_XOR, skew);
+        for (p = 0; p < np; p++) {
+            blit_pass(sbase + (uintptr_t)(p * 2),
+                             dbase + (uintptr_t)(p * 2),
+                             (uint16_t)dn, (uint16_t)h,
+                             STDL_BLIT_HOP_SRC);
+        }
+        stdl_blitter_setup(2, sm_yinc, 8, d_yinc, lm, rm, (uint16_t)dn,
+                           STDL_BLIT_HOP_SRC, STDL_BLIT_OP_AND, skew);
+        for (p = 0; p < np; p++) {
+            blit_pass(smbase, dbase + (uintptr_t)(p * 2),
+                             (uint16_t)dn, (uint16_t)h,
+                             STDL_BLIT_HOP_SRC);
+        }
+    }
+    /* the copy, or the masked blit's second XOR: same registers */
+    stdl_blitter_setup(8, s_yinc, 8, d_yinc, lm, rm, (uint16_t)dn,
+                       STDL_BLIT_HOP_SRC,
+                       masked ? STDL_BLIT_OP_XOR : STDL_BLIT_OP_SRC, skew);
+    for (p = 0; p < np; p++) {
+        blit_pass(sbase + (uintptr_t)(p * 2),
+                         dbase + (uintptr_t)(p * 2),
+                         (uint16_t)dn, (uint16_t)h, STDL_BLIT_HOP_SRC);
+    }
+    if (dst->mask != NULL) {
+        const uintptr_t dmbase = (uintptr_t)(dst->mask
+            + stdl_row_off(dy, dst->maskstride) + (dx >> 4) * 2);
+        const int16_t dm_yinc =
+            (int16_t)(dst->maskstride - (dn - 1) * 2);
+
+        if (masked) {
+            /* dstmask &= srcmask inside the span */
+            stdl_blitter_go(smbase, 2, sm_yinc, dmbase, 2, dm_yinc,
+                            lm, rm, (uint16_t)dn, (uint16_t)h,
+                            STDL_BLIT_HOP_SRC, STDL_BLIT_OP_AND, skew);
+        } else {
+            stdl_blitter_go(0, 0, 0, dmbase, 2, dm_yinc,
+                            lm, rm, (uint16_t)dn, (uint16_t)h,
+                            STDL_BLIT_HOP_ONES, STDL_BLIT_OP_ZERO, 0);
         }
     }
 }

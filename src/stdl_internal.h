@@ -509,6 +509,22 @@ void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
                      uint16_t em1, uint16_t em3,
                      uint16_t nwords, uint16_t nlines,
                      uint8_t hop, uint8_t op, uint8_t skew);
+/* whether a clipped blit is worth the BLiTTER (blitter.c) */
+int stdl_blitter_wants(int sx, int dx, int w, int h, int masked);
+/*
+ * Rows up to this many bytes are copied inline rather than through
+ * memcpy. The call costs about 650 cycles before it moves anything,
+ * which is most of the cost of a tile-sized row; past this size the
+ * library call's own loop is the better bet. Tuned by measurement -
+ * see the numbers in tests/hatari/blitcost.c. The BLiTTER's size
+ * rules follow the same line, so it is shared.
+ */
+#define BLIT_INLINE_MAX 64
+/* a surface blit, clipped and chosen by STDL_BlitSurfaceEx, at any
+ * pair of phases (blitter.c) */
+void stdl_blitter_blit(const STDL_Surface *src, STDL_Surface *dst,
+                       int sx, int sy, int dx, int dy, int w, int h,
+                       int masked);
 #ifndef __m68k__
 /* the host's BLiTTER registers: the chip's layout, except that the
  * two address registers hold host pointers */
@@ -645,11 +661,35 @@ static __inline__ int stdl_blit_reach(const void *p)
  * the CPU path up to twice as fast for tile-sized blits, which is
  * what made the previous flat 32-cell threshold wrong. Re-measure
  * if either path changes.
+ *
+ * Re-fitted 2026-09-29, when the CPU's copy of short rows became a
+ * loop with its registers fixed (restores 15-25% faster) and the old
+ * constants were handing the BLiTTER copies it lost by up to 40%.
+ * The CPU now has two regimes and the rule follows them: rows of up
+ * to BLIT_INLINE_MAX bytes copied inline, about 3.6 + 7 per group
+ * per row in the sweep's microseconds, and longer rows through a
+ * memcpy each, about 71 + 6 per group; against the BLiTTER's fixed
+ * ~460 more and 1 + 4 per group per row. Hence two (ROW, CELL)
+ * pairs, one per regime. On an STE the CPU wins every copy up to
+ * 128x16 and 64x32 now, and the BLiTTER every one with rows longer
+ * than 64 bytes and a few lines to them.
  */
-#define STDL_BLIT_CPU_ROW     26
-#define STDL_BLIT_CPU_CELL     7
-#define STDL_BLIT_SETUP      630
+#define STDL_BLIT_CPU_ROW      3    /* inline rows              */
+#define STDL_BLIT_CPU_CELL     3
+#define STDL_BLIT_MEM_ROW     70    /* memcpy rows              */
+#define STDL_BLIT_MEM_CELL     2
+#define STDL_BLIT_SETUP      460
 #define STDL_BLIT_MASKED_MIN_CELLS 64   /* masked: 3 passes/plane   */
+/* different phases: the CPU's shift chain is dear enough that the
+ * BLiTTER wins far sooner than for a same-phase copy - from 16
+ * cells unmasked, 32 keyed (measured: a keyed 16x8 lost 16% on the
+ * BLiTTER, a 16x16 won 26%) */
+#define STDL_BLIT_SHIFT_MIN_CELLS       16
+#define STDL_BLIT_SHIFT_KEYED_MIN_CELLS 32
+/* same phase with a partial edge group: the CPU merges its edges a
+ * group at a time - every restore at an unaligned x - and loses to
+ * the BLiTTER almost as early as the shift chain does */
+#define STDL_BLIT_EDGE_MIN_CELLS        16
 
 /*
  * Row offset y * stride. gcc 4.6 compiles a plain 32-bit multiply

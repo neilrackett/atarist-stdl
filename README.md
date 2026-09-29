@@ -167,14 +167,15 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | SFXDEMO.TOS  | Degas splash, YM effects stealing/restoring music voices, joystick key emulation |
 | TONEDEMO.TOS | live notes on the three YM voices: a fourth note displacing and returning        |
 | OPLDEMO.TOS  | an OPL2 register stream (the IMF games' music format) replayed as YM notes       |
-| BLITCHK.TOS  | BLiTTER vs CPU byte-identical verification at two plane budgets + timing         |
+| BLITCHK.TOS  | BLiTTER vs CPU byte-identical verification at three plane budgets + timing       |
 | VBLCHK.TOS   | 50Hz VBL callbacks, then an abnormal exit - the desktop coming back is the pass  |
 | OVERSCAN.TOS | border overscan: T top (228), B bottom (245), both combine (273), SPACE closes   |
 
-Large same-phase fills and blits are BLiTTER-accelerated where the
-hardware has one (fills 16.7 -> 50 FPS, aligned blits 8.3 -> 25 FPS
-on an emulated Mega STE); the CPU paths remain the correctness
-reference, verified byte-identical on target by BLITCHK.TOS.
+Large fills and blits are BLiTTER-accelerated where the hardware has
+one, unaligned blits included - the BLiTTER shifts them itself (a
+64x32 unaligned blit 7.4ms -> 1.4ms on an emulated STE); the CPU
+paths remain the correctness reference, verified byte-identical on
+target by BLITCHK.TOS.
 
 Games that do not need 16 colours can say so:
 `STDL_SetPlaneBudget(2)` promises no colour index above 3 and every

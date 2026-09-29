@@ -170,9 +170,12 @@ stop trying and redesign instead.
   audio refill, compat timers, the cursor - stays on the cooperative
   pump by design. See `include/stdl/stdl_vbl.h` for the full
   contract.
-* Large same-phase fills and blits are BLiTTER-accelerated when
-  the hardware has one (Mega ST/STE/Mega STE, detected at init);
-  correctness never depends on it, `STDL_UseBlitter(0)` forces the
-  CPU paths, and BLITCHK.TOS proves both paths byte-identical on
-  target. Unaligned blits stay on the CPU shift chain - pre-shifted
-  sprites are the designed answer for free positioning.
+* Large fills and blits are BLiTTER-accelerated when the hardware
+  has one (Mega ST/STE/Mega STE, detected at init), unaligned blits
+  included - the BLiTTER shifts them itself; small ones stay on the
+  CPU, where they are faster. Correctness never depends on it,
+  `STDL_UseBlitter(0)` forces the CPU paths, and BLITCHK.TOS proves
+  both paths byte-identical on target. The BLiTTER reads only ST
+  RAM: on a machine with alt-RAM, a surface allocated there takes
+  the CPU paths. On a plain ST, pre-shifted sprites remain the
+  designed answer for free positioning.

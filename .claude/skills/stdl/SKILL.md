@@ -111,13 +111,17 @@ will render wrong. Grep the port for every colour literal before
 choosing N - the maximum index used decides it, not the palette.
 
 Pre-shifted sprites (`STDL_PRESHIFT`) cost 16x RAM and make
-unaligned blits as cheap as aligned ones. Large same-phase fills
-and blits are BLiTTER-accelerated automatically when the hardware
-has one (fills hit the 50Hz VBL cap; aligned unmasked blits ~3x,
-masked ~1.7x); unaligned blits stay on the CPU shift chain
-(160x100 ~50ms, masked ~100ms on emulated Mega STE), so align to
-16px or pre-shift to benefit. `STDL_UseBlitter(0)` forces CPU
-paths for debugging; BLITCHK.TOS verifies both paths on target.
+unaligned blits as cheap as aligned ones. Fills and blits are
+BLiTTER-accelerated automatically when the hardware has one and the
+operation is big enough to repay its set-up - unaligned blits too,
+which the BLiTTER shifts itself: on an emulated STE a 64x32
+unaligned blit went from 7.4ms to 1.4ms plain and 12.4 to 3.9ms
+keyed, and a 16x16 from 2.2 to 1.1ms. Small aligned copies stay on
+the CPU, which now beats the BLiTTER for them (every copy up to
+128x16 on an STE). On a plain ST the unaligned shift chain is the
+path, so align to 16px or pre-shift there. `STDL_UseBlitter(0)`
+forces CPU paths for debugging; BLITCHK.TOS verifies both paths on
+target.
 
 ## Porting workflow
 

@@ -26,13 +26,16 @@
 #include <stdio.h>
 #include "stdl/stdl.h"
 #define ITER 1500
-static uint32_t one(STDL_Surface *dst, STDL_Surface *src, int w, int h)
+/* dx, sx: destination and source x; unequal phases make the blit
+ * unaligned (the BLiTTER's skewed passes) */
+static uint32_t one(STDL_Surface *dst, STDL_Surface *src, int w, int h,
+                    int dx, int sx)
 {
-    STDL_Rect s = { 0, 0, (int16_t)w, (int16_t)h };
+    STDL_Rect s = { (int16_t)sx, 0, (int16_t)w, (int16_t)h };
     STDL_Rect d = { 0, 0, 0, 0 };
     uint32_t t0 = STDL_GetTicks();
     int i;
-    for (i = 0; i < ITER; i++) { d.x = 0; d.y = 0;
+    for (i = 0; i < ITER; i++) { d.x = (int16_t)dx; d.y = 0;
         STDL_BlitSurface(src, &s, dst, &d); }
     return STDL_GetTicks() - t0;
 }
@@ -40,24 +43,49 @@ int main(int argc, char *argv[])
 {
     static const int ws[] = { 16, 32, 64, 128, 192, 320 };
     static const int hs[] = { 8, 16, 32 };
-    STDL_Surface *dst, *src; int wi, hi;
+    /* kinds: same-phase plain, same-phase keyed, unaligned plain,
+     * unaligned keyed - each has its own threshold */
+    static const char *const kind[5] = { "aligned", "aligned keyed",
+                                         "shift", "shift keyed",
+                                         "edges" };
+    STDL_Surface *dst, *src, *srck; int wi, hi, k;
     (void)argc; (void)argv;
     STDL_Init(STDL_INIT_VIDEO);
     STDL_SetVideoMode(320, 200, 4, 0);
     dst = STDL_CreateSurface(336, 200); src = STDL_CreateSurface(336, 200);
+    srck = STDL_CreateSurface(336, 200);
+    {
+        int x, y;
+        for (y = 0; y < 200; y++)
+            for (x = 0; x < 336; x++)
+                STDL_PutPixel(srck, x, y, (uint8_t)((x ^ y) % 5));
+        STDL_SetColourKey(srck, 1, 3);
+    }
     printf("BC: src %p dst %p stride %u, long aligned: %s\n",
            (void *)src->pixels, (void *)dst->pixels,
            (unsigned)src->stride,
            ((((uintptr_t)src->pixels | (uintptr_t)dst->pixels) & 3) == 0)
            ? "yes - short rows copy inline"
            : "NO - short rows fall back to memcpy");
-    printf("BC: w h allowed cpu1 cpu2 verdict\n"); fflush(stdout);
+    printf("BC: kind w h allowed cpu verdict\n"); fflush(stdout);
+    for (k = 0; k < 5; k++)
     for (hi = 0; hi < 3; hi++) for (wi = 0; wi < 6; wi++) {
+        STDL_Surface *s = (k & 1) ? srck : src;
+        int w = ws[wi] - ((k & 2) ? 16 : 0), dx = (k & 2) ? 5 : 0;
+        int sx = 0;
         uint32_t def, c;
-        STDL_UseBlitter(0); c = one(dst, src, ws[wi], hs[hi]);
-        STDL_UseBlitter(1); def = one(dst, src, ws[wi], hs[hi]);
-        printf("BC: %3d %2d allowed=%6lu cpu=%6lu %s\n", ws[wi], hs[hi],
-               (unsigned long)def, (unsigned long)c,
+        if (k == 4) {
+            /* same phase, both edges partial: the CPU merges them */
+            w = ws[wi] - 6;
+            sx = dx = 5;
+        }
+        if (w <= 0) {
+            w = 11;
+        }
+        STDL_UseBlitter(0); c = one(dst, s, w, hs[hi], dx, sx);
+        STDL_UseBlitter(1); def = one(dst, s, w, hs[hi], dx, sx);
+        printf("BC: %-13s %3d %2d allowed=%6lu cpu=%6lu %s\n", kind[k],
+               w, hs[hi], (unsigned long)def, (unsigned long)c,
                def <= c + c / 50 ? "ok" : "SLOWER");
         fflush(stdout);
     }

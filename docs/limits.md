@@ -123,8 +123,9 @@ stop trying and redesign instead.
   there, and a port keeps a copy-based fallback. The buffer stride is
   a multiple of 8 from 160 to 670 bytes (LINEWIDTH is a byte of
   words), fine scrolling needs a stride of at least 168, and the
-  base is word aligned. A request made early in a frame is on screen
-  at the next VBL, a late one at the VBL after. Hardware scrolling
+  base is word aligned. A request is on screen at the next VBL,
+  however late in the frame it was made (a frame later only if that
+  VBL itself runs late into the picture). Hardware scrolling
   and an open overscan border both program the video base and do not
   arbitrate, so a program uses one or the other; `STDL_Flip` now
   composes with either, because the module that owns the base at the

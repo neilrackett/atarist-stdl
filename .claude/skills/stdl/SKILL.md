@@ -614,12 +614,15 @@ first.
   shows the 320x200 window at pixel (x, y) of a surface at least 336
   wide (stride up to 670 bytes) by programming the STE's video base,
   LINEWIDTH and HSCROLL from the VBL - no copy, no CPU cost. The
-  base is written first and the two offsets at the VBL whose video
-  counter shows it latched (the Shifter latches the base three lines
-  before the VBL, the offsets apply at once), so the pair on screen
-  always matches; a request made in the first 15ms of a frame is on
-  screen at the next VBL, a later one a frame after, and
-  `STDL_ScrollWindowPending` says when. This
+  Shifter latches the base three lines before the VBL while the
+  offsets apply at once, so the VBL writes the base, the video
+  counter itself and the two offsets together while the fetch has not
+  begun: every request, however late in the frame, is on screen at
+  the next VBL, base and offsets as a matched pair (measured with
+  `tests/hatari/hwlatch.c`: late requests 0/100 on the next frame
+  before, 100/100 after). A VBL running late into the picture falls
+  back to base first, offsets a frame later, and
+  `STDL_ScrollWindowPending` says when a request has landed. This
   is the tile-engine model: keep a play field one tile larger than
   the screen in a page-flipped pair of buffers, move the window by
   the pixel, redraw only the strip that scrolls in. Test

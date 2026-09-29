@@ -231,13 +231,13 @@ time, not at runtime.
   xfine)` is the same for a raw planar block. Keep the surface at
   least 336 pixels wide (the Shifter fetches one extra group per line
   while the fine scroll is non-zero) and its stride at most 670
-  bytes (LINEWIDTH is one byte of words). The registers are
-  programmed in the order the hardware wants - the base first, the
-  offsets at the VBL whose video counter shows that base latched,
-  because the base is latched three lines before the VBL and the offsets
-  are not - so no frame shows a mismatched pair; a request made in the
-  first 15ms of a frame is on screen from the next frame, a later one a
-  frame after that; `STDL_ScrollWindowPending` says when it has landed,
+  bytes (LINEWIDTH is one byte of words). The base is latched three
+  lines before the VBL and the offsets are not, so the VBL writes the
+  base, the video counter and both offsets together before the fetch
+  begins - no frame shows a mismatched pair, and a request is on
+  screen at the next VBL however late in the frame it was made (a
+  frame later only if that VBL runs late into the picture);
+  `STDL_ScrollWindowPending` says when it has landed,
   for a page-flipping caller that must not draw into the page still
   being fetched. `STDL_HasHwScroll` is the test to make at init: on a
   plain ST the calls fail cleanly and the port keeps a copy-based

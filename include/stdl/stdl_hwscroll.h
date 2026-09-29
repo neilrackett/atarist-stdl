@@ -54,13 +54,15 @@ int STDL_HasHwScroll(void);
  *
  * The three registers are programmed in the order the hardware
  * wants. The base is latched into the video counter three lines
- * before the VBL, while LINEWIDTH and HSCROLL apply at once, so the
- * module writes a request's base first and its offsets at the VBL
- * whose counter shows that base latched - never a base with the
- * wrong offsets, the seam that STE scrollers get wrong when they
- * write all three at once. A request made in the first 15ms of a
- * frame writes its base immediately and is on screen from the next
- * frame; a later one is armed at the VBL and costs a frame more.
+ * before the VBL, while LINEWIDTH and HSCROLL apply at once - write
+ * all three at the VBL and the frame shows the old base with the new
+ * offsets, the seam STE scrollers get wrong. So at the VBL the module
+ * writes the base, the video counter itself (writable on an STE) and
+ * the two offsets together, before the fetch of the first line has
+ * begun: every request, however late in the frame, is on screen at
+ * the next VBL as a matched pair. If that VBL runs late into the
+ * picture it falls back to the base first and the offsets at the VBL
+ * whose counter shows it latched, a frame later.
  * STDL_ScrollWindowPending says whether the latest request has been
  * fully programmed yet, for a double-buffered caller that must not
  * draw into a page the Shifter is still fetching.
@@ -87,8 +89,8 @@ int STDL_SetScrollOrigin(const STDL_Surface *s, int x, int y);
 
 /*
  * Non-zero while the most recent request has not yet reached all
- * three registers (one VBL after the call, two for a request made
- * late in a frame). A page-flipping
+ * three registers (until the next VBL, or the one after if that VBL
+ * ran late into the picture). A page-flipping
  * caller waits on this before drawing into the page that was on
  * screen: STDL_WaitVBL once or twice, or spin on it.
  */

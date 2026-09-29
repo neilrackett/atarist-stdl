@@ -24,8 +24,18 @@
  * base. The base goes in straight away when the request arrives early
  * enough in the frame (before the reload), otherwise at the VBL; the
  * counter comparison makes the two paths one, and the pair on screen
- * is always a matching pair. A request made early in a frame is on
- * screen from the next; a late one costs a frame more.
+ * is always a matching pair.
+ *
+ * Unless the VBL can do better. On an STE the video counter itself is
+ * writable, and until the fetch of the first line starts it holds the
+ * base it was reloaded from. A VBL that finds it still equal to the
+ * base registers - which it does, unless it runs late into the
+ * picture - writes the new base, the counter, LINEWIDTH and HSCROLL
+ * together, and the whole request shows on the frame that is just
+ * starting: every request, early or late, is on screen at the next
+ * VBL. The two-phase path is the fallback for a VBL that finds the
+ * fetch already under way, where writing the counter would move the
+ * picture mid-frame.
  *
  * Its own translation unit, so a program that never scrolls does
  * not link it (there is no section garbage collection on this
@@ -40,6 +50,10 @@
 #define VID_BASE_LO   (*(volatile uint8_t *)0xFFFF820DUL)
 #define VID_LINEWIDTH (*(volatile uint8_t *)0xFFFF820FUL)
 #define VID_HSCROLL   (*(volatile uint8_t *)0xFFFF8265UL)
+/* the video counter, writable on an STE Shifter */
+#define VID_CNT_HI    (*(volatile uint8_t *)0xFFFF8205UL)
+#define VID_CNT_MID   (*(volatile uint8_t *)0xFFFF8207UL)
+#define VID_CNT_LO    (*(volatile uint8_t *)0xFFFF8209UL)
 #else
 /* host builds: the registers are plain bytes, so the sequencing
  * below can be exercised natively if a test ever wants to */
@@ -49,6 +63,9 @@ static volatile uint8_t host_vid[5];
 #define VID_BASE_LO   host_vid[2]
 #define VID_LINEWIDTH host_vid[3]
 #define VID_HSCROLL   host_vid[4]
+#define VID_CNT_HI    stdl_host_vidcnt[0]
+#define VID_CNT_MID   stdl_host_vidcnt[1]
+#define VID_CNT_LO    stdl_host_vidcnt[2]
 #endif
 
 /* the plain STE and the Mega STE: the TT and Falcon read as STE-class
@@ -84,6 +101,19 @@ static uint32_t read_counter(void)
          | STDL_VC_LO;
 }
 
+static uint32_t read_base(void)
+{
+    return ((uint32_t)VID_BASE_HI << 16) | ((uint32_t)VID_BASE_MID << 8)
+         | VID_BASE_LO;
+}
+
+static void write_counter(uint32_t b)
+{
+    VID_CNT_HI = (uint8_t)(b >> 16);
+    VID_CNT_MID = (uint8_t)(b >> 8);
+    VID_CNT_LO = (uint8_t)b;
+}
+
 /*
  * The VBL runs in the blanking, after the video counter was reloaded
  * from the base three lines earlier: the counter therefore names the
@@ -104,7 +134,23 @@ static void hws_vbl(void)
         done_seq = armed.seq;
     }
     if (req.seq != armed.seq) {
+        /* what the counter was reloaded from, three lines ago */
+        const uint32_t reloaded = read_base();
+
         write_base(req.base);
+        /*
+         * The fetch has not begun while the counter still holds what
+         * it was reloaded from: then the counter takes the new base
+         * too, the offsets go in beside it, and the request is on
+         * this frame whole. Otherwise its offsets wait for the next
+         * VBL, as above.
+         */
+        if (read_counter() == reloaded) {
+            write_counter(req.base);
+            VID_LINEWIDTH = req.lw;
+            VID_HSCROLL = req.hs;
+            done_seq = req.seq;
+        }
         armed = req;
     }
 }
@@ -200,9 +246,9 @@ int STDL_SetScrollWindow(const void *base, int stride, int xfine)
      * The base register is only read when the counter reloads, three
      * lines before the VBL - about 19.8ms after the previous one. A
      * request that arrives within the first three 200Hz ticks of the
-     * frame (at most 15ms in) can therefore write its base now and be
-     * on screen from the next frame, its offsets following at that
-     * VBL; a later one waits for the VBL to arm it, costing a frame.
+     * frame (at most 15ms in) can therefore write its base now, and
+     * the next VBL only has to add the offsets. A later one leaves
+     * everything to the VBL, which writes the counter as well.
      */
     if (STDL_HZ200 - vbl_stamp <= 2) {
         write_base(req.base);

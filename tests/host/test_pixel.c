@@ -842,6 +842,79 @@ static void test_partial_middle(void)
     }
 }
 
+/*
+ * Unaligned blits with no source mask and no flags take their own
+ * loop, whose edges are peeled and whose middle groups are stored
+ * without reading the destination. Every width shape (one group,
+ * two, many), both shift directions, plane budgets 4, 2 and 3, with
+ * and without a destination mask, against the model - and the mask
+ * must end up opaque exactly under the blit.
+ */
+static void test_shift_plain(void)
+{
+    static const int budgets[3] = { 4, 2, 3 };
+    enum { W = 200, H = 14 };
+    int iter;
+
+    for (iter = 0; iter < 600; iter++) {
+        const int budget = budgets[iter % 3];
+        const int withmask = (iter / 3) & 1;
+        STDL_Surface *src = STDL_CreateSurface(W, H);
+        STDL_Surface *dst = STDL_CreateSurface(W, H);
+        Ref *rs = ref_new(W, H), *rd = ref_new(W, H);
+        STDL_Rect sr, dr;
+        int w = 1 + (int)(rnd() % 150);
+        int sx = 8 + (int)(rnd() % 40), dx = 8 + (int)(rnd() % 40);
+        int x, y, bad = 0;
+
+        if ((sx & 15) == (dx & 15)) {
+            dx ^= 5;                    /* keep the phases apart */
+        }
+        STDL_SetPlaneBudget(budget);
+        randomise(src, 1 << budget);
+        randomise(dst, 1 << budget);
+        if (withmask) {
+            STDL_CreateMask(dst, 1);
+        }
+        surf_to_ref(src, rs);
+        surf_to_ref(dst, rd);
+        sr.x = (int16_t)sx;
+        sr.y = 2;
+        sr.w = (uint16_t)w;
+        sr.h = 9;
+        dr.x = (int16_t)dx;
+        dr.y = 3;
+        ref_blit(rs, sr.x, sr.y, sr.w, sr.h, rd, dr.x, dr.y, 0, 0,
+                 &dst->clip);
+        STDL_BlitSurface(src, &sr, dst, &dr);
+        CHECK(ref_cmp(dst, rd, "shift plain"),
+              "shift plain sx=%d dx=%d w=%d np=%d mask=%d", sx, dx, w,
+              budget, withmask);
+        if (withmask) {
+            for (y = 0; y < H; y++) {
+                const uint16_t *mr = (const uint16_t *)
+                    (dst->mask + y * dst->maskstride);
+                for (x = 0; x < W; x++) {
+                    int in = x >= dr.x && x < dr.x + dr.w
+                          && y >= dr.y && y < dr.y + dr.h;
+                    int set = (mr[x >> 4] >> (15 - (x & 15))) & 1;
+                    if (set == in) {
+                        bad++;
+                    }
+                }
+            }
+            CHECK(bad == 0, "shift plain mask sx=%d dx=%d w=%d: %d bits",
+                  sx, dx, w, bad);
+        }
+        ref_free(rs);
+        ref_free(rd);
+        STDL_FreeSurface(src);
+        STDL_FreeSurface(dst);
+        STDL_SetPlaneBudget(4);
+        if (failures > 3) return;
+    }
+}
+
 static void test_whole_blit_writeback(void)
 {
     /* NULL srcrect + dstrect writeback semantics */
@@ -1111,6 +1184,7 @@ int main(void)
     test_points();
     test_blits();
     test_partial_middle();
+    test_shift_plain();
     test_whole_blit_writeback();
     test_whole_copy();
     test_sprites();

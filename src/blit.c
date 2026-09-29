@@ -281,6 +281,55 @@ static __inline__ void blit_merge4(uint16_t *dg, const uint16_t *sp,
 #endif
 }
 
+/*
+ * An opaque group of the shifted blit - every middle group of an
+ * unmasked blit, and the solid inside of a masked one: the same
+ * windows and shifts as blit_merge4, stored without reading the
+ * destination or masking, which is five instructions a plane fewer.
+ * The CPU's version of the BLiTTER skipping the destination read
+ * wherever its endmask is all ones.
+ */
+static __inline__ void blit_store4(uint16_t *dg, const uint16_t *sp,
+                                   int rr)
+{
+#ifdef __m68k__
+    __asm__ volatile(
+        "move.w (%1),%%d0\n\t"
+        "swap   %%d0\n\t"
+        "move.w 8(%1),%%d0\n\t"
+        "lsr.l  %2,%%d0\n\t"
+        "move.w %%d0,(%0)\n\t"
+
+        "move.w 2(%1),%%d0\n\t"
+        "swap   %%d0\n\t"
+        "move.w 10(%1),%%d0\n\t"
+        "lsr.l  %2,%%d0\n\t"
+        "move.w %%d0,2(%0)\n\t"
+
+        "move.w 4(%1),%%d0\n\t"
+        "swap   %%d0\n\t"
+        "move.w 12(%1),%%d0\n\t"
+        "lsr.l  %2,%%d0\n\t"
+        "move.w %%d0,4(%0)\n\t"
+
+        "move.w 6(%1),%%d0\n\t"
+        "swap   %%d0\n\t"
+        "move.w 14(%1),%%d0\n\t"
+        "lsr.l  %2,%%d0\n\t"
+        "move.w %%d0,6(%0)"
+        :
+        : "a"(dg), "a"(sp), "d"(rr)
+        : "d0", "memory", "cc");
+#else
+    /* C twin - what tests/host exercises and the asm must match */
+    const uint16_t *s2 = sp + 4;
+    int p;
+    for (p = 0; p < 4; p++) {
+        dg[p] = (uint16_t)((((uint32_t)sp[p] << 16) | s2[p]) >> rr);
+    }
+#endif
+}
+
 STDL_PLANE_INLINE void blit_rows_shift(const uint8_t *srow,
                             uint8_t *drow,
                             const uint8_t *smrow, uint8_t *dmrow,
@@ -350,6 +399,88 @@ STDL_PLANE_INLINE void blit_rows_shift(const uint8_t *srow,
         srow += sstride;
         drow += dstride;
         smrow += smstride;
+        if (dmrow != NULL) {
+            dmrow += dmstride;
+        }
+    }
+}
+
+/*
+ * The shift chain for the commonest case - no source mask, no
+ * composition flags - with its edge groups peeled: only the first
+ * and last groups of a row can be partial, so every group between
+ * them is opaque and is stored outright (blit_store4), with no mask
+ * window, no per-group edge tests and no read of the destination.
+ * Keyed blits and flagged ones keep the general loop above, which
+ * this leaves exactly as it was: testing for an opaque group there
+ * cost keyed blits 2% for the few groups it caught.
+ */
+STDL_PLANE_INLINE void blit_rows_shift_plain(const uint8_t *srow,
+                            uint8_t *drow, uint8_t *dmrow,
+                            int sstride, int dstride, int dmstride,
+                            int ng, int h, uint16_t lm, uint16_t rm,
+                            int sw0, int r, const int np)
+{
+    int y, p;
+    const int rr = 16 - r;
+    const int mid = ng - 2;
+
+    if (ng == 1) {
+        lm &= rm;
+    }
+    for (y = 0; y < h; y++) {
+        const uint16_t *sp = (const uint16_t *)(srow + sw0 * 8);
+        uint16_t *dg = (uint16_t *)drow;
+        uint16_t *dm = (uint16_t *)dmrow;
+        int n;
+
+        if (np == 4) {
+            blit_merge4(dg, sp, lm, rr);
+        } else {
+            for (p = 0; p < np; p++) {
+                uint16_t v = (uint16_t)
+                    ((((uint32_t)sp[p] << 16) | sp[p + 4]) >> rr);
+                dg[p] = (uint16_t)((dg[p] & (uint16_t)~lm) | (v & lm));
+            }
+        }
+        if (dm != NULL) {
+            dm[0] &= (uint16_t)~lm;
+        }
+        if (mid >= 0) {
+            for (n = mid; n > 0; n--) {
+                sp += 4;
+                dg += 4;
+                if (np == 4) {
+                    blit_store4(dg, sp, rr);
+                } else {
+                    for (p = 0; p < np; p++) {
+                        dg[p] = (uint16_t)
+                            ((((uint32_t)sp[p] << 16) | sp[p + 4]) >> rr);
+                    }
+                }
+            }
+            sp += 4;
+            dg += 4;
+            if (np == 4) {
+                blit_merge4(dg, sp, rm, rr);
+            } else {
+                for (p = 0; p < np; p++) {
+                    uint16_t v = (uint16_t)
+                        ((((uint32_t)sp[p] << 16) | sp[p + 4]) >> rr);
+                    dg[p] = (uint16_t)((dg[p] & (uint16_t)~rm)
+                                       | (v & rm));
+                }
+            }
+            if (dm != NULL) {
+                /* opaque blit: every drawn pixel's bit clears */
+                if (mid > 0) {
+                    clear_mask_short(dm + 1, mid);
+                }
+                dm[ng - 1] &= (uint16_t)~rm;
+            }
+        }
+        srow += sstride;
+        drow += dstride;
         if (dmrow != NULL) {
             dmrow += dmstride;
         }
@@ -782,11 +913,18 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                             ng, h, lm, rm, masked, (fl), sw0, r, (np))
 #define BLIT_SHIFT_N2(fl) BLIT_SHIFT_F(2, (fl))
 #define BLIT_SHIFT_N4(fl) BLIT_SHIFT_F(4, (fl))
-            if (np <= 2) {
+#define BLIT_SHIFT_PLAIN(np) \
+            blit_rows_shift_plain(srow, drow, dmrow, src->stride, \
+                                  dst->stride, dmstride, ng, h, lm, rm, \
+                                  sw0, r, (np))
+            if (!masked && flags == 0) {
+                STDL_PLANE_DISPATCH(np, BLIT_SHIFT_PLAIN);
+            } else if (np <= 2) {
                 STDL_FLAG_DISPATCH(flags, BLIT_SHIFT_N2);
             } else {
                 STDL_FLAG_DISPATCH(flags, BLIT_SHIFT_N4);
             }
+#undef BLIT_SHIFT_PLAIN
 #undef BLIT_SHIFT_F
 #undef BLIT_SHIFT_N2
 #undef BLIT_SHIFT_N4

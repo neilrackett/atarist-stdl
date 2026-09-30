@@ -1,4 +1,8 @@
 *.o
+*.tos
+*.TOS
+*.prg
+*.PRG
 libstdl.a
 dist/
 # Every host test binary, by pattern rather than by name: the list

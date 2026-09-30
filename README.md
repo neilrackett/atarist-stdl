@@ -14,7 +14,7 @@ STDL is a planar-native library for porting SDL 1.2 games to the Atari ST.
 
 SDL 1.2 is great for TT and Falcon, which both support chunky at 256 colours,
 but on a stock ST there's no chunky mode and SDL needs c2p on every frame.
-The framework overhead therefore means you'll maybe get 5-6fps if you're lucky,
+The framework overhead therefore means you'll maybe get 3-5fps if you're lucky,
 and even then there's no colour support and everything's greyscale.
 
 STDL is 16 colours, four bitplanes, and no conversion step. 50-60fps is truly
@@ -165,7 +165,7 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | TJOY.TOS     | joystick port 1 as SDL joystick 0; 6 axes/13 buttons when an Xpad pad is present, shoulders rumble |
 | LOOPWAVE.TOS | STE/Mega STE DMA sample playback (STDL_Audio)                                    |
 | TCURSOR.TOS  | software mouse cursor with save-under                                            |
-| PLAYMUS.TOS  | YM music (stdlconv midi -> STDL_Music) + sample chunks via the SDL_mixer shim     |
+| PLAYMUS.TOS  | YM music (stdlconv midi -> STDL_Music) + sample chunks via the SDL_mixer shim    |
 | SFXDEMO.TOS  | Degas splash, YM effects stealing/restoring music voices, joystick key emulation |
 | TONEDEMO.TOS | live notes on the three YM voices: a fourth note displacing and returning        |
 | OPLDEMO.TOS  | an OPL2 register stream (the IMF games' music format) replayed as YM notes       |

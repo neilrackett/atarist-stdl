@@ -45,6 +45,20 @@ warnings** with the Makefile's `-Wall -Wextra`.
 - **On-target probes for the pixel paths.** `tests/hatari/pixchk.c`
   runs the host pixel suite on the machine - the only check of the
   asm on a plain ST, where BLITCHK has nothing to compare against.
+  Its default build samples three cases of each test, about 20s a
+  pass, for real hardware; `-DPIXCHK_FULL` runs every case, 16
+  minutes a pass on a plain ST, for the emulator.
+  **Time a test on the target before handing it to someone with
+  hardware.** The full suite was three hours a pass on a plain ST,
+  and nobody knew until a tester was left staring at a silent screen,
+  because it had only ever run natively or under fast-forward, and
+  the time was the suite's own checking, not the library. A
+  `STDL_GetPixel` call and a 32-bit multiply per pixel compared,
+  `STDL_PutPixel` with `rnd() % n` per pixel filled, and a random
+  generator built on a 32-bit multiply cost the 68000 over a thousand
+  cycles a pixel. Plane-word fills, a table decode and a
+  shift-register generator took the full pass to 16 minutes; the
+  sampling took the hardware build to seconds.
   `tests/hatari/sprcost.c` times sprites, restores, blits and fills
   (with the fixed cost of a call taken apart), twice per run so each
   run carries its own noise floor, and `tests/hatari/sccmp.py`

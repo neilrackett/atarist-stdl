@@ -40,28 +40,90 @@ static Ref *ref_new(int w, int h)
 
 static void ref_free(Ref *r) { free(r->px); free(r); }
 
+/*
+ * One row of a surface, a byte a pixel, exactly as STDL_GetPixel reads
+ * it: planes 0-3 of the pixel's group, bit 15 first. A GetPixel call
+ * per pixel plus a 32-bit multiply for the reference index cost the
+ * 68000 over a thousand cycles a pixel, and a pass of this suite three
+ * hours on the machine; shifting each pixel's bits out cost 290. So a
+ * table gives each byte of a plane word as its eight pixels, that
+ * plane's bit in each, and a group is sixteen lookups and some ORs.
+ * The table's longs hold their bytes in memory order, so the OR is
+ * right on either byte order.
+ */
+static uint32_t dec_tab[4][256][2];
+static uint32_t dec_row[256];           /* 1024 pixels, long aligned */
+
+static void dec_build(void)
+{
+    int p, b, i;
+    for (p = 0; p < 4; p++)
+        for (b = 0; b < 256; b++) {
+            uint8_t px[8];
+            for (i = 0; i < 8; i++)
+                px[i] = (uint8_t)(((b >> (7 - i)) & 1) << p);
+            memcpy(&dec_tab[p][b][0], px, 4);
+            memcpy(&dec_tab[p][b][1], px + 4, 4);
+        }
+}
+
+static void surf_row(const STDL_Surface *s, int y, uint8_t *out)
+{
+    const uint16_t *g = (const uint16_t *)(s->pixels
+                                           + (size_t)y * s->stride);
+    const int groups = (s->w + 15) >> 4;
+    uint32_t *o = dec_row;
+    int i;
+
+    if (dec_tab[0][1][1] == 0)
+        dec_build();
+    if (s->w > (int)sizeof dec_row) {
+        /* wider than the buffer: the slow way, a pixel at a time */
+        for (i = 0; i < s->w; i++)
+            out[i] = STDL_GetPixel(s, i, y);
+        return;
+    }
+    for (i = 0; i < groups; i++, g += 4, o += 4) {
+        const uint32_t *h0 = dec_tab[0][g[0] >> 8], *l0 = dec_tab[0][g[0] & 0xFF];
+        const uint32_t *h1 = dec_tab[1][g[1] >> 8], *l1 = dec_tab[1][g[1] & 0xFF];
+        const uint32_t *h2 = dec_tab[2][g[2] >> 8], *l2 = dec_tab[2][g[2] & 0xFF];
+        const uint32_t *h3 = dec_tab[3][g[3] >> 8], *l3 = dec_tab[3][g[3] & 0xFF];
+        o[0] = h0[0] | h1[0] | h2[0] | h3[0];
+        o[1] = h0[1] | h1[1] | h2[1] | h3[1];
+        o[2] = l0[0] | l1[0] | l2[0] | l3[0];
+        o[3] = l0[1] | l1[1] | l2[1] | l3[1];
+    }
+    memcpy(out, dec_row, (size_t)s->w);
+}
+
 static void surf_to_ref(const STDL_Surface *s, Ref *r)
 {
-    int x, y;
+    int y;
     for (y = 0; y < s->h; y++)
-        for (x = 0; x < s->w; x++)
-            r->px[y * r->w + x] = STDL_GetPixel(s, x, y);
+        surf_row(s, y, r->px + (size_t)y * r->w);
 }
 
 static int ref_cmp(const STDL_Surface *s, const Ref *r, const char *what)
 {
+    uint8_t *row = malloc((size_t)s->w);
     int x, y, bad = 0;
+
     for (y = 0; y < s->h && bad < 5; y++) {
+        const uint8_t *want = r->px + (size_t)y * r->w;
+
+        surf_row(s, y, row);
+        if (memcmp(row, want, (size_t)s->w) == 0) {
+            continue;
+        }
         for (x = 0; x < s->w && bad < 5; x++) {
-            uint8_t got = STDL_GetPixel(s, x, y);
-            uint8_t want = r->px[y * r->w + x];
-            if (got != want) {
+            if (row[x] != want[x]) {
                 printf("  %s mismatch at (%d,%d): got %d want %d\n",
-                       what, x, y, got, want);
+                       what, x, y, row[x], want[x]);
                 bad++;
             }
         }
     }
+    free(row);
     return bad == 0;
 }
 
@@ -69,10 +131,12 @@ static void ref_fill(Ref *r, int x1, int y1, int w, int h, uint8_t c)
 {
     int x, y;
     for (y = y1; y < y1 + h; y++) {
+        uint8_t *row;
         if (y < 0 || y >= r->h) continue;
+        row = r->px + (size_t)y * r->w;     /* not a multiply a pixel */
         for (x = x1; x < x1 + w; x++) {
             if (x < 0 || x >= r->w) continue;
-            r->px[y * r->w + x] = c;
+            row[x] = c;
         }
     }
 }
@@ -89,31 +153,147 @@ static void ref_blit(const Ref *src, int sx, int sy, int w, int h,
     if (sx + w > src->w) w = src->w - sx;
     if (sy + h > src->h) h = src->h - sy;
     for (y = 0; y < h; y++) {
+        const int ty = dy + y;
+        const uint8_t *sr;
+        uint8_t *dr;
+
+        if (ty < clip->y || ty >= clip->y + clip->h) continue;
+        /* row pointers, not an index multiplied a pixel */
+        sr = src->px + (size_t)(sy + y) * src->w + sx;
+        dr = dst->px + (size_t)ty * dst->w;
         for (x = 0; x < w; x++) {
-            int tx = dx + x, ty = dy + y;
-            uint8_t v = src->px[(sy + y) * src->w + (sx + x)];
+            int tx = dx + x;
+            uint8_t v = sr[x];
             if (tx < clip->x || tx >= clip->x + clip->w) continue;
-            if (ty < clip->y || ty >= clip->y + clip->h) continue;
             if (usekey && v == key) continue;
-            dst->px[ty * dst->w + tx] = v;
+            dr[tx] = v;
         }
     }
 }
 
-static unsigned rng_state = 12345;
-static unsigned rnd(void)
+/* 0..32767 from a shift register: no multiply, which the 68000 does
+ * in software for 32 bits, and a 16-bit result, so that rnd() % N
+ * narrows to the 68000's own 16-bit divide rather than a libgcc call */
+static uint32_t rng_state = 12345;
+static uint16_t rnd(void)
 {
-    rng_state = rng_state * 1103515245 + 12345;
-    return (rng_state >> 16) & 0x7FFF;
+    uint32_t x = rng_state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    rng_state = x;
+    return (uint16_t)(x >> 17);
 }
 
+extern int stdl_planes;     /* the plane budget (src/stdl_internal.h) */
+
+/* 32 random bits from a shift register, no multiply: the fill below
+ * takes 16 pixels at a time from it */
+static uint32_t fill_rng = 1;
+static uint32_t fill_rnd(void)
+{
+    uint32_t x = fill_rng;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    return fill_rng = x;
+}
+
+/*
+ * Random pixels in colours 0..maxcol-1, as STDL_PutPixel would leave
+ * them: the colour masked to the plane budget, the destination mask
+ * cleared under every pixel written. An unclipped surface is written a
+ * plane word at a time - a PutPixel call and a 32-bit multiply or
+ * division per pixel were most of what a case cost on the 68000 - and
+ * a clipped one a pixel at a time.
+ */
 static void randomise(STDL_Surface *s, int maxcol)
 {
-    int x, y;
+    int x, y, k = 0;
+
+    while ((1 << k) < maxcol)
+        k++;
+    if (s->clip.x == 0 && s->clip.y == 0
+        && s->clip.w >= s->w && s->clip.h >= s->h) {
+        const int pow2 = (1 << k) == maxcol;
+        const int planes = k < stdl_planes ? k : stdl_planes;
+        const unsigned colmask = (1u << stdl_planes) - 1u;
+        const int groups = (s->w + 15) >> 4;
+
+        fill_rng = ((uint32_t)rnd() << 16) ^ rnd() ^ 0x2545F491u;
+        if (fill_rng == 0)
+            fill_rng = 1;
+        for (y = 0; y < s->h; y++) {
+            uint16_t *g = (uint16_t *)(s->pixels + (size_t)y * s->stride);
+            uint16_t *m = s->mask == NULL ? NULL
+                : (uint16_t *)(s->mask + (size_t)y * s->maskstride);
+            int gx, p;
+
+            for (gx = 0; gx < groups; gx++, g += 4) {
+                const int n = s->w - gx * 16 < 16 ? s->w - gx * 16 : 16;
+                const uint16_t em = (uint16_t)(0xFFFFu << (16 - n));
+                uint16_t w[4] = { 0, 0, 0, 0 };
+
+                if (pow2) {
+                    /* every plane below the colour count is 16 fair
+                     * bits, and the ones above it are clear */
+                    const uint32_t r1 = fill_rnd(), r2 = fill_rnd();
+                    w[0] = (uint16_t)r1;
+                    w[1] = (uint16_t)(r1 >> 16);
+                    w[2] = (uint16_t)r2;
+                    w[3] = (uint16_t)(r2 >> 16);
+                    for (p = planes; p < 4; p++)
+                        w[p] = 0;
+                } else {
+                    /* a colour a pixel, scaled from 16 random bits
+                     * by a 16x16 multiply rather than a division */
+                    int i;
+                    for (i = 0; i < 16; i++) {
+                        const uint16_t r16 = (uint16_t)(fill_rnd() >> 16);
+                        const unsigned c = (unsigned)(((uint32_t)r16
+                            * (uint16_t)maxcol) >> 16) & colmask;
+                        w[0] = (uint16_t)((w[0] << 1) | (c & 1));
+                        w[1] = (uint16_t)((w[1] << 1) | ((c >> 1) & 1));
+                        w[2] = (uint16_t)((w[2] << 1) | ((c >> 2) & 1));
+                        w[3] = (uint16_t)((w[3] << 1) | ((c >> 3) & 1));
+                    }
+                }
+                for (p = 0; p < 4; p++)
+                    g[p] = (uint16_t)((g[p] & ~em) | (w[p] & em));
+                if (m != NULL)
+                    m[gx] &= (uint16_t)~em;
+            }
+        }
+        if (s->mask != NULL)
+            s->opaque_state = 0;
+        return;
+    }
     for (y = 0; y < s->h; y++)
         for (x = 0; x < s->w; x++)
             STDL_PutPixel(s, x, y, (uint8_t)(rnd() % maxcol));
 }
+
+/*
+ * Sampling, for a run on real hardware, where a full pass of this
+ * suite takes hours: with px_quick set to N, each test's case loop
+ * runs about N of its n cases - the first, then one every n/N, at a
+ * stride coprime to 6 so that cases chosen by iter % 3 or iter & 1
+ * still come round. px_case counts a test's cases and the runner
+ * zeroes it before each test. Zero - natively, and in PIXCHK's full
+ * build - runs every case.
+ */
+static unsigned px_quick, px_case;
+
+static unsigned px_stride(unsigned n)
+{
+    unsigned st = n / px_quick;
+
+    while (st > 1 && (st % 2 == 0 || st % 3 == 0))
+        st--;
+    return st ? st : 1;
+}
+
+#define PX_SKIP(n) (px_quick > 0 && px_case++ % px_stride(n) != 0)
 
 /* ---------------------------------------------------------------- */
 
@@ -129,12 +309,28 @@ static void test_putget(void)
             CHECK(STDL_GetPixel(s, x, y) == ((x + y) & 15),
                   "putget (%d,%d)", x, y);
     STDL_FreeSurface(s);
+
+    /* every comparison in this suite reads through surf_row, so it
+     * has to agree with STDL_GetPixel - at a width ending mid-group */
+    {
+        STDL_Surface *t = STDL_CreateSurface(83, 7);
+        uint8_t row[83];
+        randomise(t, 16);
+        for (y = 0; y < 7; y++) {
+            surf_row(t, y, row);
+            for (x = 0; x < 83; x++)
+                CHECK(row[x] == STDL_GetPixel(t, x, y),
+                      "surf_row (%d,%d)", x, y);
+        }
+        STDL_FreeSurface(t);
+    }
 }
 
 static void test_fills(void)
 {
     int i;
     for (i = 0; i < 200; i++) {
+        if (PX_SKIP(200)) continue;
         STDL_Surface *s = STDL_CreateSurface(83, 47);
         Ref *r = ref_new(83, 47);
         int j;
@@ -168,6 +364,7 @@ static void test_fill_blocks(void)
     int i;
 
     for (i = 0; i < 120; i++) {
+        if (PX_SKIP(120)) continue;
         int w = widths[i % 3], h = 1 + (int)(rnd() % 40);
         STDL_Surface *s = STDL_CreateSurface(w, h);
         Ref *r = ref_new(w, h);
@@ -236,10 +433,12 @@ static void ref_xor(Ref *r, int x1, int y1, int w, int h, uint8_t c)
 {
     int x, y;
     for (y = y1; y < y1 + h; y++) {
+        uint8_t *row;
         if (y < 0 || y >= r->h) continue;
+        row = r->px + (size_t)y * r->w;     /* not a multiply a pixel */
         for (x = x1; x < x1 + w; x++) {
             if (x < 0 || x >= r->w) continue;
-            r->px[y * r->w + x] ^= (uint8_t)(c & 15);
+            row[x] ^= (uint8_t)(c & 15);
         }
     }
 }
@@ -250,6 +449,7 @@ static void test_xor(void)
 
     /* rects and hlines against the reference model */
     for (i = 0; i < 200; i++) {
+        if (PX_SKIP(200)) continue;
         STDL_Surface *s = STDL_CreateSurface(83, 47);
         Ref *r = ref_new(83, 47);
         int j;
@@ -442,6 +642,7 @@ static void test_points(void)
     int iter;
 
     for (iter = 0; iter < 400; iter++) {
+        if (PX_SKIP(400)) continue;
         STDL_Surface *a = STDL_CreateSurface(W, H);
         STDL_Surface *b = STDL_CreateSurface(W, H);
         STDL_Point pts[32];
@@ -594,6 +795,7 @@ static void test_spans(void)
     int iter;
 
     for (iter = 0; iter < 400; iter++) {
+        if (PX_SKIP(400)) continue;
         STDL_Surface *a = STDL_CreateSurface(W, H);
         STDL_Surface *b = STDL_CreateSurface(W, H);
         STDL_Span sp[24];
@@ -733,6 +935,7 @@ static void test_blits(void)
 {
     int i;
     for (i = 0; i < 400; i++) {
+        if (PX_SKIP(400)) continue;
         int sw = 17 + (int)(rnd() % 80);
         int sh = 5 + (int)(rnd() % 40);
         STDL_Surface *src = STDL_CreateSurface(sw, sh);
@@ -809,6 +1012,7 @@ static void test_partial_middle(void)
         for (withmask = 0; withmask <= 1; withmask++) {
             for (phase = 0; phase < 16; phase++) {
                 for (ng = 1; ng <= 10; ng++) {
+                    if (PX_SKIP(2 * 2 * 2 * 16 * 10)) continue;
                     STDL_Surface *src, *dst;
                     Ref *rs, *rd;
                     STDL_Rect sr, dr;
@@ -924,6 +1128,7 @@ static void test_keyed_same_phase(void)
     int iter;
 
     for (iter = 0; iter < iters; iter++) {
+        if (PX_SKIP(iters)) continue;
         const int budget = (iter & 1) ? 2 : 4;
         const int maxcol = 1 << budget;
         const uint8_t key = (uint8_t)(rnd() % (unsigned)maxcol);
@@ -946,7 +1151,9 @@ static void test_keyed_same_phase(void)
                 const int mode = (int)(rnd() % 3);  /* key, none, mixed */
                 int k;
                 for (k = 0; k < 16; k++) {
-                    uint8_t c = (uint8_t)(rnd() % (unsigned)maxcol);
+                    /* maxcol is a power of two: the mask is the
+                     * same colour as %, without a division a pixel */
+                    uint8_t c = (uint8_t)(rnd() & (unsigned)(maxcol - 1));
                     if (mode == 0) {
                         c = key;
                     } else if (mode == 1 && c == key) {
@@ -1006,6 +1213,7 @@ static void test_shift_plain(void)
     int iter;
 
     for (iter = 0; iter < 600; iter++) {
+        if (PX_SKIP(600)) continue;
         const int budget = budgets[iter % 3];
         const int withmask = (iter / 3) & 1;
         STDL_Surface *src = STDL_CreateSurface(W, H);
@@ -1146,6 +1354,7 @@ static void test_sprites(void)
     /* sprite from surface must draw identically to a keyed blit */
     int iter;
     for (iter = 0; iter < 60; iter++) {
+        if (PX_SKIP(60)) continue;
         STDL_Surface *img = STDL_CreateSurface(32, 20);
         STDL_Surface *a = STDL_CreateSurface(90, 40);
         STDL_Surface *b = STDL_CreateSurface(90, 40);
@@ -1174,10 +1383,15 @@ static void test_sprites(void)
 
         {
             int xx, yy, bad = 0;
-            for (yy = 0; yy < 40 && bad < 4; yy++)
+            uint8_t ra[90], rb[90];
+            for (yy = 0; yy < 40 && bad < 4; yy++) {
+                surf_row(a, yy, ra);
+                surf_row(b, yy, rb);
+                if (memcmp(ra, rb, sizeof ra) == 0)
+                    continue;
                 for (xx = 0; xx < 90 && bad < 4; xx++) {
-                    uint8_t va = STDL_GetPixel(a, xx, yy);
-                    uint8_t vb = STDL_GetPixel(b, xx, yy);
+                    uint8_t va = ra[xx];
+                    uint8_t vb = rb[xx];
                     if (va != vb) {
                         printf("  sprite mismatch (%d,%d): surf=%d "
                                "sprite=%d [x=%d y=%d pre=%d]\n",
@@ -1186,6 +1400,7 @@ static void test_sprites(void)
                         failures++;
                     }
                 }
+            }
         }
         STDL_FreeSprite(spr);
         STDL_FreeSurface(img);
@@ -1209,6 +1424,7 @@ static void test_sprites_wide(void)
     int iter;
 
     for (iter = 0; iter < 360; iter++) {
+        if (PX_SKIP(360)) continue;
         const int budget = budgets[iter % 3];
         const int maxcol = 1 << budget;
         const uint8_t key = (uint8_t)(maxcol - 2);
@@ -1258,9 +1474,14 @@ static void test_sprites_wide(void)
         STDL_BlitSprite(spr, frame, b, x, y);
 
         for (yy = 0; yy < 60 && bad < 4; yy++) {
+            uint8_t ra[120], rb[120];
+            surf_row(a, yy, ra);
+            surf_row(b, yy, rb);
+            if (memcmp(ra, rb, sizeof ra) == 0)
+                continue;
             for (xx = 0; xx < 120 && bad < 4; xx++) {
-                uint8_t va = STDL_GetPixel(a, xx, yy);
-                uint8_t vb = STDL_GetPixel(b, xx, yy);
+                uint8_t va = ra[xx];
+                uint8_t vb = rb[xx];
                 if (va != vb) {
                     printf("  wide sprite (%d,%d): blit=%d sprite=%d "
                            "[w=%d h=%d f=%d/%d x=%d y=%d pre=%d np=%d "
@@ -1466,6 +1687,7 @@ static void test_tiles_wide(void)
     int iter;
 
     for (iter = 0; iter < 300; iter++) {
+        if (PX_SKIP(300)) continue;
         const int budget = budgets[iter % 3];
         const int maxcol = 1 << budget;
         const int tw = shapes[iter & 3][0], th = shapes[iter & 3][1];
@@ -1522,11 +1744,15 @@ static void test_tiles_wide(void)
         }
         STDL_BlitTile(ts, index, dst, x, y);
         for (py = 0; py < 60 && bad < 4; py++) {
+            uint8_t rd[120];
+            surf_row(dst, py, rd);
+            if (memcmp(rd, want->px + py * 120, sizeof rd) == 0)
+                continue;
             for (px = 0; px < 120 && bad < 4; px++) {
-                if (STDL_GetPixel(dst, px, py) != want->px[py * 120 + px]) {
+                if (rd[px] != want->px[py * 120 + px]) {
                     printf("  tile (%d,%d): got %d want %d [tw=%d th=%d "
                            "masked=%d np=%d x=%d y=%d clip=%d,%d %ux%u]\n",
-                           px, py, STDL_GetPixel(dst, px, py),
+                           px, py, rd[px],
                            want->px[py * 120 + px], tw, th, masked,
                            budget, x, y, clip.x, clip.y, clip.w, clip.h);
                     bad++;
@@ -1558,6 +1784,7 @@ static void test_text_model(void)
     int iter;
 
     for (iter = 0; iter < 240; iter++) {
+        if (PX_SKIP(240)) continue;
         const int budget = budgets[iter % 3];
         const int cw = cws[(iter / 3) & 3], ch = chs[iter % 3];
         const int bpr = (cw + 7) >> 3;
@@ -1622,11 +1849,15 @@ static void test_text_model(void)
             STDL_DrawText(dst, &font, x, y, text, (uint8_t)col);
         }
         for (py = 0; py < 48 && bad < 4; py++) {
+            uint8_t rd[112];
+            surf_row(dst, py, rd);
+            if (memcmp(rd, want->px + py * 112, sizeof rd) == 0)
+                continue;
             for (px = 0; px < 112 && bad < 4; px++) {
-                if (STDL_GetPixel(dst, px, py) != want->px[py * 112 + px]) {
+                if (rd[px] != want->px[py * 112 + px]) {
                     printf("  text (%d,%d): got %d want %d [cw=%d ch=%d "
                            "x=%d y=%d col=%d np=%d char=%d]\n", px, py,
-                           STDL_GetPixel(dst, px, py),
+                           rd[px],
                            want->px[py * 112 + px], cw, ch, x, y, col,
                            budget, viachar);
                     bad++;
@@ -1744,6 +1975,7 @@ static void test_shapes_ref(void)
     int iter;
 
     for (iter = 0; iter < iters; iter++) {
+        if (PX_SKIP(iters)) continue;
         const int budget = budgets[iter % 3];
         const int shape = (iter / 3) % 5;
         /* rows wide enough for HLine's BLiTTER cut on the HLine
@@ -1816,30 +2048,36 @@ static void test_shapes_ref(void)
     }
 }
 
+/* each test through a hook: natively a plain call, while
+ * tests/hatari/pixchk.c times each one on the machine */
+#ifndef PIXEL_RUN
+#define PIXEL_RUN(t) t()
+#endif
+
 int main(void)
 {
-    test_putget();
-    test_fills();
-    test_fill_blocks();
-    test_hvlines();
-    test_xor();
-    test_spans();
-    test_points();
-    test_blits();
-    test_partial_middle();
-    test_keyed_same_phase();
-    test_shift_plain();
-    test_whole_blit_writeback();
-    test_whole_copy();
-    test_sprites();
-    test_sprites_wide();
-    test_1bpp();
-    test_tiles();
-    test_tiles_wide();
-    test_tiles_budget();
-    test_word_aligned_views();
-    test_text_model();
-    test_shapes_ref();
+    PIXEL_RUN(test_putget);
+    PIXEL_RUN(test_fills);
+    PIXEL_RUN(test_fill_blocks);
+    PIXEL_RUN(test_hvlines);
+    PIXEL_RUN(test_xor);
+    PIXEL_RUN(test_spans);
+    PIXEL_RUN(test_points);
+    PIXEL_RUN(test_blits);
+    PIXEL_RUN(test_partial_middle);
+    PIXEL_RUN(test_keyed_same_phase);
+    PIXEL_RUN(test_shift_plain);
+    PIXEL_RUN(test_whole_blit_writeback);
+    PIXEL_RUN(test_whole_copy);
+    PIXEL_RUN(test_sprites);
+    PIXEL_RUN(test_sprites_wide);
+    PIXEL_RUN(test_1bpp);
+    PIXEL_RUN(test_tiles);
+    PIXEL_RUN(test_tiles_wide);
+    PIXEL_RUN(test_tiles_budget);
+    PIXEL_RUN(test_word_aligned_views);
+    PIXEL_RUN(test_text_model);
+    PIXEL_RUN(test_shapes_ref);
     if (failures == 0) {
         printf("all pixel-path tests passed\n");
         return 0;

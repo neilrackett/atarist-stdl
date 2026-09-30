@@ -180,4 +180,9 @@ stop trying and redesign instead.
   RAM: on a machine with alt-RAM, a surface allocated there takes
   the CPU paths. Sprites go to the BLiTTER too, shifted by the chip,
   so pre-shifting pays only on a plain ST, where pre-shifted sprites
-  remain the designed answer for free positioning.
+  remain the designed answer for free positioning. Except onto the
+  screen of a single-buffered program: the chip draws a keyed blit or
+  a sprite in several whole-rectangle passes, and on the page being
+  displayed the beam shows the state between them, so masked and
+  shifted blits and sprites there stay on the CPU. Double-buffer
+  (`STDL_DOUBLEBUF`) to have the BLiTTER draw them.

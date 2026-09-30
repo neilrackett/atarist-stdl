@@ -120,7 +120,13 @@ the same as pre-shifted ones, so there pre-shifting only spends RAM
 must run on a plain ST and fit in its RAM can decide at init:
 pre-shift only when `STDL_GetMachineInfo()->has_blitter` is 0. With
 a border open, pre-shifted sprites stay on the CPU, where they are
-faster. Fills and blits are
+faster. All of this assumes `STDL_DOUBLEBUF`: onto the displayed
+screen of a single-buffered program, keyed and shifted blits and
+sprites stay on the CPU, because the chip draws them in passes over
+the whole rectangle (a keyed blit XORs, ANDs and XORs every plane)
+and the beam shows the rectangle between them - on a real Mega STE
+sprites flashed white, tore and vanished. Single-buffered, pre-shift
+as for a plain ST. Fills and blits are
 BLiTTER-accelerated automatically when the hardware has one and the
 operation is big enough to repay its set-up - unaligned blits too,
 which the BLiTTER shifts itself: on an emulated STE a 64x32

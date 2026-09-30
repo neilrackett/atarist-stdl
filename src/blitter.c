@@ -41,12 +41,16 @@ uint8_t stdl_blit_user = 1;
  * shift chain is dear enough that the BLiTTER wins from a handful of
  * cells.
  */
-int stdl_blitter_wants(int sx, int dx, int w, int h, int masked)
+int stdl_blitter_wants(int sx, int dx, int w, int h, int masked,
+                       const STDL_Surface *dst)
 {
     const int bph = dx & 15;
     const int bng = (bph + w + 15) >> 4;
     const uint32_t cells = stdl_row_off(bng, (uint16_t)h);
 
+    if (stdl_drawn_visibly(dst) && (masked || (sx & 15) != bph)) {
+        return 0;               /* passes the beam would show */
+    }
     if ((sx & 15) != bph) {
         return cells >= (masked ? STDL_BLIT_SHIFT_KEYED_MIN_CELLS
                                 : STDL_BLIT_SHIFT_MIN_CELLS);

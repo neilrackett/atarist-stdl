@@ -454,6 +454,11 @@ spr_blitter(const uint16_t *fdata, uint32_t rowwords, int xbase, int x,
     uintptr_t sbase, dbase;
     int16_t s_yinc, d_yinc;
 
+    /* a sprite drawn in two passes a plane would show between them
+     * on a single-buffered screen (see stdl_drawn_visibly) */
+    if (stdl_drawn_visibly(dst) && !STDL_BLIT_FORCED()) {
+        return 0;
+    }
     /* with a border open an aligned sprite stays on the CPU (below):
      * say so before working anything out - aligned exactly when the
      * data's pixel 0 lands on a group edge */

@@ -989,7 +989,8 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
      * and MARK go the CPU route.
      */
     if (flags == 0 && stdl_blitter_active()
-        && (STDL_BLIT_FORCED() || stdl_blitter_wants(sx, dx, w, h, masked))
+        && (STDL_BLIT_FORCED()
+            || stdl_blitter_wants(sx, dx, w, h, masked, dst))
         && STDL_BLIT_REACHES(src, dst)) {
 #ifdef STDL_BLIT_STATS
         stdl_blit_blitter += (unsigned long)h;

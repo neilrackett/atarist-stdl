@@ -15,7 +15,10 @@ time, not at runtime.
 5. Align sprites to 16px or enable `STDL_PRESHIFT` - on a plain ST.
    With a BLiTTER the chip shifts sprites and unaligned blits itself
    and pre-shifting only costs RAM, so a port can pre-shift only when
-   `STDL_GetMachineInfo()->has_blitter` is 0.
+   `STDL_GetMachineInfo()->has_blitter` is 0 - if it double-buffers.
+   Onto the displayed screen of a single-buffered program, keyed and
+   shifted blits and sprites stay on the CPU, because the chip's
+   passes would show between one and the next.
 6. Profile on a plain ST first (`MACHINE=st`), then an STE and a Mega
    STE; `dist/TBLITSPD.TOS` gives a baseline, and the BLiTTER takes
    large fills, blits and sprites automatically.

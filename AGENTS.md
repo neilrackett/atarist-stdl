@@ -150,6 +150,17 @@ warnings** with the Makefile's `-Wall -Wextra`.
   changes *how* a blit is driven (mode, restart, interleaving with
   interrupts) gets watched in a real scene with fades before it
   ships, not just measured.
+  The same holds for *which* operations the chip takes. Handing
+  shifted keyed blits and sprites to the BLiTTER passed BLITCHK,
+  PIXCHK and every port - all double-buffered - and made TSPRITE and
+  TPALETTE, single-buffered, flash and tear on a real Mega STE: a
+  keyed blit is XOR, AND and XOR over the whole rectangle a plane at
+  a time, a sprite AND then OR, and on the displayed page the beam
+  shows the state between passes. The CPU finishes a group before
+  the next. `stdl_drawn_visibly` keeps those onto a single-buffered
+  screen on the CPU. Hatari shows it too: record an AVI
+  (`--avirecord`) of the scene and look at the frames with the
+  fewest lit pixels.
 - **A line-locked MFP interrupt needs lines of grace, and its waits
   need short bounds.** The CPU takes an MFP interrupt only once it
   is below level 6, and TOS's 200Hz Timer C handler keeps it there

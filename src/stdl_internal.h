@@ -529,8 +529,25 @@ void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
 #define STDL_SPR_MIN_CELLS         9
 #define STDL_SPR_SHIFT_MIN_CELLS   4
 #define STDL_SPR_BORDER_MIN_CELLS 32
+/*
+ * Whether drawing into s shows while it happens: the screen of a
+ * single-buffered program. The BLiTTER draws a masked blit as three
+ * whole-rectangle passes a plane - XOR, AND, XOR - and a sprite as an
+ * AND pass then an OR, and on the page being displayed the beam shows
+ * the rectangle between passes: XOR garbage, holes. On real hardware
+ * the sprites of a single-buffered demo came and went, tore and
+ * flashed. The CPU finishes a group before it starts the next, so
+ * masked blits, shifted blits and sprites onto that page stay with it,
+ * as they did before the BLiTTER could shift; a double-buffered
+ * program draws into the hidden page and keeps the chip.
+ */
+static __inline__ int stdl_drawn_visibly(const STDL_Surface *s)
+{
+    return s == &stdl_screen && !stdl.doublebuf;
+}
 /* whether a clipped blit is worth the BLiTTER (blitter.c) */
-int stdl_blitter_wants(int sx, int dx, int w, int h, int masked);
+int stdl_blitter_wants(int sx, int dx, int w, int h, int masked,
+                       const STDL_Surface *dst);
 /*
  * Rows up to this many bytes are copied inline rather than through
  * memcpy. The call costs about 650 cycles before it moves anything,

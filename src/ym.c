@@ -11,7 +11,11 @@
  *
  * The service never touches YM registers 14/15 (the I/O ports TOS
  * uses for floppy select) and preserves the port-direction bits
- * whenever it writes the mixer.
+ * whenever it writes the mixer. Each register write masks
+ * interrupts between selecting the register and writing it: TOS's
+ * Timer C plays Dosound sequences (the bell, a desk accessory's
+ * sound) on the same chip, and outranks the VBL, so landing in
+ * between would send the value to the register it selected.
  */
 
 #include "stdl_internal.h"
@@ -29,15 +33,26 @@ static int old_conterm = -1;
 
 void stdl_ym_write(int reg, int val)
 {
+    uint16_t sr = stdl_int_off();
+
     STDL_YM_SELECT = (uint8_t)reg;
     STDL_YM_DATA = (uint8_t)val;
+    stdl_int_restore(sr);
 }
 
 void stdl_ym_mix_update(uint8_t clr, uint8_t set)
 {
+    uint8_t mix;
+    uint16_t sr;
+
     mix_shadow = (uint8_t)((mix_shadow & ~clr) | set);
+    mix = (uint8_t)(mix_shadow & 0x3F);
+
+    /* the port bits are read back under the same mask */
+    sr = stdl_int_off();
     STDL_YM_SELECT = 7;
-    stdl_ym_write(7, (STDL_YM_READBACK & 0xC0) | (mix_shadow & 0x3F));
+    STDL_YM_DATA = (uint8_t)((STDL_YM_READBACK & 0xC0) | mix);
+    stdl_int_restore(sr);
 }
 
 /* an effect is taking a voice: mark it and let a tone on it know */
@@ -121,10 +136,10 @@ int stdl_ym_install(void)
     if (!stdl.initialised) {
         STDL_Init(0);
     }
-    /* silence the console key click so it cannot fight over the
-     * sound chip; key repeat stays on */
+    /* silence the console key click and bell so they cannot fight
+     * over the sound chip; key repeat stays on */
     old_conterm = STDL_CONTERM;
-    STDL_CONTERM = (uint8_t)(old_conterm & ~1);
+    STDL_CONTERM = (uint8_t)(old_conterm & ~5);
 
     for (i = 0; i < STDL_NVBLS; i++) {
         if (STDL_VBLQUEUE[i] == NULL) {

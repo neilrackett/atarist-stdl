@@ -812,8 +812,13 @@ warnings** with the Makefile's `-Wall -Wextra`.
   set serves a scene built from both. Keep new ones aligned.
 - YM2149: never touch registers 14/15 (TOS floppy select); all r7
   writes must preserve the port-direction bits (go through
-  `stdl_ym_mix_update`). Effects/music share voices via
-  `stdl_ym_owned` ownership - see src/ym.c.
+  `stdl_ym_mix_update`). Every register write goes through
+  `stdl_ym_write` or `stdl_ym_mix_update`, which mask interrupts
+  across the select and the write: TOS's Timer C plays Dosound
+  sequences (the bell, an accessory's sound) on the same chip and
+  outranks the VBL, so a write split by it lands in the wrong
+  register. Effects/music share voices via `stdl_ym_owned`
+  ownership - see src/ym.c.
 - The library runs in supervisor mode between `STDL_Init` and exit.
   Low memory (cookie jar at $5A0, hz200 at $4BA) bus-errors in user
   mode. `Super(0)` is a *toggle*: calling it when the caller is

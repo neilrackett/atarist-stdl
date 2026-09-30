@@ -195,11 +195,13 @@ int main(void)
      * anything a second time.
      */
     stdl_shutdown_music();
-    stdl_host_conterm = 0x03;
+    stdl_host_conterm = 0x07;           /* click, repeat, bell      */
     CHECK(STDL_ToneOpen() == 0, "open failed");
     CHECK(slots_used() == 1, "open should claim one VBL slot");
     CHECK(STDL_ToneActive(-1) == 0, "open should sound nothing");
-    CHECK((stdl_host_conterm & 1) == 0, "open should silence the click");
+    CHECK(stdl_host_conterm == 0x02,
+          "open should silence the click and bell, keep repeat: %02x",
+          stdl_host_conterm);
     STDL_ToneOn(0, 500, 12);
     CHECK(slots_used() == 1, "a key after open claimed a second slot");
     vbl_fn();
@@ -213,6 +215,8 @@ int main(void)
           "period 0 should key off");
 
     stdl_shutdown_music();
+    CHECK(stdl_host_conterm == 0x07, "shutdown should restore conterm: %02x",
+          stdl_host_conterm);
     if (failures == 0) {
         printf("test_tone: all checks passed\n");
         return 0;

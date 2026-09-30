@@ -11,8 +11,8 @@
  * STE; on a plain ST chunk calls fail cleanly and music still
  * plays). Anything not declared here is a compile error by design.
  *
- * Chunks cost, on an 8MHz STE: 9% for one at 6258Hz and 26% for all
- * four, about twice that at 12517; half of it on a Mega STE
+ * Chunks cost, on an 8MHz STE: 5% for one at 6258Hz, 9% for two and
+ * 20% for all four; 8%, 16% and 40% at 12517; about half on a Mega STE
  * (measured, tests/hatari/mixbench.c). Mix_OpenAudio mixes at 6258 or
  * 12517, whichever is nearer the rate asked for - a PC game's 22050
  * gets 12517 - since four voices at 25033 would be the whole machine.

@@ -177,7 +177,7 @@ time, not at runtime.
 | `SDL_AddTimer` / `SDL_SetTimer` | compat | cooperative: callbacks fire inside `SDL_Delay` |
 | `SDL_OpenAudio` / `SDL_LoadWAV` | `STDL_Audio` | STE DMA; cooperative refill, 2% of an 8MHz STE plus your callback when it writes signed 8-bit at a DMA rate straight into the ring; other formats are converted at every refill (13% for unsigned 8-bit mono at 12517Hz, 48% for 16-bit stereo at 22050); PCM WAVs only (`stdlconv wav`) |
 | `Mix_PlayMusic` etc (SDL_mixer) | `STDL_Music` | YM register streams from `stdlconv midi`; works on every ST |
-| `Mix_PlayChannel` / `Mix_LoadWAV` | mixer shim | up to 4 chunks on the `STDL_Voice` mixer, from the VBL (STE only): 9% of an 8MHz STE for one chunk at 6258Hz and 26% for four, about twice that at 12517 - the rate `Mix_OpenAudio` picks for a PC game's 22050; half scale at full volume |
+| `Mix_PlayChannel` / `Mix_LoadWAV` | mixer shim | up to 4 chunks on the `STDL_Voice` mixer, from the VBL (STE only): 5% of an 8MHz STE for one chunk at 6258Hz and 20% for four, 8% and 40% at 12517 - the rate `Mix_OpenAudio` picks for a PC game's 22050; half scale at full volume |
 | one-shot game effects | `STDL_PlaySample` | monophonic, but the DMA reads your buffer directly: no refill, no mixing, no per-frame cost |
 | PC-speaker sound | `STDL_SpeakerOn/Off` | immediate YM tone; steals voice A from music, restores after |
 | PC-speaker sequences | `STDL_PlaySfx` | step-array effects (periods+volumes), tone or noise, auto voice; optional per-step noise for tone and noise together (gunshots, sinking explosions) |

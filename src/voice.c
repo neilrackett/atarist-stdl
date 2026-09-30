@@ -128,23 +128,56 @@ static void clamp_build(void)
     }
 }
 
-/* run frames of one voice into acc: stored for the first voice of the
- * block, added for the rest. pos is 16.16. */
-static uint32_t voice_run_c(int16_t *acc, const int8_t *data,
+/*
+ * Where a voice's frames go. With three or four voices each adds into
+ * mixacc's 16-bit sums, the first storing, and the clamp table takes
+ * the sums to the ring. One or two cannot overflow a byte - every
+ * volume row is half scale, -64..63, so two sum to -128..126 - and
+ * they go straight into the ring: no 16-bit block, no clamp pass, the
+ * same bytes. That is the usual case for sound effects, one or two at
+ * a time. With the one-frame step below, SDL_mixer chunks went from
+ * 9% to 5% of an 8MHz STE for one at 6258Hz, 15% to 9% for two and
+ * 26% to 20% for four (tests/hatari/mixbench.c); four resampled
+ * voices, a module, are where they were.
+ */
+enum { MIX_WSTORE, MIX_WADD, MIX_BSTORE, MIX_BADD };
+
+/* run frames of one voice into dst, in one of the modes above. pos is
+ * 16.16. */
+static uint32_t voice_run_c(void *dst, const int8_t *data,
                             const int8_t *vt, uint32_t pos,
-                            uint32_t step, int run, int first)
+                            uint32_t step, int run, int mode)
 {
-    if (first) {
+    int16_t *acc = (int16_t *)dst;
+    int8_t *out = (int8_t *)dst;
+
+    switch (mode) {
+    case MIX_WSTORE:
         while (run-- > 0) {
             *acc++ = vt[(uint8_t)data[pos >> 16]];
             pos += step;
         }
-    } else {
+        break;
+    case MIX_WADD:
         while (run-- > 0) {
             *acc = (int16_t)(*acc + vt[(uint8_t)data[pos >> 16]]);
             acc++;
             pos += step;
         }
+        break;
+    case MIX_BSTORE:
+        while (run-- > 0) {
+            *out++ = vt[(uint8_t)data[pos >> 16]];
+            pos += step;
+        }
+        break;
+    default:
+        while (run-- > 0) {
+            *out = (int8_t)(*out + vt[(uint8_t)data[pos >> 16]]);
+            out++;
+            pos += step;
+        }
+        break;
     }
     return pos;
 }
@@ -163,62 +196,142 @@ int stdl_voice_use_c;
  * at is worked out here rather than read back, so the word add may
  * wrap past a stretch's end without it mattering.
  *
+ * A voice at the device's own rate - every SDL_mixer chunk, which is
+ * converted to that rate when it loads - steps exactly one frame, and
+ * then the sample is walked with a post-increment instead: no index,
+ * no fraction, 14 cycles a sample less.
+ *
  * Four samples to a pass: .rept writes the body out four times, so
  * the dbra closing the loop is paid once in four samples rather than
  * on each - it was 12 of the 68 cycles a sample cost. A run that is
  * not a multiple of four enters its first pass part-way in, (-run & 3)
- * bodies along: every instruction in the body is a fixed size, 16
- * bytes in all, and the jmp adds that times the skip to the block's
- * start. One body in the source; the store variant for the first
- * voice and the add for the rest differ in one mnemonic. */
-#define VOICE_BODY_BYTES 16
-#define VOICE_RUN_ASM(store)            \
+ * bodies along: every instruction in a body is a fixed size, and the
+ * jmp adds the body's size times the skip to the block's start. The
+ * sizes: an indexed move.b is 4 bytes, a post-increment move.b, ext,
+ * add.b, add.w, addx.w and a word move to (An)+ 2 each.
+ */
+#define VOICE_RUN_ASM(body)             \
     "moveq #0,%%d0\n\t"                 \
-    "jmp (1f,%%pc,%8.w)\n"               \
+    "jmp (1f,%%pc,%4.w)\n"               \
     "1:\n\t"                             \
     ".rept 4\n\t"                        \
-    "move.b (%1,%3.l),%%d0\n\t"          \
-    "move.b (%2,%%d0.w),%%d1\n\t"        \
-    "ext.w %%d1\n\t"                     \
-    store " %%d1,(%0)+\n\t"              \
-    "add.w %6,%4\n\t"                    \
-    "addx.w %5,%3\n\t"                   \
+    body                                 \
     ".endr\n\t"                          \
-    "dbra %7,1b"
+    "dbra %3,1b"
 
-static uint32_t voice_run(int16_t *acc, const int8_t *data,
-                          const int8_t *vt, uint32_t pos,
-                          uint32_t step, int run, int first)
+/* resampled: %1 data, %5 index, %6 fraction, %7/%8 the step's parts */
+#define VR_STEP "add.w %8,%6\n\taddx.w %7,%5\n\t"
+#define VR_W(store) "move.b (%1,%5.l),%%d0\n\t" \
+    "move.b (%2,%%d0.w),%%d1\n\text.w %%d1\n\t" store " %%d1,(%0)+\n\t" VR_STEP
+#define VR_BSTORE "move.b (%1,%5.l),%%d0\n\t" \
+    "move.b (%2,%%d0.w),(%0)+\n\t" VR_STEP
+#define VR_BADD "move.b (%1,%5.l),%%d0\n\t" \
+    "move.b (%2,%%d0.w),%%d1\n\tadd.b %%d1,(%0)+\n\t" VR_STEP
+/* one frame a step: %1 walks the sample */
+#define V1_W(store) "move.b (%1)+,%%d0\n\t" \
+    "move.b (%2,%%d0.w),%%d1\n\text.w %%d1\n\t" store " %%d1,(%0)+\n\t"
+#define V1_BSTORE "move.b (%1)+,%%d0\n\tmove.b (%2,%%d0.w),(%0)+\n\t"
+#define V1_BADD "move.b (%1)+,%%d0\n\t" \
+    "move.b (%2,%%d0.w),%%d1\n\tadd.b %%d1,(%0)+\n\t"
+
+#define VR_ASM(body)                                                     \
+    __asm__ volatile(VOICE_RUN_ASM(body)                                 \
+        : "+a"(dst), "+a"(data), "+a"(vt), "+d"(count)                   \
+        : "d"(skip)                                                      \
+        : "d0", "d1", "cc", "memory")
+/* the resampled bodies move the index and fraction: outputs there */
+#define VRS_ASM(body)                                                    \
+    __asm__ volatile(VOICE_RUN_ASM(body)                                 \
+        : "+a"(dst), "+a"(data), "+a"(vt), "+d"(count), "+d"(skip),      \
+          "+d"(ipos), "+d"(fpos)                                         \
+        : "d"(istep), "d"(fstep)                                         \
+        : "d0", "d1", "cc", "memory")
+
+/* One function per kind, so each carries only its own loop and the
+ * choice is made once a block rather than on every run: with the four
+ * kinds in one function, four resampled voices - a module - mixed 2%
+ * slower than before any of this, for the switch and the registers. */
+#define VR_SETUP(bytes)                                                  \
+    uint32_t ipos = pos >> 16;                                           \
+    uint16_t fpos = (uint16_t)pos, fstep = (uint16_t)step;               \
+    uint16_t istep = (uint16_t)(step >> 16);                             \
+    int16_t count = (int16_t)(((run + 3) >> 2) - 1);                     \
+    uint16_t skip = (uint16_t)((-run & 3) * (bytes))
+
+static uint32_t vr_word(void *dst, const int8_t *data, const int8_t *vt,
+                        uint32_t pos, uint32_t step, int run, int mode)
 {
-    uint32_t ipos = pos >> 16;
-    uint16_t fpos = (uint16_t)pos, fstep = (uint16_t)step;
-    uint16_t istep = (uint16_t)(step >> 16);
-    /* passes after the first, for dbra, and where the first starts */
-    int16_t count = (int16_t)(((run + 3) >> 2) - 1);
-    uint16_t skip = (uint16_t)((-run & 3) * VOICE_BODY_BYTES);
-
-    if (run <= 0 || stdl_voice_use_c) {
-        return voice_run_c(acc, data, vt, pos, step, run, first);
-    }
-    if (first) {
-        __asm__ volatile(
-            VOICE_RUN_ASM("move.w")
-            : "+a"(acc), "+a"(data), "+a"(vt), "+d"(ipos), "+d"(fpos),
-              "+d"(istep), "+d"(fstep), "+d"(count)
-            : "d"(skip)
-            : "d0", "d1", "cc", "memory");
+    VR_SETUP(16);
+    if (mode & 1) {
+        VRS_ASM(VR_W("add.w"));
     } else {
-        __asm__ volatile(
-            VOICE_RUN_ASM("add.w")
-            : "+a"(acc), "+a"(data), "+a"(vt), "+d"(ipos), "+d"(fpos),
-              "+d"(istep), "+d"(fstep), "+d"(count)
-            : "d"(skip)
-            : "d0", "d1", "cc", "memory");
+        VRS_ASM(VR_W("move.w"));
     }
     return pos + stdl_mul32x16(step, (uint16_t)run);
 }
-#else
-#define voice_run voice_run_c
+
+static uint32_t vr_byte(void *dst, const int8_t *data, const int8_t *vt,
+                        uint32_t pos, uint32_t step, int run, int mode)
+{
+    if (mode & 1) {
+        VR_SETUP(14);
+        VRS_ASM(VR_BADD);
+    } else {
+        VR_SETUP(12);
+        VRS_ASM(VR_BSTORE);
+    }
+    return pos + stdl_mul32x16(step, (uint16_t)run);
+}
+
+static uint32_t v1_word(void *dst, const int8_t *data, const int8_t *vt,
+                        uint32_t pos, uint32_t step, int run, int mode)
+{
+    int16_t count = (int16_t)(((run + 3) >> 2) - 1);
+    uint16_t skip = (uint16_t)((-run & 3) * 10);
+
+    (void)step;
+    data += pos >> 16;
+    if (mode & 1) {
+        VR_ASM(V1_W("add.w"));
+    } else {
+        VR_ASM(V1_W("move.w"));
+    }
+    return pos + ((uint32_t)run << 16);
+}
+
+static uint32_t v1_byte(void *dst, const int8_t *data, const int8_t *vt,
+                        uint32_t pos, uint32_t step, int run, int mode)
+{
+    int16_t count = (int16_t)(((run + 3) >> 2) - 1);
+    uint16_t skip;
+
+    (void)step;
+    data += pos >> 16;
+    if (mode & 1) {
+        skip = (uint16_t)((-run & 3) * 8);
+        VR_ASM(V1_BADD);
+    } else {
+        skip = (uint16_t)((-run & 3) * 6);
+        VR_ASM(V1_BSTORE);
+    }
+    return pos + ((uint32_t)run << 16);
+}
+
+typedef uint32_t (*voice_run_fn)(void *, const int8_t *, const int8_t *,
+                                 uint32_t, uint32_t, int, int);
+
+/* the loop for a voice's step and the block's mode, or the C */
+static __inline__ __attribute__((always_inline))
+voice_run_fn voice_runner(uint32_t step, int bytes)
+{
+    if (stdl_voice_use_c) {
+        return voice_run_c;
+    }
+    if (step == 0x10000u) {
+        return bytes ? v1_byte : v1_word;
+    }
+    return bytes ? vr_byte : vr_word;
+}
 #endif
 
 /*
@@ -246,13 +359,20 @@ static int frames_left(uint32_t d, uint32_t step)
     return stdl_divu(n, (uint16_t)step) + 1;
 }
 
-/* one voice through the block, looping or ending as it goes */
-static void voice_mix(voice_t *v, int first)
+/* one voice through the block into dst - mixacc or the ring, as mode
+ * says - looping or ending as it goes. Inlined into one function per
+ * kind of block (below), so the word blocks a module mixes compile to
+ * what they were before the byte blocks existed. */
+static __inline__ __attribute__((always_inline))
+void voice_mix(voice_t *v, int mode, void *dst, const int bytes)
 {
     const int8_t *vt = v->vt;
     const int8_t *data = v->data;
     uint32_t pos = v->pos, step = v->step, end = v->end;
     int n = 0;
+#ifdef __m68k__
+    const voice_run_fn run_fn = voice_runner(step, bytes);
+#endif
 
     while (n < BLOCK_FRAMES) {
         int run = BLOCK_FRAMES - n;
@@ -260,8 +380,11 @@ static void voice_mix(voice_t *v, int first)
             uint32_t over = pos - end;
             if (v->loopsize == 0 || v->repeats == 0) {
                 v->active = 0;
-                if (first) {
-                    memset(mixacc + n, 0, (BLOCK_FRAMES - n) * sizeof(int16_t));
+                if (mode == MIX_WSTORE) {
+                    memset((int16_t *)dst + n, 0,
+                           (BLOCK_FRAMES - n) * sizeof(int16_t));
+                } else if (mode == MIX_BSTORE) {
+                    memset((int8_t *)dst + n, 0, BLOCK_FRAMES - n);
                 }
                 break;
             }
@@ -285,28 +408,63 @@ static void voice_mix(voice_t *v, int first)
         if (stdl_mul32x16(step, (uint16_t)(run - 1)) >= end - pos) {
             run = frames_left(end - pos, step);
         }
-        pos = voice_run(mixacc + n, data, vt, pos, step, run, first);
+#ifdef __m68k__
+        pos = run_fn(bytes ? (void *)((int8_t *)dst + n)
+                           : (void *)((int16_t *)dst + n),
+                     data, vt, pos, step, run, mode);
+#else
+        pos = voice_run_c(bytes ? (void *)((int8_t *)dst + n)
+                                : (void *)((int16_t *)dst + n),
+                          data, vt, pos, step, run, mode);
+#endif
         n += run;
     }
     v->pos = pos;
+}
+
+static __attribute__((noinline))
+void voice_mix_w(voice_t *v, int mode)
+{
+    voice_mix(v, mode, mixacc, 0);
+}
+
+static __attribute__((noinline))
+void voice_mix_b(voice_t *v, int mode, int8_t *dst)
+{
+    voice_mix(v, mode, dst, 1);
 }
 
 /* mix one quarter of the ring; returns 0 if it wrote pure silence,
  * which is what the deferred stop in the tick below waits for */
 static int mix_block(int8_t *dst)
 {
-    int mixed = 0;
+    int active = 0, mode;
     int i, n;
 
     for (i = 0; i < STDL_VOICES; i++) {
-        if (vc.v[i].active) {
-            voice_mix(&vc.v[i], !mixed);
-            mixed = 1;
-        }
+        active += vc.v[i].active;
     }
-    if (!mixed) {
+    if (active == 0) {
         memset(dst, 0, BLOCK_FRAMES);
         return 0;
+    }
+    if (active <= 2) {
+        /* no sum that can clip: straight into the ring (see above) */
+        mode = MIX_BSTORE;
+        for (i = 0; i < STDL_VOICES; i++) {
+            if (vc.v[i].active) {
+                voice_mix_b(&vc.v[i], mode, dst);
+                mode = MIX_BADD;
+            }
+        }
+        return 1;
+    }
+    mode = MIX_WSTORE;
+    for (i = 0; i < STDL_VOICES; i++) {
+        if (vc.v[i].active) {
+            voice_mix_w(&vc.v[i], mode);
+            mode = MIX_WADD;
+        }
     }
 #ifdef __m68k__
     if (!stdl_voice_use_c) {

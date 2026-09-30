@@ -93,26 +93,29 @@ static void pick(vparm *p)
         p->loop = 0;
         p->looplen = 0;
     }
-    p->freq = 500 + rnd() % 40000;
+    /* a third at the device's own rate: a step of exactly one frame,
+     * which is what every SDL_mixer chunk plays at */
+    p->freq = (rnd() % 3 == 0) ? 6258 : 500 + rnd() % 40000;
     p->vol = (uint8_t)(rnd() % 65);
 }
 
-/* ms to mix `blocks` blocks of four voices with one path */
-static long time_path(int use_c, int blocks)
+/* ms to mix `blocks` blocks of nv voices with one path, at the
+ * device's rate (native, a step of one frame) or resampled */
+static long time_path(int use_c, int blocks, int nv, int native)
 {
     static int8_t out[BLOCK];
     vparm p[STDL_VOICES];
     uint32_t t0;
     int v, b;
-    for (v = 0; v < STDL_VOICES; v++) {
+    for (v = 0; v < nv; v++) {
         p[v].len = SLEN;
         p[v].loop = 0;
         p[v].looplen = SLEN;
-        p[v].freq = 8363 + v * 1000;
+        p[v].freq = native ? 6258 : 8363 + v * 1000;
         p[v].vol = 48;
     }
     stdl_voice_use_c = use_c;
-    setup(p, STDL_VOICES);
+    setup(p, nv);
     t0 = STDL_GetTicks();
     for (b = 0; b < blocks; b++) {
         stdl_voice_mix_block(out);
@@ -177,14 +180,26 @@ int main(void)
     STDL_PauseVoices();
     while (!STDL_VoicesPaused()) {
     }
-    tasm = time_path(0, 400);
-    tc = time_path(1, 400);
-    setup(0, 0);
+    tasm = time_path(0, 400, STDL_VOICES, 0);
+    tc = time_path(1, 400, STDL_VOICES, 0);
     if (f) {
+        static const int counts[3] = { 1, 2, STDL_VOICES };
+        int k, native;
         fprintf(f, "%s: %d of %d cases differ\n", fails ? "FAIL" : "OK", fails, CASES);
         fprintf(f, "400 blocks of 4 voices: asm %ldms, C %ldms\n", tasm, tc);
+        /* asm only, per voice count: resampled voices (a module's)
+         * and voices at the device rate (every SDL_mixer chunk) */
+        for (native = 0; native <= 1; native++) {
+            for (k = 0; k < 3; k++) {
+                fprintf(f, "400 blocks, %d voice%s %s: asm %ldms\n",
+                        counts[k], counts[k] == 1 ? " " : "s",
+                        native ? "native   " : "resampled",
+                        time_path(0, 400, counts[k], native));
+            }
+        }
         fclose(f);
     }
+    setup(0, 0);
     if (screen) {
         STDL_Rect r = { 0, 0, 320, 200 };
         STDL_SetColour(1, fails ? 0x700 : 0x070);

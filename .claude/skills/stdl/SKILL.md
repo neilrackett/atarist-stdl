@@ -870,8 +870,9 @@ first.
   priority yourself. It is the one path that costs nothing; when a
   game needs sounds on top of each other, the SDL_mixer shim
   (`Mix_PlayChannel`) plays up to four chunks on the voice mixer from
-  the VBL, **9% of an 8MHz STE for one chunk at 6258Hz and 26% for
-  four** (about twice that at 12517; half of it on a Mega STE). Before
+  the VBL, **5% of an 8MHz STE for one chunk at 6258Hz, 9% for two
+  and 20% for four** (8%, 16% and 40% at 12517; about half on a Mega
+  STE). Before
   v1.13.0 it mixed in C over the ring device and measured 36-75% in
   Koules - the same effects through `STDL_PlaySample` measured 0%. A
   chunk at full volume plays at half scale, a voice at 64: 6dB quieter

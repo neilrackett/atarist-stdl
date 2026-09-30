@@ -31,13 +31,15 @@
 #include "xpad.h"
 
 static XPAD block;
+static XPAD_REQ req;    /* read back by xpadprobe's rumble checks */
 
 int main(void)
 {
     XPAD_PAD *pad;
 
-    xpad_init(&block, 1, XPAD_CAP_ANALOG | XPAD_CAP_HOTPLUG,
-              "STDL test stub 1.0", 0);
+    xpad_init(&block, 1,
+              XPAD_CAP_ANALOG | XPAD_CAP_HOTPLUG | XPAD_CAP_RUMBLE,
+              "STDL test stub 1.0", &req);
 
     pad = xpad_back(&block);
     pad[0].type = XPAD_TYPE_GAMEPAD;

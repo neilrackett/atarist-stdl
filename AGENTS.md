@@ -842,6 +842,18 @@ warnings** with the Makefile's `-Wall -Wextra`.
   because STDL replaces `ikbdsys`: TOS never dispatches `joyvec`
   while a game runs, so a provider that injects there cannot reach
   us, and one that publishes a block can.
+- **Rumble is the one thing STDL writes to a provider**, and every
+  pulse needs an end: a provider holds magnitudes until something
+  replaces them. `STDL_PadRumble` records where it wrote; the pump
+  zeroes it once the time has passed, and `stdl_events_remove()`
+  zeroes it on every exit route, the terminate path included (memory
+  writes only). A refusal stops what is running before it returns -1,
+  because a provider drops `XPAD_CAP_RUMBLE` when its last
+  rumble-capable pad leaves, and a pulse already written would
+  otherwise never end. `tests/hatari/xpadprobe.c` checks each case
+  against `XPADSTUB.PRG`, taking snapshots and printing them
+  afterwards: a console print costs about 150ms under Hatari, longer
+  than the pulse it would be timing.
 - **Xpad is a submodule at `lib/xpad`**, not a vendored copy, and the
   Makefile compiles `$(XPAD)/xpad.c` straight out of it. It used to be
   a copy in `src/`; that stopped being safe once the ABI started

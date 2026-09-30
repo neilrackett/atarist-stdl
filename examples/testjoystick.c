@@ -15,6 +15,7 @@
  *    the desktop get no argv to select a stick with
  *  - the ST's joystick port 1 is stick 0: 2 digital axes, 1 button.
  *    Note the fire button shares a line with the right mouse button
+ *  - with an Xpad pad, the shoulder buttons show STDL_PadRumble
  */
 
 #include <stdio.h>
@@ -69,6 +70,19 @@ void WatchJoystick(SDL_Joystick *joystick)
 				printf("Joystick %d button %d down\n",
 				       event.jbutton.which,
 				       event.jbutton.button);
+				/* STDL: a pad's shoulders, buttons 4 and 5,
+				 * pulse its heavy and light motors in turn. */
+				if (event.jbutton.button == 4 ||
+				    event.jbutton.button == 5) {
+					int heavy = event.jbutton.button == 4;
+
+					printf("Rumble %s: %s\n",
+					       heavy ? "heavy" : "light",
+					       STDL_PadRumble(heavy ? 200 : 0,
+					                      heavy ? 0 : 200,
+					                      300) == 0 ?
+					       "on" : "not supported");
+				}
 				break;
 			    case SDL_JOYBUTTONUP:
 				printf("Joystick %d button %d up\n",

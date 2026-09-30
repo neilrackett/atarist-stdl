@@ -244,6 +244,20 @@ void STDL_JoyKeyEmulation(int enable);
 int STDL_HavePad(void);
 
 /*
+ * Rumble the pad for `ms` milliseconds. `low` drives the low-frequency
+ * (heavy) motor and `high` the high-frequency (light) one, 0 to 255
+ * each; which of those a pad actually has is up to the pad. A new call
+ * replaces whatever is running, and 0, 0 stops it.
+ *
+ * Returns 0 when the pad's provider honours rumble and -1 otherwise -
+ * no pad, or one without motors - so a game can call it
+ * unconditionally. The pulse is ended by the event pump once `ms` has
+ * passed, so a program that stops pumping keeps it running until it
+ * pumps again; STDL_Quit and the terminate path end it too.
+ */
+int STDL_PadRumble(uint8_t low, uint8_t high, uint16_t ms);
+
+/*
  * Whether an input is held right now. Takes the same STDL_JOYKEY_*
  * identifiers, which do double duty: bind them to keys for a game that
  * reads the keyboard, or poll them for a game that has its own notion

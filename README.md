@@ -41,6 +41,8 @@ six axes, thirteen buttons and a hat with real analogue values, and the
 joystick key emulation picks the pad up too. Ports need no changes:
 button 0 stays fire, axes 0 and 1 stay the left stick, and with no
 provider everything reads exactly as a plain ST joystick.
+`STDL_PadRumble(low, high, ms)` pulses the pad's motors when its
+provider offers them, and returns -1 without doing anything otherwise.
 
 On an STE, `STDL_SetScrollOrigin` shows a 320x200 window of a larger
 planar surface positioned to the pixel - the video base, LINEWIDTH
@@ -160,7 +162,7 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | TBLITSPD.TOS | blit throughput baseline                                                         |
 | TVIDINFO.TOS | capability report + fill/blit/flip benchmarks                                    |
 | TKEYS.TOS    | keysym name table dump                                                           |
-| TJOY.TOS     | joystick port 1 as SDL joystick 0; 6 axes/13 buttons when an Xpad pad is present |
+| TJOY.TOS     | joystick port 1 as SDL joystick 0; 6 axes/13 buttons when an Xpad pad is present, shoulders rumble |
 | LOOPWAVE.TOS | STE/Mega STE DMA sample playback (STDL_Audio)                                    |
 | TCURSOR.TOS  | software mouse cursor with save-under                                            |
 | PLAYMUS.TOS  | YM music (stdlconv midi -> STDL_Music) + sample chunks via the SDL_mixer shim     |

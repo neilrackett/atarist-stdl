@@ -267,3 +267,78 @@ void stdl_xpad_events(void)
 
     prev = pad;
 }
+
+/*
+ * Rumble, the one thing this file writes. A provider holds a rumble
+ * until something replaces it, so every pulse needs an end: the pump
+ * stops it once `until` has passed, and so does the shutdown path,
+ * since a game that quits or crashes mid-pulse would otherwise leave
+ * the pad buzzing on the desktop.
+ *
+ * `rumble_req` is where the running pulse was written, and NULL when
+ * nothing is running. It is kept rather than looked up again because
+ * the provider may drop XPAD_CAP_RUMBLE mid-pulse (a COMpad adapter
+ * does, when its last rumble-capable pad leaves), and the zeroes still
+ * have to reach the area the magnitudes went into.
+ */
+static XPAD_REQ *rumble_req;
+static uint32_t rumble_until;
+
+/* Written through a volatile pointer: the provider reads the area
+ * from an interrupt, and seq has to land after both magnitudes, which
+ * a plain store lets the compiler move. */
+void stdl_xpad_rumble_stop(void)
+{
+    volatile XPAD_REQ *r = rumble_req;
+
+    if (r) {
+        r->rumble[0][0] = 0;
+        r->rumble[0][1] = 0;
+        r->seq++;                   /* last, so the provider sees both */
+        rumble_req = 0;
+    }
+}
+
+void stdl_xpad_rumble_tick(uint32_t now)
+{
+    if (rumble_req && (int32_t)(now - rumble_until) >= 0) {
+        stdl_xpad_rumble_stop();
+    }
+}
+
+int STDL_PadRumble(uint8_t low, uint8_t high, uint16_t ms)
+{
+    XPAD_REQ *req = 0;
+
+    /* caps is read on every call, not cached at open: it may change
+     * under a live block. */
+    if (stdl_xpad_present() && (xpad->caps & XPAD_CAP_RUMBLE)) {
+        req = xpad_req(xpad);
+    }
+
+    /*
+     * Anything running stops before a refusal or a stop request, never
+     * after: a refusal that left the old magnitudes in place would
+     * leave a motor running with nothing to end it.
+     */
+    if (!req || (low == 0 && high == 0) || ms == 0) {
+        stdl_xpad_rumble_stop();
+        return req ? 0 : -1;
+    }
+
+    /* A new pulse overwrites the old one in place rather than stopping
+     * it first, so the provider never sees a gap between the two. */
+    if (rumble_req && rumble_req != req) {
+        stdl_xpad_rumble_stop();
+    }
+    {
+        volatile XPAD_REQ *r = req;
+
+        r->rumble[0][0] = low;
+        r->rumble[0][1] = high;
+        r->seq++;                   /* last, as in the stop */
+    }
+    rumble_req = req;
+    rumble_until = STDL_GetTicks() + ms;
+    return 0;
+}

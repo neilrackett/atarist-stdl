@@ -264,6 +264,12 @@ time, not at runtime.
   STDLK_SPACE)` rebinds it to the game's own convention (returns
   how many keys resolved, so bad bindings are caught; 0 leaves an
   input unmapped).
+* **Rumble**: SDL 1.2 has none, so it is an addition rather than a
+  mapping. `STDL_PadRumble(low, high, ms)` pulses an Xpad pad's heavy
+  and light motors (0-255 each) and returns -1 when there is no pad
+  or it has no motors, so call it unconditionally at the moment it
+  belongs to - a hit, a landing, an explosion. The event pump ends
+  the pulse, so it runs long while the game is not pumping.
 * **Filenames**: loaders retry with an uppercased name, so
   `"icon.bmp"` works on GEMDOS.
 

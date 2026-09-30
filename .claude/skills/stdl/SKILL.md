@@ -1012,6 +1012,9 @@ first.
   slower on both an STE and a Mega STE, reverted).
 - Splash: `STDL_ShowDegas("SPLASH.PI1")` (make with `stdlconv pi1`).
 - Keyboard games + joystick: `STDL_JoyKeyEmulation(1)`, rebindable
+  with `STDL_JoyKeyMapping(up, down, left, right, fire)` keysyms
+  (default arrows + left Alt; `STDL_KMOD_JOYSTICK` tagged; check
+  the return value = keys resolved).
 - Modern controllers work through the same API, with no port
   changes: when an Xpad provider is present, joystick 0 grows to 6
   axes (both sticks, both triggers), 13 buttons and a hat, and the
@@ -1019,9 +1022,10 @@ first.
   stay the left stick, so a port written for a plain ST joystick
   keeps working and a port that asks `SDL_JoystickNumButtons()`
   gets more. Key emulation picks a pad up too.
-  with `STDL_JoyKeyMapping(up, down, left, right, fire)` keysyms
-  (default arrows + left Alt; `STDL_KMOD_JOYSTICK` tagged; check
-  the return value = keys resolved).
+  `STDL_PadRumble(low, high, ms)` pulses its motors (0-255 each,
+  -1 when there is no pad or no motors, so call it unconditionally);
+  the pump ends the pulse, and STDL_Quit and the terminate path end
+  one still running.
 
 ## Anti-patterns (reject these in review)
 

@@ -15,6 +15,38 @@
 #include "stdl_xpad.h"
 #include "stdl_event.h"
 #include "stdl_keys.h"
+#include "xpad.h"
+
+/* Pump for `ms`, which is what ends a rumble. */
+static void pump_for(uint32_t ms)
+{
+    uint32_t t0 = STDL_GetTicks();
+
+    while (STDL_GetTicks() - t0 < ms) {
+        STDL_PumpEvents();
+    }
+}
+
+/*
+ * What the request area held at one moment. Taken into memory and
+ * printed afterwards: a console print costs about 150ms under Hatari,
+ * which is longer than the pulse being timed.
+ */
+typedef struct {
+    const char *what;
+    int ret;
+    uint8_t lo, hi, seq;
+} RumbleSnap;
+
+static void snap(RumbleSnap *s, const char *what, int ret,
+                 const XPAD_REQ *req)
+{
+    s->what = what;
+    s->ret = ret;
+    s->lo = req->rumble[0][0];
+    s->hi = req->rumble[0][1];
+    s->seq = req->seq;
+}
 
 int main(void)
 {
@@ -103,8 +135,50 @@ int main(void)
             (int)stdl_xpad_axis_merged(1, 0x00),
             (int)stdl_xpad_axis_merged(1, 0x02));
 
-    fprintf(stderr, "PROBE-DONE\r\n");
+    /*
+     * Rumble. The stub offers a request area and XPAD_CAP_RUMBLE, and a
+     * provider's area is plain memory, so what STDL_PadRumble wrote can
+     * be read straight back. The cast is the test's alone: it drops the
+     * cap below to play a pad that loses its motors mid-pulse.
+     */
+    {
+        XPAD *x = (XPAD *)xpad_find();
+        XPAD_REQ *req = xpad_req(x);
+        RumbleSnap s[7];
+        int taken = 0;
 
-    SDL_Quit();
+        if (!req) {
+            fprintf(stderr, "rumble no request area\r\n");
+            fprintf(stderr, "PROBE-DONE\r\n");
+            SDL_Quit();
+            return 0;
+        }
+
+        snap(&s[taken++], "before", 0, req);
+        snap(&s[taken++], "start", STDL_PadRumble(200, 60, 100), req);
+        pump_for(50);
+        snap(&s[taken++], "at 50ms", 0, req);
+        pump_for(100);
+        snap(&s[taken++], "at 150ms", 0, req);
+
+        STDL_PadRumble(90, 0, 1000);
+        snap(&s[taken++], "stop", STDL_PadRumble(0, 0, 0), req);
+
+        STDL_PadRumble(90, 0, 1000);
+        x->caps &= (uint16_t)~XPAD_CAP_RUMBLE;
+        snap(&s[taken++], "refused", STDL_PadRumble(90, 90, 100), req);
+        x->caps |= XPAD_CAP_RUMBLE;
+
+        /* Left running on purpose: SDL_Quit must end it. */
+        STDL_PadRumble(120, 120, 5000);
+        SDL_Quit();
+        snap(&s[taken++], "after quit", 0, req);
+
+        for (i = 0; i < taken; i++) {
+            fprintf(stderr, "rumble %s ret=%d lo=%d hi=%d seq=%d\r\n",
+                    s[i].what, s[i].ret, s[i].lo, s[i].hi, s[i].seq);
+        }
+        fprintf(stderr, "PROBE-DONE\r\n");
+    }
     return 0;
 }

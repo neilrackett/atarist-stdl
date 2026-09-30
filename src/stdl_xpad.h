@@ -55,6 +55,14 @@ uint8_t stdl_xpad_hat(void);
  */
 int16_t stdl_xpad_axis_merged(int axis, uint8_t ikbd);
 
+/* End a running rumble (STDL_PadRumble) once its time has passed; the
+ * pump calls it with STDL_GetTicks(). */
+void stdl_xpad_rumble_tick(uint32_t now);
+
+/* End a running rumble now. Memory writes only, so the terminate path
+ * may call it. */
+void stdl_xpad_rumble_stop(void);
+
 /* The joystick port's byte without the pad merged in. event.c owns it. */
 uint8_t stdl_joy_ikbd(void);
 

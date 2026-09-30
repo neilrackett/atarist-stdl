@@ -234,6 +234,9 @@ void stdl_events_install(void)
 
 void stdl_events_remove(void)
 {
+    /* Before the desktop gets the machine back: a provider holds a
+     * rumble until it is replaced, and nothing would replace it. */
+    stdl_xpad_rumble_stop();
     if (events_installed) {
         kbdvecs_t *kv = (kbdvecs_t *)Kbdvbase();
         ikbd_quiesce();
@@ -843,6 +846,7 @@ void STDL_PumpEvents(void)
         joy_xpad = stdl_xpad_poll();
         handle_joy((uint8_t)(joy_ikbd | joy_xpad));
         stdl_xpad_events();
+        stdl_xpad_rumble_tick(now);
         if (joykey_enabled) {
             joykey_emulate_buttons(now);
         }

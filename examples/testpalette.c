@@ -23,6 +23,13 @@
  * random walks, and the FPS overlay goes through FillRect/PutPixel.
  * The palette fade in/out and the wave cycling are exactly the
  * original logic, running on SDL_SetPalette(SDL_PHYSPAL).
+ *
+ * Like the original it draws on the page being displayed, so boats
+ * flicker whenever the beam passes between an erase and a redraw.
+ * -flip (rename to TPALETTE.TTP to pass it from the desktop) draws
+ * into a second page and flips at the vertical blank instead, the
+ * way a game should: each page is repaired where it last had its
+ * boats, two frames back.
  */
 
 #include <stdio.h>
@@ -242,6 +249,12 @@ int main(int argc, char **argv)
     int fade_level, fade_dir;
     int boatcols, frames, i, red;
     int boatx[NBOATS], boaty[NBOATS], boatdir[NBOATS];
+    /* -flip: where each of the two pages last had its boats drawn, so
+     * the page about to be drawn can be repaired where it was painted
+     * two frames ago - the previous frame went to the other page */
+    int drawnx[2][NBOATS];
+    int drawn[2] = { 0, 0 };
+    int flip = 0;
     int boats = NBOATS;
     int palette_step = 1;
     int show_fps = 1;
@@ -276,14 +289,26 @@ int main(int argc, char **argv)
 	    show_fps = 0;
 	else if(strcmp(*argv, "-fpslog") == 0)
 	    log_fps = 1;
+	else if(strcmp(*argv, "-flip") == 0)
+	    flip = 1;
 	else {
 	    fprintf(stderr,
 		    "usage: testpalette "
 		    " [-nofade] [-fademax N] [-boats N]"
-		    " [-palstep N] [-nofps] [-fpslog]\n");
+		    " [-palstep N] [-nofps] [-fpslog] [-flip]\n");
 	    quit(1);
 	}
     }
+
+    /*
+     * -flip double-buffers: every frame is drawn into the page not on
+     * screen and shown with SDL_Flip at the next vertical blank. Without
+     * it the boats are erased and redrawn on the page being displayed,
+     * and the beam shows them missing whenever it passes in between -
+     * which is how the original draws, and why it flickers.
+     */
+    if(flip)
+	vidflags |= SDL_DOUBLEBUF;
 
     /* Ask explicitly for a hardware palette */
     if((screen = SDL_SetVideoMode(SCRW, SCRH, 4, vidflags | SDL_HWPALETTE)) == NULL)
@@ -337,6 +362,11 @@ int main(int argc, char **argv)
     if(SDL_BlitSurface(bg, NULL, screen, NULL) < 0)
 	sdlerr("blitting background to screen");
     SDL_Flip(screen);		/* actually put the background on screen */
+    if(flip) {
+	/* and on the other page, which the first frame draws into */
+	if(SDL_BlitSurface(bg, NULL, screen, NULL) < 0)
+	    sdlerr("blitting background to screen");
+    }
 
     /* determine initial boat placements */
     for(i = 0; i < boats; i++) {
@@ -384,7 +414,14 @@ int main(int argc, char **argv)
 	    if(boatx[i] <= -boat[0]->w || boatx[i] >= screen->w)
 		boatdir[i] = -boatdir[i];
 
-	    /* paint over the old boat position */
+	    /* paint over the old boat position: with -flip, where this
+	     * page last had it, two frames back */
+	    if(flip) {
+		const int page = frames & 1;
+		old_x = drawnx[page][i];
+		if(!drawn[page])
+		    old_x = screen->w;	/* nothing drawn on it yet */
+	    }
 	    r.x = old_x;
 	    r.y = boaty[i];
 	    r.w = boat[0]->w;
@@ -414,7 +451,9 @@ int main(int argc, char **argv)
 	    if(SDL_BlitSurface(boat[(boatdir[i] + 1) / 2], NULL,
 			       screen, &r) < 0)
 		sdlerr("blitting boat");
+	    drawnx[frames & 1][i] = boatx[i];
 	}
+	drawn[frames & 1] = 1;
 
 	/* cycle wave palette */
 	for(i = 0; i < NWAVE; i++)
@@ -467,7 +506,7 @@ int main(int argc, char **argv)
 
 	if (show_fps) {
 	    fps_target = GetFPSRect(screen);
-	    if (frames == 0) {
+	    if (frames == 0 || flip) {	/* flip: both pages need it */
 		fps_needs_redraw = 1;
 	    } else {
 		for (i = 0; i < nupdates; i++) {
@@ -484,8 +523,11 @@ int main(int argc, char **argv)
 	    }
 	}
 
-	/* update changed areas of the screen */
-	SDL_UpdateRects(screen, nupdates, updates);
+	/* update changed areas of the screen, or show the page drawn */
+	if(flip)
+	    SDL_Flip(screen);
+	else
+	    SDL_UpdateRects(screen, nupdates, updates);
 	frames++;
     } while(fade_level > 0);
 

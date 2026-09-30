@@ -38,7 +38,13 @@ int main(void)
     }
     printf("PX: blitter %s\n",
            STDL_GetMachineInfo()->has_blitter ? "present" : "absent");
+    /* a pass runs for minutes and prints only failures, which looks
+     * like a hang to someone watching the machine */
+    printf("PX: several minutes per pass;\n"
+           "PX: nothing prints unless a test fails\n");
+    fflush(stdout);
     for (use = 0; use <= 1; use++) {
+        uint32_t t0;
         int r;
 
         if (use && !STDL_GetMachineInfo()->has_blitter) {
@@ -46,9 +52,11 @@ int main(void)
         }
         STDL_UseBlitter(use);
         failures = 0;
+        t0 = STDL_GetTicks();
         r = pixchk_suite();
-        printf("PX: BLiTTER %s: %s\n", use ? "allowed" : "refused",
-               r == 0 ? "PASS" : "FAIL");
+        printf("PX: BLiTTER %s: %s in %lus\n",
+               use ? "allowed" : "refused", r == 0 ? "PASS" : "FAIL",
+               (unsigned long)((STDL_GetTicks() - t0) / 1000));
         fflush(stdout);
         bad |= r;
     }

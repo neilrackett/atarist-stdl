@@ -148,8 +148,11 @@ target.
    `stdlconv wav in.wav OUT.WAV --rate 12517` for sample audio
    (decodes MS ADPCM, resamples to an exact STE DMA rate: 6258/
    12517/25033/50066), and `stdlconv midi in.mid OUT.STM` for
-   music (renders MIDI to a YM2149 register stream - 3 square
-   voices, last-note priority, drums to noise; expect a chiptune
+   music (renders General MIDI to a YM2149 register stream - 3
+   square voices shared one per instrument before chords, by
+   General MIDI program (bass, melody, then pads), with envelopes,
+   vibrato and drums as noise or falling-tone bursts; the programs
+   shape each part, so keep them in the file; expect a chiptune
    cover, not the original mix).
 2. Build with `-Iinclude/compat` so `#include "SDL.h"` resolves to
    the shim; link `libstdl.a`. Compile errors = the porting TODO

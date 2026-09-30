@@ -741,7 +741,8 @@ warnings** with the Makefile's `-Wall -Wextra`.
   mode takes an 8-BIT displacement only.
 - **Audio/music**: record Hatari output (`hatari-shortcut recsound`,
   path from the `szYMCaptureFileName` config key) and verify
-  spectrally; PLAYMUS's DEMO.STM is note-exact by construction. The
+  spectrally; PLAYMUS's DEMO.STM is note-exact by construction (its
+  melody's held notes carry a vibrato of 1/8 semitone). The
   voice mixer (voice.c) is host-tested end to end through the fake
   TOS queue and DMA counter in tests/host/test_voice.c - steer
   `stdl_host_dma_pos` and call the queue slot like the interrupt

@@ -10,13 +10,12 @@
  * a tracker of its own - rather than as an STM file it can hand to
  * STDL_Music. The program keys notes on and off in up to sixteen
  * slots, one per logical channel, and the device plays the three
- * most recently keyed on the chip: last-note priority, the policy
- * stdlconv's MIDI converter uses, so a live cover sounds like a
- * converted one. A note that lost its voice to a newer one comes
- * back when a voice frees, whether that is a note ending or an
- * effect handing its voice back, so held chords survive passing
- * notes. A note keyed while an effect holds a voice takes a free
- * voice and sounds at once; it does not wait for that voice.
+ * most recently keyed on the chip: last-note priority. A note that
+ * lost its voice to a newer one comes back when a voice frees,
+ * whether that is a note ending or an effect handing its voice
+ * back, so held chords survive passing notes. A note keyed while an
+ * effect holds a voice takes a free voice and sounds at once; it
+ * does not wait for that voice.
  *
  * The slot calls only record intent; the shared 50Hz sound tick
  * applies it, between the music stream and the effects: tones

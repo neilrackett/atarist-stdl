@@ -5,9 +5,12 @@
 """
 Regenerate the demo audio assets in examples/assets/:
 
-  DEMO.MID - deterministic test tune (arpeggio melody, sustained
-             bass, hats) used by PLAYMUS/SFXDEMO and designed for
-             spectral verification of the YM output
+  DEMO.MID - deterministic test tune (arpeggio melody on a square
+             lead, sustained bass, hats) used by PLAYMUS/SFXDEMO and
+             designed for spectral verification of the YM output:
+             the converter plays each part on its own voice, the
+             melody with an accent and a slight vibrato on held
+             notes, the bass with an accent
   BEEP.WAV - 0.4s 880Hz square at 12517Hz u8 mono, the DMA chunk
              PLAYMUS fires over the music
 
@@ -41,6 +44,11 @@ def make_midi(path):
     events = []
     # tempo 120bpm -> 500000us/qn -> 2 qn = 1s
     events.append((0, b"\xFF\x51\x03" + struct.pack(">I", 500000)[1:]))
+
+    # General MIDI programs: the converter shapes each part by its
+    # instrument (80 = square lead, 33 = fingered bass)
+    events.append((0, bytes([0xC0, 80])))
+    events.append((0, bytes([0xC1, 33])))
 
     # melody (channel 0): A3 C4 E4 A4 C5 E5 A5 A4, one second each
     melody = [57, 60, 64, 69, 72, 76, 81, 69]

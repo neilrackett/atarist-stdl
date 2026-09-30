@@ -63,9 +63,11 @@ stop trying and redesign instead.
 * Music is the one interrupt-driven part of STDL: the YM replay
   runs from a VBL queue slot (register updates cannot tolerate pump
   jitter). It is three square-wave voices plus noise - MIDI
-  converted with `stdlconv midi` keeps the three most recent notes
-  (last-note priority) and maps percussion to noise bursts; chords
-  beyond three voices are dropped. Streams replay at 50Hz and
+  converted with `stdlconv midi` gives each instrument one voice
+  before any gets a chord (the bass, then melodic instruments, then
+  pads, by General MIDI program) and plays percussion as short noise
+  or falling-tone bursts over a free voice or the least important
+  note; notes beyond three voices are dropped. Streams replay at 50Hz and
   assume a 50Hz display (colour low resolution). There is no MOD /
   OGG / MP3 path: sample-based music has no YM equivalent - author
   natively (SNDH-style) or re-score via MIDI.
@@ -74,7 +76,7 @@ stop trying and redesign instead.
   restored). The speaker is always voice A; `STDL_PlaySfx` prefers
   voice C. More than three simultaneous effects steal voices.
 * `STDL_Tone` plays the three most recently keyed of its sixteen
-  slots (last-note priority, as `stdlconv midi` does); a displaced
+  slots (last-note priority); a displaced
   note returns when a voice frees. Tones override music on the
   voices they use, and effects override tones. Square waves only:
   no envelopes, no noise, no per-slot priority yet.

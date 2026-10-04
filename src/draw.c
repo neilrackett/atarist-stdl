@@ -86,6 +86,109 @@ static __attribute__((noinline)) void fill_longpairs(uint32_t *lp,
 }
 
 /*
+ * Whole groups, every plane: `rows` rows of `ng` groups from g, each
+ * group the pattern pair l01, l23. Each row is stored from its end
+ * down, four groups to a movem.l of eight registers (72 cycles for 32
+ * bytes) and the rest a group at a time. The edge-merge loop this
+ * replaces for whole groups read and rewrote both edge groups of
+ * every row, about 100 cycles each where a store costs 24, and rows
+ * of 32 groups and more each paid a memset call's 70us.
+ *
+ * At a plane budget of 2 only planes 0 and 1 are stored (l23 is not
+ * used), a long a group.
+ *
+ * Out of line, like fill_longpairs, so its eleven registers are its
+ * own business and not fill_rows' allocation. ng >= 1, rows >= 1.
+ */
+static __attribute__((noinline)) void fill_groups(uint8_t *g, int ng,
+                                                  int rows,
+                                                  int32_t stride,
+                                                  uint32_t l01,
+                                                  uint32_t l23)
+{
+#ifdef __m68k__
+    uint8_t *end = g + (ng << 3);       /* the first row's end */
+    int16_t n = (int16_t)ng, h = (int16_t)rows;
+
+    if (stdl_planes <= 2) {
+        stride -= ng << 3;
+        __asm__ volatile(
+            "1:\n\t"
+            "move.w %[n],%%d0\n\t"
+            "subq.w #1,%%d0\n"
+            "2:\n\t"
+            "move.l %[l01],(%[g])\n\t"
+            "addq.l #8,%[g]\n\t"
+            "dbf    %%d0,2b\n\t"
+            "adda.l %[st],%[g]\n\t"
+            "subq.w #1,%[h]\n\t"
+            "bne.s  1b"
+            : [g] "+a"(g), [h] "+d"(h)
+            : [n] "d"(n), [l01] "d"(l01), [st] "d"(stride)
+            : "d0", "cc", "memory");
+        return;
+    }
+    __asm__ volatile(
+        "move.l %[l01],%%d0\n\t"
+        "move.l %[l23],%%d1\n\t"
+        "move.l %%d0,%%d2\n\t"
+        "move.l %%d1,%%d3\n\t"
+        "move.l %%d0,%%a1\n\t"
+        "move.l %%d1,%%a2\n\t"
+        "move.l %%d0,%%a3\n\t"
+        "move.l %%d1,%%a4\n\t"
+        "moveq  #3,%%d6\n\t"
+        "and.w  %[n],%%d6\n\t"        /* groups over a multiple of 4 */
+        "swap   %%d6\n\t"
+        "lsr.w  #2,%[n]\n\t"
+        "move.w %[n],%%d6\n"           /* d6 = rest : fours          */
+        "1:\n\t"
+        "move.l %[e],%%a5\n\t"
+        "move.w %%d6,%%d5\n\t"
+        "subq.w #1,%%d5\n\t"
+        "bmi.s  3f\n"
+        "2:\n\t"
+        /* predecrement movem puts d0 lowest and a4 highest */
+        "movem.l %%d0-%%d3/%%a1-%%a4,-(%%a5)\n\t"
+        "dbf    %%d5,2b\n"
+        "3:\n\t"
+        "swap   %%d6\n\t"
+        "move.w %%d6,%%d5\n\t"
+        "swap   %%d6\n\t"
+        "subq.w #1,%%d5\n\t"
+        "bmi.s  5f\n"
+        "4:\n\t"
+        "move.l %%d1,-(%%a5)\n\t"
+        "move.l %%d0,-(%%a5)\n\t"
+        "dbf    %%d5,4b\n"
+        "5:\n\t"
+        "adda.l %[st],%[e]\n\t"
+        "subq.w #1,%[h]\n\t"
+        "bne.s  1b"
+        : [e] "+a"(end), [n] "+d"(n), [h] "+d"(h)
+        : [l01] "g"(l01), [l23] "g"(l23), [st] "g"(stride)
+        : "d0", "d1", "d2", "d3", "d5", "d6", "a1", "a2", "a3", "a4",
+          "a5", "cc", "memory");
+#else
+    /* C twin - what tests/host exercises and the asm must match */
+    int y, i;
+
+    for (y = 0; y < rows; y++) {
+        stdl_wlong *p = (stdl_wlong *)g;
+
+        for (i = 0; i < ng; i++) {
+            p[0] = l01;
+            if (stdl_planes > 2) {
+                p[1] = l23;
+            }
+            p += 2;
+        }
+        g += stride;
+    }
+#endif
+}
+
+/*
  * One row of a span: every CPU fill that is not a whole block in 0
  * or 15 (FillRect's rows, STDL_HLine, each span of STDL_HSpans). The
  * edge groups merge a plane pair at a time as XOR-AND-XOR -
@@ -357,6 +460,10 @@ static void fill_rows(STDL_Surface *s, int x1, int x2, int y1,
                  STDL_PACK2(pw[0], pw[1]), STDL_PACK2(pw[2], pw[3]), (np))
         STDL_PLANE_DISPATCH(np, FILL_ONE);
 #undef FILL_ONE
+    } else if ((lm & rm) == 0xFFFFu) {
+        /* whole groups in any colour: rows of stores, no edge merge */
+        fill_groups(row + g0 * 8, ng, rows, s->stride,
+                    STDL_PACK2(pw[0], pw[1]), STDL_PACK2(pw[2], pw[3]));
     } else {
         fill_block((stdl_wlong *)(row + g0 * 8), g1 - g0, rows, s->stride,
                    lm, rm, STDL_PACK2(pw[0], pw[1]),

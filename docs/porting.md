@@ -425,6 +425,10 @@ truncates colours to the low N bits rather than rejecting them. See
   scribble over low-res screen RAM. Fine for tests, not for games.
 * **Arguments**: programs launched from the desktop get no argv;
   make sure defaults are sensible.
+* **Many copies of one sprite**: `STDL_BlitSprites` draws a list of
+  positions and frames in one call, and `STDL_DirtyWholeGroups(1)`
+  makes their restores plain copies of whole groups, where the scene
+  allows it.
 * **Overlapping dirty-rect sprites** (testsprite-style erase/redraw)
   show tearing between overlapping sprites at ST frame rates; use
   `STDL_Dirty` restore or a back buffer for real games. The two

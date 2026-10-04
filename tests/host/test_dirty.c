@@ -19,7 +19,9 @@
  *  - The direct restore, which skips STDL_BlitSurfaceEx when the
  *    background and page are alike, against STDL_BlitSurfaceEx itself:
  *    random rectangles at every phase and width, under random clip
- *    rectangles on the page, byte for byte.
+ *    rectangles on the page, byte for byte; and with
+ *    STDL_DirtyWholeGroups, against the same blit of each rectangle
+ *    rounded out to whole groups.
  */
 #include <stdio.h>
 #include <string.h>
@@ -192,7 +194,14 @@ static void test_two_pages(void)
     }
 }
 
+static void test_direct_whole(int whole);
 static void test_direct(void)
+{
+    test_direct_whole(0);
+    test_direct_whole(1);
+}
+
+static void test_direct_whole(int whole)
 {
     STDL_Surface *bg = STDL_CreateSurface(W, H);
     STDL_Surface *a = STDL_CreateSurface(W, H);
@@ -201,6 +210,7 @@ static void test_direct(void)
 
     randomise(bg);
     STDL_DirtyInit(bg, MAXR);
+    STDL_DirtyWholeGroups(whole);
     for (it = 0; it < 400; it++) {
         STDL_Rect clip, rs[MAXR];
         int n = 1 + (int)(rnd() % MAXR);
@@ -224,11 +234,21 @@ static void test_direct(void)
         }
         STDL_DirtyRestore(a);
         for (k = 0; k < n; k++) {
-            STDL_Rect d = rs[k];
-            STDL_BlitSurfaceEx(bg, &rs[k], b, &d, 0);
+            STDL_Rect r = rs[k], d;
+
+            if (whole) {
+                const int x1 = (r.x + r.w + 15) & ~15;
+
+                r.x = (int16_t)(r.x & ~15);
+                r.w = (uint16_t)(x1 - r.x);
+            }
+            d = r;
+            STDL_BlitSurfaceEx(bg, &r, b, &d, 0);
         }
-        CHECK(same(a, b), "direct restore differs, iteration %d", it);
+        CHECK(same(a, b), "direct restore differs (whole %d), iteration %d",
+              whole, it);
     }
+    STDL_DirtyWholeGroups(0);
     STDL_DirtyQuit();
     STDL_FreeSurface(bg);
     STDL_FreeSurface(a);

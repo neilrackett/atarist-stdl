@@ -48,6 +48,7 @@ static const uint8_t *owes[4];
 static int owes_next;
 static int shared;              /* no room for a second list: both
                                  * pages share one, restored whole    */
+static int whole_groups;        /* STDL_DirtyWholeGroups              */
 
 int STDL_DirtyInit(STDL_Surface *background, int max)
 {
@@ -248,6 +249,11 @@ static void restore_rect(STDL_Surface *dst, const STDL_Rect *r)
     const int stride = dst->stride;
     int x0 = r->x, y0 = r->y, x1 = x0 + r->w, y1 = y0 + r->h;
     int g0, g1, h, n;
+
+    if (whole_groups) {
+        x0 &= ~15;              /* out to the groups it touches */
+        x1 = (x1 + 15) & ~15;
+    }
     uint16_t lm, rm;
     uint32_t off;
     uint8_t *d;
@@ -315,6 +321,11 @@ void STDL_DirtyRestore(STDL_Surface *dst)
         }
     }
     STDL_DirtyReset();          /* cur is this page's list */
+}
+
+void STDL_DirtyWholeGroups(int on)
+{
+    whole_groups = on != 0;
 }
 
 void STDL_DirtyReset(void)

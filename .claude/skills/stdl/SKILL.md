@@ -110,6 +110,13 @@ surface already holding out-of-budget colours when you lower it
 will render wrong. Grep the port for every colour literal before
 choosing N - the maximum index used decides it, not the palette.
 
+Many copies of one sprite - bobs, particles, a wave of enemies -
+go in one `STDL_BlitSprites(spr, list, n, dst)` call, a list of
+`STDL_SpriteAt {x, y, frame}`. Each one wholly inside the clip skips
+`STDL_BlitSprite`'s per-call set-up; anything else is drawn by it.
+Measured on a plain ST (SPRCOST): fourteen pre-shifted 16x16 bobs
+13.1ms one call each, 11.1ms batched.
+
 Pre-shifted sprites (`STDL_PRESHIFT`) cost 16x RAM and make
 unaligned sprites as cheap as aligned ones - on a plain ST. With a
 BLiTTER, `STDL_BlitSprite` hands sprites to the chip, which shifts
@@ -776,8 +783,13 @@ first.
   (`STDL_UseBlitter(0)`) at plane budget 4, each rectangle is
   restored by offset, skipping the general
   blit's set-up: measured on a plain ST, 16 restores of 16x16 at
-  group edges went from 9.9ms to 6.3ms, and at x & 15 = 5 from 18.6
-  to 14.9 (the edge groups' merges are most of what is left).
+  group edges went from 9.9ms to 6.1ms, and at x & 15 = 5 from 18.6
+  to 12.7 (the edge groups' merges are most of what is left).
+  `STDL_DirtyWholeGroups(1)` restores the whole groups a rectangle
+  touches instead, a plain copy: 12.7 -> 7.9ms for those sixteen. It
+  also repaints the pixels beside each rectangle from the background,
+  so use it only where everything on the page is background or a
+  pushed sprite, not where a HUD is drawn straight onto it.
 - Composition: `STDL_TRANSPARENT` fills punch holes in masked
   surfaces; blits maintain destination masks; `STDL_SurfaceIsOpaque`
   (cached) skips backdrop under solid tiles; `STDL_PutGroup` for

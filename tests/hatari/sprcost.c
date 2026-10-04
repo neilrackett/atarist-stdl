@@ -94,6 +94,16 @@ static void op_restore(int i)
 
 static int dirty_phase = 1;     /* 0: every rectangle on a group edge */
 
+/* one large rectangle at an odd x: a ball and its shadow */
+static void op_dirty_big(int i)
+{
+    STDL_Rect r = { 37, 40, 92, 69 };
+
+    (void)i;
+    STDL_DirtyPush(&r);
+    STDL_DirtyRestore(dst);
+}
+
 static void op_dirty(int i)
 {
     int k;
@@ -316,6 +326,7 @@ static void restore_cases(int subset)
         dirty_phase = 0;
         report("dirty 16 x 16x16 aligned", op_dirty);
         dirty_phase = 1;
+        report("dirty 1 x 92x69 x&15=5", op_dirty_big);
         STDL_DirtyQuit();
     }
 }

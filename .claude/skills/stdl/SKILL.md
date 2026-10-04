@@ -214,7 +214,11 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
    - 1bpp data -> `STDL_SurfaceFrom1bpp`; byte-per-pixel (chunky)
      art -> `STDL_SurfaceFromIndexed8(bytes, w, h, stride, key)`
      then `STDL_SpriteFromSurface`. Only reach for `STDL_PutGroup` /
-     `STDL_PutGroup8` when the source is some format of its own
+     `STDL_PutGroup8` when the source is some format of its own.
+     Load-time costs on a plain ST: the conversion about 80 cycles a
+     pixel (96 keyed), and `STDL_PRESHIFT` 280ms for one 64x64
+     sprite, so a loader converting a screenful of art is counting
+     tenths of a second, not seconds
    - the same art in several colour schemes (team/faction colours,
      damage flashes) -> `STDL_RemapSurface(s, map)` once per
      variant at load, then blit normally. There is no blit-time

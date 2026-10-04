@@ -91,8 +91,9 @@ static void build_frame(const STDL_Surface *s, int fx, int frame_w,
  * window and one shift a word; the first and last output groups, which
  * have the fill (mask ones, planes zero) on one side, are peeled out
  * of the loop. The form this replaced shifted each word twice and
- * tested both neighbours for every word: about 0.8s for one 64x64
- * sprite on a plain ST, a load-time cost a demo's loader showed. */
+ * tested both neighbours for every word: 732ms for one 64x64 sprite
+ * on a plain ST, a load-time cost a demo's loader showed; 280ms now
+ * (tests/hatari/ixchk.c times it). */
 static uint16_t *preshift_expand(const uint16_t *v0, int groups,
                                  int rows_total)
 {

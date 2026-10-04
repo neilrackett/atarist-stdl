@@ -23,6 +23,7 @@ void (*stdl_shutdown_rasters)(void);
 uint8_t stdl_timerb_owner;
 uint16_t (*stdl_blit_policy)(uint16_t nlines, uint32_t cpl);
 void (*stdl_pal_apply_hook)(void);
+int (*stdl_pal_raw_hook)(int index, uint16_t word);
 
 static STDL_Palette screen_palette;
 static STDL_PixelFormat screen_format;
@@ -204,6 +205,7 @@ static void release_hardware(void)
     /* staging's flush went with the VBL slots; writes are immediate
      * again, and staging starts afresh if the program inits again */
     stdl_pal_apply_hook = NULL;
+    stdl_pal_raw_hook = NULL;
     if (stdl_shutdown_hwscroll != NULL) {
         /* LINEWIDTH and HSCROLL back to stock before the Setscreen
          * below repoints the display at page[0] */

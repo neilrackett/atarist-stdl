@@ -10,11 +10,16 @@
  *
  *  - Random convex polygons (hulls of random points), every
  *    operation, plane budgets 4, 2 and 3, random clip rectangles,
- *    surface origins and masked surfaces (a drawn pixel turns
- *    opaque).
+ *    masked surfaces (a drawn pixel turns opaque, or transparent for
+ *    a SET in STDL_TRANSPARENT), and surface origins, which a
+ *    polygon ignores like the other drawing primitives.
  *  - Tiling: a polygon split along a diagonal and both halves XORed
  *    equals the whole polygon XORed - no seam drawn twice, no gap.
  *  - The four corners of a rectangle fill what STDL_FillRect fills.
+ *  - Coordinates at the ends of int16_t: columns far off either side
+ *    must not wrap round into the picture, and edges taller than
+ *    32767 rows must step right (the 68000's divs.w takes a 16-bit
+ *    divisor, so they take the long way).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -71,8 +76,7 @@ static void randomise(STDL_Surface *s, int budget)
 
     for (y = 0; y < s->h; y++) {
         for (x = 0; x < s->w; x++) {
-            STDL_PutPixel(s, x + s->org_x, y + s->org_y,
-                          (uint8_t)rnd(1 << budget));
+            STDL_PutPixel(s, x, y, (uint8_t)rnd(1 << budget));
         }
     }
 }
@@ -202,7 +206,7 @@ static void test_random(void)
         uint8_t before[W * H], mbefore[W * H];
         STDL_Point p[20];
         STDL_Rect clip;
-        int n, x, y, col, ox = 0, oy = 0, bad = 0;
+        int n, x, y, col, ox = 0, oy = 0, bad = 0, trans;
 
         STDL_SetPlaneBudget(budget);
         if (masked) {
@@ -249,17 +253,21 @@ static void test_random(void)
                 STDL_Point t = p[x]; p[x] = p[n - 1 - x]; p[n - 1 - x] = t;
             }
         }
-        col = rnd(16);
+        col = rnd(17);                  /* 16: STDL_TRANSPARENT */
         STDL_FillPolygon(s, p, n, (uint8_t)col, op);
+        trans = op == STDL_DRAW_SET && col == STDL_TRANSPARENT && masked;
         col &= (1 << budget) - 1;
+        if (trans) {
+            col = 0;
+        }
         for (y = 0; y < H && bad < 3; y++) {
             int first, end;
 
-            section(p, n, y + oy, &first, &end);
+            section(p, n, y, &first, &end);
             for (x = 0; x < W && bad < 3; x++) {
                 const int in = x >= clip.x && x < clip.x + clip.w
                     && y >= clip.y && y < clip.y + clip.h
-                    && x + ox >= first && x + ox < end
+                    && x >= first && x < end
                     && (op == STDL_DRAW_SET || col != 0);
                 const int want = in ? apply(before[y * W + x], col, op)
                                     : before[y * W + x];
@@ -271,7 +279,7 @@ static void test_random(void)
                     bad++;
                 }
                 if (masked) {
-                    const int wm = in ? 0 : mbefore[y * W + x];
+                    const int wm = in ? trans : mbefore[y * W + x];
 
                     if (getmask(s, x, y) != wm) {
                         CHECK(0, "it %d: mask (%d,%d) got %d want %d", it,
@@ -344,8 +352,64 @@ static void test_rect(void)
     }
 }
 
+/* every pixel of the surface against the reference */
+static void check_against(const STDL_Point *p, int n, const char *what)
+{
+    STDL_Surface *s = STDL_CreateSurface(W, H);
+    int x, y, bad = 0;
+
+    STDL_FillPolygon(s, p, n, 7, STDL_DRAW_SET);
+    for (y = 0; y < H && bad < 3; y++) {
+        int first, end;
+
+        section(p, n, y, &first, &end);
+        for (x = 0; x < W && bad < 3; x++) {
+            const int want = x >= first && x < end ? 7 : 0;
+
+            if (getpix(s, x, y) != want) {
+                CHECK(0, "%s: (%d,%d) got %d want %d", what, x, y,
+                      getpix(s, x, y), want);
+                bad++;
+            }
+        }
+    }
+    STDL_FreeSurface(s);
+}
+
+static void test_extremes(void)
+{
+    static const STDL_Point wrap_r[3] = {
+        { -32768, 0 }, { -32000, 8 }, { -32768, 12 }
+    };
+    static const STDL_Point wrap_l[3] = {
+        { 32767, 0 }, { 32767, 12 }, { 32000, 8 }
+    };
+    static const STDL_Point tall[3] = {
+        { -15000, -20000 }, { 15000, 20000 }, { -15000, 20000 }
+    };
+    static const STDL_Point taller[4] = {
+        { 20, -32767 }, { 60, -32767 }, { 90, 32767 }, { 10, 32767 }
+    };
+    static const STDL_Point wide[3] = {
+        { -32768, 30 }, { 32767, 10 }, { 32767, 50 }
+    };
+    /* clipped 30000 rows down an edge 60000 wide: the product of the
+     * two passes 32 bits */
+    static const STDL_Point steep[3] = {
+        { -30000, -30000 }, { 30000, 30000 }, { -30000, 30000 }
+    };
+
+    check_against(wrap_r, 3, "far left");
+    check_against(wrap_l, 3, "far right");
+    check_against(tall, 3, "40000 rows");
+    check_against(taller, 4, "65534 rows");
+    check_against(wide, 3, "65535 columns");
+    check_against(steep, 3, "clipped 30000 rows down");
+}
+
 int main(void)
 {
+    test_extremes();
     test_random();
     test_tiling();
     test_rect();

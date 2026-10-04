@@ -71,10 +71,18 @@ the no-border figure; palette writes are staged to the vertical
 blanking so they can never flash mid-frame. See `examples/overscan.c`.
 
 `STDL_OpenRasters` changes one or two colour registers every few lines
-down the picture from a double-buffered table - copper bars, skies, a
+down the picture from tables filled a frame ahead - copper bars, skies, a
 gradient behind text - with the Timer C prefix that keeps them steady,
 Timer B shared safely with the borders (each refuses while the other
 holds it), and the vectors put back however the program exits.
+
+`STDL_FillPolygon` fills convex polygons straight from their edges -
+set, or XORed, ORed or cleared into a colour's planes, with shared
+edges tiling exactly - for flat-shaded 3D and glenz. `STDL_StagePalette(1)`
+holds palette changes for the vertical blank, so a fade or a cycle never
+splits a frame. Music can be played from memory, sought, and read back
+for meters (`STDL_MusicFromMemory`, `STDL_SeekMusic`,
+`STDL_GetMusicRegisters`).
 
 `STDL_EnableMouse(0)` stops the IKBD reporting a mouse the game never
 reads - three ACIA interrupts per movement that, with a border open,
@@ -117,10 +125,11 @@ emulated; see [docs/limits.md](docs/limits.md).
 | `include/compat/` | SDL.h and SDL_mixer.h - the SDL 1.2 compatibility shims                             |
 | `src/`            | video, surface, surfacefrom, draw, shapes, blit, blit8, blitter, planes, palette,   |
 |                   | event, cursor, time, dirty, vbl, sprite, tileset, text, drawchar, indexed, asset,   |
-|                   | bmp, degas, audio, voice, music, sfx, tone, opl, ym, compat, mixer, palstage        |
+|                   | bmp, degas, audio, voice, music, sfx, tone, opl, ym, compat, mixer, palstage,       |
+|                   | polygon, raster                                                                     |
 | `tools/stdlconv/` | asset converter: image quantise + planar, sprite/tile/font banks, Degas PI1,        |
 |                   | WAV (incl. MS ADPCM) to STE DMA rates, MIDI to YM music, C-array embedding          |
-| `tools/libcalls.sh` | per-function libgcc multiply/divide/float calls in object files, with an allowlist gate |
+| `tools/libcalls.sh` | per-function libgcc arithmetic calls (multiply, divide, 64-bit, float) in object files, with an allowlist gate |
 | `examples/`       | ported SDL 1.2 test programs + original STDL demos and their assets (public domain) |
 | `docs/`           | format.md (the contract), porting.md, limits.md, design-overview.md                 |
 | `.claude/skills/` | the `stdl` porting skill (auto-discovered by Claude Code in this repo)              |

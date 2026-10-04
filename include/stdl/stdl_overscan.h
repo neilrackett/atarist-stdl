@@ -31,7 +31,8 @@ extern "C" {
  * line 228 read as colour 0, i.e. border.
  *
  * Returns the new visible height (228), or 0 with STDL_GetError()
- * set when unavailable: no video mode yet, or a TT/Falcon.
+ * set when unavailable: no video mode yet, a TT/Falcon, or rasters
+ * open (STDL_OpenRasters) - both run on Timer B.
  *
  * STDL_DOUBLEBUF works here: opening a border with it set allocates
  * a second tall page, and STDL_Flip swaps them. The flip goes

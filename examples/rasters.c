@@ -11,8 +11,10 @@
  * Colour 0 is the background and the border, so bars written into it
  * run edge to edge; colour 15 gets a gradient of its own, which the
  * box in the middle (drawn once, in colour 15) shows. Each frame
- * fills the next raster table and shows it with the flip - only the
- * bars move, the rest of the table carries over from the last one.
+ * fills the next raster table - black, the scrolled gradient, then
+ * the bars over it - and shows it with the flip. (A table starts as
+ * a copy of the last shown, so a program that changes less can
+ * write less.)
  * STDL_OpenRasters refuses while a border is open: both run on
  * Timer B. ESC quits; the rasters close on the way out, however the
  * program ends.

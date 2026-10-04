@@ -162,6 +162,26 @@ int main(void)
           && stdl_timerb_owner == 0, "terminate path left Timer B");
     CHECK(STDL_RasterTable() == NULL, "still open after the teardown");
 
+    /* Timer C hooked by someone else after us, so close cannot unhook
+     * it; then they unhook back to our prefix and we reopen. Hooking
+     * again would save our own prefix as the vector to call. */
+    {
+        uint32_t ours, tos = stdl_host_vec_tc;
+        extern uint32_t stdl_rast_oldtc;
+
+        STDL_OpenRasters(2, 0, -1);
+        ours = stdl_host_vec_tc;
+        stdl_host_vec_tc = 0x7777;          /* a later hook */
+        STDL_CloseRasters();
+        CHECK(stdl_host_vec_tc == 0x7777, "unhooked under a later hook");
+        stdl_host_vec_tc = ours;            /* it unhooks */
+        STDL_OpenRasters(2, 0, -1);
+        CHECK(stdl_rast_oldtc == tos, "prefix saved %lx, its own chain",
+              (unsigned long)stdl_rast_oldtc);
+        STDL_CloseRasters();
+        CHECK(stdl_host_vec_tc == tos, "Timer C not back to TOS's");
+    }
+
     if (failures) {
         printf("test_raster: %d failures\n", failures);
         return 1;

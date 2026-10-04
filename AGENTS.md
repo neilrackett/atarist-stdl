@@ -364,13 +364,15 @@ warnings** with the Makefile's `-Wall -Wextra`.
   is a vectors-and-registers-only function on `stdl_shutdown_rasters`,
   called from release_hardware: RASTCHK aborted with rasters open,
   and the desktop came back in its own colours. The Timer C prefix
-  earns its place measurably: with a fixed table and the program
-  idle, a stripe edge was a line late in 184 of 186 frames without
-  it and 13 with it (Hatari, plain ST). The quicker colour-0 handler,
-  one register saved and the write about 20 cycles sooner, took that
-  to 6. Colour 0 is also the border, so its write must land before
-  the next line's left border, and the general handlers missed that
-  by a few dozen cycles now and then. Any new user of Timer B, or of
+  earns its place measurably. RASTCHK holds a fixed table, and
+  tests/hatari/rstill.py counts the held frames whose stripes moved:
+  2 of 144 with the prefix, 16 of 144 with RASTCHK built
+  -DRASTCHK_NOPREFIX (Hatari, plain ST, program idle in STDL_Delay).
+  A hold that only spun showed far more without it during
+  development. Colour 0 has its own handlers: one register saved,
+  and the write about 20 cycles sooner. Colour 0 is also the border,
+  so its write must land before the next line's left border, and the
+  general handlers missed that by a few dozen cycles now and then. Any new user of Timer B, or of
   an MFP vector, wants the same three things: an owner, a teardown
   on the terminate path, and a frame-by-frame capture of a still
   scene.
@@ -909,8 +911,10 @@ warnings** with the Makefile's `-Wall -Wextra`.
   handler (event.c) - plus, while a border is open, overscan.c's
   timer ISRs and its register-free prefixes on the VBL and Timer C
   vectors (the latter only lowers the CPU mask to 5 inside TOS's
-  handler). Services (audio refill, compat timers, cursor) run from
-  the pump and the native delays.
+  handler), and while rasters are open, raster.c's Timer B handlers
+  and its own Timer C prefix of the same kind. The two never run
+  together: `stdl_timerb_owner`. Services (audio refill, compat
+  timers, cursor) run from the pump and the native delays.
 
 ## 68000 / gcc 4.6.4 performance notes
 

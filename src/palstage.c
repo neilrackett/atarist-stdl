@@ -25,11 +25,11 @@
 #include "stdl_internal.h"
 
 static uint16_t pending[16];
-static volatile uint8_t dirty;
+static volatile uint16_t dirty;         /* a bit a register to write */
 static uint8_t users;
 
 /* stdl_pal_apply_hook while staging: convert now, write in the VBL.
- * The flag drops first so a VBL landing halfway through cannot
+ * The mask drops first so a VBL landing halfway through cannot
  * write a half-converted palette; it writes the whole one at the
  * next blank instead. */
 static void stage(void)
@@ -41,17 +41,31 @@ static void stage(void)
         pending[i] = STDL_HWColour(stdl.colours[i].r, stdl.colours[i].g,
                                    stdl.colours[i].b);
     }
-    dirty = 1;
+    dirty = 0xFFFFu;
+}
+
+/* one register's word, from the SDL shim's physical palette: that
+ * register alone is marked, so the blank writes it and nothing else
+ * - not the other fifteen, which STDL_SetColour may have changed
+ * since, and which an unstaged write would not have touched */
+static int stage_raw(int index, uint16_t word)
+{
+    pending[index & 15] = word;
+    dirty |= (uint16_t)(1u << (index & 15));
+    return 1;
 }
 
 static void flush(void)
 {
+    const uint16_t m = dirty;
     int i;
 
-    if (dirty) {
+    if (m != 0) {
         dirty = 0;
         for (i = 0; i < 16; i++) {
-            STDL_HWPAL[i] = pending[i];
+            if (m & (1u << i)) {
+                STDL_HWPAL[i] = pending[i];
+            }
         }
     }
 }
@@ -62,11 +76,19 @@ int stdl_pal_stage_on(int who)
      * a hook that is not ours means nothing is installed, whatever
      * the bits say */
     if (stdl_pal_apply_hook != stage) {
+        /* nothing left over from before a release - a fade-out just
+         * before STDL_Quit - may reach the registers */
+        dirty = 0;
         if (STDL_AddVBL(flush) != 0) {
             return -1;
         }
         users = 0;
+        /* the set starts as what is on screen, so the first raw write
+         * to one register has the rest to sit beside */
+        stage();
+        dirty = 0;
         stdl_pal_apply_hook = stage;
+        stdl_pal_raw_hook = stage_raw;
     }
     users |= (uint8_t)who;
     return 0;
@@ -78,6 +100,7 @@ void stdl_pal_stage_off(int who)
     if (users == 0 && stdl_pal_apply_hook == stage) {
         STDL_RemoveVBL(flush);
         stdl_pal_apply_hook = NULL;
+        stdl_pal_raw_hook = NULL;
         flush();                /* a change still waiting goes now */
     }
 }

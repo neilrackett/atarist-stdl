@@ -24,8 +24,9 @@ extern "C" {
  * text or an object a gradient of its own.
  *
  * Entry k of a table holds from picture line k * lines; the last
- * entry, written at the end of the picture, colours the bottom
- * border too. Returns the number of entries a frame (200 / lines +
+ * entry, written by the frame's last interrupt (at the end of the
+ * picture when `lines` divides 200), holds to the end of the frame
+ * and so colours the bottom border too. Returns the number of entries a frame (200 / lines +
  * 1), or -1 with STDL_GetError() set: no video mode, a bad argument,
  * no VBL slot, or a border open - Timer B, which this runs on, is
  * the borders' too, and each refuses while the other holds it.
@@ -42,10 +43,10 @@ extern "C" {
  * a frame. An interrupt still waits for the instruction it lands in,
  * so a raster's edge moves by up to a few pixels under divs or movem
  * - the price of a timer, not a cycle-counted loop. Measured in
- * Hatari with a fixed table and the program idle: an edge a line
- * late in 3% of frames with colour 0 first (its handler is the
- * quickest), against all but 2 frames in 186 without the Timer C
- * prefix. Closed on exit, however the program ends.
+ * Hatari (RASTCHK's hold, tests/hatari/rstill.py) with a fixed
+ * table in colour 0 and the program idle: an edge a line late in 2
+ * held frames of 144, and in 16 with TOS's Timer C handler left
+ * unopened. Closed on exit, however the program ends.
  *
  * While open, the two registers are the table's: a palette call
  * that sets them is overwritten from the next raster on.

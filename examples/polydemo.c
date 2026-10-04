@@ -12,8 +12,9 @@
  * its own with STDL_FillPolygon and STDL_DRAW_XOR: where they cross,
  * the planes add up to the colours between, and the palette decides
  * what those look like. Polygons that share an edge tile exactly
- * under the fill rule, so the star's triangles, drawn one by one,
- * show no seam - XOR would cancel any pixel drawn twice.
+ * under the fill rule: the star is ten triangles fanned about its
+ * centre, each sharing an edge with the next, drawn one by one, and
+ * it shows no seam - XOR would cancel any pixel drawn twice.
  *
  * The rotation is 16-bit fixed point through STDL_MulS16: gcc 4.6
  * turns `int * int` into a library call, and a sine-table multiply
@@ -81,7 +82,9 @@ int main(int argc, char *argv[])
         { 23, -40 }
     };
     STDL_Surface *s;
-    int frame = 0, quit = 0;
+    STDL_Point star[10];
+    int star_angle[10];
+    int frame = 0, quit = 0, k;
 
     (void)argc;
     (void)argv;
@@ -92,11 +95,13 @@ int main(int argc, char *argv[])
     }
     STDL_SetColours(s, pal, 0, 8);
     make_sine();
+    for (k = 0; k < 10; k++) {
+        star_angle[k] = k * NSIN / 10;      /* once, so not per frame */
+    }
 
     while (!quit) {
         STDL_Event e;
         STDL_Point p[6], tri[3];
-        int k;
 
         while (STDL_PollEvent(&e)) {
             if (e.type == STDL_KEYDOWN
@@ -111,17 +116,21 @@ int main(int argc, char *argv[])
         place(p, hexagon, 6, -frame * 3, 64, 190, 100);
         STDL_FillPolygon(s, p, 6, 2, STDL_DRAW_XOR);
 
-        /* a star as five triangles about a shared centre: drawn one
-         * at a time with no seam between them */
-        for (k = 0; k < 5; k++) {
-            const int a = frame + k * NSIN / 5;
+        /* a five-pointed star: its ten corners, points and notches,
+         * worked out once, then ten triangles fanned about the centre,
+         * each sharing an edge - the centre to a corner - with the
+         * next. Drawn one at a time, with no seam between them. */
+        for (k = 0; k < 10; k++) {
+            const int a = frame + star_angle[k], r = (k & 1) ? 30 : 90;
 
-            tri[0].x = 160;
-            tri[0].y = 100;
-            tri[1].x = (int16_t)(160 + (STDL_MulS16(COS(a), 90) >> 14));
-            tri[1].y = (int16_t)(100 + (STDL_MulS16(SIN(a), 90) >> 14));
-            tri[2].x = (int16_t)(160 + (STDL_MulS16(COS(a + 25), 30) >> 14));
-            tri[2].y = (int16_t)(100 + (STDL_MulS16(SIN(a + 25), 30) >> 14));
+            star[k].x = (int16_t)(160 + (STDL_MulS16(COS(a), r) >> 14));
+            star[k].y = (int16_t)(100 + (STDL_MulS16(SIN(a), r) >> 14));
+        }
+        tri[0].x = 160;
+        tri[0].y = 100;
+        for (k = 0; k < 10; k++) {
+            tri[1] = star[k];
+            tri[2] = star[k < 9 ? k + 1 : 0];
             STDL_FillPolygon(s, tri, 3, 4, STDL_DRAW_XOR);
         }
         STDL_Flip();

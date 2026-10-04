@@ -60,9 +60,10 @@ stop trying and redesign instead.
   buffer to read once and costs nothing per frame - at the price of
   being monophonic. Only one of the two may own the chip at a time;
   whichever is second fails cleanly.
-* Music is the one interrupt-driven part of STDL: the YM replay
-  runs from a VBL queue slot (register updates cannot tolerate pump
-  jitter). It is three square-wave voices plus noise - MIDI
+* Music is interrupt-driven: the YM replay runs from a VBL queue
+  slot (register updates cannot tolerate pump jitter). So are the
+  borders and rasters, on the MFP's timers, and the program's own
+  `STDL_AddVBL` callbacks; everything else runs from the pump. It is three square-wave voices plus noise - MIDI
   converted with `stdlconv midi` gives each instrument one voice
   before any gets a chord (the bass, then melodic instruments, then
   pads, by General MIDI program) and plays percussion as short noise
@@ -84,10 +85,14 @@ stop trying and redesign instead.
   block, key-on) and the carrier total level; timbre, rhythm mode
   and the noise generator are ignored, so drums are silent.
 * The surface origin applies to blits and rect fills only; draw
-  primitives (lines, circles, PutPixel) ignore it.
+  primitives (lines, circles, polygons, PutPixel) ignore it.
 * All draw primitives maintain surface masks (fills, spans,
   `STDL_PutPixel`, and the line/circle shapes built on them), and
   all accept `STDL_TRANSPARENT`.
+* `STDL_FillPolygon` takes `STDL_TRANSPARENT` for `STDL_DRAW_SET`
+  (a hole in a masked surface); its `STDL_DRAW_XOR`, `STDL_DRAW_OR`
+  and `STDL_DRAW_CLEAR` are plane operations and use bits 0-3 of the
+  colour, like the XOR primitives below.
 * The XOR primitives (`STDL_XorRect` and friends) are the one
   exception to `STDL_TRANSPARENT`: only bits 0-3 of the colour are
   used, colour 0 is a no-op, and the pixels they touch are marked

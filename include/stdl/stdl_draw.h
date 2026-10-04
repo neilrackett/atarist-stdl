@@ -129,18 +129,23 @@ void STDL_XorVSpans(STDL_Surface *dst, const STDL_Span *spans,
  * are inside, the bottom and right ones outside, so polygons that
  * share an edge tile with no gap and no overlap - XORed faces of one
  * object do not cancel along their seams - and the four corners of
- * {x, y, w, h} fill exactly that rectangle. Clipped to dst->clip;
- * coordinates take the surface origin like the other drawing calls.
- * A polygon that is not convex is drawn as something, but not as
+ * {x, y, w, h} fill exactly that rectangle. Clipped to dst->clip.
+ * Like the other drawing primitives, and unlike blits and rectangle
+ * fills, it ignores the surface origin. A SET in STDL_TRANSPARENT
+ * punches a hole in a masked surface, as STDL_FillRect does; XOR,
+ * OR and CLEAR take bits 0-3 of `col`, as the XOR primitives do, and
+ * mark what they touch opaque. Coordinates are any int16_t. A
+ * polygon that is not convex is drawn as something, but not as
  * itself.
  *
  * The edges are stepped down the rows into column tables and the
- * rows filled from them, with no span list. Measured on a plain ST:
- * a 160-row diamond XORed in two colours' planes took 16.8ms against
- * 23.9 through STDL_XorHSpans. Each edge costs about 1000 cycles to
- * set up (a divide), so a face of a few rows is cheaper as spans: a
- * 22-row triangle took 2.6ms against 2.3. CPU only. Its own object:
- * a program that never calls it does not carry it.
+ * rows filled from them, with no span list. Measured on a plain ST
+ * (PRIMCOST): a 160-row diamond XORed into two planes took 17.3ms
+ * against 23.9 for the same rows through STDL_XorHSpans. Each edge
+ * costs about 1000 cycles to set up, so a face of a few rows is
+ * cheaper as spans: a 22-row triangle took 2.7ms against 2.3. CPU
+ * only. Its own object: a program that never calls it does not carry
+ * it.
  */
 void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,
                       uint8_t col, int op);

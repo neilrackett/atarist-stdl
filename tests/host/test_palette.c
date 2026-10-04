@@ -156,10 +156,21 @@ static void test_staging(void)
     set3(0xA0);
     CHECK(STDL_HWPAL[3] == grey(0x80), "border close ended program staging");
 
+    /* the SDL shim's physical palette, a raw word: staged beside the
+     * rest, and the other registers keep what is on screen */
+    CHECK(stdl_pal_raw_hook != NULL, "no raw hook while staging");
+    STDL_HWPAL[5] = 0x123;
+    CHECK(stdl_pal_raw_hook(5, 0x0777) == 1, "raw word not staged");
+    CHECK(STDL_HWPAL[5] == 0x123, "raw word written before the blank");
+    fire();
+    CHECK(STDL_HWPAL[5] == 0x0777, "raw word not written at the blank");
+    CHECK(STDL_HWPAL[3] == grey(0xA0), "raw write disturbed another");
+
     /* off: what was waiting goes now, then immediate, slot freed */
     STDL_StagePalette(0);
     CHECK(STDL_HWPAL[3] == grey(0xA0), "waiting change dropped at off");
     CHECK(slots_used() == 0, "slot kept after off");
+    CHECK(stdl_pal_raw_hook == NULL, "raw hook kept after off");
     set3(0xC0);
     CHECK(STDL_HWPAL[3] == grey(0xC0), "write not immediate after off");
 

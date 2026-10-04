@@ -170,7 +170,8 @@ pixel, per row, per object or per frame. `STDL_MulS16`/`STDL_MulU16`
 and `STDL_FixDiv` (`(a << 16) / b` for a 16.16 slope, about 420
 cycles against 630) are the instruction whatever surrounds them.
 Products with a constant can stay plain C (`y * 160` compiles to
-`mulu.w #160`). Precompute a reciprocal or a table instead of
+shifts and adds for an `int`, `muls.w #160` for an `int16_t`).
+Precompute a reciprocal or a table instead of
 dividing per element, and step an index instead of taking `%`.
 
 Then make it a build failure rather than a profiling discovery.
@@ -236,14 +237,17 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
    - filled polygons (flat-shaded 3D, glenz, vector fonts) ->
      `STDL_FillPolygon(dst, pts, n, col, op)` for each convex face,
      not a span list built by hand. `op` is `STDL_DRAW_SET`, or
-     `_XOR`/`_OR`/`_CLEAR` on the planes `col` has, which is how a
-     glenz draws each face into a plane of its own. Edges follow the
-     rectangle's rule (top and left inside), so faces sharing an
-     edge tile with no seam, which XOR needs. Measured on a plain
-     ST: a 160-row diamond XORed in 16.8ms against 23.9 through
-     `STDL_XorHSpans`. A 22-row triangle is 2.6ms against 2.3,
-     because each edge's set-up (a divide) is about 1000 cycles.
-     Faces of a few rows go faster as spans. `examples/polydemo.c`
+     `STDL_DRAW_XOR`/`STDL_DRAW_OR`/`STDL_DRAW_CLEAR` on the planes
+     `col` has, which is how a glenz draws each face into a plane of
+     its own. Edges follow the rectangle's rule (top and left
+     inside), so faces sharing an edge tile with no seam, which XOR
+     needs. Like the other drawing primitives it ignores the surface
+     origin. A rectangle's four corners with an op is a plane-masked
+     rectangle fill. Measured on a plain ST (PRIMCOST): a 160-row
+     diamond XORed in 17.3ms against 23.9 through `STDL_XorHSpans`.
+     A 22-row triangle is 2.7ms against 2.3, because each edge costs
+     about 1000 cycles to set up. Faces of a few rows go faster as
+     spans. `examples/polydemo.c`
    - a *loop* of short spans (terrain profiles, column fields,
      raycaster walls) -> fill an `STDL_Span` array and make one
      `STDL_XorVSpans` / `STDL_VSpans` / `STDL_XorHSpans` /
@@ -766,9 +770,11 @@ first.
   what was drawn into it two frames ago. Before that change (v1.13.2
   and earlier) the single list erased the wrong page; a double-buffered
   port that pushed both frames' rectangles to compensate can stop.
-  Keep the background the page's shape - same size, no origin, no
-  masks on either - and on a machine without a BLiTTER at plane
-  budget 4 each rectangle is restored by offset, skipping the general
+  Keep the background the page's shape - same size and stride, no
+  origin on either, no mask on the page, and no colour key on the
+  background - and with the BLiTTER absent or refused
+  (`STDL_UseBlitter(0)`) at plane budget 4, each rectangle is
+  restored by offset, skipping the general
   blit's set-up: measured on a plain ST, 16 restores of 16x16 at
   group edges went from 9.9ms to 6.3ms, and at x & 15 = 5 from 18.6
   to 14.9 (the edge groups' merges are most of what is left).
@@ -781,8 +787,9 @@ first.
   program, which plays in place without a copy. `STDL_MusicFrame()`
   is the music's own clock, in stream frames, so sync effects to it,
   not to a counter of your own. `STDL_SeekMusic(frame)` jumps,
-  playing or paused, and writes every voice's state at once. Ship
-  one song and seek, not a copy per entry point.
+  playing or paused, in `0 .. STDL_MusicLength(m) - 1`. It writes
+  every voice's state at once, or on resume when paused. Ship one
+  song and seek, not a copy per entry point.
   `STDL_GetMusicRegisters(regs)` returns the stream's 14 registers
   for VU meters without touching the chip; volumes 8-10 with bit 4
   set follow the envelope. `examples/musicvu.c`.
@@ -893,23 +900,27 @@ first.
 - Rasters (colour changes down the screen): `STDL_OpenRasters(lines,
   reg1, reg2)` changes one or two colour registers every `lines`
   lines from a table. Fill `STDL_RasterTable()` and call
-  `STDL_ShowRasters()` with each flip. A new table starts as a copy
-  of the last, so change only what moves. Colour 0 is the border
-  too, so its bars run edge to edge. Measured on a plain ST with
-  colour 0 first, every second line costs 11% of the machine (15%
-  with a second register) and every line 22% (29%).
-  Timer B is the borders' as well, so rasters and an open border
-  refuse each other. The terminate path puts the vectors back,
-  which a hand-rolled raster handler leaves pointing into freed
-  memory. `examples/rasters.c`.
+  `STDL_ShowRasters()` with each flip; `STDL_CloseRasters()` when
+  done (`<stdl/stdl_raster.h>`, in `stdl.h`). A new table starts as
+  a copy of the last, so change only what moves. Colour 0 is the
+  border too, so its bars run edge to edge. Measured on a plain ST
+  (RASTCHK) with colour 0 first, every second line costs 11% of the
+  machine (15% with a second register) and every line 22% (29%);
+  another first register is a few points dearer. Timer B is the
+  borders' as well, so rasters and an open border refuse each
+  other. The terminate path puts the vectors back, which a
+  hand-rolled raster handler leaves pointing into freed memory.
+  While open, the two registers are the table's. `examples/rasters.c`.
 - Palette changes on the frame boundary: `STDL_StagePalette(1)`
   holds every change made through `STDL_SetPalette`,
-  `STDL_SetColours`, the SDL shim and `STDL_FadeTo`, and writes it
-  in the next vertical blank. Unstaged, a palette cycle or fade
-  written from the main loop lands wherever the beam is, and that
-  frame shows the old colours above it and the new below. Measured
-  in Hatari with a colour switched at mid-screen every frame: 300 of
-  300 frames split unstaged, 0 of 305 staged. It costs up to a
+  `STDL_SetColours`, `STDL_FadeTo` and the SDL shim's
+  `SDL_SetColors`/`SDL_SetPalette(SDL_PHYSPAL)`, and writes it in the
+  next vertical blank. Unstaged, a palette cycle or fade written from
+  the main loop lands wherever the beam is, and that frame shows the
+  old colours above it and the new below. Measured in Hatari with a
+  colour switched at mid-screen every frame (`tests/hatari/palstg.c`):
+  99 and 100 frames of 100 split unstaged, 1 and 2 staged (the
+  switch-over frames). It costs up to a
   frame of delay and a VBL slot; an open border stages on its own
   account. `STDL_SetColour` (raw word) is never staged, for raster
   tricks. A port that staged its own palette from an `STDL_AddVBL`

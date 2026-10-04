@@ -108,10 +108,12 @@ static void write_shadow(void)
     }
 }
 
-/* the YM service hands a voice back: re-write the stream's state */
+/* the YM service hands a voice back: re-write the stream's state,
+ * unless the music is paused - then the voice stays silent until
+ * resume writes the whole state back */
 static void restore_voice(int voice)
 {
-    if (playing && cur != NULL) {
+    if (playing && !paused && cur != NULL) {
         write_voice(voice);
     } else {
         stdl_ym_write(8 + voice, 0);
@@ -497,10 +499,14 @@ int STDL_SeekMusic(int frame)
     cur_pos = pos;
     cur_frame = (uint16_t)frame;
     tick_acc = 0;
+    /* playing again before the state goes out: an effect handing a
+     * voice back meanwhile then restores it rather than silencing
+     * it, and a tick landing in the middle writes from the same,
+     * already whole, state */
+    playing = was;
     if (was && !paused) {
         write_shadow();
     }
-    playing = was;
     return 0;
 }
 

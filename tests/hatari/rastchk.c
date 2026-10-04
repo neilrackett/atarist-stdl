@@ -6,7 +6,9 @@
  * The raster service on the machine.
  *
  *  - What it costs: an idle loop counted over 100 frames with
- *    rasters off, then every 4, 2 and 1 lines, one register and two.
+ *    rasters off, then every 4, 2 and 1 lines - colour 0 alone and
+ *    with colour 15 (its own quicker handlers), and colour 1 alone
+ *    and with colour 15 (the general ones).
  *  - Timer B has one owner: a border refuses to open over rasters,
  *    rasters refuse to open over a border, and each opens once the
  *    other has closed.
@@ -21,6 +23,12 @@
  *       -o dist/RASTCHK.TOS tests/hatari/rastchk.c libstdl.a
  *   TOS=$PWD/tmp/tos/etos256uk.img MACHINE=st \
  *       tests/hatari/run.sh rc dist/RASTCHK.TOS 8 "waitfor RC:done"
+ *
+ * The hold, recorded (EXTRA="--avirecord on --avi-vcodec png
+ * --avi-file ...") and counted with tests/hatari/rstill.py, is the
+ * raster's stability: frames whose stripes differ from the median.
+ * Built with -DRASTCHK_NOPREFIX the hold runs with TOS's Timer C
+ * handler unopened, which is the measure of what the prefix buys.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,12 +60,19 @@ static void stripes(int lines)
         t[i] = (i * lines / 10) & 1 ? STDL_HW444(0xF80) : STDL_HW444(0x028);
     }
     STDL_ShowRasters();
+#ifdef RASTCHK_NOPREFIX
+    {
+        extern uint32_t stdl_rast_oldtc;
+
+        *(volatile uint32_t *)0x114UL = stdl_rast_oldtc;
+    }
+#endif
 }
 
 int main(int argc, char *argv[])
 {
     static const int steps[3] = { 4, 2, 1 };
-    uint32_t base, one[3], two[3];
+    uint32_t base, one[3], two[3], gone[3], gtwo[3];
     int k, fails = 0, ok1, ok2, ok3, ok4;
 
     if (STDL_SetVideoMode(320, 200, 4, 0) == NULL
@@ -77,6 +92,10 @@ int main(int argc, char *argv[])
         one[k] = idle();
         STDL_OpenRasters(steps[k], 0, 15);
         two[k] = idle();
+        STDL_OpenRasters(steps[k], 1, -1);
+        gone[k] = idle();
+        STDL_OpenRasters(steps[k], 1, 15);
+        gtwo[k] = idle();
     }
     STDL_CloseRasters();
 
@@ -99,12 +118,15 @@ int main(int argc, char *argv[])
     STDL_CloseRasters();
     STDL_Quit();
 
-    printf("RC: idle %lu; cost a frame with one register / two:\n",
+    printf("RC: idle %lu; cost a frame, colour 0 / 0+15 / 1 / 1+15:\n",
            (unsigned long)base);
     for (k = 0; k < 3; k++) {
-        printf("RC:  every %d lines: %lu%% / %lu%%\n", steps[k],
+        printf("RC:  every %d lines: %lu%% / %lu%% / %lu%% / %lu%%\n",
+               steps[k],
                (unsigned long)((base - one[k]) * 100 / base),
-               (unsigned long)((base - two[k]) * 100 / base));
+               (unsigned long)((base - two[k]) * 100 / base),
+               (unsigned long)((base - gone[k]) * 100 / base),
+               (unsigned long)((base - gtwo[k]) * 100 / base));
     }
     printf("RC: border over rasters refused %s, opens after %s\n",
            ok1 ? "yes" : "NO", ok2 ? "yes" : "NO");

@@ -7,7 +7,7 @@
  * sprites, restores and rectangles - tiles, keyed blits at aligned
  * x (the SDL port's sprite), text and single glyphs, lines and
  * circles, span and point batches, chunky frames, single pixels,
- * the XOR forms.
+ * the XOR forms, filled polygons beside the span lists they replace.
  * Same method and output format, so tests/hatari/sccmp.py compares
  * two logs: each case runs until it has taken MINTICKS of the 200Hz
  * clock, twice per process (passes A and B, the same-binary floor),
@@ -90,6 +90,83 @@ static void op_chars(int i)
         STDL_DrawChar(dst, &font, 21 + k * 8, 50, s[k], 7);
     }
 }
+/* an 8x8 font on its own grid: the movep path */
+static void op_text8(int i)
+{
+    (void)i;
+    STDL_DrawText(dst, &font, 16, 50, "SCORE 1234", 7);
+}
+static void op_chars8(int i)
+{
+    static const char s[] = "SCORE 1234";
+    int k;
+    (void)i;
+    for (k = 0; k < 10; k++) {
+        STDL_DrawChar(dst, &font, 16 + k * 8, 50, s[k], 7);
+    }
+}
+
+/* filled polygons, and the same shapes as span lists */
+static const STDL_Point diamond[4] = {
+    { 160, 20 }, { 240, 100 }, { 160, 180 }, { 80, 100 }
+};
+static const STDL_Point tri[3] = { { 100, 50 }, { 130, 70 }, { 95, 72 } };
+static STDL_Span dsp[200], tsp[40];
+static int ndsp, ntsp;
+
+/* a convex polygon's spans by the fill rule, slowly, once */
+static int spans_of(const STDL_Point *p, int n, STDL_Span *out)
+{
+    int y, i, k = 0, top = p[0].y, bot = p[0].y;
+
+    for (i = 1; i < n; i++) {
+        if (p[i].y < top) top = p[i].y;
+        if (p[i].y > bot) bot = p[i].y;
+    }
+    for (y = top; y < bot; y++) {
+        int l = 32767, r = -32768;
+
+        for (i = 0; i < n; i++) {
+            const STDL_Point *a = &p[i], *b = &p[(i + 1) % n];
+            int lo, hi, num, den, x;
+
+            if (a->y == b->y) continue;
+            lo = a->y < b->y ? a->y : b->y;
+            hi = a->y < b->y ? b->y : a->y;
+            if (y < lo || y >= hi) continue;
+            num = (y - a->y) * (b->x - a->x);
+            den = b->y - a->y;
+            x = a->x + num / den;
+            if (x < l) l = x;
+            if (x > r) r = x;
+        }
+        if (r > l) {
+            out[k].x = (int16_t)l;
+            out[k].y = (int16_t)y;
+            out[k].len = (int16_t)(r - l);
+            k++;
+        }
+    }
+    return k;
+}
+static void op_poly_d(int i)
+{
+    (void)i;
+    STDL_FillPolygon(dst, diamond, 4, 5, STDL_DRAW_XOR);
+}
+static void op_spans_d(int i) { (void)i; STDL_XorHSpans(dst, dsp, ndsp, 5); }
+static void op_poly_t(int i)
+{
+    (void)i;
+    STDL_FillPolygon(dst, tri, 3, 5, STDL_DRAW_XOR);
+}
+static void op_spans_t(int i) { (void)i; STDL_XorHSpans(dst, tsp, ntsp, 5); }
+static void op_poly_set(int i)
+{
+    (void)i;
+    STDL_FillPolygon(dst, diamond, 4, 9, STDL_DRAW_SET);
+}
+
 static void op_hline32(int i)  { (void)i; STDL_HLine(dst, 37, 68, 60, 5); }
 static void op_hline300(int i) { (void)i; STDL_HLine(dst, 7, 306, 60, 5); }
 static void op_vline(int i)    { (void)i; STDL_VLine(dst, 77, 20, 69, 5); }
@@ -222,6 +299,8 @@ int main(void)
     printf("SC: units: microseconds per operation\n");
     fflush(stdout);
 
+    ndsp = spans_of(diamond, 4, dsp);
+    ntsp = spans_of(tri, 3, tsp);
     for (pass_name = 'A'; pass_name <= 'B'; pass_name++) {
         report("tile 16x16", op_tile);
         report("tile 16x16 masked", op_tilem);
@@ -230,6 +309,8 @@ int main(void)
         report("keyed blit 32x32 aligned", op_key32);
         report("text 10 chars 8x8", op_text);
         report("drawchar x10 8x8", op_chars);
+        report("text 10 chars 8x8 x=16", op_text8);
+        report("drawchar x10 8x8 x=16", op_chars8);
         report("hline 32", op_hline32);
         report("hline 300", op_hline300);
         report("vline 50", op_vline);
@@ -249,6 +330,11 @@ int main(void)
         report("xorvline 50", op_xvline);
         report("xorvline 50 c3", op_xvline3);
         report("xorhline 32", op_xhline);
+        report("polygon 160 rows xor", op_poly_d);
+        report("xorhspans same 159", op_spans_d);
+        report("polygon 22 rows xor", op_poly_t);
+        report("xorhspans same 21", op_spans_t);
+        report("polygon 160 rows set", op_poly_set);
     }
     printf("SC:done\n");
     fflush(stdout);

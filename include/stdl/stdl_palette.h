@@ -55,10 +55,15 @@ uint16_t STDL_HWColour(uint8_t r, uint8_t g, uint8_t b);
 /*
  * Stage palette changes to the vertical blank (on = 1), or write them
  * where they are made (0, the default). Staged, everything that sets
- * the screen's palette - STDL_SetPalette, STDL_SetColours, the SDL
- * shim's palette calls, STDL_FadeTo - is converted when it is made
- * and written to the registers in the next blanking, so no frame
- * shows the old colours above the beam and the new below it. The
+ * the screen's palette - STDL_SetPalette, STDL_SetColours,
+ * STDL_FadeTo, and the SDL shim's SDL_SetColors and
+ * SDL_SetPalette(SDL_PHYSPAL) - is converted when it is made and
+ * written to the registers in the next blanking, so no frame shows
+ * the old colours above the beam and the new below it. Measured in
+ * Hatari with a colour switched at mid-screen every frame
+ * (tests/hatari/palstg.c): 99 and 100 frames of 100 split unstaged,
+ * through STDL_SetColours and the SDL shim; 1 and 2 staged, both at
+ * the switch from the phase before. The
  * cost is up to a frame's delay and one VBL slot. STDL_SetColour is
  * never staged. Returns 0, or -1 with STDL_GetError() set when no
  * VBL slot is free, and changes then stay immediate. An open border

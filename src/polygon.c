@@ -65,7 +65,7 @@ static void edge_start(Edge *e, const STDL_Point *a, const STDL_Point *b,
     /* one divs.w where the step fits sixteen bits, as it does for any
      * edge on a screen: a libgcc divide is about 630 cycles, and a
      * 24-face object has 72 edges a frame */
-    if (dx >= -32768 && dx <= 32767) {
+    if (dx >= -32768 && dx <= 32767 && dy <= 32767) {
 #ifdef __m68k__
         int32_t qr = dx;
 
@@ -91,10 +91,23 @@ static void edge_start(Edge *e, const STDL_Point *a, const STDL_Point *b,
     e->e = 0;
     e->yend = b->y;
     if (y > a->y) {
-        /* the exact x at row y: a->x + t * dx / dy, rounded up */
-        const long num = (long)(y - a->y) * dx;
-        long fq = num / dy, fr = num - fq * dy;
+        /* the exact x at row y: a->x + t * dx / dy, rounded up. In 32
+         * bits while the product fits, as it does for anything near a
+         * screen; 64 for an edge from the far ends of int16_t */
+        const int t = y - a->y;
+        long long fq, fr;
 
+        if (t < 32768 && dx > -32768 && dx < 32768) {
+            const int32_t num = (int32_t)t * dx;
+
+            fq = num / dy;
+            fr = num - (int32_t)fq * dy;
+        } else {
+            const long long num = (long long)t * dx;
+
+            fq = num / dy;
+            fr = num - fq * dy;
+        }
         if (fr < 0) {
             fr += dy;
             fq--;
@@ -136,14 +149,19 @@ static int edge_next(Edge *e, const STDL_Point *pts, int n, int dir,
  * One side's columns for rows [y, y1), into out[]: the left side's
  * first column clamped up to lo, the right side's last (its edge less
  * one) clamped down to hi, both in the surface's storage columns. A
- * row whose left is then past its right is empty. A tight loop of its
+ * row whose left is then past its right is empty - and each is held
+ * within [lo - 1, hi + 1] too, before it is narrowed to sixteen
+ * bits: an edge out at x = -32768 would otherwise wrap to a column
+ * the far side of the screen and turn an empty row into one 32000
+ * pixels long. A tight loop of its
  * own, so its few values stay in registers - stepped inside the fill,
  * with everything else live, gcc kept them on the stack. 0 when the
  * side ran out (the polygon's bottom).
  */
 #define SIDE(NAME, CLAMP)                                                 \
 static int NAME(Edge *e, const STDL_Point *pts, int n, int dir,          \
-                int bottom, int y, int y1, int16_t *out, int lim, int off)\
+                int bottom, int y, int y1, int16_t *out, int lo, int hi, \
+                int off)                                                  \
 {                                                                         \
     while (y < y1) {                                                      \
         int stop, x, er, q, r, dy;                                        \
@@ -158,7 +176,7 @@ static int NAME(Edge *e, const STDL_Point *pts, int n, int dir,          \
         r = e->r;                                                         \
         dy = e->dy;                                                       \
         for (; y < stop; y++) {                                           \
-            *out++ = (int16_t)(CLAMP(x, lim));                            \
+            *out++ = (int16_t)(CLAMP(x, lo, hi));                         \
             x += q;                                                       \
             er -= r;                                                      \
             if (er < 0) {                                                 \
@@ -171,8 +189,12 @@ static int NAME(Edge *e, const STDL_Point *pts, int n, int dir,          \
     }                                                                     \
     return 1;                                                             \
 }
-#define CLAMP_LO(x, lo) ((x) < (lo) ? (lo) : (x))
-#define CLAMP_HI(x, hi) ((x) > (hi) ? (hi) : (x))
+/* the left column at least lo, the right at most hi; each also kept
+ * one past the other bound, so a row off the clip stays empty */
+#define CLAMP_LO(x, lo, hi) \
+    ((x) < (lo) ? (lo) : (x) > (hi) + 1 ? (hi) + 1 : (x))
+#define CLAMP_HI(x, lo, hi) \
+    ((x) > (hi) ? (hi) : (x) < (lo) - 1 ? (lo) - 1 : (x))
 SIDE(side_left, CLAMP_LO)
 SIDE(side_right, CLAMP_HI)
 
@@ -338,22 +360,25 @@ typedef void (*rows_fn)(uint8_t *, int32_t, const int16_t *,
                         const int16_t *, int, uint32_t, uint32_t,
                         uint32_t, uint32_t);
 
-/* the mask words under a span: drawn pixels become opaque */
-static void mask_row(uint16_t *mw, int x1, int x2)
+/* the mask words under a span: drawn pixels become opaque, or - a
+ * transparent SET - transparent */
+static void mask_row(uint16_t *mw, int x1, int x2, int transparent)
 {
     int n = (x2 >> 4) - (x1 >> 4);
     uint16_t lm = lmask[x1 & 15], rm = rmask[x2 & 15];
 
     mw += x1 >> 4;
     if (n == 0) {
-        *mw &= (uint16_t)~(lm & rm);
+        lm &= rm;
+        *mw = transparent ? (uint16_t)(*mw | lm) : (uint16_t)(*mw & ~lm);
         return;
     }
-    *mw++ &= (uint16_t)~lm;
+    *mw = transparent ? (uint16_t)(*mw | lm) : (uint16_t)(*mw & ~lm);
+    mw++;
     while (--n != 0) {
-        *mw++ = 0;
+        *mw++ = transparent ? 0xFFFFu : 0;
     }
-    *mw &= (uint16_t)~rm;
+    *mw = transparent ? (uint16_t)(*mw | rm) : (uint16_t)(*mw & ~rm);
 }
 
 /* rows a chunk: the column tables are static, and a polygon taller
@@ -361,11 +386,42 @@ static void mask_row(uint16_t *mw, int x1, int x2)
 #define CHUNK 100
 static int16_t tab_l[CHUNK], tab_r[CHUNK];
 
+/* +1 when walking forwards from the top vertex goes down the left
+ * side, -1 when it goes down the right, 0 for no area. With y down
+ * the screen, the cross product of the top vertex's two edges says
+ * which, in two 16-bit multiplies - compared, not subtracted, so
+ * nothing overflows; only a top vertex its neighbours run straight
+ * through needs the polygon's whole signed area. */
+static int orientation(const STDL_Point *pts, int n, int top)
+{
+    const STDL_Point *t = &pts[top];
+    const STDL_Point *nx = &pts[top + 1 < n ? top + 1 : 0];
+    const STDL_Point *pv = &pts[top > 0 ? top - 1 : n - 1];
+    const int ux = nx->x - t->x, uy = nx->y - t->y;
+    const int vx = pv->x - t->x, vy = pv->y - t->y;
+    long long area = 0;
+    int i;
+
+    if (ux >= -32768 && ux <= 32767 && vx >= -32768 && vx <= 32767
+        && uy <= 32767 && vy <= 32767) {
+        const int32_t a = STDL_MulS16(ux, vy), b = STDL_MulS16(uy, vx);
+
+        if (a != b) {
+            return a < b ? 1 : -1;
+        }
+    }
+    for (i = 0; i < n; i++) {
+        const STDL_Point *p = &pts[i], *q = &pts[i + 1 < n ? i + 1 : 0];
+
+        area += (long long)p->x * q->y - (long long)q->x * p->y;
+    }
+    return area < 0 ? 1 : area > 0 ? -1 : 0;
+}
+
 void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,
                       uint8_t col, int op)
 {
-    int i, top = 0, bottom, y, y2, ox, oy, lo, hi, fwd_left;
-    int32_t area = 0;
+    int i, top = 0, bottom, y, y2, lo, hi, dir, transparent;
     uint32_t l01, l23, k01 = 0, k23 = 0;
     rows_fn fill;
     Edge el, er;
@@ -373,43 +429,44 @@ void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,
     if (dst == NULL || pts == NULL || n < 3 || dst->pixels == NULL) {
         return;
     }
+    /* as STDL_FillRect: STDL_TRANSPARENT punches a hole in a masked
+     * surface and is colour 0 on one without; the plane operations
+     * take bits 0-3, as the XOR primitives do */
+    transparent = op == STDL_DRAW_SET && col >= STDL_TRANSPARENT
+                  && dst->mask != NULL;
     col &= STDL_COL_MASK;
+    if (transparent) {
+        col = 0;
+    }
     if (col == 0 && op != STDL_DRAW_SET) {
         return;                 /* no plane to flip, set or clear */
     }
     bottom = pts[0].y;
-    for (i = 0; i < n; i++) {
-        const STDL_Point *a = &pts[i], *b = &pts[i + 1 < n ? i + 1 : 0];
-
-        if (a->y < pts[top].y) {
+    for (i = 1; i < n; i++) {
+        if (pts[i].y < pts[top].y) {
             top = i;
         }
-        if (a->y > bottom) {
-            bottom = a->y;
+        if (pts[i].y > bottom) {
+            bottom = pts[i].y;
         }
-        area += STDL_MulS16(a->x, b->y) - STDL_MulS16(b->x, a->y);
     }
-    if (area == 0) {
+    dir = orientation(pts, n, top);
+    if (dir == 0) {
         return;                 /* no area: a line, or a point */
     }
-    /* with y down the screen, positive area is clockwise to the eye,
-     * and walking forwards from the top then goes down the right */
-    fwd_left = area < 0;
 
-    /* edges in the program's coordinates, columns stored in the
-     * surface's: the clip comes into the one, the origin off the
-     * other */
-    ox = dst->org_x;
-    oy = dst->org_y;
+    /* the surface's own coordinates: like the other drawing
+     * primitives, and unlike blits and rectangle fills, a polygon
+     * does not take the surface origin */
     lo = dst->clip.x;
     hi = dst->clip.x + dst->clip.w - 1;
     y = pts[top].y;
     y2 = bottom;
-    if (y < dst->clip.y + oy) {
-        y = dst->clip.y + oy;
+    if (y < dst->clip.y) {
+        y = dst->clip.y;
     }
-    if (y2 > dst->clip.y + oy + dst->clip.h) {
-        y2 = dst->clip.y + oy + dst->clip.h;
+    if (y2 > dst->clip.y + dst->clip.h) {
+        y2 = dst->clip.y + dst->clip.h;
     }
     if (y >= y2 || lo > hi) {
         return;
@@ -440,21 +497,21 @@ void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,
     while (y < y2) {
         const int y1 = y + CHUNK < y2 ? y + CHUNK : y2;
         const int rows = y1 - y;
-        uint8_t *row = dst->pixels + stdl_row_off(y - oy, dst->stride);
+        uint8_t *row = dst->pixels + stdl_row_off(y, dst->stride);
 
-        if (!side_left(&el, pts, n, fwd_left ? 1 : -1, bottom, y, y1,
-                       tab_l, lo, ox)
-            || !side_right(&er, pts, n, fwd_left ? -1 : 1, bottom, y, y1,
-                           tab_r, hi, ox + 1)) {
+        if (!side_left(&el, pts, n, dir, bottom, y, y1, tab_l, lo, hi, 0)
+            || !side_right(&er, pts, n, -dir, bottom, y, y1, tab_r, lo,
+                           hi, 1)) {
             break;
         }
         fill(row, dst->stride, tab_l, tab_r, rows, l01, l23, k01, k23);
         if (dst->mask != NULL) {
-            uint8_t *mrow = dst->mask + stdl_row_off(y - oy, dst->maskstride);
+            uint8_t *mrow = dst->mask + stdl_row_off(y, dst->maskstride);
 
             for (i = 0; i < rows; i++, mrow += dst->maskstride) {
                 if (tab_l[i] <= tab_r[i]) {
-                    mask_row((uint16_t *)mrow, tab_l[i], tab_r[i]);
+                    mask_row((uint16_t *)mrow, tab_l[i], tab_r[i],
+                             transparent);
                 }
             }
         }

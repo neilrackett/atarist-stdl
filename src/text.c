@@ -98,8 +98,10 @@ STDL_PLANE_INLINE void draw_text_glyphs(uint8_t *pixels, int stride,
  * An 8-pixel font set on its own grid (x & 7 == 0) stays on it, so
  * every glyph not cut by the clip is a byte of each plane and takes
  * stdl_glyph8_rows; the cut ones at the ends take the general rows.
- * Measured on a plain ST, a 39-character line at x = 0 went from
- * 13.9ms to 9.8ms. Its own function, entered once: as a test inside
+ * Measured on a plain ST (PRIMCOST), ten characters at x = 16 take
+ * 2.68ms against 4.36 at x = 21 on the general rows; a 39-character
+ * line went from 13.9ms to 9.55. Its own function, entered once: as
+ * a test inside
  * the general loop it made unaligned text 5% slower through that
  * loop's register allocation.
  */

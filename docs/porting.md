@@ -176,7 +176,7 @@ time, not at runtime.
 | `SDL_GetTicks` / `SDL_Delay` | time module | 200Hz clock: 5ms resolution |
 | `SDL_AddTimer` / `SDL_SetTimer` | compat | cooperative: callbacks fire inside `SDL_Delay` |
 | `SDL_OpenAudio` / `SDL_LoadWAV` | `STDL_Audio` | STE DMA; cooperative refill, 2% of an 8MHz STE plus your callback when it writes signed 8-bit at a DMA rate straight into the ring; other formats are converted at every refill (13% for unsigned 8-bit mono at 12517Hz, 48% for 16-bit stereo at 22050); PCM WAVs only (`stdlconv wav`) |
-| `Mix_PlayMusic` etc (SDL_mixer) | `STDL_Music` | YM register streams from `stdlconv midi`; works on every ST. Natively: `STDL_MusicFromMemory`, `STDL_MusicFrame`/`STDL_SeekMusic` for position, `STDL_GetMusicRegisters` for meters |
+| `Mix_PlayMusic` etc (SDL_mixer) | `STDL_Music` | YM register streams from `stdlconv midi`; works on every ST. Natively: `STDL_MusicFromMemory`, `STDL_MusicFrame`/`STDL_MusicLength`/`STDL_SeekMusic` for position, `STDL_GetMusicRegisters` for meters |
 | `Mix_PlayChannel` / `Mix_LoadWAV` | mixer shim | up to 4 chunks on the `STDL_Voice` mixer, from the VBL (STE only): 5% of an 8MHz STE for one chunk at 6258Hz and 20% for four, 8% and 40% at 12517 - the rate `Mix_OpenAudio` picks for a PC game's 22050; half scale at full volume |
 | one-shot game effects | `STDL_PlaySample` | monophonic, but the DMA reads your buffer directly: no refill, no mixing, no per-frame cost |
 | PC-speaker sound | `STDL_SpeakerOn/Off` | immediate YM tone; steals voice A from music, restores after |
@@ -280,9 +280,17 @@ A game designed for 224 or 240 lines has three ways onto the ST's
 top border with `STDL_OpenTopBorder()` - 228 native lines on any
 50Hz machine for one timer interrupt per frame; a 60Hz base screen
 is switched to 50Hz while a border is open and restored on close.
-It fails cleanly (returns 0) only where the hardware has no GLUE
-borders (TT/Falcon), so keep one of the other two mappings as the
-fallback and choose at init. `examples/overscan.c`
+It fails cleanly (returns 0) where the hardware has no GLUE borders
+(TT/Falcon), or while rasters are open (`STDL_OpenRasters`; both run
+on Timer B and each refuses the other), so keep one of the other two
+mappings as the fallback and choose at init.
+
+Rasters - one or two colour registers changed every few lines down
+the picture - are `STDL_OpenRasters(lines, reg1, reg2)`: fill
+`STDL_RasterTable()` with hardware words, `STDL_ShowRasters()` with
+each flip, `STDL_CloseRasters()` when done. They are put back on any
+exit, abnormal ones included, which a port's own Timer B handler
+would not be. `examples/rasters.c`. `examples/overscan.c`
 is the pattern, including the toggle for A/B comparison.
 `STDL_OpenBottomBorder()` gains 45 lines at the other end instead,
 seamlessly: content goes at rows 200..244 with nothing to align
@@ -444,8 +452,8 @@ truncates colours to the low N bits rather than rejecting them. See
   multiplied, a value from a loop counter, `/` or `%` by a
   non-power-of-two (constants included) and `-O1` builds all call
   libgcc instead, at about 350 and 630 cycles a time on a plain ST.
-  Use `STDL_MulS16`, `STDL_DivS16` and `STDL_FixDiv` from
-  `stdl_math.h` on per-frame paths, and run `tools/libcalls.sh` over
+  Use `STDL_MulS16`/`STDL_MulU16`, `STDL_DivS16`/`STDL_DivU16` and
+  `STDL_FixDiv` from `stdl_math.h` on per-frame paths, and run `tools/libcalls.sh` over
   the port's objects to list every call per function. With `-a` and
   an allowlist it fails the build on a new one.
 * **libc memcpy in per-frame paths**: mintlib's memcpy overhead

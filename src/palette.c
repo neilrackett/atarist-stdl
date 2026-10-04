@@ -35,8 +35,9 @@ void stdl_palette_apply_hw(void)
 {
     int i;
     if (stdl_pal_apply_hook != NULL) {
-        /* a border overscan is open: writes are staged and drained
-         * inside the blanking, where they cannot flash mid-frame */
+        /* staging (palstage.c) - STDL_StagePalette, or an open
+         * border: writes are converted now and written inside the
+         * blanking, where they cannot split a frame */
         stdl_pal_apply_hook();
         return;
     }

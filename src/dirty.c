@@ -146,8 +146,8 @@ static int list_for(const uint8_t *key)
  * masks and a run of whole groups, and the general blit's set-up -
  * clipping both surfaces, the BLiTTER's rules, the phase and mask
  * dispatch - is most of the cost of a sprite-sized restore. Measured
- * on a plain ST: a 16x16 at x & 15 = 5 cost about 9200 cycles through
- * it, of which the pixels were under 4000.
+ * on a plain ST (SPRCOST's dirty cases): sixteen 16x16 restores at
+ * group edges took 9.9ms through it and 6.3 by offset.
  *
  * Exactly what the general path draws: the rectangle clipped to the
  * page's clip, edge groups merged under their masks, nothing rounded

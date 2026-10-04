@@ -424,6 +424,11 @@ extern uint16_t (*stdl_blit_policy)(uint16_t nlines, uint32_t cpl);
  * vertical blanking with it. Defined in video.c (always linked). */
 extern void (*stdl_pal_apply_hook)(void);
 
+/* while staging, one register's raw word into the staged set (1), or
+ * 0 to write it now: SDL_SetPalette(SDL_PHYSPAL), which sets the
+ * registers without the logical palette. Defined in video.c. */
+extern int (*stdl_pal_raw_hook)(int index, uint16_t word);
+
 /* palette staging's users (palstage.c): it runs while either holds
  * its bit. on returns -1 when no VBL slot is free, and writes then
  * stay immediate. */

@@ -60,6 +60,11 @@ uint32_t stdl_rast_oldtc;
 
 static uint32_t old_tb;
 static uint8_t old_ier, old_imr;
+/* our Timer C prefix is in the vector's chain: hooked at open and
+ * only unhooked if nobody hooked after us, so a reopen must not hook
+ * it again - its saved vector would then be itself, or a chain back
+ * to it, and the first tick would loop for ever */
+static uint8_t tc_hooked;
 
 #ifdef __m68k__
 #define MFP_IERA (*(volatile uint8_t *)0xFFFFFA07UL)
@@ -217,6 +222,7 @@ static void rast_release(void)
     VEC_TB = old_tb;
     if (VEC_TC == TC) {         /* unless someone hooked it after us */
         VEC_TC = stdl_rast_oldtc;
+        tc_hooked = 0;
     }
     stdl_int_restore(sr);
     open_ = 0;
@@ -290,12 +296,15 @@ int STDL_OpenRasters(int lines, int reg1, int reg2)
     old_tb = VEC_TB;
     old_ier = (uint8_t)(MFP_IERA & 0x01);
     old_imr = (uint8_t)(MFP_IMRA & 0x01);
-    stdl_rast_oldtc = VEC_TC;
+    if (!tc_hooked) {
+        stdl_rast_oldtc = VEC_TC;
+        VEC_TC = TC;
+        tc_hooked = 1;
+    }
     MFP_TBCR = 0;
     stdl_rast_ptr = tab[0] + words;
     VEC_TB = r1 == 0 ? (words == 2 ? ISR02 : ISR0)
                      : (words == 2 ? ISR2 : ISR1);
-    VEC_TC = TC;
     MFP_IERA |= 0x01;
     MFP_IMRA |= 0x01;
     open_ = 1;

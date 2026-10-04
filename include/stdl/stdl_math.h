@@ -40,8 +40,9 @@ extern "C" {
  * __divsi3 about 630 against 140 for divs.w. The functions here are
  * the instruction itself, whatever surrounds them - use them in any
  * loop that runs per pixel, per object or per frame. A product with
- * a constant can stay plain C (`y * 160` compiles to mulu.w #160 or
- * shifts), and tools/libcalls.sh lists, per function, every call an
+ * a constant can stay plain C (`y * 160` compiles to shifts and adds
+ * for an int, a muls.w #160 for an int16_t), and tools/libcalls.sh
+ * lists, per function, every call an
  * object file makes to libgcc's arithmetic, which is how to find the
  * cases nobody wrote down.
  *

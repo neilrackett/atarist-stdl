@@ -92,6 +92,8 @@ static void op_restore(int i)
     }
 }
 
+static int dirty_phase = 1;     /* 0: every rectangle on a group edge */
+
 static void op_dirty(int i)
 {
     int k;
@@ -99,7 +101,8 @@ static void op_dirty(int i)
     (void)i;
     for (k = 0; k < 16; k++) {
         STDL_Rect r;
-        r.x = (int16_t)(21 + (k & 3) * 72 + k);
+        r.x = (int16_t)(dirty_phase ? 21 + (k & 3) * 72 + k
+                                    : 16 + (k & 3) * 64);
         r.y = (int16_t)(13 + (k >> 2) * 44);
         r.w = 16;
         r.h = 16;
@@ -310,6 +313,9 @@ static void restore_cases(int subset)
     }
     if (!subset && STDL_DirtyInit(bg, 32) == 0) {
         report("dirty 16 x 16x16", op_dirty);
+        dirty_phase = 0;
+        report("dirty 16 x 16x16 aligned", op_dirty);
+        dirty_phase = 1;
         STDL_DirtyQuit();
     }
 }

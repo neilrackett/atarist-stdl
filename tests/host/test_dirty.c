@@ -16,6 +16,10 @@
  *    leaves the other's list alone.
  *  - A third page evicts the older list, and the evicted page is
  *    restored whole when it comes back.
+ *  - The direct restore, which skips STDL_BlitSurfaceEx when the
+ *    background and page are alike, against STDL_BlitSurfaceEx itself:
+ *    random rectangles at every phase and width, under random clip
+ *    rectangles on the page, byte for byte.
  */
 #include <stdio.h>
 #include <string.h>
@@ -188,10 +192,54 @@ static void test_two_pages(void)
     }
 }
 
+static void test_direct(void)
+{
+    STDL_Surface *bg = STDL_CreateSurface(W, H);
+    STDL_Surface *a = STDL_CreateSurface(W, H);
+    STDL_Surface *b = STDL_CreateSurface(W, H);
+    int it, k;
+
+    randomise(bg);
+    STDL_DirtyInit(bg, MAXR);
+    for (it = 0; it < 400; it++) {
+        STDL_Rect clip, rs[MAXR];
+        int n = 1 + (int)(rnd() % MAXR);
+
+        randomise(a);
+        memcpy(b->pixels, a->pixels, (size_t)a->stride * a->h);
+        clip.x = (int16_t)(rnd() % (W / 2));
+        clip.y = (int16_t)(rnd() % (H / 2));
+        clip.w = (uint16_t)(1 + rnd() % (W - clip.x));
+        clip.h = (uint16_t)(1 + rnd() % (H - clip.y));
+        if (it & 1) {
+            clip.x = clip.y = 0;
+            clip.w = W;
+            clip.h = H;
+        }
+        STDL_SetClipRect(a, &clip);
+        STDL_SetClipRect(b, &clip);
+        for (k = 0; k < n; k++) {
+            rs[k] = random_rect();
+            STDL_DirtyPush(&rs[k]);
+        }
+        STDL_DirtyRestore(a);
+        for (k = 0; k < n; k++) {
+            STDL_Rect d = rs[k];
+            STDL_BlitSurfaceEx(bg, &rs[k], b, &d, 0);
+        }
+        CHECK(same(a, b), "direct restore differs, iteration %d", it);
+    }
+    STDL_DirtyQuit();
+    STDL_FreeSurface(bg);
+    STDL_FreeSurface(a);
+    STDL_FreeSurface(b);
+}
+
 int main(void)
 {
     test_one_page();
     test_two_pages();
+    test_direct();
     if (failures == 0) {
         printf("dirty-list tests passed\n");
         return 0;

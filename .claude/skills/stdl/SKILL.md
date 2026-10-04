@@ -751,6 +751,12 @@ first.
   what was drawn into it two frames ago. Before that change (v1.13.2
   and earlier) the single list erased the wrong page; a double-buffered
   port that pushed both frames' rectangles to compensate can stop.
+  Keep the background the page's shape - same size, no origin, no
+  masks on either - and on a machine without a BLiTTER at plane
+  budget 4 each rectangle is restored by offset, skipping the general
+  blit's set-up: measured on a plain ST, 16 restores of 16x16 at
+  group edges went from 9.9ms to 6.3ms, and at x & 15 = 5 from 18.6
+  to 14.9 (the edge groups' merges are most of what is left).
 - Composition: `STDL_TRANSPARENT` fills punch holes in masked
   surfaces; blits maintain destination masks; `STDL_SurfaceIsOpaque`
   (cached) skips backdrop under solid tiles; `STDL_PutGroup` for

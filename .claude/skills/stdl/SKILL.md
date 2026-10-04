@@ -244,9 +244,9 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
      needs. Like the other drawing primitives it ignores the surface
      origin. A rectangle's four corners with an op is a plane-masked
      rectangle fill. Measured on a plain ST (PRIMCOST): a 160-row
-     diamond XORed in 17.3ms against 23.9 through `STDL_XorHSpans`.
-     A 22-row triangle is 2.7ms against 2.3, because each edge costs
-     about 1000 cycles to set up. Faces of a few rows go faster as
+     diamond XORed in 15.1ms against 23.9 through `STDL_XorHSpans`,
+     a 22-row triangle 2.3ms, level with spans: each edge costs about
+     1000 cycles to set up, so faces smaller than that go faster as
      spans. `examples/polydemo.c`
    - a *loop* of short spans (terrain profiles, column fields,
      raycaster walls) -> fill an `STDL_Span` array and make one

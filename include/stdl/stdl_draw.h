@@ -140,11 +140,10 @@ void STDL_XorVSpans(STDL_Surface *dst, const STDL_Span *spans,
  *
  * The edges are stepped down the rows into column tables and the
  * rows filled from them, with no span list. Measured on a plain ST
- * (PRIMCOST): a 160-row diamond XORed into two planes took 17.3ms
- * against 23.9 for the same rows through STDL_XorHSpans. Each edge
- * costs about 1000 cycles to set up, so a face of a few rows is
- * cheaper as spans: a 22-row triangle took 2.7ms against 2.3. CPU
- * only. Its own object: a program that never calls it does not carry
+ * (PRIMCOST): a 160-row diamond XORed into two planes took 15.1ms
+ * against 23.9 for the same rows through STDL_XorHSpans, and a
+ * 22-row triangle 2.3ms, the same as spans - each edge costs about
+ * 1000 cycles to set up, so below that size spans win. CPU only. Its own object: a program that never calls it does not carry
  * it.
  */
 void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,

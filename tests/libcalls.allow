@@ -25,7 +25,7 @@ mixer.o Mix_LoadWAV __udivdi3 1
 mixer.o Mix_LoadWAV __udivsi3 1
 sprite.o STDL_SpriteFromSurface __divsi3 1  # frames in a strip
 sprite.o STDL_SpriteFromSurface __mulsi3 1
-sprite.o stdl_sprite_preshift __mulsi3 3    # variant offsets, once
+sprite.o stdl_sprite_preshift __mulsi3 2    # variant sizes, once
 tileset.o STDL_TilesetFromSurface __divsi3 1
 tileset.o STDL_TilesetFromSurface __mulsi3 4
 

@@ -85,7 +85,14 @@ static void build_frame(const STDL_Surface *s, int fx, int frame_w,
 }
 
 /* Expand variant 0 into 16 pre-shifted variants (variant v shifted
- * right v pixels, one pad group wider). Returns new data block. */
+ * right v pixels, one pad group wider). Returns new data block.
+ *
+ * Output group g takes source groups g-1 and g through one 32-bit
+ * window and one shift a word; the first and last output groups, which
+ * have the fill (mask ones, planes zero) on one side, are peeled out
+ * of the loop. The form this replaced shifted each word twice and
+ * tested both neighbours for every word: about 0.8s for one 64x64
+ * sprite on a plain ST, a load-time cost a demo's loader showed. */
 static uint16_t *preshift_expand(const uint16_t *v0, int groups,
                                  int rows_total)
 {
@@ -105,34 +112,37 @@ static uint16_t *preshift_expand(const uint16_t *v0, int groups,
      * which is what the group loop below advances it by per variant */
     for (v = 0; v < 16; v++) {
         const uint16_t *src = v0;
-        for (y = 0; y < rows_total; y++) {
-            for (g = 0; g < pg; g++) {
-                /* source groups g-1 and g feed output group g */
-                const uint16_t *a =
-                    (g > 0) ? src + (g - 1) * SPR_WORDS : NULL;
-                const uint16_t *b =
-                    (g < groups) ? src + g * SPR_WORDS : NULL;
-                uint16_t am, bm, aw, bw;
 
-                am = a ? a[0] : 0xFFFFu;     /* mask 1-fills edges */
-                bm = b ? b[0] : 0xFFFFu;
-                if (v == 0) {
-                    dst[0] = bm;
-                } else {
-                    dst[0] = (uint16_t)((am << (16 - v)) | (bm >> v));
-                }
-                for (p = 1; p <= 4; p++) {
-                    aw = a ? a[p] : 0;       /* planes 0-fill */
-                    bw = b ? b[p] : 0;
-                    if (v == 0) {
-                        dst[p] = bw;
-                    } else {
-                        dst[p] = (uint16_t)
-                            ((aw << (16 - v)) | (bw >> v));
-                    }
-                }
+        for (y = 0; y < rows_total; y++) {
+            const uint16_t *a = src;
+
+            /* fill | source group 0 */
+            dst[0] = (uint16_t)((0xFFFF0000u | a[0]) >> v);
+            for (p = 1; p < SPR_WORDS; p++) {
+                dst[p] = (uint16_t)(a[p] >> v);
+            }
+            dst += SPR_WORDS;
+            /* written out: as a loop of five, the count and compare
+             * cost a third of each word */
+#define PRESHIFT_WORD(p) \
+            dst[p] = (uint16_t)((((uint32_t)a[p] << 16) \
+                                 | a[(p) + SPR_WORDS]) >> v)
+            for (g = 1; g < groups; g++) {
+                PRESHIFT_WORD(0);
+                PRESHIFT_WORD(1);
+                PRESHIFT_WORD(2);
+                PRESHIFT_WORD(3);
+                PRESHIFT_WORD(4);
+                a += SPR_WORDS;
                 dst += SPR_WORDS;
             }
+#undef PRESHIFT_WORD
+            /* the last source group | fill */
+            dst[0] = (uint16_t)((((uint32_t)a[0] << 16) | 0xFFFFu) >> v);
+            for (p = 1; p < SPR_WORDS; p++) {
+                dst[p] = (uint16_t)(((uint32_t)a[p] << 16) >> v);
+            }
+            dst += SPR_WORDS;
             src += srcrow;
         }
     }

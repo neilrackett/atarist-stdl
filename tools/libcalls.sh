@@ -49,6 +49,10 @@ command -v "$objdump" >/dev/null || { echo "$0: no $objdump" >&2; exit 2; }
 for o in "$@"; do
     [ -r "$o" ] || { echo "$0: cannot read $o" >&2; exit 2; }
 done
+if [ -n "$allow" ] && [ ! -r "$allow" ]; then
+    echo "$0: cannot read $allow" >&2
+    exit 2
+fi
 
 found=$(for o in "$@"; do
     "$objdump" -dr "$o" | awk -v o="${o##*/}" '
@@ -71,8 +75,17 @@ echo "$found" | awk -v allowfile="$allow" '
     BEGIN {
         while ((getline line < allowfile) > 0) {
             sub(/#.*/, "", line)
-            if (split(line, f) == 4)
+            if (split(line, f) == 4) {
                 ok[f[1] " " f[2] " " f[3]] = f[4] + 0
+                lines++
+            }
+        }
+        # an allowlist that reads as empty is a fault, not a policy:
+        # a file replaced under the toolchain container has done it
+        if (lines == 0) {
+            print "*** " allowfile " read as empty" > "/dev/stderr"
+            unreadable = 1
+            exit 2
         }
     }
     NF == 4 {
@@ -90,6 +103,8 @@ echo "$found" | awk -v allowfile="$allow" '
         n += $4
     }
     END {
+        if (unreadable)
+            exit 2
         for (k in ok)
             if (!(k in seen))
                 printf "%s: no longer called - drop the line\n", k

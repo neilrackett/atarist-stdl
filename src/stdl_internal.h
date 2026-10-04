@@ -73,6 +73,9 @@ extern volatile uint8_t stdl_host_vidbase[2];
 #define STDL_VC_LO      stdl_host_vidcnt[2]
 /* the YM as a register file: SELECT is the index, DATA the selected
  * entry, so a test reads the chip state straight out of the array */
+/* the MFP's registers by offset from $FFFFFA00, and two vectors */
+extern volatile uint8_t stdl_host_mfp[0x30];
+extern volatile uint32_t stdl_host_vec_tb, stdl_host_vec_tc;
 extern volatile uint8_t stdl_host_ym_sel;
 extern volatile uint8_t stdl_host_ym[16];
 extern volatile uint8_t stdl_host_conterm;
@@ -375,6 +378,15 @@ extern uint8_t stdl_mouse_on;
 extern uint8_t stdl_vbl_hz;
 extern int     stdl_sync_want;
 extern void (*stdl_shutdown_hwscroll)(void);
+extern void (*stdl_shutdown_rasters)(void);
+
+/* Timer B has one user at a time: an open border (overscan.c) or the
+ * raster service (raster.c). Each refuses to start while the other
+ * holds it. Defined in video.c (always linked), so neither object
+ * pulls in the other. */
+#define STDL_TB_BORDER  1
+#define STDL_TB_RASTERS 2
+extern uint8_t stdl_timerb_owner;
 
 /* Mega STE speed/cache control: the register, the requested mode
  * (see STDL_UseMegaSteSpeedup) and the read-modify-write that

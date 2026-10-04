@@ -26,6 +26,7 @@ extern "C" {
 #include <stdl/stdl_vbl.h>
 #include <stdl/stdl_overscan.h>
 #include <stdl/stdl_hwscroll.h>
+#include <stdl/stdl_raster.h>
 #include <stdl/stdl_dirty.h>
 #include <stdl/stdl_asset.h>
 #include <stdl/stdl_audio.h>

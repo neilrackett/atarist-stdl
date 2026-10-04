@@ -1746,6 +1746,7 @@ static void ovsc_release(void)
     mode = 0;
     stdl_blit_policy = NULL;
     stdl_shutdown_overscan = NULL;
+    stdl_timerb_owner = 0;
 }
 
 /* (Re)program prefixes, vectors and enable bits for a mode. The
@@ -1808,6 +1809,7 @@ static void ovsc_program(int m)
     stdl_ovsc_bpaused = 0;
     stdl_blit_policy = ovsc_blit_policy;
     stdl_shutdown_overscan = ovsc_release;
+    stdl_timerb_owner = STDL_TB_BORDER;
 }
 
 static int ovsc_flip(void);
@@ -1853,6 +1855,10 @@ static int ovsc_open(int which)
     }
     if (stdl.mach.mch_cookie >= 0x00020000UL) {
         STDL_SetError("TT/Falcon video has no GLUE borders");
+        return 0;
+    }
+    if (stdl_timerb_owner == STDL_TB_RASTERS) {
+        STDL_SetError("rasters are using Timer B");
         return 0;
     }
     /* The tricks are built on a 50Hz frame: the top border only

@@ -890,6 +890,18 @@ first.
   why it is opt-in and why the return value is the rate rather than
   an acknowledgement - ask, then believe the answer.
   `examples/vblchk.c` measures the VBL at both rates.
+- Rasters (colour changes down the screen): `STDL_OpenRasters(lines,
+  reg1, reg2)` changes one or two colour registers every `lines`
+  lines from a table. Fill `STDL_RasterTable()` and call
+  `STDL_ShowRasters()` with each flip. A new table starts as a copy
+  of the last, so change only what moves. Colour 0 is the border
+  too, so its bars run edge to edge. Measured on a plain ST with
+  colour 0 first, every second line costs 11% of the machine (15%
+  with a second register) and every line 22% (29%).
+  Timer B is the borders' as well, so rasters and an open border
+  refuse each other. The terminate path puts the vectors back,
+  which a hand-rolled raster handler leaves pointing into freed
+  memory. `examples/rasters.c`.
 - Palette changes on the frame boundary: `STDL_StagePalette(1)`
   holds every change made through `STDL_SetPalette`,
   `STDL_SetColours`, the SDL shim and `STDL_FadeTo`, and writes it

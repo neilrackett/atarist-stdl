@@ -354,6 +354,26 @@ warnings** with the Makefile's `-Wall -Wextra`.
   Do not reach for clearing the ALTALLOC flag. A 594KB port dies at
   its first allocation on a 1MB machine without alt-RAM, which is
   exactly why testers enable it.
+- **Timer B has one owner, and its teardown is on the terminate
+  path.** The raster service (src/raster.c) and the borders both run
+  on Timer B. Before it existed, a program that wanted rasters wrote
+  its own handler. Nothing stopped that coexisting with an open
+  border, and an abnormal exit left the Timer B and Timer C vectors
+  pointing into freed memory. `stdl_timerb_owner` in video.c now
+  names the holder and each refuses the other. The raster teardown
+  is a vectors-and-registers-only function on `stdl_shutdown_rasters`,
+  called from release_hardware: RASTCHK aborted with rasters open,
+  and the desktop came back in its own colours. The Timer C prefix
+  earns its place measurably: with a fixed table and the program
+  idle, a stripe edge was a line late in 184 of 186 frames without
+  it and 13 with it (Hatari, plain ST). The quicker colour-0 handler,
+  one register saved and the write about 20 cycles sooner, took that
+  to 6. Colour 0 is also the border, so its write must land before
+  the next line's left border, and the general handlers missed that
+  by a few dozen cycles now and then. Any new user of Timer B, or of
+  an MFP vector, wants the same three things: an owner, a teardown
+  on the terminate path, and a frame-by-frame capture of a still
+  scene.
 - **A mouse nobody reads still costs a border.** Moving a mouse with
   the bottom border open flickers it on a real Mega STE and the
   missed-window count climbs while the movement lasts; disabling

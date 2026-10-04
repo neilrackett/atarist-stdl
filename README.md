@@ -70,6 +70,12 @@ holds the CPU off the border and throughput stays within 14-28% of
 the no-border figure; palette writes are staged to the vertical
 blanking so they can never flash mid-frame. See `examples/overscan.c`.
 
+`STDL_OpenRasters` changes one or two colour registers every few lines
+down the picture from a double-buffered table - copper bars, skies, a
+gradient behind text - with the Timer C prefix that keeps them steady,
+Timer B shared safely with the borders (each refuses while the other
+holds it), and the vectors put back however the program exits.
+
 `STDL_EnableMouse(0)` stops the IKBD reporting a mouse the game never
 reads - three ACIA interrupts per movement that, with a border open,
 are enough to delay the timers a flick depends on and flicker the
@@ -177,6 +183,7 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | PLAYMUS.TOS  | YM music (stdlconv midi -> STDL_Music) + sample chunks via the SDL_mixer shim    |
 | MUSICVU.TOS  | YM music from memory: VU meter from the stream's registers, position, seeking    |
 | POLYDEMO.TOS | convex polygons XORed into single planes, a glenz look; seamless shared edges    |
+| RASTERS.TOS  | Timer B rasters: copper bars in colour 0 edge to edge, a gradient in colour 15   |
 | SFXDEMO.TOS  | Degas splash, YM effects stealing/restoring music voices, joystick key emulation |
 | TONEDEMO.TOS | live notes on the three YM voices: a fourth note displacing and returning        |
 | OPLDEMO.TOS  | an OPL2 register stream (the IMF games' music format) replayed as YM notes       |

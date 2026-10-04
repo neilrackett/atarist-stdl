@@ -233,6 +233,17 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
      multi-coloured (do not sort into colour runs to avoid it: the
      sort costs more than the per-point colour does); erase next
      frame with a second call in the background colour
+   - filled polygons (flat-shaded 3D, glenz, vector fonts) ->
+     `STDL_FillPolygon(dst, pts, n, col, op)` for each convex face,
+     not a span list built by hand. `op` is `STDL_DRAW_SET`, or
+     `_XOR`/`_OR`/`_CLEAR` on the planes `col` has, which is how a
+     glenz draws each face into a plane of its own. Edges follow the
+     rectangle's rule (top and left inside), so faces sharing an
+     edge tile with no seam, which XOR needs. Measured on a plain
+     ST: a 160-row diamond XORed in 16.8ms against 23.9 through
+     `STDL_XorHSpans`. A 22-row triangle is 2.6ms against 2.3,
+     because each edge's set-up (a divide) is about 1000 cycles.
+     Faces of a few rows go faster as spans. `examples/polydemo.c`
    - a *loop* of short spans (terrain profiles, column fields,
      raycaster walls) -> fill an `STDL_Span` array and make one
      `STDL_XorVSpans` / `STDL_VSpans` / `STDL_XorHSpans` /

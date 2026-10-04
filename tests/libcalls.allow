@@ -40,6 +40,8 @@ surface.o mask_alloc __mulsi3 1
 blit.o blit_whole __mulsi3 1                # beside a whole-surface memcpy
 sprite.o STDL_BlitSprite __mulsi3 1         # frames past 64K only
 shapes.o STDL_FillCircle __mulsi3 1         # span count (6-byte struct)
+polygon.o edge_next __divsi3 2              # once an edge, and only for a
+polygon.o edge_next __mulsi3 2              # step past 16 bits or a clipped top
 
 # Borders: at open, close and calibration, never from the ISRs
 overscan.o ovsc_measure_one __divsi3 1

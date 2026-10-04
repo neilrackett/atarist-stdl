@@ -43,7 +43,7 @@ TESTS   = test_pixel test_compose test_cursor test_assets test_planes \
           test_footprint test_indexed test_glyph test_vbl test_blit8 \
           test_underleak test_blitter test_dirty \
           test_voice test_ym test_tone test_sfx test_opl test_refresh \
-          test_wav test_mixer test_ring test_math test_palette test_music
+          test_wav test_mixer test_ring test_math test_palette test_music test_polygon
 
 all: $(TESTS)
 
@@ -62,6 +62,7 @@ test_pixel:     $(SRC)/surfacefrom.c $(SRC)/drawchar.c
 test_dirty:     $(SRC)/dirty.c
 test_palette:   $(SRC)/palstage.c $(SRC)/vbl.c
 test_music:     $(SRC)/music.c $(SRC)/ym.c $(SRC)/asset.c
+test_polygon:   $(SRC)/polygon.c
 # built with the counters, for stdl_blit_force: every operation the
 # BLiTTER could take goes to it, whatever its size
 test_blitter:   XFLAGS = -DSTDL_BLIT_STATS

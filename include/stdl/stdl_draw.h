@@ -112,6 +112,39 @@ void STDL_XorHSpans(STDL_Surface *dst, const STDL_Span *spans,
 void STDL_XorVSpans(STDL_Surface *dst, const STDL_Span *spans,
                     int count, uint8_t col);
 
+/*
+ * What a fill does to the pixels it covers. SET makes them `col`;
+ * the others work on the planes `col` has set and leave the rest
+ * alone - XOR flips them, OR sets them, CLEAR clears them - which is
+ * how a glenz or a planar overlay draws one plane over another.
+ */
+#define STDL_DRAW_SET   0
+#define STDL_DRAW_XOR   1
+#define STDL_DRAW_OR    2
+#define STDL_DRAW_CLEAR 3
+
+/*
+ * Fill the convex polygon pts[0..n-1] (either winding, n >= 3) under
+ * `op`. Coverage follows the rectangle's rule: the top and left edges
+ * are inside, the bottom and right ones outside, so polygons that
+ * share an edge tile with no gap and no overlap - XORed faces of one
+ * object do not cancel along their seams - and the four corners of
+ * {x, y, w, h} fill exactly that rectangle. Clipped to dst->clip;
+ * coordinates take the surface origin like the other drawing calls.
+ * A polygon that is not convex is drawn as something, but not as
+ * itself.
+ *
+ * The edges are stepped down the rows into column tables and the
+ * rows filled from them, with no span list. Measured on a plain ST:
+ * a 160-row diamond XORed in two colours' planes took 16.8ms against
+ * 23.9 through STDL_XorHSpans. Each edge costs about 1000 cycles to
+ * set up (a divide), so a face of a few rows is cheaper as spans: a
+ * 22-row triangle took 2.6ms against 2.3. CPU only. Its own object:
+ * a program that never calls it does not carry it.
+ */
+void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,
+                      uint8_t col, int op);
+
 #ifdef __cplusplus
 }
 #endif

@@ -40,7 +40,7 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           $(XPAD)/xpad.c src/stdl_xpad.c src/overscan.c \
           src/hwscroll.c src/tone.c src/cpuspeed.c src/opl.c \
           src/refresh.c src/mouse.c src/stram.c src/wav.c src/ring.c \
-          src/palstage.c
+          src/palstage.c src/polygon.c
 # Objects live under obj/, mirroring each source's own path. Sources
 # now come from two places, this repo and the xpad submodule, and
 # building beside the source would drop .o files inside lib/xpad. The
@@ -59,7 +59,7 @@ EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
            dist/TCURSOR.TOS dist/PLAYMUS.TOS dist/SFXDEMO.TOS \
            dist/BLITCHK.TOS dist/VBLCHK.TOS dist/OVERSCAN.TOS \
            dist/HWSCROLL.TOS dist/TONEDEMO.TOS dist/OPLDEMO.TOS \
-           dist/MUSICVU.TOS
+           dist/MUSICVU.TOS dist/POLYDEMO.TOS
 
 # Pinned, not left to ordering: a rule added above this one would
 # silently become the default goal, and `make` would then build
@@ -234,6 +234,8 @@ dist/HWSCROLL.TOS: examples/hwscroll.c $(LIB)
 dist/TONEDEMO.TOS: examples/tonedemo.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
 dist/MUSICVU.TOS: examples/musicvu.c $(LIB)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
+dist/POLYDEMO.TOS: examples/polydemo.c $(LIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
 dist/OPLDEMO.TOS: examples/opldemo.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@

@@ -336,6 +336,11 @@ or `pixels[y*pitch+x]` writes corrupt planar data. Rewrite:
 
 * gradient / row fills -> `SDL_FillRect` band per row or
   `STDL_HLine`
+* filled polygons (a software rasteriser's triangles, vector
+  graphics) -> `STDL_FillPolygon` per convex face, with
+  `STDL_DRAW_SET` or XOR/OR/CLEAR into the planes of a colour.
+  Shared edges tile exactly (top-left rule), and the edges are
+  stepped without a span list.
 * tiny overlays (FPS counters, debug text) -> `STDL_PutPixel`
   (slow path, fine for a handful of pixels) or `STDL_DrawText`
 * 1bpp bitmap expansion -> `STDL_SurfaceFrom1bpp`; byte-per-pixel

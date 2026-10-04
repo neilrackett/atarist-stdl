@@ -859,6 +859,24 @@ first.
   why it is opt-in and why the return value is the rate rather than
   an acknowledgement - ask, then believe the answer.
   `examples/vblchk.c` measures the VBL at both rates.
+- Palette changes on the frame boundary: `STDL_StagePalette(1)`
+  holds every change made through `STDL_SetPalette`,
+  `STDL_SetColours`, the SDL shim and `STDL_FadeTo`, and writes it
+  in the next vertical blank. Unstaged, a palette cycle or fade
+  written from the main loop lands wherever the beam is, and that
+  frame shows the old colours above it and the new below. Measured
+  in Hatari with a colour switched at mid-screen every frame: 300 of
+  300 frames split unstaged, 0 of 305 staged. It costs up to a
+  frame of delay and a VBL slot; an open border stages on its own
+  account. `STDL_SetColour` (raw word) is never staged, for raster
+  tricks. A port that staged its own palette from an `STDL_AddVBL`
+  callback can drop it. `TPALETTE -stage`.
+- Constant colour tables: `STDL_HW444(0xC72)` turns an 0xRGB with
+  four bits a channel (0-15, the STE's scale) into the hardware word
+  at compile time. The register does not take 0xRGB as written: its
+  nibbles keep a channel's lowest bit in bit 3, so a raw 0xC72 shows
+  green, not orange. ST-style 0x777 values (0-7) are already valid
+  words.
 - Engine-owned framebuffers: `STDL_CreateSurfaceFrom(pixels, w, h,
   stride, mask, maskstride)` wraps caller-owned planar blocks (and an
   optional mask plane) as surfaces - pointer-swappable, memcpy-able,

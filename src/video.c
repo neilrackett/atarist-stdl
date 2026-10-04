@@ -199,6 +199,9 @@ static void release_hardware(void)
         stdl_shutdown_vbl();
         stdl_shutdown_vbl = NULL;
     }
+    /* staging's flush went with the VBL slots; writes are immediate
+     * again, and staging starts afresh if the program inits again */
+    stdl_pal_apply_hook = NULL;
     if (stdl_shutdown_hwscroll != NULL) {
         /* LINEWIDTH and HSCROLL back to stock before the Setscreen
          * below repoints the display at page[0] */

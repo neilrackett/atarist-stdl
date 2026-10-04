@@ -111,7 +111,7 @@ emulated; see [docs/limits.md](docs/limits.md).
 | `include/compat/` | SDL.h and SDL_mixer.h - the SDL 1.2 compatibility shims                             |
 | `src/`            | video, surface, surfacefrom, draw, shapes, blit, blit8, blitter, planes, palette,   |
 |                   | event, cursor, time, dirty, vbl, sprite, tileset, text, drawchar, indexed, asset,   |
-|                   | bmp, degas, audio, voice, music, sfx, tone, opl, ym, compat, mixer                  |
+|                   | bmp, degas, audio, voice, music, sfx, tone, opl, ym, compat, mixer, palstage        |
 | `tools/stdlconv/` | asset converter: image quantise + planar, sprite/tile/font banks, Degas PI1,        |
 |                   | WAV (incl. MS ADPCM) to STE DMA rates, MIDI to YM music, C-array embedding          |
 | `tools/libcalls.sh` | per-function libgcc multiply/divide/float calls in object files, with an allowlist gate |
@@ -165,7 +165,7 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | GRAYWIN.TOS  | fills, clipping, palette                                                         |
 | TESTWIN.TOS  | BMP loading, surface blits, palette fades                                        |
 | TSPRITE.TOS  | colour-keyed sprite blits, dirty rects, FPS                                      |
-| TPALETTE.TOS | palette animation on a 16-entry budget                                           |
+| TPALETTE.TOS | palette animation on a 16-entry budget; `-stage` lands each change in the blank  |
 | CHECKKEY.TOS | raw IKBD keyboard: key-ups, modifiers, unicode                                   |
 | TTIMER.TOS   | 200Hz timing, cooperative timers                                                 |
 | TBLITSPD.TOS | blit throughput baseline                                                         |

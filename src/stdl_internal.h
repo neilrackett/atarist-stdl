@@ -408,9 +408,17 @@ void stdl_megaste_apply(int mode);
 extern uint16_t (*stdl_blit_policy)(uint16_t nlines, uint32_t cpl);
 
 /* while set, stdl_palette_apply_hw routes through this instead of
- * writing the registers - overscan.c stages writes into the
+ * writing the registers - palstage.c stages writes into the
  * vertical blanking with it. Defined in video.c (always linked). */
 extern void (*stdl_pal_apply_hook)(void);
+
+/* palette staging's users (palstage.c): it runs while either holds
+ * its bit. on returns -1 when no VBL slot is free, and writes then
+ * stay immediate. */
+#define STDL_PAL_STAGE_USER   1     /* STDL_StagePalette             */
+#define STDL_PAL_STAGE_BORDER 2     /* an open border (overscan.c)   */
+int  stdl_pal_stage_on(int who);
+void stdl_pal_stage_off(int who);
 
 /* brief interrupt masking (supervisor mode) for state shared with
  * interrupt context; no-ops when built for host-side unit tests */

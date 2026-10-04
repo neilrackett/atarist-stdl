@@ -39,7 +39,8 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/surfacefrom.c src/blit8.c src/voice.c \
           $(XPAD)/xpad.c src/stdl_xpad.c src/overscan.c \
           src/hwscroll.c src/tone.c src/cpuspeed.c src/opl.c \
-          src/refresh.c src/mouse.c src/stram.c src/wav.c src/ring.c
+          src/refresh.c src/mouse.c src/stram.c src/wav.c src/ring.c \
+          src/palstage.c
 # Objects live under obj/, mirroring each source's own path. Sources
 # now come from two places, this repo and the xpad submodule, and
 # building beside the source would drop .o files inside lib/xpad. The

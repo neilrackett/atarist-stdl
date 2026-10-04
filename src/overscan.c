@@ -915,41 +915,6 @@ extern long stdl_ovsc_sample(const uint16_t *table, int n2);
 extern void stdl_ovsc_burst(uint8_t *buf, int n);
 
 /*
- * Palette staging. With a border open the display starts fetching
- * at line 34 instead of 63, so a palette write from the main loop
- * is far more likely to land mid-display and flash wrong colours
- * for part of a frame. While open, stdl_pal_apply_hook points here:
- * writes are staged and a VBL callback drains them inside the
- * blanking. The hook lives in always-linked video.c so palette.o
- * carries only a pointer test for programs that never open a
- * border.
- */
-static uint16_t pal_pending[16];
-static volatile uint8_t pal_dirty;
-
-static void ovsc_pal_stage(void)
-{
-    int i;
-    for (i = 0; i < 16; i++) {
-        pal_pending[i] = STDL_HWColour(stdl.colours[i].r,
-                                       stdl.colours[i].g,
-                                       stdl.colours[i].b);
-    }
-    pal_dirty = 1;
-}
-
-static void ovsc_pal_flush(void)
-{
-    int i;
-    if (pal_dirty) {
-        pal_dirty = 0;
-        for (i = 0; i < 16; i++) {
-            STDL_HWPAL[i] = pal_pending[i];
-        }
-    }
-}
-
-/*
  * Time the flick's dbra against displayed scanlines. Timer B counts
  * Display Enable ends, one per picture line of exactly 512 cycles
  * while the sync rate is 50Hz and no border trick is running -
@@ -1780,7 +1745,6 @@ static void ovsc_release(void)
     ovsc_shifter_reseed();
     mode = 0;
     stdl_blit_policy = NULL;
-    stdl_pal_apply_hook = NULL;
     stdl_shutdown_overscan = NULL;
 }
 
@@ -1973,11 +1937,11 @@ static int ovsc_open(int which)
         stdl_ovsc_flip = ovsc_flip;
         (void)Setscreen(buf, buf, -1);
         STDL_WaitVBL();
-        /* palette writes land in the blanking from here on; if no
-         * VBL slot is free they stay immediate, as before */
-        if (STDL_AddVBL(ovsc_pal_flush) == 0) {
-            stdl_pal_apply_hook = ovsc_pal_stage;
-        }
+        /* palette writes land in the blanking from here on: with a
+         * border open the picture starts at line 34, so a write from
+         * the main loop is likelier than ever to land in it. If no
+         * VBL slot is free they stay immediate, as before. */
+        (void)stdl_pal_stage_on(STDL_PAL_STAGE_BORDER);
     }
     if ((which & MODE_BOT)
         && (c16 == 0 || cal_mode != stdl_megaste_mode)) {
@@ -2036,12 +2000,10 @@ static int ovsc_close(int which)
         ovsc_surface();
         return stdl_screen.h;
     }
-    if (stdl_pal_apply_hook != NULL) {
-        STDL_RemoveVBL(ovsc_pal_flush);
-    }
-    ovsc_release();                     /* clears the hook, reseeds
-                                         * in the blanking */
-    stdl_palette_apply_hw();            /* immediate, no staging */
+    stdl_pal_stage_off(STDL_PAL_STAGE_BORDER);
+    ovsc_release();                     /* reseeds in the blanking */
+    stdl_palette_apply_hw();            /* immediate unless the
+                                         * program stages too */
     stdl_ovsc_flip = NULL;
     (void)Setscreen(stdl.page[0], stdl.page[0], -1);
     STDL_WaitVBL();

@@ -30,6 +30,12 @@
  * into a second page and flips at the vertical blank instead, the
  * way a game should: each page is repaired where it last had its
  * boats, two frames back.
+ *
+ * -stage does for the palette what -flip does for the picture. The
+ * wave colours cycle every frame from the main loop, so wherever
+ * the beam happens to be, the picture above it shows the old cycle
+ * and below it the new. STDL_StagePalette(1) holds each change for
+ * the vertical blank, and the water moves a whole screen at a time.
  */
 
 #include <stdio.h>
@@ -255,6 +261,7 @@ int main(int argc, char **argv)
     int drawnx[2][NBOATS];
     int drawn[2] = { 0, 0 };
     int flip = 0;
+    int stage = 0;
     int boats = NBOATS;
     int palette_step = 1;
     int show_fps = 1;
@@ -291,11 +298,13 @@ int main(int argc, char **argv)
 	    log_fps = 1;
 	else if(strcmp(*argv, "-flip") == 0)
 	    flip = 1;
+	else if(strcmp(*argv, "-stage") == 0)
+	    stage = 1;
 	else {
 	    fprintf(stderr,
 		    "usage: testpalette "
 		    " [-nofade] [-fademax N] [-boats N]"
-		    " [-palstep N] [-nofps] [-fpslog] [-flip]\n");
+		    " [-palstep N] [-nofps] [-fpslog] [-flip] [-stage]\n");
 	    quit(1);
 	}
     }
@@ -313,6 +322,8 @@ int main(int argc, char **argv)
     /* Ask explicitly for a hardware palette */
     if((screen = SDL_SetVideoMode(SCRW, SCRH, 4, vidflags | SDL_HWPALETTE)) == NULL)
 	sdlerr("setting video mode");
+    if(stage && STDL_StagePalette(1) < 0)
+	sdlerr("staging the palette");
 
     if((boat[0] = SDL_LoadBMP("SAIL.BMP")) == NULL)
 	sdlerr("loading SAIL.BMP");

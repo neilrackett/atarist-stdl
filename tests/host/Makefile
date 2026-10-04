@@ -60,6 +60,7 @@ $(TESTS): %: %.c $(CORE) $(HDRS)
 
 test_pixel:     $(SRC)/surfacefrom.c $(SRC)/drawchar.c
 test_dirty:     $(SRC)/dirty.c
+test_palette:   $(SRC)/palstage.c $(SRC)/vbl.c
 # built with the counters, for stdl_blit_force: every operation the
 # BLiTTER could take goes to it, whatever its size
 test_blitter:   XFLAGS = -DSTDL_BLIT_STATS

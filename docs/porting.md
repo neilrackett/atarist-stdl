@@ -171,7 +171,7 @@ time, not at runtime.
 | `SDL_DisplayFormat` | duplicate | already planar; result flagged `SDL_HWACCEL` |
 | `SDL_SetColorKey` | `STDL_SetColourKey` | builds the transparency mask (a snapshot); key >= 16 = use the existing mask, no scan - for surfaces whose transparency is built during decode |
 | `SDL_LoadBMP` | `STDL_LoadBMP` | uncompressed 1/4/8bpp, max 16 colours |
-| `SDL_SetColors` / `SDL_SetPalette` | palette module | `SDL_LOGPAL` / `SDL_PHYSPAL` honoured |
+| `SDL_SetColors` / `SDL_SetPalette` | palette module | `SDL_LOGPAL` / `SDL_PHYSPAL` honoured; `STDL_StagePalette(1)` lands changes in the vertical blank |
 | events / keysyms / `SDL_GetKeyState` | event module | numbering matches SDL 1.2 |
 | `SDL_GetTicks` / `SDL_Delay` | time module | 200Hz clock: 5ms resolution |
 | `SDL_AddTimer` / `SDL_SetTimer` | compat | cooperative: callbacks fire inside `SDL_Delay` |

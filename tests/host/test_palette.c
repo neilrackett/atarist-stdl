@@ -9,6 +9,14 @@
  * entries past the target's count are left alone. The steps are
  * caught through stdl_pal_apply_hook, which is where an open border
  * stages them.
+ *
+ * Then STDL_StagePalette: staged changes reach the registers only
+ * when the VBL queue runs, the last change before a blank wins, the
+ * program's staging and a border's share one slot and outlive each
+ * other, turning it off writes what was waiting, no free slot leaves
+ * writes immediate, and staging comes back after release_hardware
+ * has cleared the queue and the hook. And STDL_HW444 against the
+ * run-time conversion.
  */
 #include <stdio.h>
 #include <string.h>
@@ -76,6 +84,130 @@ static void fade(const STDL_Colour *from, const STDL_Colour *to, int n,
     }
 }
 
+/* run the queue as the VBL interrupt would */
+static void fire(void)
+{
+    int i;
+
+    for (i = 0; i < STDL_NVBLS; i++) {
+        if (STDL_VBLQUEUE[i] != NULL) {
+            STDL_VBLQUEUE[i]();
+        }
+    }
+}
+
+static int slots_used(void)
+{
+    int i, n = 0;
+
+    for (i = 0; i < STDL_NVBLS; i++) {
+        n += STDL_VBLQUEUE[i] != NULL;
+    }
+    return n;
+}
+
+/* colour 3 to a grey, through the path every palette call takes */
+static void set3(uint8_t v)
+{
+    stdl.colours[3].r = stdl.colours[3].g = stdl.colours[3].b = v;
+    stdl_palette_apply_hw();
+}
+
+static uint16_t grey(uint8_t v)
+{
+    return STDL_HWColour(v, v, v);
+}
+
+static void test_staging(void)
+{
+    int i;
+
+    for (i = 0; i < STDL_NVBLS; i++) {
+        STDL_VBLQUEUE[i] = NULL;
+    }
+    stdl_pal_apply_hook = NULL;
+
+    set3(0x20);
+    CHECK(STDL_HWPAL[3] == grey(0x20), "unstaged write not immediate");
+
+    CHECK(STDL_StagePalette(1) == 0, "staging refused");
+    CHECK(slots_used() == 1, "staging took %d slots", slots_used());
+    set3(0x40);
+    CHECK(STDL_HWPAL[3] == grey(0x20), "staged write reached hardware");
+    set3(0x60);
+    fire();
+    CHECK(STDL_HWPAL[3] == grey(0x60), "blank did not write the last");
+    STDL_HWPAL[3] = 0;
+    fire();
+    CHECK(STDL_HWPAL[3] == 0, "a blank rewrote an unchanged palette");
+
+    /* a border joins and the program leaves: still staged */
+    CHECK(stdl_pal_stage_on(STDL_PAL_STAGE_BORDER) == 0, "border refused");
+    CHECK(slots_used() == 1, "border took a second slot");
+    CHECK(STDL_StagePalette(0) == 0, "unstaging failed");
+    set3(0x80);
+    CHECK(STDL_HWPAL[3] == 0, "border's staging ended with the program's");
+    fire();
+    CHECK(STDL_HWPAL[3] == grey(0x80), "border staging did not write");
+
+    /* the program rejoins; the border closing leaves it staged */
+    CHECK(STDL_StagePalette(1) == 0, "restaging refused");
+    stdl_pal_stage_off(STDL_PAL_STAGE_BORDER);
+    set3(0xA0);
+    CHECK(STDL_HWPAL[3] == grey(0x80), "border close ended program staging");
+
+    /* off: what was waiting goes now, then immediate, slot freed */
+    STDL_StagePalette(0);
+    CHECK(STDL_HWPAL[3] == grey(0xA0), "waiting change dropped at off");
+    CHECK(slots_used() == 0, "slot kept after off");
+    set3(0xC0);
+    CHECK(STDL_HWPAL[3] == grey(0xC0), "write not immediate after off");
+
+    /* a full queue: refused, and writes stay immediate */
+    for (i = 0; i < STDL_NVBLS; i++) {
+        STDL_VBLQUEUE[i] = fire;
+    }
+    CHECK(STDL_StagePalette(1) == -1, "staging accepted with no slot");
+    set3(0xE0);
+    CHECK(STDL_HWPAL[3] == grey(0xE0), "refused staging still staged");
+    for (i = 0; i < STDL_NVBLS; i++) {
+        STDL_VBLQUEUE[i] = NULL;
+    }
+
+    /* release_hardware empties the queue and the hook together */
+    CHECK(STDL_StagePalette(1) == 0, "staging refused after a full queue");
+    for (i = 0; i < STDL_NVBLS; i++) {
+        STDL_VBLQUEUE[i] = NULL;
+    }
+    stdl_pal_apply_hook = NULL;
+    CHECK(STDL_StagePalette(1) == 0 && slots_used() == 1,
+          "staging not reinstalled after a release");
+    set3(0x10);
+    CHECK(STDL_HWPAL[3] == grey(0xE0), "reinstalled staging not staged");
+    fire();
+    CHECK(STDL_HWPAL[3] == grey(0x10), "reinstalled staging not written");
+    STDL_StagePalette(0);
+}
+
+/* STDL_HW444: the rotated nibble, against the run-time conversion of
+ * the same 4-bit level spread to 8 bits */
+static void test_hw444(void)
+{
+    static const uint16_t table[] = { STDL_HW444(0xC72), STDL_HW444(0xFFF),
+                                      STDL_HW444(0x000) };
+    int v;
+
+    for (v = 0; v < 16; v++) {
+        uint8_t c = (uint8_t)(v << 4);
+
+        CHECK(STDL_HW444(v << 8 | v << 4 | v) == STDL_HWColour(c, c, c),
+              "HW444 level %d", v);
+    }
+    CHECK(table[0] == STDL_HWColour(0xC0, 0x70, 0x20), "HW444(0xC72) %04x",
+          table[0]);
+    CHECK(table[1] == 0x0FFF && table[2] == 0, "HW444 extremes");
+}
+
 int main(void)
 {
     static const int lengths[] = { 1, 2, 7, 25, 128, 300 };
@@ -103,6 +235,8 @@ int main(void)
         fade(b, a, 9, lengths[k]);
     }
     stdl_pal_apply_hook = NULL;
+    test_staging();
+    test_hw444();
 
     if (failures) {
         printf("test_palette: %d failures\n", failures);

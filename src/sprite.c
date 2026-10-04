@@ -335,6 +335,85 @@ STDL_PLANE_INLINE void spr_rows_aligned(const uint16_t *srow,
     }
 }
 
+/*
+ * The aligned loop again, written out for the 68000: four planes and
+ * no clip cover, the case a pre-shifted sprite away from the screen's
+ * edges always is. Each group's mask is doubled into a long and the
+ * planes go two at a time, an and.l and an or.l a pair; transparent
+ * groups are skipped and opaque ones stored, as in the C. About 160
+ * cycles a mixed group against the C's 300 - gcc 4.6 merges a word at
+ * a time and reloads around every store. s and d start at the first
+ * group drawn; the skips are each row's stride less what it moved.
+ */
+static void spr_rows4(const uint16_t *s, uint8_t *d, int ng, int rows,
+                      int32_t sskip, int32_t dskip)
+{
+#ifdef __m68k__
+    int16_t h = (int16_t)rows;
+    const int16_t n = (int16_t)(ng - 1);
+
+    __asm__ volatile(
+        "1:\n\t"
+        "move.w %[n],%%d2\n"
+        "2:\n\t"
+        "move.w (%[s])+,%%d0\n\t"     /* mask; Z: opaque          */
+        "beq.s  5f\n\t"
+        "not.w  %%d0\n\t"             /* Z: transparent           */
+        "beq.s  4f\n\t"
+        "not.w  %%d0\n\t"
+        "move.w %%d0,%%d1\n\t"        /* the mask in both words   */
+        "swap   %%d0\n\t"
+        "move.w %%d1,%%d0\n\t"
+        "and.l  %%d0,(%[d])\n\t"
+        "move.l (%[s])+,%%d1\n\t"
+        "or.l   %%d1,(%[d])+\n\t"
+        "and.l  %%d0,(%[d])\n\t"
+        "move.l (%[s])+,%%d1\n\t"
+        "or.l   %%d1,(%[d])+\n\t"
+        "dbf    %%d2,2b\n\t"
+        "bra.s  6f\n"
+        "4:\n\t"
+        "addq.l #8,%[s]\n\t"
+        "addq.l #8,%[d]\n\t"
+        "dbf    %%d2,2b\n\t"
+        "bra.s  6f\n"
+        "5:\n\t"
+        "move.l (%[s])+,(%[d])+\n\t"
+        "move.l (%[s])+,(%[d])+\n\t"
+        "dbf    %%d2,2b\n"
+        "6:\n\t"
+        "adda.l %[sk],%[s]\n\t"
+        "adda.l %[dk],%[d]\n\t"
+        "subq.w #1,%[h]\n\t"
+        "bne.s  1b"
+        : [d] "+a"(d), [s] "+a"(s), [h] "+d"(h)
+        : [n] "d"(n), [sk] "d"(sskip), [dk] "d"(dskip)
+        : "d0", "d1", "d2", "cc", "memory");
+#else
+    /* C twin - what tests/host exercises and the asm must match */
+    int y, g, p;
+
+    for (y = 0; y < rows; y++) {
+        for (g = 0; g < ng; g++) {
+            uint16_t m = *s++;
+            uint16_t *dw = (uint16_t *)d;
+
+            for (p = 0; p < 4; p++) {
+                if (m == 0) {
+                    dw[p] = s[p];
+                } else if (m != 0xFFFFu) {
+                    dw[p] = (uint16_t)((dw[p] & m) | s[p]);
+                }
+            }
+            s += 4;
+            d += 8;
+        }
+        s = (const uint16_t *)((const uint8_t *)s + sskip);
+        d += dskip;
+    }
+#endif
+}
+
 /* the group beyond either end of an unshifted sprite: transparent */
 static const uint16_t spr_edge[SPR_WORDS] = { 0xFFFFu, 0, 0, 0, 0 };
 
@@ -652,7 +731,13 @@ void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
         }
 #endif
         np = stdl_planes;
-        if (!runtime_shift) {
+        if (!runtime_shift && np > 2 && (cover0 & cover1) == 0xFFFFu) {
+            const int n = g1 - g0;
+
+            spr_rows4(srow + g0 * SPR_WORDS, drow, n, row1 - row0,
+                      (int32_t)(rowwords - (uint32_t)n * SPR_WORDS) * 2,
+                      dst->stride - n * 8);
+        } else if (!runtime_shift) {
 #define SPRITE_ALIGNED(np) \
             spr_rows_aligned(srow, drow, rowwords, dst->stride, \
                              row1 - row0, g0, g1, cover0, cover1, (np))

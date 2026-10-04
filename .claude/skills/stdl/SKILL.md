@@ -167,7 +167,7 @@ the profiler, one site at a time. Measured with gcc 4.6.4 at `-O2`:
 Use `<stdl/stdl_math.h>` (in `stdl.h`) on anything that runs per
 pixel, per row, per object or per frame. `STDL_MulS16`/`STDL_MulU16`
 (16x16->32), `STDL_DivS16`/`STDL_DivU16` (32/16, quotient must fit)
-and `STDL_FixDiv` (`(a << 16) / b` for a 16.16 slope, about 420
+and `STDL_FixDiv` (`(a << 16) / b` for a 16.16 slope, about 330
 cycles against 630) are the instruction whatever surrounds them.
 Products with a constant can stay plain C (`y * 160` compiles to
 shifts and adds for an `int`, `muls.w #160` for an `int16_t`).

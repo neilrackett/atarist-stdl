@@ -53,6 +53,20 @@ TIMED(t_mulsi3, va * vb)
 TIMED(t_divs,   STDL_DivS16(vn, vd))
 TIMED(t_divsi3, vn / vd)
 TIMED(t_fix,    STDL_FixDiv(va, vd))
+
+/* for comparison: the shortest form, a positive divisor and one sign
+ * to handle - what FixDiv costs for being general */
+static int32_t fix_pos(int a, int b)
+{
+    uint32_t t = (uint32_t)(a < 0 ? -a : a), lo;
+
+    __asm__("divu.w %1,%0" : "+d"(t) : "d"((uint16_t)b));
+    lo = t & 0xFFFF0000u;
+    __asm__("divu.w %1,%0" : "+d"(lo) : "d"((uint16_t)b));
+    t = (t << 16) | (lo & 0xFFFF);
+    return a < 0 ? -(int32_t)t : (int32_t)t;
+}
+TIMED(t_fixp,   fix_pos(va, vd))
 TIMED(t_fixc,   ((int32_t)va << 16) / vd)
 
 /* cycles a call at 8MHz, less the loop: ms * 8000 / REPS */
@@ -83,6 +97,7 @@ int main(void)
     report("divs.w", t_divs(), fl);
     report("__divsi3", t_divsi3(), fl);
     report("FixDiv", t_fix(), fl);
+    report("pos form", t_fixp(), fl);
     report("C fixdiv", t_fixc(), fl);
     printf("MC:done %s\n", r == 0 ? "PASS" : "FAIL");
     fflush(stdout);

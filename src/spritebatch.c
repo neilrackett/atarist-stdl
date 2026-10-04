@@ -15,7 +15,9 @@
  * STDL_BlitSprite uses (stdl_spr_rows4). Anything else - a sprite cut
  * by the clip, an unshifted one at an odd x, a plane budget of 2, a
  * machine whose BLiTTER the sprite path would use - is handed to
- * STDL_BlitSprite, so the pixels are the same whichever way it goes.
+ * STDL_BlitSprite, so the pixels are the same whichever way it goes -
+ * as is an empty sprite, which the row loop, counting with dbf, must
+ * never be given.
  *
  * Its own translation unit: a program that draws one sprite at a time
  * does not carry it.
@@ -49,7 +51,7 @@ void STDL_BlitSprites(STDL_Sprite *spr, const STDL_SpriteAt *at,
 
         /* wholly inside, and drawn by the aligned loop: a pre-shifted
          * variant, or an unshifted sprite on a group edge */
-        if (!fast || frame >= spr->nframes
+        if (!fast || frame >= spr->nframes || h <= 0 || groups == 0
             || (spr->nvariants != 16 && phase != 0)
             || xb < cx1 || xb + (groups << 4) > cx2
             || y < cy1 || y + h > cy2) {
@@ -64,6 +66,10 @@ void STDL_BlitSprites(STDL_Sprite *spr, const STDL_SpriteAt *at,
             STDL_BlitSprite(spr, frame, dst, x, y);     /* a huge sheet */
             continue;
         }
+#ifdef STDL_BLIT_STATS
+        stdl_spr_calls++;
+        stdl_spr_rows += (unsigned long)h;
+#endif
         stdl_spr_rows4(spr->data
                            + stdl_row_off((int)idx, (uint16_t)spr->framesize),
                        dst->pixels + stdl_row_off(y, (uint16_t)stride)

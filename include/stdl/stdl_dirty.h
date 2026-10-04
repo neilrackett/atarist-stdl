@@ -45,7 +45,10 @@ void STDL_DirtyReset(void);
  * from the background, so it is for scenes where everything drawn on
  * the page is either the background or something pushed: bobs,
  * particles. Not for a page with a score or a HUD drawn straight
- * onto it beside the sprites.
+ * onto it beside the sprites. It applies where the restore goes by
+ * offset - the background the page's shape, the BLiTTER absent or
+ * refused, plane budget 4 - and elsewhere the rectangles are
+ * restored exactly as before.
  */
 void STDL_DirtyWholeGroups(int on);
 

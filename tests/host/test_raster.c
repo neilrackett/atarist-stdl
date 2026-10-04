@@ -115,9 +115,10 @@ int main(void)
           "Timer B not restarted: data %u control %u",
           stdl_host_mfp[0x21], stdl_host_mfp[0x1B]);
 
-    /* the program is never handed the armed or the shown table, and
-     * each starts as the one last shown when that was shown with
-     * keep (every other one here); without, it is left alone */
+    /* the program is never handed the armed or the shown table. The
+     * even ones are shown with keep, so the odd ones start as copies
+     * of them; the odd are shown without, and the next is left
+     * alone */
     shown[0] = t;
     for (k = 1; k < 8; k++) {
         uint16_t *next = STDL_RasterTable();
@@ -129,11 +130,18 @@ int main(void)
                   "new table %d is not a copy of the last shown", k);
         }
         next[k] = (uint16_t)(0x300 + k);
-        STDL_ShowRasters(!(k & 1));
-        memcpy(before, STDL_RasterTable(), sizeof before);
         if (k & 1) {
-            CHECK(memcmp(STDL_RasterTable(), before, sizeof before) == 0,
-                  "a show without keep wrote the next table");
+            /* shown without keep: every entry unique to this table,
+             * so a copy of it into the next would be unmistakable */
+            for (i = 0; i < 202; i++) {
+                next[i] = (uint16_t)(0x8000 + k * 256 + i);
+            }
+        }
+        memcpy(before, next, sizeof before);
+        STDL_ShowRasters(!(k & 1));
+        if (k & 1) {
+            CHECK(memcmp(STDL_RasterTable(), before, sizeof before) != 0,
+                  "a show without keep copied into the next table");
         }
         shown[k] = next;
         if (k & 1) {

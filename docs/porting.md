@@ -287,7 +287,7 @@ mappings as the fallback and choose at init.
 
 Rasters - one or two colour registers changed every few lines down
 the picture - are `STDL_OpenRasters(lines, reg1, reg2)`: fill
-`STDL_RasterTable()` with hardware words, `STDL_ShowRasters()` with
+`STDL_RasterTable()` with hardware words, `STDL_ShowRasters(keep)` with
 each flip, `STDL_CloseRasters()` when done. They are put back on any
 exit, abnormal ones included, which a port's own Timer B handler
 would not be. `examples/rasters.c`. `examples/overscan.c`

@@ -106,7 +106,7 @@ int main(void)
         t[i * 2] = (uint16_t)(0x100 + i);
         t[i * 2 + 1] = (uint16_t)(0x200 + i);
     }
-    STDL_ShowRasters();
+    STDL_ShowRasters(1);
     fire();
     CHECK(STDL_HWPAL[0] == 0x100 && STDL_HWPAL[15] == 0x200,
           "entry 0 not written: %03x %03x", STDL_HWPAL[0], STDL_HWPAL[15]);
@@ -116,16 +116,25 @@ int main(void)
           stdl_host_mfp[0x21], stdl_host_mfp[0x1B]);
 
     /* the program is never handed the armed or the shown table, and
-     * each starts as the one last shown */
+     * each starts as the one last shown when that was shown with
+     * keep (every other one here); without, it is left alone */
     shown[0] = t;
     for (k = 1; k < 8; k++) {
         uint16_t *next = STDL_RasterTable();
+        uint16_t before[202];
 
         CHECK(next != shown[k - 1], "handed the shown table at %d", k);
-        CHECK(memcmp(next, shown[k - 1], 202 * 2) == 0,
-              "new table %d is not a copy of the last shown", k);
+        if (k & 1) {
+            CHECK(memcmp(next, shown[k - 1], 202 * 2) == 0,
+                  "new table %d is not a copy of the last shown", k);
+        }
         next[k] = (uint16_t)(0x300 + k);
-        STDL_ShowRasters();
+        STDL_ShowRasters(!(k & 1));
+        memcpy(before, STDL_RasterTable(), sizeof before);
+        if (k & 1) {
+            CHECK(memcmp(STDL_RasterTable(), before, sizeof before) == 0,
+                  "a show without keep wrote the next table");
+        }
         shown[k] = next;
         if (k & 1) {
             fire();             /* sometimes a VBL, sometimes not */

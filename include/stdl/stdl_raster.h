@@ -21,7 +21,10 @@ extern "C" {
  * words (STDL_HWColour, STDL_HW444). Colour 0 is also the border, so
  * rasters in it run edge to edge: copper bars, skies, a background
  * gradient no 16-colour palette could hold. Another register gives
- * text or an object a gradient of its own.
+ * text or an object a gradient of its own. With colour 0 first, every
+ * second register has a handler of its own with both addresses
+ * written in; another first register takes a general handler, a few
+ * points dearer.
  *
  * Entry k of a table holds from picture line k * lines; the last
  * entry, written by the frame's last interrupt (at the end of the
@@ -34,8 +37,8 @@ extern "C" {
  * Timer B counts displayed lines and interrupts every `lines` of them
  * to write the next entry. Measured on a plain ST (RASTCHK), with
  * colour 0 as the first register: every fourth line costs 6% of the
- * machine, 7% with a second register; every second line 11% / 15%;
- * every line 22% / 29%. Colour 0 has the quickest handler; with
+ * machine, 6% with a second register; every second line 11% / 12%;
+ * every line 22% / 25%. Colour 0 has the quickest handler; with
  * another first register, every second line is 14% / 16%. A VBL
  * callback restarts the count from entry 0 before each picture, and
  * a prefix on TOS's 200Hz Timer C handler lets Timer B in while it
@@ -56,14 +59,22 @@ int  STDL_OpenRasters(int lines, int reg1, int reg2);
 /*
  * The table to fill for a coming frame: entries in order, one word
  * an entry for one register, two (reg1's, then reg2's) for two. It
- * starts as a copy of the table last shown, so a program can change
- * only what moves. NULL while rasters are closed.
+ * holds the table last shown when that was shown with `keep`, else
+ * whatever it held before - so a program that changes only what moves
+ * shows with keep, and one that rewrites every entry shows without
+ * and skips the copy. NULL while rasters are closed.
  */
 uint16_t *STDL_RasterTable(void);
 
-/* Show the table filled since the last call from the next frame on,
- * as STDL_Flip shows a page; STDL_RasterTable then returns another. */
-void STDL_ShowRasters(void);
+/*
+ * Show the table filled since the last call from the next frame on,
+ * as STDL_Flip shows a page; STDL_RasterTable then returns another.
+ * keep = 1 copies this table into that one, for a program that
+ * changes a few entries a frame; 0 leaves it as it was, for one that
+ * rewrites them all (the copy measured about 2.9k cycles a frame for
+ * two registers every second line).
+ */
+void STDL_ShowRasters(int keep);
 
 /* Stop, put Timer B and the vectors back, and restore the two
  * registers from the palette. */

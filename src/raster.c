@@ -92,7 +92,20 @@ static uint8_t tc_hooked;
 void stdl_rast_isr1(void);
 void stdl_rast_isr2(void);
 void stdl_rast_isr0(void);
-void stdl_rast_isr02(void);
+void stdl_rast_isr0_1(void), stdl_rast_isr0_2(void), stdl_rast_isr0_3(void),
+     stdl_rast_isr0_4(void), stdl_rast_isr0_5(void), stdl_rast_isr0_6(void),
+     stdl_rast_isr0_7(void), stdl_rast_isr0_8(void), stdl_rast_isr0_9(void),
+     stdl_rast_isr0_10(void), stdl_rast_isr0_11(void),
+     stdl_rast_isr0_12(void), stdl_rast_isr0_13(void),
+     stdl_rast_isr0_14(void), stdl_rast_isr0_15(void);
+/* colour 0 alone, then with colour k at [k] */
+static void (*const isr0k[16])(void) = {
+    stdl_rast_isr0, stdl_rast_isr0_1, stdl_rast_isr0_2, stdl_rast_isr0_3,
+    stdl_rast_isr0_4, stdl_rast_isr0_5, stdl_rast_isr0_6, stdl_rast_isr0_7,
+    stdl_rast_isr0_8, stdl_rast_isr0_9, stdl_rast_isr0_10,
+    stdl_rast_isr0_11, stdl_rast_isr0_12, stdl_rast_isr0_13,
+    stdl_rast_isr0_14, stdl_rast_isr0_15
+};
 void stdl_rast_tc(void);
 
 /*
@@ -101,7 +114,7 @@ void stdl_rast_tc(void);
  * 220 cycles an interrupt with one register and 250 with two, entry
  * and rte included: a raster every second line is a hundred a frame,
  * 14-16% of a plain ST. Colour 0's own handlers below take that to
- * 11-15%.
+ * 11-12%.
  */
 __asm__(
 "    .text\n"
@@ -146,20 +159,33 @@ __asm__(
 "    move.l (%sp)+,%a0\n"
 "    move.b #0xFE,0xfffffa0f.w\n"
 "    rte\n"
-"    .even\n"
-"    .globl _stdl_rast_isr02\n"
-"_stdl_rast_isr02:\n"
-"    move.l %a0,-(%sp)\n"
-"    move.l _stdl_rast_ptr,%a0\n"
-"    move.w (%a0)+,0xffff8240.w\n"
-"    move.l %a1,-(%sp)\n"
-"    move.w _stdl_rast_reg2,%a1\n"
-"    move.w (%a0)+,(%a1)\n"
-"    move.l (%sp)+,%a1\n"
-"    move.l %a0,_stdl_rast_ptr\n"
-"    move.l (%sp)+,%a0\n"
-"    move.b #0xFE,0xfffffa0f.w\n"
+/*
+ * Colour 0 and one of the other fifteen: a handler for each, the
+ * second register's address an absolute operand like the first's.
+ * Fetching the address and saving a second register for it, as the
+ * general handler does, made each interrupt a third dearer than one
+ * demo's own handler with the address written in.
+ */
+#define RAST_ISR0K(k, reg) \
+"    .even\n" \
+"    .globl _stdl_rast_isr0_" #k "\n" \
+"_stdl_rast_isr0_" #k ":\n" \
+"    move.l %a0,-(%sp)\n" \
+"    move.l _stdl_rast_ptr,%a0\n" \
+"    move.w (%a0)+,0xffff8240.w\n" \
+"    move.w (%a0)+," reg ".w\n" \
+"    move.l %a0,_stdl_rast_ptr\n" \
+"    move.l (%sp)+,%a0\n" \
+"    move.b #0xFE,0xfffffa0f.w\n" \
 "    rte\n"
+RAST_ISR0K(1, "0xffff8242") RAST_ISR0K(2, "0xffff8244")
+RAST_ISR0K(3, "0xffff8246") RAST_ISR0K(4, "0xffff8248")
+RAST_ISR0K(5, "0xffff824a") RAST_ISR0K(6, "0xffff824c")
+RAST_ISR0K(7, "0xffff824e") RAST_ISR0K(8, "0xffff8250")
+RAST_ISR0K(9, "0xffff8252") RAST_ISR0K(10, "0xffff8254")
+RAST_ISR0K(11, "0xffff8256") RAST_ISR0K(12, "0xffff8258")
+RAST_ISR0K(13, "0xffff825a") RAST_ISR0K(14, "0xffff825c")
+RAST_ISR0K(15, "0xffff825e")
 /* Timer C prefix: TOS's handler opened to Timer B, as overscan.c's */
 "    .even\n"
 "    .globl _stdl_rast_tc\n"
@@ -171,14 +197,14 @@ __asm__(
 #define ISR1  ((uint32_t)(uintptr_t)stdl_rast_isr1)
 #define ISR2  ((uint32_t)(uintptr_t)stdl_rast_isr2)
 #define ISR0  ((uint32_t)(uintptr_t)stdl_rast_isr0)
-#define ISR02 ((uint32_t)(uintptr_t)stdl_rast_isr02)
+#define ISR0K(k) ((uint32_t)(uintptr_t)isr0k[k])
 #define TC    ((uint32_t)(uintptr_t)stdl_rast_tc)
 #else
 /* the host has no MFP: the vectors are tokens the tests read */
 #define ISR1  1u
 #define ISR2  2u
 #define ISR0  4u
-#define ISR02 5u
+#define ISR0K(k) (0x100u + (k))
 #define TC    3u
 #endif
 
@@ -303,7 +329,7 @@ int STDL_OpenRasters(int lines, int reg1, int reg2)
     }
     MFP_TBCR = 0;
     stdl_rast_ptr = tab[0] + words;
-    VEC_TB = r1 == 0 ? (words == 2 ? ISR02 : ISR0)
+    VEC_TB = r1 == 0 ? ISR0K(words == 2 ? r2 : 0)
                      : (words == 2 ? ISR2 : ISR1);
     MFP_IERA |= 0x01;
     MFP_IMRA |= 0x01;
@@ -319,7 +345,7 @@ uint16_t *STDL_RasterTable(void)
     return open_ ? tab[drawing] : NULL;
 }
 
-void STDL_ShowRasters(void)
+void STDL_ShowRasters(int keep)
 {
     int next;
 
@@ -333,7 +359,9 @@ void STDL_ShowRasters(void)
     showing = (int8_t)drawing;
     for (next = 0; next == showing || next == armed; next++) {
     }
-    memcpy(tab[next], tab[drawing], (size_t)(entries << words));
+    if (keep) {
+        memcpy(tab[next], tab[drawing], (size_t)(entries << words));
+    }
     drawing = next;
 }
 

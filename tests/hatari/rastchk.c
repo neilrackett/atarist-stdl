@@ -59,7 +59,7 @@ static void stripes(int lines)
     for (i = 0; i < n; i++) {
         t[i] = (i * lines / 10) & 1 ? STDL_HW444(0xF80) : STDL_HW444(0x028);
     }
-    STDL_ShowRasters();
+    STDL_ShowRasters(1);
 #ifdef RASTCHK_NOPREFIX
     {
         extern uint32_t stdl_rast_oldtc;

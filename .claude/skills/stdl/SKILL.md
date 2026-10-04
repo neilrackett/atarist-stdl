@@ -900,12 +900,13 @@ first.
 - Rasters (colour changes down the screen): `STDL_OpenRasters(lines,
   reg1, reg2)` changes one or two colour registers every `lines`
   lines from a table. Fill `STDL_RasterTable()` and call
-  `STDL_ShowRasters()` with each flip; `STDL_CloseRasters()` when
-  done (`<stdl/stdl_raster.h>`, in `stdl.h`). A new table starts as
-  a copy of the last, so change only what moves. Colour 0 is the
+  `STDL_ShowRasters(keep)` with each flip; `STDL_CloseRasters()`
+  when done (`<stdl/stdl_raster.h>`, in `stdl.h`). With keep = 1 the
+  next table starts as a copy of this one, so change only what moves;
+  rewrite every entry and pass 0 to skip the copy. Colour 0 is the
   border too, so its bars run edge to edge. Measured on a plain ST
   (RASTCHK) with colour 0 first, every second line costs 11% of the
-  machine (15% with a second register) and every line 22% (29%);
+  machine (12% with a second register) and every line 22% (25%);
   another first register is a few points dearer. Timer B is the
   borders' as well, so rasters and an open border refuse each
   other. The terminate path puts the vectors back, which a

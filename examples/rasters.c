@@ -12,9 +12,9 @@
  * run edge to edge; colour 15 gets a gradient of its own, which the
  * box in the middle (drawn once, in colour 15) shows. Each frame
  * fills the next raster table - black, the scrolled gradient, then
- * the bars over it - and shows it with the flip. (A table starts as
- * a copy of the last shown, so a program that changes less can
- * write less.)
+ * the bars over it - and shows it with the flip, without the copy
+ * into the next table that STDL_ShowRasters(1) would make for a
+ * program changing only a few entries.
  * STDL_OpenRasters refuses while a border is open: both run on
  * Timer B. ESC quits; the rasters close on the way out, however the
  * program ends.
@@ -91,7 +91,7 @@ int main(int argc, char *argv[])
                 t[(c + i) * 2] = bar[i < 0 ? -i : i];
             }
         }
-        STDL_ShowRasters();
+        STDL_ShowRasters(0);    /* every entry rewritten: no copy */
         STDL_Flip();
         frame++;
     }

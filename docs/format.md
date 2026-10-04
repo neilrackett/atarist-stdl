@@ -199,6 +199,9 @@ Rules:
   envelope.
 * Volume registers written without bit 4 (fixed-volume channels)
   are scaled by `STDL_VolumeMusic` on the fly.
+* A frame holds only the registers that change, so frame 0 should
+  set all fourteen (`stdlconv` always does). `STDL_SeekMusic`
+  replays from silence: every register 0 and register 7 at 0x3F.
 
 ## 8. Palettes and hardware colour words
 

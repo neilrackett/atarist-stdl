@@ -58,7 +58,8 @@ EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
            dist/TKEYS.TOS dist/TJOY.TOS dist/LOOPWAVE.TOS \
            dist/TCURSOR.TOS dist/PLAYMUS.TOS dist/SFXDEMO.TOS \
            dist/BLITCHK.TOS dist/VBLCHK.TOS dist/OVERSCAN.TOS \
-           dist/HWSCROLL.TOS dist/TONEDEMO.TOS dist/OPLDEMO.TOS
+           dist/HWSCROLL.TOS dist/TONEDEMO.TOS dist/OPLDEMO.TOS \
+           dist/MUSICVU.TOS
 
 # Pinned, not left to ordering: a rule added above this one would
 # silently become the default goal, and `make` would then build
@@ -232,6 +233,8 @@ dist/HWSCROLL.TOS: examples/hwscroll.c $(LIB)
 
 dist/TONEDEMO.TOS: examples/tonedemo.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
+dist/MUSICVU.TOS: examples/musicvu.c $(LIB)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
 dist/OPLDEMO.TOS: examples/opldemo.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
 

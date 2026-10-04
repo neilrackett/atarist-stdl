@@ -755,6 +755,16 @@ first.
   surfaces; blits maintain destination masks; `STDL_SurfaceIsOpaque`
   (cached) skips backdrop under solid tiles; `STDL_PutGroup` for
   runtime asset decoders; `STDL_CreateMask` for built-up surfaces.
+- YM music: `STDL_LoadMusic("SONG.STM")` (from `stdlconv midi`), or
+  `STDL_MusicFromMemory(data, bytes)` for a stream linked into the
+  program, which plays in place without a copy. `STDL_MusicFrame()`
+  is the music's own clock, in stream frames, so sync effects to it,
+  not to a counter of your own. `STDL_SeekMusic(frame)` jumps,
+  playing or paused, and writes every voice's state at once. Ship
+  one song and seek, not a copy per entry point.
+  `STDL_GetMusicRegisters(regs)` returns the stream's 14 registers
+  for VU meters without touching the chip; volumes 8-10 with bit 4
+  set follow the envelope. `examples/musicvu.c`.
 - Sound effects: `STDL_SpeakerOn/Off` = PC-speaker idiom on voice A;
   `STDL_PlaySfx` = step sequences (tone or noise) on auto voices;
   give it a `noises` array (v1.12.0) and each step has its own

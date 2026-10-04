@@ -175,6 +175,7 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | LOOPWAVE.TOS | STE/Mega STE DMA sample playback (STDL_Audio)                                    |
 | TCURSOR.TOS  | software mouse cursor with save-under                                            |
 | PLAYMUS.TOS  | YM music (stdlconv midi -> STDL_Music) + sample chunks via the SDL_mixer shim    |
+| MUSICVU.TOS  | YM music from memory: VU meter from the stream's registers, position, seeking    |
 | SFXDEMO.TOS  | Degas splash, YM effects stealing/restoring music voices, joystick key emulation |
 | TONEDEMO.TOS | live notes on the three YM voices: a fourth note displacing and returning        |
 | OPLDEMO.TOS  | an OPL2 register stream (the IMF games' music format) replayed as YM notes       |

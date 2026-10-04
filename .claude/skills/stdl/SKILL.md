@@ -138,6 +138,57 @@ path, so align to 16px or pre-shift there. `STDL_UseBlitter(0)`
 forces CPU paths for debugging; BLITCHK.TOS verifies both paths on
 target.
 
+**Your own arithmetic: 16 bits, or a library call.** The 68000
+multiplies 16 by 16 and divides 32 by 16. gcc 4.6 uses those
+instructions only when it can see, where it chooses, that both
+operands are 16-bit values of the same signedness; anything else
+becomes a call to `__mulsi3` (about 350 cycles on a plain ST against
+40 for `muls.w`) or `__divsi3` (630 against 140). It is silent and
+it moves with the surrounding code, so ports keep finding it with
+the profiler, one site at a time. Measured with gcc 4.6.4 at `-O2`:
+
+- `int * int` is always a call. So are mixed widths:
+  `uint8_t * uint8_t`, `int16_t * int`, `int16_t * uint16_t`.
+- In a loop, a value derived from the counter loses its 16-bit cast.
+  The induction-variable pass rewrites it as a 32-bit variable, so
+  `(int32_t)(int16_t)dx * (int16_t)dx` with `dx = x - 80` is a call
+  inside the loop and `muls.w` outside it. Declaring `dx` as
+  `int16_t` does not help. One demo's plasma precalc made 40,860 of
+  these calls in eight seconds of loading.
+- At `-O1` every product is a call: the widening pass runs only at
+  `-O2`/`-Os`.
+- Division by anything but a power of two is a call, constants
+  included (`x / 12` on an `int`), and so is `%` (`text[i % len]` in
+  a scroller). A `short` divided by a constant is the exception: it
+  becomes a `muls.w` by the reciprocal.
+- Subtracting pointers to a struct whose size is not a power of two
+  divides: `q - spans` for 6-byte spans multiplies by 0xAAAAAAAB.
+
+Use `<stdl/stdl_math.h>` (in `stdl.h`) on anything that runs per
+pixel, per row, per object or per frame. `STDL_MulS16`/`STDL_MulU16`
+(16x16->32), `STDL_DivS16`/`STDL_DivU16` (32/16, quotient must fit)
+and `STDL_FixDiv` (`(a << 16) / b` for a 16.16 slope, about 420
+cycles against 630) are the instruction whatever surrounds them.
+Products with a constant can stay plain C (`y * 160` compiles to
+`mulu.w #160`). Precompute a reciprocal or a table instead of
+dividing per element, and step an index instead of taking `%`.
+
+Then make it a build failure rather than a profiling discovery.
+`tools/libcalls.sh` in the STDL repo lists every libgcc arithmetic
+call an object makes, per function, and with `-a` fails on any that
+an allowlist does not name. The library checks its own build this
+way (`tests/libcalls.allow`). A port's Makefile can do the same:
+
+```make
+libcallcheck: $(OBJS)
+	sh $(STDL)/tools/libcalls.sh -a libcalls.allow $(OBJS)
+```
+
+Run it without `-a` first to see what is there today. Allow the
+load-time calls with a reason each, fix the per-frame ones, and the
+next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
+`__fixdfsi`...) shows up in the same list.
+
 ## Porting workflow
 
 1. `python3 tools/stdlconv/stdlconv.py bmp16 in.png OUT.BMP
@@ -350,14 +401,26 @@ The recipe, because several steps are not obvious:
 
 1. Copy the **unstripped** ELF over the `.TOS` on the test drive.
    The profiler needs symbols the stripped binary does not have.
-2. Build a symbol file with `nm`, sanitising the names: Hatari's
-   loader drops anything it cannot parse, so demangle C++ names and
-   strip characters it will not take, or the symbols silently do
-   not load.
+2. Load the symbols once the program is running:
+   `hatari-debug symbols prg` reads them straight from the program's
+   own a.out symbol table (Hatari 2.6.1 answered "Loaded 1057
+   symbols" for one demo). A C++ port may still need a symbol file
+   built with `nm`, demangled and with the characters Hatari's loader
+   will not take stripped, or the symbols silently do not load.
 3. Around a marker you have synced on, drive it through the fifo:
-   `hatari-debug symbols <file>`, `hatari-debug profile on`, then
-   `hatari-debug profile save <path>`.
-4. Convert with the machine's clock - one run measured
+   `hatari-debug profile on`, then `hatari-debug profile save
+   <path>` **while profiling is still on**. `profile off` frees the
+   data, and a save after it fails with "no CPU profiling data
+   available". `profile symbols N` and `profile addresses N` printed
+   nothing when sent through the fifo, so work from the saved file.
+4. Read the saved file's call-graph lines (`0xADDR: caller = calls
+   type i/i/cycles e/e/cycles, ..., _name`). They carry each
+   function's inclusive and exclusive cycles, and they are where
+   `___mulsi3` and friends show up with their callers. In one demo's
+   saves the per-address section was empty. A call still running at
+   the save is missing from the graph, so save between frames, not
+   in the middle of a long one.
+5. Convert with the machine's clock - one run measured
    `ms = cycles / 8021` - and attribute exclusive cycles per object
    file by address range. The TEXT base was `0x149f2` under TOS
    2.06 with 4MB; it moves with TOS and memory size, so read it
@@ -1050,6 +1113,9 @@ first.
   runs on the CPU inside the pump, and of the voice mixer, which
   mixes in the VBL.
 - Lowercase or long filenames in `fopen`/`STDL_LoadBMP`.
+- `int * int`, `/` or `%` in anything per pixel, per object or per
+  frame: libgcc calls. Use `stdl_math.h` and gate the build with
+  `tools/libcalls.sh` (see "Your own arithmetic" above).
 
 ## Reference
 

@@ -43,7 +43,7 @@ TESTS   = test_pixel test_compose test_cursor test_assets test_planes \
           test_footprint test_indexed test_glyph test_vbl test_blit8 \
           test_underleak test_blitter test_dirty \
           test_voice test_ym test_tone test_sfx test_opl test_refresh \
-          test_wav test_mixer test_ring
+          test_wav test_mixer test_ring test_math test_palette
 
 all: $(TESTS)
 

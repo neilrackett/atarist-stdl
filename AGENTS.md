@@ -907,6 +907,37 @@ warnings** with the Makefile's `-Wall -Wextra`.
   (`stdl_audio_convert`), and check the disassembly of any new
   per-sample loop for `jsr` - `m68k-atari-mint-objdump -dr obj/src/x.o`
   prints the relocations by name.
+- **The build lists every libgcc arithmetic call, and fails on a new
+  one.** This trap kept coming back, found by profiling one site at a
+  time: the resampler above, the BLiTTER size rule's 8% of a tile
+  blit, the music tick scaling a volume with `uint8_t * uint8_t`.
+  The rules are now measured, not folklore. gcc 4.6 emits
+  `muls.w`/`mulu.w` only when both operands are visibly 16-bit and
+  of the same signedness at the point it selects instructions, so
+  any of these is a call:
+  - mixed widths (`u8*u8`, `s16*int`, `s16*u16`);
+  - a value derived from a loop counter, which the induction-variable
+    pass (ivopts) rewrites as a fresh 32-bit variable, casts and
+    `int16_t` declarations notwithstanding. A port's bisect found
+    that `-fno-ivopts`, or the function attribute
+    `optimize("no-ivopts")`, restores `muls.w`, but globally it
+    raised the library's own count;
+  - anything at `-O1`, where the widening pass does not run;
+  - a divide or `%` by a non-power-of-two, constants included;
+  - a difference of pointers to a struct whose size is not a power
+    of two.
+
+  So the cross build runs `libcallcheck`: `tools/libcalls.sh` reads
+  every library object's relocations with objdump, counts the calls
+  per function, and fails on any that `tests/libcalls.allow` does not
+  name. Each line there says why that call is not hot. A new one is
+  a decision: write the line with its reason, or use
+  `include/stdl/stdl_math.h` (`STDL_MulS16` and friends, the
+  instruction in inline asm with C twins, checked on target by
+  `tests/hatari/mathchk.c`). The internal `stdl_row_off`, `stdl_mul16`
+  and `stdl_divu` predate the public header and stay as they are:
+  their `"d"` constraints are what the pixel paths were measured
+  with.
 - Variable shifts cost 8+2n cycles each, so two of them per word is
   a fixed tax whatever the shift amount. Building the value from a
   32-bit window needs one: `(((uint32_t)hi << 16) | lo) >> n` rather

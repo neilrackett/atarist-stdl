@@ -92,6 +92,14 @@ from `STDL_GetTicks` instead; a
 border forces 50Hz for as long as it is open, the overscan tricks being
 PAL-timed.
 
+`<stdl/stdl_math.h>` is the 68000's own 16-bit multiply and divide
+(`STDL_MulS16`, `STDL_DivS16`, `STDL_FixDiv` for 16.16 slopes), because
+gcc 4.6 silently turns any product it cannot prove 16-bit into a
+`__mulsi3` call eight times the price - a loop counter, two bytes, an
+`int`. `tools/libcalls.sh` lists every such call an object makes, per
+function, and fails a build on any its allowlist does not name; the
+library's own build runs it.
+
 Anything that cannot be done cheaply in planar has been removed rather than
 emulated; see [docs/limits.md](docs/limits.md).
 
@@ -106,6 +114,7 @@ emulated; see [docs/limits.md](docs/limits.md).
 |                   | bmp, degas, audio, voice, music, sfx, tone, opl, ym, compat, mixer                  |
 | `tools/stdlconv/` | asset converter: image quantise + planar, sprite/tile/font banks, Degas PI1,        |
 |                   | WAV (incl. MS ADPCM) to STE DMA rates, MIDI to YM music, C-array embedding          |
+| `tools/libcalls.sh` | per-function libgcc multiply/divide/float calls in object files, with an allowlist gate |
 | `examples/`       | ported SDL 1.2 test programs + original STDL demos and their assets (public domain) |
 | `docs/`           | format.md (the contract), porting.md, limits.md, design-overview.md                 |
 | `.claude/skills/` | the `stdl` porting skill (auto-discovered by Claude Code in this repo)              |

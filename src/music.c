@@ -49,7 +49,8 @@ static uint8_t scale_vol(uint8_t v)
     if (v & 0x10) {
         return v;               /* envelope-driven: leave alone     */
     }
-    v = (uint8_t)(((unsigned)v * music_volume) >> 7);
+    /* in the music tick: gcc 4.6 multiplies two bytes with __mulsi3 */
+    v = (uint8_t)(STDL_MulU16(v, music_volume) >> 7);
     return v > 15 ? 15 : v;
 }
 

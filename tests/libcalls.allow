@@ -1,0 +1,71 @@
+# libgcc arithmetic the library is allowed to call, checked by
+# `make libcallcheck` (part of the default build) with
+# tools/libcalls.sh.
+#
+#   object function helper count  # why it is not hot
+#
+# A function that calls a helper more often than its line here fails
+# the build. That is the point: gcc 4.6 turns a multiply or divide it
+# cannot prove 16-bit into a call costing 350-630 cycles on a plain
+# ST, and nothing in the source shows which ones it chose (see
+# include/stdl/stdl_math.h). So a new call is a decision, written
+# down here with its reason - or, in anything that runs per pixel,
+# per row, per object, per sample or from an interrupt, replaced with
+# STDL_MulS16 and friends.
+
+# Loading and converting: once per asset, sizes that pass 16 bits
+asset.o STDL_LoadFont __mulsi3 1            # glyph bytes
+asset.o STDL_LoadSprite __mulsi3 1          # frame bytes
+asset.o STDL_LoadSurface __mulsi3 1         # plane bytes
+asset.o STDL_LoadTileset __mulsi3 1         # tile bytes
+bmp.o STDL_LoadBMP __mulsi3 2               # row and image size
+mixer.o Mix_LoadWAV __muldi3 1              # rate conversion length
+mixer.o Mix_LoadWAV __mulsi3 1
+mixer.o Mix_LoadWAV __udivdi3 1
+mixer.o Mix_LoadWAV __udivsi3 1
+sprite.o STDL_SpriteFromSurface __divsi3 1  # frames in a strip
+sprite.o STDL_SpriteFromSurface __mulsi3 1
+sprite.o stdl_sprite_preshift __mulsi3 3    # variant offsets, once
+tileset.o STDL_TilesetFromSurface __divsi3 1
+tileset.o STDL_TilesetFromSurface __mulsi3 4
+
+# Creating surfaces and masks: once per surface
+surface.o STDL_CreateMask __mulsi3 1
+surface.o STDL_CreateSurface __mulsi3 1
+surface.o STDL_DuplicateSurface __mulsi3 1
+surface.o STDL_SurfaceIsOpaque __mulsi3 1
+surface.o mask_alloc __mulsi3 1
+
+# Drawing, once per call rather than per row or pixel
+blit.o blit_whole __mulsi3 1                # beside a whole-surface memcpy
+sprite.o STDL_BlitSprite __mulsi3 1         # frames past 64K only
+shapes.o STDL_FillCircle __mulsi3 1         # span count (6-byte struct)
+
+# Borders: at open, close and calibration, never from the ISRs
+overscan.o ovsc_measure_one __divsi3 1
+overscan.o ovsc_open __divsi3 1
+overscan.o ovsc_open __udivsi3 1
+overscan.o ovsc_program __divsi3 1
+overscan.o ovsc_shifter_reseed __divsi3 1
+overscan.o ovsc_table __divsi3 4
+overscan.o ovsc_table __mulsi3 3
+
+# Audio: once per open, per refill of half the ring, per voice start
+# or retune, or per wrap of a loop shorter than one step - none per
+# sample
+ring.o STDL_OpenAudio __mulsi3 2
+ring.o STDL_OpenAudio __udivsi3 1
+ring.o fill_frames __mulsi3 2               # frames * rate, 32-bit
+ring.o fill_frames __udivsi3 1
+ring.o fill_frames __umodsi3 1
+sfx.o STDL_SpeakerOn __divsi3 1
+voice.o STDL_OpenVoices __mulsi3 1
+voice.o STDL_SetVoiceFreq __udivsi3 1       # step = (freq << 16) / rate
+voice.o stdl_voice_start __udivsi3 1
+voice.o voice_mix_b __umodsi3 1
+voice.o voice_mix_w __umodsi3 1
+voice.o voice_run_c __mulsi3 4              # the asm's C twin, VOICECHK
+
+# Elsewhere
+time.o STDL_Delay __udivsi3 1               # ms to ticks, once a delay
+xpad.o xpad_valid __mulsi3 1                # submodule, once a discovery

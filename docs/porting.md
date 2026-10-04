@@ -433,6 +433,16 @@ truncates colours to the low N bits rather than rejecting them. See
   into layout-dependent heap corruption - address/bus errors far
   from the real cause. (Map exception PCs to symbols with
   `tests/hatari/map-crash.sh`.)
+* **Multiplies and divides that are function calls**: gcc 4.6 uses
+  the 68000's 16-bit `muls.w`/`divs.w` only when it can see both
+  operands are 16-bit and of one signedness. `int * int`, two bytes
+  multiplied, a value from a loop counter, `/` or `%` by a
+  non-power-of-two (constants included) and `-O1` builds all call
+  libgcc instead, at about 350 and 630 cycles a time on a plain ST.
+  Use `STDL_MulS16`, `STDL_DivS16` and `STDL_FixDiv` from
+  `stdl_math.h` on per-frame paths, and run `tools/libcalls.sh` over
+  the port's objects to list every call per function. With `-a` and
+  an allowlist it fails the build on a new one.
 * **libc memcpy in per-frame paths**: mintlib's memcpy overhead
   dominates short copies. 160 small per-line memcpys cost
   one port ~13ms/frame on an 8MHz ST; inline word-copy loops

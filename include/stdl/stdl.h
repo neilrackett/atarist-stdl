@@ -15,6 +15,7 @@ extern "C" {
 #endif
 
 #include <stdl/stdl_types.h>
+#include <stdl/stdl_math.h>
 #include <stdl/stdl_video.h>
 #include <stdl/stdl_surface.h>
 #include <stdl/stdl_draw.h>

@@ -1098,6 +1098,91 @@ void stdl_glyph_rows(uint8_t *g1p, int stride, const uint8_t *glyph,
 #endif
 }
 
+/*
+ * The rows of an 8-pixel glyph standing on a byte boundary (x & 7 ==
+ * 0, unclipped across), the common case of an 8x8 font set on its
+ * own grid. A glyph row is then one byte of each plane, the bytes two
+ * apart, and movep.l reads or writes all four in one instruction: per
+ * row, the byte doubled out to a long mask m and d ^= (d ^ c) & m.
+ * Its gain over stdl_glyph_rows is less in the row than around it:
+ * five operands where that one takes nine, which gcc otherwise
+ * reloads for every character. d is the row's byte in plane 0 (the
+ * group plus 0 or 1); c32 the colour, a byte a plane, plane 0 on
+ * top. At a budget of 2, movep.w and planes 0-1 only.
+ */
+static __inline__ __attribute__((always_inline))
+void stdl_glyph8_rows(uint8_t *d, int stride, const uint8_t *glyph,
+                      int rows, uint32_t c32, const int np)
+{
+#ifdef __m68k__
+    int16_t n = (int16_t)(rows - 1);
+
+    if (np > 2) {
+        __asm__ volatile(
+            "1:\n\t"
+            "move.b (%[g])+,%%d0\n\t"
+            "beq.s  2f\n\t"
+            "move.b %%d0,%%d1\n\t"
+            "lsl.w  #8,%%d0\n\t"
+            "move.b %%d1,%%d0\n\t"
+            "move.w %%d0,%%d1\n\t"
+            "swap   %%d0\n\t"
+            "move.w %%d1,%%d0\n\t"        /* the row in all four bytes */
+            "movep.l 0(%[d]),%%d1\n\t"
+            "move.l %%d1,%%d2\n\t"
+            "eor.l  %[c],%%d2\n\t"
+            "and.l  %%d0,%%d2\n\t"
+            "eor.l  %%d2,%%d1\n\t"
+            "movep.l %%d1,0(%[d])\n"
+            "2:\n\t"
+            "adda.l %[st],%[d]\n\t"
+            "dbf    %[n],1b"
+            : [d] "+a"(d), [g] "+a"(glyph), [n] "+d"(n)
+            : [c] "d"(c32), [st] "a"((int32_t)stride)
+            : "d0", "d1", "d2", "cc", "memory");
+    } else {
+        __asm__ volatile(
+            "1:\n\t"
+            "move.b (%[g])+,%%d0\n\t"
+            "beq.s  2f\n\t"
+            "move.b %%d0,%%d1\n\t"
+            "lsl.w  #8,%%d0\n\t"
+            "move.b %%d1,%%d0\n\t"
+            "movep.w 0(%[d]),%%d1\n\t"
+            "move.w %%d1,%%d2\n\t"
+            "eor.w  %[c],%%d2\n\t"
+            "and.w  %%d0,%%d2\n\t"
+            "eor.w  %%d2,%%d1\n\t"
+            "movep.w %%d1,0(%[d])\n"
+            "2:\n\t"
+            "adda.l %[st],%[d]\n\t"
+            "dbf    %[n],1b"
+            : [d] "+a"(d), [g] "+a"(glyph), [n] "+d"(n)
+            : [c] "d"((uint16_t)(c32 >> 16)), [st] "a"((int32_t)stride)
+            : "d0", "d1", "d2", "cc", "memory");
+    }
+#else
+    /* C twin - what tests/host exercises and the asm must match.
+     * In words, not bytes: the host keeps plane words in its own
+     * byte order, so "the group's byte 0" is the high half of the
+     * word only on the 68000. Groups start on even addresses. */
+    const int lo = (int)((uintptr_t)d & 1);
+    int row, p;
+
+    d -= lo;
+    for (row = 0; row < rows; row++, d += stride) {
+        const uint16_t m = (uint16_t)(*glyph++ << (lo ? 0 : 8));
+        uint16_t *w = (uint16_t *)d;
+
+        for (p = 0; p < (np > 2 ? 4 : 2); p++) {
+            const uint16_t c = (c32 >> (24 - 8 * p)) & 0xFF ? 0xFFFFu : 0;
+
+            w[p] = (uint16_t)(w[p] ^ ((w[p] ^ c) & m));
+        }
+    }
+#endif
+}
+
 /* case-normalising fopen for GEMDOS: retries with an uppercased
  * basename so lowercase asset names in ported code just work */
 void *stdl_fopen_ci(const char *path, const char *mode);

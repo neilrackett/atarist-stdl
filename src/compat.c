@@ -88,9 +88,15 @@ int SDL_SetPalette(SDL_Surface *surface, int flags, SDL_Color *colors,
      * on (SDL_SetColors maps to LOGPAL | PHYSPAL) */
     if ((flags & SDL_PHYSPAL) && (surface->flags & STDL_SCREEN)) {
         for (i = 0; i < ncolors && firstcolor + i < 16; i++) {
-            STDL_SetColour(firstcolor + i,
-                           STDL_HWColour(colors[i].r, colors[i].g,
-                                         colors[i].b));
+            const uint16_t w = STDL_HWColour(colors[i].r, colors[i].g,
+                                             colors[i].b);
+
+            /* staged with the rest when STDL_StagePalette (or an
+             * open border) is staging; STDL_SetColour never is */
+            if (stdl_pal_raw_hook == NULL
+                || !stdl_pal_raw_hook(firstcolor + i, w)) {
+                STDL_SetColour(firstcolor + i, w);
+            }
         }
     }
     return 1;

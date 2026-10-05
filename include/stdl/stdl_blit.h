@@ -61,6 +61,21 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
 
 void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
                      int x, int y);
+
+/*
+ * One sprite at many places: each entry drawn as STDL_BlitSprite would
+ * draw it, in list order. What does not change between them is worked
+ * out once, and each one wholly inside the clip that STDL_BlitSprite
+ * would give its aligned four-plane loop - a pre-shifted sprite, or an
+ * unshifted one on a group edge, on the CPU - goes straight to that
+ * loop; any other is drawn by STDL_BlitSprite. For the bobs and
+ * particles of a scene, where most of a small sprite's cost was the
+ * call. Its own object: a program that never calls it does not carry
+ * it.
+ */
+typedef struct { int16_t x, y; uint16_t frame; } STDL_SpriteAt;
+void STDL_BlitSprites(STDL_Sprite *spr, const STDL_SpriteAt *at,
+                      int count, STDL_Surface *dst);
 void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,
                    int x, int y);
 

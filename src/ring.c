@@ -103,8 +103,7 @@ static void stdl_audio_pump(void)
     if (au.filled_half == playing_half) {
         int half_frames = RING_FRAMES / 2;
         int other = playing_half ^ 1;
-        fill_frames(au.ring
-                    + (uint32_t)other * (au.ring_bytes / 2),
+        fill_frames(au.ring + (other ? au.ring_bytes / 2 : 0),
                     half_frames);
         au.filled_half = other;
     }

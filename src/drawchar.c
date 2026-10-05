@@ -25,6 +25,23 @@
 
 #include "stdl_internal.h"
 
+/* an 8-pixel cell on a byte boundary, uncut: see stdl_glyph8_rows.
+ * Out of line so STDL_DrawChar's own allocation is as it was. */
+static __attribute__((noinline)) void draw_char8(uint8_t *d, int stride,
+        const uint8_t *glyph, int rows, uint16_t pw0, uint16_t pw1,
+        uint16_t pw2, uint16_t pw3)
+{
+    const uint32_t c32 = ((uint32_t)(pw0 & 0xFF) << 24)
+                       | ((uint32_t)(pw1 & 0xFF) << 16)
+                       | ((uint32_t)(pw2 & 0xFF) << 8) | (pw3 & 0xFF);
+
+    if (stdl_planes > 2) {
+        stdl_glyph8_rows(d, stride, glyph, rows, c32, 4);
+    } else {
+        stdl_glyph8_rows(d, stride, glyph, rows, c32, 2);
+    }
+}
+
 void STDL_DrawChar(STDL_Surface *dst, const STDL_Font *font,
                    int x, int y, int ch, uint8_t col)
 {
@@ -97,6 +114,11 @@ void STDL_DrawChar(STDL_Surface *dst, const STDL_Font *font,
     g1p = dst->pixels + stdl_row_off(y + row0, dst->stride)
         + (x >> 4) * 8;
 
+    if (clipmask == 0xFF00u && bpr == 1 && (x & 7) == 0) {
+        draw_char8(g1p + ((x >> 3) & 1), dst->stride, glyph, row1 - row0,
+                   pw0, pw1, pw2, pw3);
+        return;
+    }
     np = stdl_planes;
 #define CHAR_ROWS(np) \
     stdl_glyph_rows(g1p, dst->stride, glyph, bpr, row1 - row0, \

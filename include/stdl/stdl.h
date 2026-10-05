@@ -15,6 +15,7 @@ extern "C" {
 #endif
 
 #include <stdl/stdl_types.h>
+#include <stdl/stdl_math.h>
 #include <stdl/stdl_video.h>
 #include <stdl/stdl_surface.h>
 #include <stdl/stdl_draw.h>
@@ -25,6 +26,7 @@ extern "C" {
 #include <stdl/stdl_vbl.h>
 #include <stdl/stdl_overscan.h>
 #include <stdl/stdl_hwscroll.h>
+#include <stdl/stdl_raster.h>
 #include <stdl/stdl_dirty.h>
 #include <stdl/stdl_asset.h>
 #include <stdl/stdl_audio.h>

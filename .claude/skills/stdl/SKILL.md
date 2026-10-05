@@ -110,6 +110,13 @@ surface already holding out-of-budget colours when you lower it
 will render wrong. Grep the port for every colour literal before
 choosing N - the maximum index used decides it, not the palette.
 
+Many copies of one sprite - bobs, particles, a wave of enemies -
+go in one `STDL_BlitSprites(spr, list, n, dst)` call, a list of
+`STDL_SpriteAt {x, y, frame}`. Each one wholly inside the clip skips
+`STDL_BlitSprite`'s per-call set-up; anything else is drawn by it.
+Measured on a plain ST (SPRCOST): fourteen pre-shifted 16x16 bobs
+13.1ms one call each, 11.1ms batched.
+
 Pre-shifted sprites (`STDL_PRESHIFT`) cost 16x RAM and make
 unaligned sprites as cheap as aligned ones - on a plain ST. With a
 BLiTTER, `STDL_BlitSprite` hands sprites to the chip, which shifts
@@ -138,6 +145,58 @@ path, so align to 16px or pre-shift there. `STDL_UseBlitter(0)`
 forces CPU paths for debugging; BLITCHK.TOS verifies both paths on
 target.
 
+**Your own arithmetic: 16 bits, or a library call.** The 68000
+multiplies 16 by 16 and divides 32 by 16. gcc 4.6 uses those
+instructions only when it can see, where it chooses, that both
+operands are 16-bit values of the same signedness; anything else
+becomes a call to `__mulsi3` (about 350 cycles on a plain ST against
+40 for `muls.w`) or `__divsi3` (630 against 140). It is silent and
+it moves with the surrounding code, so ports keep finding it with
+the profiler, one site at a time. Measured with gcc 4.6.4 at `-O2`:
+
+- `int * int` is always a call. So are mixed widths:
+  `uint8_t * uint8_t`, `int16_t * int`, `int16_t * uint16_t`.
+- In a loop, a value derived from the counter loses its 16-bit cast.
+  The induction-variable pass rewrites it as a 32-bit variable, so
+  `(int32_t)(int16_t)dx * (int16_t)dx` with `dx = x - 80` is a call
+  inside the loop and `muls.w` outside it. Declaring `dx` as
+  `int16_t` does not help. One demo's plasma precalc made 40,860 of
+  these calls in eight seconds of loading.
+- At `-O1` every product is a call: the widening pass runs only at
+  `-O2`/`-Os`.
+- Division by anything but a power of two is a call, constants
+  included (`x / 12` on an `int`), and so is `%` (`text[i % len]` in
+  a scroller). A `short` divided by a constant is the exception: it
+  becomes a `muls.w` by the reciprocal.
+- Subtracting pointers to a struct whose size is not a power of two
+  divides: `q - spans` for 6-byte spans multiplies by 0xAAAAAAAB.
+
+Use `<stdl/stdl_math.h>` (in `stdl.h`) on anything that runs per
+pixel, per row, per object or per frame. `STDL_MulS16`/`STDL_MulU16`
+(16x16->32), `STDL_DivS16`/`STDL_DivU16` (32/16, quotient must fit)
+and `STDL_FixDiv` (`(a << 16) / b` for a 16.16 slope, about 330
+cycles against 630) are the instruction whatever surrounds them.
+Products with a constant can stay plain C (`y * 160` compiles to
+shifts and adds for an `int`, `muls.w #160` for an `int16_t`).
+Precompute a reciprocal or a table instead of
+dividing per element, and step an index instead of taking `%`.
+
+Then make it a build failure rather than a profiling discovery.
+`tools/libcalls.sh` in the STDL repo lists every libgcc arithmetic
+call an object makes, per function, and with `-a` fails on any that
+an allowlist does not name. The library checks its own build this
+way (`tests/libcalls.allow`). A port's Makefile can do the same:
+
+```make
+libcallcheck: $(OBJS)
+	sh $(STDL)/tools/libcalls.sh -a libcalls.allow $(OBJS)
+```
+
+Run it without `-a` first to see what is there today. Allow the
+load-time calls with a reason each, fix the per-frame ones, and the
+next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
+`__fixdfsi`...) shows up in the same list.
+
 ## Porting workflow
 
 1. `python3 tools/stdlconv/stdlconv.py bmp16 in.png OUT.BMP
@@ -163,7 +222,11 @@ target.
    - 1bpp data -> `STDL_SurfaceFrom1bpp`; byte-per-pixel (chunky)
      art -> `STDL_SurfaceFromIndexed8(bytes, w, h, stride, key)`
      then `STDL_SpriteFromSurface`. Only reach for `STDL_PutGroup` /
-     `STDL_PutGroup8` when the source is some format of its own
+     `STDL_PutGroup8` when the source is some format of its own.
+     Load-time costs on a plain ST: the conversion about 80 cycles a
+     pixel (96 keyed), and `STDL_PRESHIFT` 280ms for one 64x64
+     sprite, so a loader converting a screenful of art is counting
+     tenths of a second, not seconds
    - the same art in several colour schemes (team/faction colours,
      damage flashes) -> `STDL_RemapSurface(s, map)` once per
      variant at load, then blit normally. There is no blit-time
@@ -178,6 +241,26 @@ target.
      multi-coloured (do not sort into colour runs to avoid it: the
      sort costs more than the per-point colour does); erase next
      frame with a second call in the background colour
+   - filled polygons (flat-shaded 3D, glenz, vector fonts) ->
+     `STDL_FillPolygon(dst, pts, n, col, op)` for each convex face,
+     not a span list built by hand. `op` is `STDL_DRAW_SET`, or
+     `STDL_DRAW_XOR`/`STDL_DRAW_OR`/`STDL_DRAW_CLEAR` on the planes
+     `col` has, which is how a glenz draws each face into a plane of
+     its own. Edges follow the rectangle's rule (top and left
+     inside), so faces sharing an edge tile with no seam, which XOR
+     needs. Like the other drawing primitives it ignores the surface
+     origin. A rectangle's four corners with an op is a plane-masked
+     rectangle fill. A face inside the clip's columns, at most 256
+     rows tall, SET or XORed onto a surface with no mask, is filled
+     entirely in 68000 with both edges in registers; others take
+     column tables. XOR/OR/CLEAR write only the colour's planes, so
+     a one-plane glenz face is one word a group. Measured on a plain
+     ST (PRIMCOST): a 160-row diamond XORed in 12.6ms against 23.9
+     through `STDL_XorHSpans`; a 22-row triangle 1.55ms against
+     2.26 as spans, 1.27ms in one plane; 24 one-plane glenz-like
+     triangles 49ms (85 before this path). Set-up is about 5000
+     cycles a polygon, so from those figures only faces under about
+     ten rows are cheaper as spans. `examples/polydemo.c`
    - a *loop* of short spans (terrain profiles, column fields,
      raycaster walls) -> fill an `STDL_Span` array and make one
      `STDL_XorVSpans` / `STDL_VSpans` / `STDL_XorHSpans` /
@@ -350,14 +433,26 @@ The recipe, because several steps are not obvious:
 
 1. Copy the **unstripped** ELF over the `.TOS` on the test drive.
    The profiler needs symbols the stripped binary does not have.
-2. Build a symbol file with `nm`, sanitising the names: Hatari's
-   loader drops anything it cannot parse, so demangle C++ names and
-   strip characters it will not take, or the symbols silently do
-   not load.
+2. Load the symbols once the program is running:
+   `hatari-debug symbols prg` reads them straight from the program's
+   own a.out symbol table (Hatari 2.6.1 answered "Loaded 1057
+   symbols" for one demo). A C++ port may still need a symbol file
+   built with `nm`, demangled and with the characters Hatari's loader
+   will not take stripped, or the symbols silently do not load.
 3. Around a marker you have synced on, drive it through the fifo:
-   `hatari-debug symbols <file>`, `hatari-debug profile on`, then
-   `hatari-debug profile save <path>`.
-4. Convert with the machine's clock - one run measured
+   `hatari-debug profile on`, then `hatari-debug profile save
+   <path>` **while profiling is still on**. `profile off` frees the
+   data, and a save after it fails with "no CPU profiling data
+   available". `profile symbols N` and `profile addresses N` printed
+   nothing when sent through the fifo, so work from the saved file.
+4. Read the saved file's call-graph lines (`0xADDR: caller = calls
+   type i/i/cycles e/e/cycles, ..., _name`). They carry each
+   function's inclusive and exclusive cycles, and they are where
+   `___mulsi3` and friends show up with their callers. In one demo's
+   saves the per-address section was empty. A call still running at
+   the save is missing from the graph, so save between frames, not
+   in the middle of a long one.
+5. Convert with the machine's clock - one run measured
    `ms = cycles / 8021` - and attribute exclusive cycles per object
    file by address range. The TEXT base was `0x149f2` under TOS
    2.06 with 4MB; it moves with TOS and memory size, so read it
@@ -688,10 +783,34 @@ first.
   what was drawn into it two frames ago. Before that change (v1.13.2
   and earlier) the single list erased the wrong page; a double-buffered
   port that pushed both frames' rectangles to compensate can stop.
+  Keep the background the page's shape - same size and stride, no
+  origin on either, no mask on the page, and no colour key on the
+  background - and with the BLiTTER absent or refused
+  (`STDL_UseBlitter(0)`) at plane budget 4, each rectangle is
+  restored by offset, skipping the general
+  blit's set-up: measured on a plain ST, 16 restores of 16x16 at
+  group edges went from 9.9ms to 6.1ms, and at x & 15 = 5 from 18.6
+  to 12.7 (the edge groups' merges are most of what is left).
+  `STDL_DirtyWholeGroups(1)` restores the whole groups a rectangle
+  touches instead, a plain copy: 12.7 -> 7.9ms for those sixteen. It
+  also repaints the pixels beside each rectangle from the background,
+  so use it only where everything on the page is background or a
+  pushed sprite, not where a HUD is drawn straight onto it.
 - Composition: `STDL_TRANSPARENT` fills punch holes in masked
   surfaces; blits maintain destination masks; `STDL_SurfaceIsOpaque`
   (cached) skips backdrop under solid tiles; `STDL_PutGroup` for
   runtime asset decoders; `STDL_CreateMask` for built-up surfaces.
+- YM music: `STDL_LoadMusic("SONG.STM")` (from `stdlconv midi`), or
+  `STDL_MusicFromMemory(data, bytes)` for a stream linked into the
+  program, which plays in place without a copy. `STDL_MusicFrame()`
+  is the music's own clock, in stream frames, so sync effects to it,
+  not to a counter of your own. `STDL_SeekMusic(frame)` jumps,
+  playing or paused, in `0 .. STDL_MusicLength(m) - 1`. It writes
+  every voice's state at once, or on resume when paused. Ship one
+  song and seek, not a copy per entry point.
+  `STDL_GetMusicRegisters(regs)` returns the stream's 14 registers
+  for VU meters without touching the chip; volumes 8-10 with bit 4
+  set follow the envelope. `examples/musicvu.c`.
 - Sound effects: `STDL_SpeakerOn/Off` = PC-speaker idiom on voice A;
   `STDL_PlaySfx` = step sequences (tone or noise) on auto voices;
   give it a `noises` array (v1.12.0) and each step has its own
@@ -796,6 +915,41 @@ first.
   why it is opt-in and why the return value is the rate rather than
   an acknowledgement - ask, then believe the answer.
   `examples/vblchk.c` measures the VBL at both rates.
+- Rasters (colour changes down the screen): `STDL_OpenRasters(lines,
+  reg1, reg2)` changes one or two colour registers every `lines`
+  lines from a table. Fill `STDL_RasterTable()` and call
+  `STDL_ShowRasters(keep)` with each flip; `STDL_CloseRasters()`
+  when done (`<stdl/stdl_raster.h>`, in `stdl.h`). With keep = 1 the
+  next table starts as a copy of this one, so change only what moves;
+  rewrite every entry and pass 0 to skip the copy. Colour 0 is the
+  border too, so its bars run edge to edge. Measured on a plain ST
+  (RASTCHK) with colour 0 first, every second line costs 11% of the
+  machine (12% with a second register) and every line 22% (25%);
+  another first register is a few points dearer. Timer B is the
+  borders' as well, so rasters and an open border refuse each
+  other. The terminate path puts the vectors back, which a
+  hand-rolled raster handler leaves pointing into freed memory.
+  While open, the two registers are the table's. `examples/rasters.c`.
+- Palette changes on the frame boundary: `STDL_StagePalette(1)`
+  holds every change made through `STDL_SetPalette`,
+  `STDL_SetColours`, `STDL_FadeTo` and the SDL shim's
+  `SDL_SetColors`/`SDL_SetPalette(SDL_PHYSPAL)`, and writes it in the
+  next vertical blank. Unstaged, a palette cycle or fade written from
+  the main loop lands wherever the beam is, and that frame shows the
+  old colours above it and the new below. Measured in Hatari with a
+  colour switched at mid-screen every frame (`tests/hatari/palstg.c`):
+  99 and 100 frames of 100 split unstaged, 1 and 2 staged (the
+  switch-over frames). It costs up to a
+  frame of delay and a VBL slot; an open border stages on its own
+  account. `STDL_SetColour` (raw word) is never staged, for raster
+  tricks. A port that staged its own palette from an `STDL_AddVBL`
+  callback can drop it. `TPALETTE -stage`.
+- Constant colour tables: `STDL_HW444(0xC72)` turns an 0xRGB with
+  four bits a channel (0-15, the STE's scale) into the hardware word
+  at compile time. The register does not take 0xRGB as written: its
+  nibbles keep a channel's lowest bit in bit 3, so a raw 0xC72 shows
+  green, not orange. ST-style 0x777 values (0-7) are already valid
+  words.
 - Engine-owned framebuffers: `STDL_CreateSurfaceFrom(pixels, w, h,
   stride, mask, maskstride)` wraps caller-owned planar blocks (and an
   optional mask plane) as surfaces - pointer-swappable, memcpy-able,
@@ -1050,6 +1204,9 @@ first.
   runs on the CPU inside the pump, and of the voice mixer, which
   mixes in the VBL.
 - Lowercase or long filenames in `fopen`/`STDL_LoadBMP`.
+- `int * int`, `/` or `%` in anything per pixel, per object or per
+  frame: libgcc calls. Use `stdl_math.h` and gate the build with
+  `tools/libcalls.sh` (see "Your own arithmetic" above).
 
 ## Reference
 

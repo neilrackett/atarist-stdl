@@ -39,7 +39,8 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/surfacefrom.c src/blit8.c src/voice.c \
           $(XPAD)/xpad.c src/stdl_xpad.c src/overscan.c \
           src/hwscroll.c src/tone.c src/cpuspeed.c src/opl.c \
-          src/refresh.c src/mouse.c src/stram.c src/wav.c src/ring.c
+          src/refresh.c src/mouse.c src/stram.c src/wav.c src/ring.c \
+          src/palstage.c src/polygon.c src/raster.c src/spritebatch.c
 # Objects live under obj/, mirroring each source's own path. Sources
 # now come from two places, this repo and the xpad submodule, and
 # building beside the source would drop .o files inside lib/xpad. The
@@ -57,7 +58,8 @@ EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
            dist/TKEYS.TOS dist/TJOY.TOS dist/LOOPWAVE.TOS \
            dist/TCURSOR.TOS dist/PLAYMUS.TOS dist/SFXDEMO.TOS \
            dist/BLITCHK.TOS dist/VBLCHK.TOS dist/OVERSCAN.TOS \
-           dist/HWSCROLL.TOS dist/TONEDEMO.TOS dist/OPLDEMO.TOS
+           dist/HWSCROLL.TOS dist/TONEDEMO.TOS dist/OPLDEMO.TOS \
+           dist/MUSICVU.TOS dist/POLYDEMO.TOS dist/RASTERS.TOS
 
 # Pinned, not left to ordering: a rule added above this one would
 # silently become the default goal, and `make` would then build
@@ -66,7 +68,7 @@ EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
 # notice - a port lost a cycle to exactly this.
 .DEFAULT_GOAL := all
 
-all: $(LIB) sizecheck $(EXAMPLES) assets
+all: $(LIB) sizecheck libcallcheck $(EXAMPLES) assets
 
 # Size budget for the pixel-path objects.
 #
@@ -116,6 +118,23 @@ sizecheck: $(PIXEL_OBJS)
 	 if [ $$n -gt $(PIXEL_MAX) ]; then \
 	   echo "*** over the pixel-path size budget"; exit 1; \
 	 fi
+
+# Calls into libgcc's arithmetic, per function, against an allowlist.
+#
+# The 68000 multiplies 16 bits by 16 and divides 32 by 16; gcc 4.6
+# turns anything it cannot prove fits into a __mulsi3 or __divsi3
+# call, 350-630 cycles on a plain ST, and what it can prove changes
+# with the code around the expression - a cast that compiles to
+# muls.w in one function is a call inside a loop in the next, and
+# two bytes multiplied are a call everywhere. Found by profiling, one
+# at a time, for months: the ring device's resampler (37% of an STE,
+# silent), the BLiTTER's size rule (8% of a tile blit), the music
+# tick's volume. A grep cannot see them and neither can the host
+# tests, so the cross build lists them and fails on any the
+# allowlist does not name. tools/libcalls.sh is the same check for a
+# port's own objects.
+libcallcheck: $(LIBOBJS)
+	@sh tools/libcalls.sh -a tests/libcalls.allow $(LIBOBJS)
 
 # runtime assets the examples load (tracked in examples/assets/,
 # regenerable via tools/mkdemo.py and tools/stdlconv/stdlconv.py)
@@ -214,6 +233,12 @@ dist/HWSCROLL.TOS: examples/hwscroll.c $(LIB)
 
 dist/TONEDEMO.TOS: examples/tonedemo.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
+dist/MUSICVU.TOS: examples/musicvu.c $(LIB)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
+dist/POLYDEMO.TOS: examples/polydemo.c $(LIB)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
+dist/RASTERS.TOS: examples/rasters.c $(LIB)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
 dist/OPLDEMO.TOS: examples/opldemo.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
 
@@ -268,4 +293,4 @@ clean:
 run-%:
 	hatari --machine ste --memsize 4 --fast-boot on dist/$*.TOS
 
-.PHONY: sizecheck all clean assets test cmini bundle ci
+.PHONY: sizecheck libcallcheck all clean assets test cmini bundle ci

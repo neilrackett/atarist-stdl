@@ -36,6 +36,22 @@ void STDL_DirtyPush(const STDL_Rect *r);   /* mark for restore        */
 void STDL_DirtyRestore(STDL_Surface *dst); /* repaint from background */
 void STDL_DirtyReset(void);
 
+/*
+ * Restore whole 16-pixel groups (on = 1) rather than exactly the
+ * rectangles pushed (0, the default). A rectangle at an odd x then
+ * restores the groups it touches, a plain copy, where exact edges are
+ * merged a plane pair at a time - roughly half the cost of a 16x16
+ * sprite's restore. It also repaints the pixels beside each rectangle
+ * from the background, so it is for scenes where everything drawn on
+ * the page is either the background or something pushed: bobs,
+ * particles. Not for a page with a score or a HUD drawn straight
+ * onto it beside the sprites. It applies where the restore goes by
+ * offset - the background the page's shape, the BLiTTER absent or
+ * refused, plane budget 4 - and elsewhere the rectangles are
+ * restored exactly as before.
+ */
+void STDL_DirtyWholeGroups(int on);
+
 #ifdef __cplusplus
 }
 #endif

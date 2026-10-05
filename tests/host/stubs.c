@@ -43,6 +43,10 @@ void  (*stdl_shutdown_overscan)(void);
 uint16_t (*stdl_blit_policy)(uint16_t nlines, uint32_t cpl);
 
 /* the YM2149 as a register file, and the console-attributes byte */
+volatile uint8_t stdl_host_mfp[0x30];
+volatile uint32_t stdl_host_vec_tb, stdl_host_vec_tc;
+void (*stdl_shutdown_rasters)(void);
+uint8_t stdl_timerb_owner;
 volatile uint8_t stdl_host_ym_sel;
 volatile uint8_t stdl_host_ym[16];
 volatile uint8_t stdl_host_conterm;
@@ -154,3 +158,4 @@ void (*stdl_audio_hook)(void);
 
 /* defined in video.c on target, which the host tests do not link */
 void (*stdl_pal_apply_hook)(void);
+int (*stdl_pal_raw_hook)(int index, uint16_t word);

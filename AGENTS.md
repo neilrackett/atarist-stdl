@@ -59,6 +59,17 @@ warnings** with the Makefile's `-Wall -Wextra`.
   cycles a pixel. Plane-word fills, a table decode and a
   shift-register generator took the full pass to 16 minutes; the
   sampling took the hardware build to seconds.
+  The emulator has a ceiling too: `run.sh`'s `waitfor` gives up
+  after two minutes of host time and the log simply stops, which
+  reads exactly like a hang. PGCHK, given a second suite, outgrew it
+  by seconds and was chased as a crash in new asm until a trace
+  showed it still running; filling its test surfaces a plane word at
+  a time rather than through `STDL_PutPixel` put it back at 84
+  seconds. And that was the emulator: on a real Mega STE at 8MHz the
+  same build took 28 minutes, the reference's exact arithmetic doing
+  the work, so PGCHK now samples by default and `-DPGCHK_FULL` is the
+  emulator's. Time a CHK runner after adding cases to it, on the
+  machine as well as under fast-forward.
   `tests/hatari/sprcost.c` times sprites, restores, blits and fills
   (with the fixed cost of a call taken apart), twice per run so each
   run carries its own noise floor, and `tests/hatari/sccmp.py`
@@ -354,6 +365,28 @@ warnings** with the Makefile's `-Wall -Wextra`.
   Do not reach for clearing the ALTALLOC flag. A 594KB port dies at
   its first allocation on a 1MB machine without alt-RAM, which is
   exactly why testers enable it.
+- **Timer B has one owner, and its teardown is on the terminate
+  path.** The raster service (src/raster.c) and the borders both run
+  on Timer B. Before it existed, a program that wanted rasters wrote
+  its own handler. Nothing stopped that coexisting with an open
+  border, and an abnormal exit left the Timer B and Timer C vectors
+  pointing into freed memory. `stdl_timerb_owner` in video.c now
+  names the holder and each refuses the other. The raster teardown
+  is a vectors-and-registers-only function on `stdl_shutdown_rasters`,
+  called from release_hardware: RASTCHK aborted with rasters open,
+  and the desktop came back in its own colours. The Timer C prefix
+  earns its place measurably. RASTCHK holds a fixed table, and
+  tests/hatari/rstill.py counts the held frames whose stripes moved:
+  2 of 144 with the prefix, 16 of 144 with RASTCHK built
+  -DRASTCHK_NOPREFIX (Hatari, plain ST, program idle in STDL_Delay).
+  A hold that only spun showed far more without it during
+  development. Colour 0 has its own handlers: one register saved,
+  and the write about 20 cycles sooner. Colour 0 is also the border,
+  so its write must land before the next line's left border, and the
+  general handlers missed that by a few dozen cycles now and then. Any new user of Timer B, or of
+  an MFP vector, wants the same three things: an owner, a teardown
+  on the terminate path, and a frame-by-frame capture of a still
+  scene.
 - **A mouse nobody reads still costs a border.** Moving a mouse with
   the bottom border open flickers it on a real Mega STE and the
   missed-window count climbs while the movement lasts; disabling
@@ -732,7 +765,9 @@ warnings** with the Makefile's `-Wall -Wextra`.
   `#ifdef __m68k__` with the identical loop in C as the `#else` -
   the C build is what tests/host exercises, and the same host tests
   run on the target gate the asm: `tests/hatari/pixchk.c` for
-  test_pixel.c, `tests/hatari/i8chk.c` for test_blit8.c. A pixel
+  test_pixel.c, `tests/hatari/i8chk.c` for test_blit8.c,
+  `tests/hatari/ixchk.c` for test_indexed.c and
+  `tests/hatari/pgchk.c` for test_polygon.c. A pixel
   file with asm and no such runner has its asm checked by nobody -
   blit8.c's was, until I8CHK, and a deliberately broken gather now
   fails it with 26 differences. (gcc 4.6 earned the asm: it
@@ -887,8 +922,10 @@ warnings** with the Makefile's `-Wall -Wextra`.
   handler (event.c) - plus, while a border is open, overscan.c's
   timer ISRs and its register-free prefixes on the VBL and Timer C
   vectors (the latter only lowers the CPU mask to 5 inside TOS's
-  handler). Services (audio refill, compat timers, cursor) run from
-  the pump and the native delays.
+  handler), and while rasters are open, raster.c's Timer B handlers
+  and its own Timer C prefix of the same kind. The two never run
+  together: `stdl_timerb_owner`. Services (audio refill, compat
+  timers, cursor) run from the pump and the native delays.
 
 ## 68000 / gcc 4.6.4 performance notes
 
@@ -907,6 +944,37 @@ warnings** with the Makefile's `-Wall -Wextra`.
   (`stdl_audio_convert`), and check the disassembly of any new
   per-sample loop for `jsr` - `m68k-atari-mint-objdump -dr obj/src/x.o`
   prints the relocations by name.
+- **The build lists every libgcc arithmetic call, and fails on a new
+  one.** This trap kept coming back, found by profiling one site at a
+  time: the resampler above, the BLiTTER size rule's 8% of a tile
+  blit, the music tick scaling a volume with `uint8_t * uint8_t`.
+  The rules are now measured, not folklore. gcc 4.6 emits
+  `muls.w`/`mulu.w` only when both operands are visibly 16-bit and
+  of the same signedness at the point it selects instructions, so
+  any of these is a call:
+  - mixed widths (`u8*u8`, `s16*int`, `s16*u16`);
+  - a value derived from a loop counter, which the induction-variable
+    pass (ivopts) rewrites as a fresh 32-bit variable, casts and
+    `int16_t` declarations notwithstanding. A port's bisect found
+    that `-fno-ivopts`, or the function attribute
+    `optimize("no-ivopts")`, restores `muls.w`, but globally it
+    raised the library's own count;
+  - anything at `-O1`, where the widening pass does not run;
+  - a divide or `%` by a non-power-of-two, constants included;
+  - a difference of pointers to a struct whose size is not a power
+    of two.
+
+  So the cross build runs `libcallcheck`: `tools/libcalls.sh` reads
+  every library object's relocations with objdump, counts the calls
+  per function, and fails on any that `tests/libcalls.allow` does not
+  name. Each line there says why that call is not hot. A new one is
+  a decision: write the line with its reason, or use
+  `include/stdl/stdl_math.h` (`STDL_MulS16` and friends, the
+  instruction in inline asm with C twins, checked on target by
+  `tests/hatari/mathchk.c`). The internal `stdl_row_off`, `stdl_mul16`
+  and `stdl_divu` predate the public header and stay as they are:
+  their `"d"` constraints are what the pixel paths were measured
+  with.
 - Variable shifts cost 8+2n cycles each, so two of them per word is
   a fixed tax whatever the shift amount. Building the value from a
   32-bit window needs one: `(((uint32_t)hi << 16) | lo) >> n` rather

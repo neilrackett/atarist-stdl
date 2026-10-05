@@ -70,6 +70,20 @@ holds the CPU off the border and throughput stays within 14-28% of
 the no-border figure; palette writes are staged to the vertical
 blanking so they can never flash mid-frame. See `examples/overscan.c`.
 
+`STDL_OpenRasters` changes one or two colour registers every few lines
+down the picture from tables filled a frame ahead - copper bars, skies, a
+gradient behind text - with the Timer C prefix that keeps them steady,
+Timer B shared safely with the borders (each refuses while the other
+holds it), and the vectors put back however the program exits.
+
+`STDL_FillPolygon` fills convex polygons straight from their edges -
+set, or XORed, ORed or cleared into a colour's planes, with shared
+edges tiling exactly - for flat-shaded 3D and glenz. `STDL_StagePalette(1)`
+holds palette changes for the vertical blank, so a fade or a cycle never
+splits a frame. Music can be played from memory, sought, and read back
+for meters (`STDL_MusicFromMemory`, `STDL_SeekMusic`,
+`STDL_GetMusicRegisters`).
+
 `STDL_EnableMouse(0)` stops the IKBD reporting a mouse the game never
 reads - three ACIA interrupts per movement that, with a border open,
 are enough to delay the timers a flick depends on and flicker the
@@ -92,6 +106,14 @@ from `STDL_GetTicks` instead; a
 border forces 50Hz for as long as it is open, the overscan tricks being
 PAL-timed.
 
+`<stdl/stdl_math.h>` is the 68000's own 16-bit multiply and divide
+(`STDL_MulS16`, `STDL_DivS16`, `STDL_FixDiv` for 16.16 slopes), because
+gcc 4.6 silently turns any product it cannot prove 16-bit into a
+`__mulsi3` call eight times the price - a loop counter, two bytes, an
+`int`. `tools/libcalls.sh` lists every such call an object makes, per
+function, and fails a build on any its allowlist does not name; the
+library's own build runs it.
+
 Anything that cannot be done cheaply in planar has been removed rather than
 emulated; see [docs/limits.md](docs/limits.md).
 
@@ -103,9 +125,11 @@ emulated; see [docs/limits.md](docs/limits.md).
 | `include/compat/` | SDL.h and SDL_mixer.h - the SDL 1.2 compatibility shims                             |
 | `src/`            | video, surface, surfacefrom, draw, shapes, blit, blit8, blitter, planes, palette,   |
 |                   | event, cursor, time, dirty, vbl, sprite, tileset, text, drawchar, indexed, asset,   |
-|                   | bmp, degas, audio, voice, music, sfx, tone, opl, ym, compat, mixer                  |
+|                   | bmp, degas, audio, voice, music, sfx, tone, opl, ym, compat, mixer, palstage,       |
+|                   | polygon, raster, spritebatch                                                        |
 | `tools/stdlconv/` | asset converter: image quantise + planar, sprite/tile/font banks, Degas PI1,        |
 |                   | WAV (incl. MS ADPCM) to STE DMA rates, MIDI to YM music, C-array embedding          |
+| `tools/libcalls.sh` | per-function libgcc arithmetic calls (multiply, divide, 64-bit, float) in object files, with an allowlist gate |
 | `examples/`       | ported SDL 1.2 test programs + original STDL demos and their assets (public domain) |
 | `docs/`           | format.md (the contract), porting.md, limits.md, design-overview.md                 |
 | `.claude/skills/` | the `stdl` porting skill (auto-discovered by Claude Code in this repo)              |
@@ -156,7 +180,7 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | GRAYWIN.TOS  | fills, clipping, palette                                                         |
 | TESTWIN.TOS  | BMP loading, surface blits, palette fades                                        |
 | TSPRITE.TOS  | colour-keyed sprite blits, dirty rects, FPS                                      |
-| TPALETTE.TOS | palette animation on a 16-entry budget                                           |
+| TPALETTE.TOS | palette animation on a 16-entry budget; `-stage` lands each change in the blank  |
 | CHECKKEY.TOS | raw IKBD keyboard: key-ups, modifiers, unicode                                   |
 | TTIMER.TOS   | 200Hz timing, cooperative timers                                                 |
 | TBLITSPD.TOS | blit throughput baseline                                                         |
@@ -166,6 +190,9 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | LOOPWAVE.TOS | STE/Mega STE DMA sample playback (STDL_Audio)                                    |
 | TCURSOR.TOS  | software mouse cursor with save-under                                            |
 | PLAYMUS.TOS  | YM music (stdlconv midi -> STDL_Music) + sample chunks via the SDL_mixer shim    |
+| MUSICVU.TOS  | YM music from memory: VU meter from the stream's registers, position, seeking    |
+| POLYDEMO.TOS | convex polygons XORed into single planes, a glenz look; seamless shared edges    |
+| RASTERS.TOS  | Timer B rasters: copper bars in colour 0 edge to edge, a gradient in colour 15   |
 | SFXDEMO.TOS  | Degas splash, YM effects stealing/restoring music voices, joystick key emulation |
 | TONEDEMO.TOS | live notes on the three YM voices: a fourth note displacing and returning        |
 | OPLDEMO.TOS  | an OPL2 register stream (the IMF games' music format) replayed as YM notes       |

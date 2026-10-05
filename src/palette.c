@@ -35,8 +35,9 @@ void stdl_palette_apply_hw(void)
 {
     int i;
     if (stdl_pal_apply_hook != NULL) {
-        /* a border overscan is open: writes are staged and drained
-         * inside the blanking, where they cannot flash mid-frame */
+        /* staging (palstage.c) - STDL_StagePalette, or an open
+         * border: writes are converted now and written inside the
+         * blanking, where they cannot split a frame */
         stdl_pal_apply_hook();
         return;
     }
@@ -127,25 +128,37 @@ void STDL_GetRGB(uint32_t index, const STDL_PixelFormat *fmt,
 
 void STDL_FadeTo(const STDL_Palette *target, int frames)
 {
-    STDL_Colour from[16];
+    STDL_Colour from[16], step[16];
     int f, i, n;
 
     if (target == NULL || frames <= 0) {
         return;
     }
+    if (frames > 32767) {
+        frames = 32767;         /* 11 minutes; the steps are 16-bit */
+    }
     n = target->ncolors > 16 ? 16 : target->ncolors;
     for (i = 0; i < 16; i++) {
-        from[i] = stdl.colours[i];
+        from[i] = step[i] = stdl.colours[i];
     }
+    /* Each step is worked out before its blank and written straight
+     * after, so the change lands above the picture. It used to be
+     * worked out after the blank in 32-bit C, 48 __mulsi3 and 48
+     * __divsi3 calls: about 6ms on a plain ST at the prices
+     * tests/hatari/mathchk.c measures, which put each step's write
+     * some thirty lines into the picture. */
     for (f = 1; f <= frames; f++) {
+        for (i = 0; i < n; i++) {
+            step[i].r = (uint8_t)(from[i].r + STDL_DivS16(STDL_MulS16(
+                target->colors[i].r - from[i].r, f), frames));
+            step[i].g = (uint8_t)(from[i].g + STDL_DivS16(STDL_MulS16(
+                target->colors[i].g - from[i].g, f), frames));
+            step[i].b = (uint8_t)(from[i].b + STDL_DivS16(STDL_MulS16(
+                target->colors[i].b - from[i].b, f), frames));
+        }
         STDL_WaitVBL();
         for (i = 0; i < n; i++) {
-            stdl.colours[i].r = (uint8_t)(from[i].r
-                + ((target->colors[i].r - from[i].r) * f) / frames);
-            stdl.colours[i].g = (uint8_t)(from[i].g
-                + ((target->colors[i].g - from[i].g) * f) / frames);
-            stdl.colours[i].b = (uint8_t)(from[i].b
-                + ((target->colors[i].b - from[i].b) * f) / frames);
+            stdl.colours[i] = step[i];
         }
         stdl_palette_apply_hw();
     }

@@ -199,6 +199,9 @@ Rules:
   envelope.
 * Volume registers written without bit 4 (fixed-volume channels)
   are scaled by `STDL_VolumeMusic` on the fly.
+* A frame holds only the registers that change, so frame 0 should
+  set all fourteen (`stdlconv` always does). `STDL_SeekMusic`
+  replays from silence: every register 0 and register 7 at 0x3F.
 
 ## 8. Palettes and hardware colour words
 
@@ -207,4 +210,6 @@ rotated-nibble format: for a 4-bit channel value `v`, the register
 nibble is `(v >> 1) | ((v & 1) << 3)`. A plain ST reads bits 2-0 of
 each nibble - the top three bits of the channel - so a single word
 programs both register layouts correctly. `STDL_HWColour(r, g, b)`
-performs this transformation from RGB888.
+performs this transformation from RGB888, and `STDL_HW444(0xRGB)`
+from a constant with four bits a channel, at compile time - a raw
+0xRGB written to a register is not the colour it reads as.

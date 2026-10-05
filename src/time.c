@@ -67,7 +67,7 @@ void STDL_FrameLimit(int fps)
         next = 0;
         return;
     }
-    step = 200 / (uint32_t)fps;
+    step = fps > 200 ? 0 : STDL_DivU16(200, (unsigned)fps);
     if (step == 0) {
         step = 1;
     }

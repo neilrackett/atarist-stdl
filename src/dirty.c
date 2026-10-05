@@ -48,6 +48,7 @@ static const uint8_t *owes[4];
 static int owes_next;
 static int shared;              /* no room for a second list: both
                                  * pages share one, restored whole    */
+static int whole_groups;        /* STDL_DirtyWholeGroups              */
 
 int STDL_DirtyInit(STDL_Surface *background, int max)
 {
@@ -139,6 +140,157 @@ static int list_for(const uint8_t *key)
     return other;
 }
 
+/*
+ * The restore without STDL_BlitSurfaceEx. A background and the page it
+ * restores are normally the same shape: same size and stride, no
+ * origins, no masks. A rectangle is then an offset into both, two edge
+ * masks and a run of whole groups, and the general blit's set-up -
+ * clipping both surfaces, the BLiTTER's rules, the phase and mask
+ * dispatch - is most of the cost of a sprite-sized restore. Measured
+ * on a plain ST (SPRCOST's dirty cases): sixteen 16x16 restores at
+ * group edges took 9.9ms through it and 6.3 by offset.
+ *
+ * Exactly what the general path draws: the rectangle clipped to the
+ * page's clip, edge groups merged under their masks, nothing rounded
+ * out. With a BLiTTER present, or a plane budget, or anything that
+ * makes the two surfaces differ, the general path does it as before.
+ */
+static int restore_direct(const STDL_Surface *dst)
+{
+    return stdl_planes == 4 && !stdl_blitter_active()
+        && bg->w == dst->w && bg->h == dst->h
+        && bg->stride == dst->stride && dst->mask == NULL
+        && !((bg->flags & STDL_SRCKEY) && bg->mask != NULL)
+        && (bg->org_x | bg->org_y | dst->org_x | dst->org_y) == 0;
+}
+
+/* one column of groups, h rows, under mask m: d ^= (d ^ s) & m */
+static void merge_col(uint8_t *d, const uint8_t *s, uint16_t m, int h,
+                      int stride)
+{
+    const uint32_t ml = ((uint32_t)m << 16) | m;
+
+    while (h-- > 0) {
+        stdl_wlong *dl = (stdl_wlong *)d;
+        const stdl_wlong *sl = (const stdl_wlong *)s;
+
+        dl[0] ^= (dl[0] ^ sl[0]) & ml;
+        dl[1] ^= (dl[1] ^ sl[1]) & ml;
+        d += stride;
+        s += stride;
+    }
+}
+
+/*
+ * Rows of a rectangle with partial edges, a row at a time: the left
+ * group merged under lm, n whole groups copied, the right group merged
+ * under rm (both masks doubled into longs). merge_col twice and a copy
+ * of the middle walked the rectangle three times, and on a large one -
+ * a ball and its shadow, 92x69 - that cost more than the general
+ * blit's single pass had. skip is each row's stride less what it
+ * moved.
+ */
+static void restore_rows(uint8_t *d, const uint8_t *s, int n, int h,
+                         int32_t skip, uint32_t lm, uint32_t rm)
+{
+#ifdef __m68k__
+    int16_t rows = (int16_t)h;
+    const int16_t mid = (int16_t)(n - 1);
+
+#define RESTORE_MERGE(M) \
+        "move.l (%[s])+,%%d0\n\t" "move.l (%[d]),%%d1\n\t" \
+        "eor.l  %%d1,%%d0\n\t" "and.l " M ",%%d0\n\t" \
+        "eor.l  %%d0,(%[d])+\n\t"
+    __asm__ volatile(
+        "1:\n\t"
+        RESTORE_MERGE("%[lm]") RESTORE_MERGE("%[lm]")
+        "move.w %[mid],%%d2\n\t"
+        "bmi.s  3f\n"
+        "2:\n\t"
+        "move.l (%[s])+,(%[d])+\n\t"
+        "move.l (%[s])+,(%[d])+\n\t"
+        "dbf    %%d2,2b\n"
+        "3:\n\t"
+        RESTORE_MERGE("%[rm]") RESTORE_MERGE("%[rm]")
+        "adda.l %[sk],%[s]\n\t"
+        "adda.l %[sk],%[d]\n\t"
+        "subq.w #1,%[h]\n\t"
+        "bne.s  1b"
+        : [d] "+a"(d), [s] "+a"(s), [h] "+d"(rows)
+        : [mid] "d"(mid), [sk] "d"(skip), [lm] "d"(lm), [rm] "d"(rm)
+        : "d0", "d1", "d2", "cc", "memory");
+#undef RESTORE_MERGE
+#else
+    /* C twin - what tests/host exercises and the asm must match */
+    int y, g;
+
+    for (y = 0; y < h; y++) {
+        stdl_wlong *dl = (stdl_wlong *)d;
+        const stdl_wlong *sl = (const stdl_wlong *)s;
+
+        dl[0] ^= (dl[0] ^ sl[0]) & lm;
+        dl[1] ^= (dl[1] ^ sl[1]) & lm;
+        for (g = 1; g <= n; g++) {
+            dl[g * 2] = sl[g * 2];
+            dl[g * 2 + 1] = sl[g * 2 + 1];
+        }
+        dl[(n + 1) * 2] ^= (dl[(n + 1) * 2] ^ sl[(n + 1) * 2]) & rm;
+        dl[(n + 1) * 2 + 1] ^= (dl[(n + 1) * 2 + 1] ^ sl[(n + 1) * 2 + 1])
+                               & rm;
+        d += ((n + 2) << 3) + skip;
+        s += ((n + 2) << 3) + skip;
+    }
+#endif
+}
+
+static void restore_rect(STDL_Surface *dst, const STDL_Rect *r)
+{
+    const STDL_Rect *c = &dst->clip;
+    const int stride = dst->stride;
+    int x0 = r->x, y0 = r->y, x1 = x0 + r->w, y1 = y0 + r->h;
+    int g0, g1, h, n;
+
+    if (whole_groups) {
+        x0 &= ~15;              /* out to the groups it touches */
+        x1 = (x1 + 15) & ~15;
+    }
+    uint16_t lm, rm;
+    uint32_t off;
+    uint8_t *d;
+    const uint8_t *s;
+
+    if (x0 < c->x) x0 = c->x;
+    if (y0 < c->y) y0 = c->y;
+    if (x1 > c->x + c->w) x1 = c->x + c->w;
+    if (y1 > c->y + c->h) y1 = c->y + c->h;
+    if (x0 >= x1 || y0 >= y1) {
+        return;
+    }
+    h = y1 - y0;
+    g0 = x0 >> 4;
+    g1 = (x1 - 1) >> 4;                 /* inclusive */
+    lm = (uint16_t)(0xFFFFu >> (x0 & 15));
+    rm = (uint16_t)(0xFFFFu << (15 - ((x1 - 1) & 15)));
+    off = stdl_row_off(y0, (uint16_t)stride) + (uint32_t)(g0 << 3);
+    d = dst->pixels + off;
+    s = bg->pixels + off;
+    n = g1 - g0 + 1;
+    if (g0 == g1) {
+        lm &= rm;               /* one group, both edges in it */
+        if (lm != 0xFFFFu) {
+            merge_col(d, s, lm, h, stride);
+            return;
+        }
+    } else if ((lm & rm) != 0xFFFFu) {
+        /* an edge to merge: one pass a row, the middle copied in it */
+        restore_rows(d, s, n - 2, h, stride - (n << 3),
+                     ((uint32_t)lm << 16) | lm, ((uint32_t)rm << 16) | rm);
+        return;
+    }
+    stdl_copy_rows_groups(d, s, n, h, stride - (n << 3),
+                          stride - (n << 3));
+}
+
 void STDL_DirtyRestore(STDL_Surface *dst)
 {
     dirty_list_t *l;
@@ -158,6 +310,10 @@ void STDL_DirtyRestore(STDL_Surface *dst)
     }
     if (full) {
         STDL_BlitSurface(bg, NULL, dst, NULL);
+    } else if (restore_direct(dst)) {
+        for (i = 0; i < l->n; i++) {
+            restore_rect(dst, &l->rects[i]);
+        }
     } else {
         for (i = 0; i < l->n; i++) {
             STDL_Rect d = l->rects[i];
@@ -165,6 +321,11 @@ void STDL_DirtyRestore(STDL_Surface *dst)
         }
     }
     STDL_DirtyReset();          /* cur is this page's list */
+}
+
+void STDL_DirtyWholeGroups(int on)
+{
+    whole_groups = on != 0;
 }
 
 void STDL_DirtyReset(void)

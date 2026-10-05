@@ -92,6 +92,36 @@ static void op_restore(int i)
     }
 }
 
+static int dirty_phase = 1;     /* 0: every rectangle on a group edge */
+
+/* fourteen pre-shifted 16x16 bobs, one call each or one batch */
+static STDL_Sprite *bob;
+static STDL_SpriteAt bobs[14];
+static void op_bobs_single(int i)
+{
+    int k;
+
+    (void)i;
+    for (k = 0; k < 14; k++) {
+        STDL_BlitSprite(bob, 0, dst, bobs[k].x, bobs[k].y);
+    }
+}
+static void op_bobs_batch(int i)
+{
+    (void)i;
+    STDL_BlitSprites(bob, bobs, 14, dst);
+}
+
+/* one large rectangle at an odd x: a ball and its shadow */
+static void op_dirty_big(int i)
+{
+    STDL_Rect r = { 37, 40, 92, 69 };
+
+    (void)i;
+    STDL_DirtyPush(&r);
+    STDL_DirtyRestore(dst);
+}
+
 static void op_dirty(int i)
 {
     int k;
@@ -99,7 +129,8 @@ static void op_dirty(int i)
     (void)i;
     for (k = 0; k < 16; k++) {
         STDL_Rect r;
-        r.x = (int16_t)(21 + (k & 3) * 72 + k);
+        r.x = (int16_t)(dirty_phase ? 21 + (k & 3) * 72 + k
+                                    : 16 + (k & 3) * 64);
         r.y = (int16_t)(13 + (k >> 2) * 44);
         r.w = 16;
         r.h = 16;
@@ -283,6 +314,20 @@ static void sprite_cases(int subset)
             sprintf(label, "spr %dx%d %s clipL", e->w, e->h, e->shape);
             report(label, op_sprite);
         }
+        /* a scene's bobs: the 16x16 disc, pre-shifted, at fourteen
+         * places across the phases */
+        if (!subset && e->w == 16 && e->shape[0] == 'd' && e->pre != NULL) {
+            int b;
+
+            bob = e->pre;
+            for (b = 0; b < 14; b++) {
+                bobs[b].x = (int16_t)(10 + b * 21);
+                bobs[b].y = (int16_t)(20 + (b & 3) * 40);
+                bobs[b].frame = 0;
+            }
+            report("bobs 14 pre 16x16 single", op_bobs_single);
+            report("bobs 14 pre 16x16 batch", op_bobs_batch);
+        }
     }
 }
 
@@ -310,6 +355,13 @@ static void restore_cases(int subset)
     }
     if (!subset && STDL_DirtyInit(bg, 32) == 0) {
         report("dirty 16 x 16x16", op_dirty);
+        dirty_phase = 0;
+        report("dirty 16 x 16x16 aligned", op_dirty);
+        dirty_phase = 1;
+        report("dirty 1 x 92x69 x&15=5", op_dirty_big);
+        STDL_DirtyWholeGroups(1);
+        report("dirty 16 x 16x16 whole groups", op_dirty);
+        STDL_DirtyWholeGroups(0);
         STDL_DirtyQuit();
     }
 }

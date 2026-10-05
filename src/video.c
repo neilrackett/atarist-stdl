@@ -19,8 +19,11 @@ void (*stdl_shutdown_music)(void);
 void (*stdl_shutdown_vbl)(void);
 void (*stdl_shutdown_overscan)(void);
 void (*stdl_shutdown_hwscroll)(void);
+void (*stdl_shutdown_rasters)(void);
+uint8_t stdl_timerb_owner;
 uint16_t (*stdl_blit_policy)(uint16_t nlines, uint32_t cpl);
 void (*stdl_pal_apply_hook)(void);
+int (*stdl_pal_raw_hook)(int index, uint16_t word);
 
 static STDL_Palette screen_palette;
 static STDL_PixelFormat screen_format;
@@ -199,11 +202,21 @@ static void release_hardware(void)
         stdl_shutdown_vbl();
         stdl_shutdown_vbl = NULL;
     }
+    /* staging's flush went with the VBL slots; writes are immediate
+     * again, and staging starts afresh if the program inits again */
+    stdl_pal_apply_hook = NULL;
+    stdl_pal_raw_hook = NULL;
     if (stdl_shutdown_hwscroll != NULL) {
         /* LINEWIDTH and HSCROLL back to stock before the Setscreen
          * below repoints the display at page[0] */
         stdl_shutdown_hwscroll();
         stdl_shutdown_hwscroll = NULL;
+    }
+    if (stdl_shutdown_rasters != NULL) {
+        /* Timer B and the Timer C prefix back; the VBL slot went
+         * with the queue above */
+        stdl_shutdown_rasters();
+        stdl_shutdown_rasters = NULL;
     }
     if (stdl_shutdown_overscan != NULL) {
         /* border, timers and vectors back before the Setscreen
@@ -280,6 +293,11 @@ int STDL_Init(uint32_t flags)
         return 0;
     }
     memset(&stdl, 0, sizeof(stdl));
+    /* -1 is "never changed": left at 0, every program that inits
+     * without a video mode wrote 60Hz into the sync register on its
+     * way out - seen on a Mega STE whose desktop came back at 60Hz
+     * after a test program */
+    stdl.old_sync = -1;
 
     /*
      * Supervisor mode from here on - low memory (the cookie jar

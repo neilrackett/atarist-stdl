@@ -16,6 +16,15 @@
  *    leaves the other's list alone.
  *  - A third page evicts the older list, and the evicted page is
  *    restored whole when it comes back.
+ *  - The direct restore, which skips STDL_BlitSurfaceEx when the
+ *    background and page are alike, against STDL_BlitSurfaceEx itself:
+ *    random rectangles at every phase and width, under random clip
+ *    rectangles on the page, byte for byte; and with
+ *    STDL_DirtyWholeGroups, against the same blit of each rectangle
+ *    rounded out to whole groups. Then again with the host's BLiTTER
+ *    model present, where the restore is the general blit's and
+ *    whole groups do not apply - the case every STE takes, which
+ *    this test had never run until DTCHK failed on one.
  */
 #include <stdio.h>
 #include <string.h>
@@ -41,12 +50,22 @@ static unsigned rnd(void)
 
 enum { W = 96, H = 48, MAXR = 12 };
 
+/* random pixels a plane word at a time from a shift-register
+ * generator: STDL_PutPixel and a 32-bit multiply a pixel made this
+ * most of DTCHK's several minutes on a real Mega STE */
 static void randomise(STDL_Surface *s)
 {
-    int x, y;
-    for (y = 0; y < s->h; y++)
-        for (x = 0; x < s->w; x++)
-            STDL_PutPixel(s, x, y, (uint8_t)(rnd() & 15));
+    static uint32_t x = 0x9E3779B9u;
+    uint16_t *w = (uint16_t *)s->pixels;
+    size_t i;
+    const size_t n = (size_t)s->stride * s->h / 2;
+
+    for (i = 0; i < n; i++) {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        w[i] = (uint16_t)x;
+    }
 }
 
 static int same(const STDL_Surface *a, const STDL_Surface *b)
@@ -188,10 +207,84 @@ static void test_two_pages(void)
     }
 }
 
+static void test_direct_whole(int whole);
+static void test_direct(void)
+{
+    test_direct_whole(0);
+    test_direct_whole(1);
+}
+
+static void test_direct_whole(int whole)
+{
+    STDL_Surface *bg = STDL_CreateSurface(W, H);
+    STDL_Surface *a = STDL_CreateSurface(W, H);
+    STDL_Surface *b = STDL_CreateSurface(W, H);
+    int it, k;
+
+    randomise(bg);
+    STDL_DirtyInit(bg, MAXR);
+    STDL_DirtyWholeGroups(whole);
+    for (it = 0; it < 400; it++) {
+        STDL_Rect clip, rs[MAXR];
+        int n = 1 + (int)(rnd() % MAXR);
+
+        randomise(a);
+        memcpy(b->pixels, a->pixels, (size_t)a->stride * a->h);
+        clip.x = (int16_t)(rnd() % (W / 2));
+        clip.y = (int16_t)(rnd() % (H / 2));
+        clip.w = (uint16_t)(1 + rnd() % (W - clip.x));
+        clip.h = (uint16_t)(1 + rnd() % (H - clip.y));
+        if (it & 1) {
+            clip.x = clip.y = 0;
+            clip.w = W;
+            clip.h = H;
+        }
+        STDL_SetClipRect(a, &clip);
+        STDL_SetClipRect(b, &clip);
+        for (k = 0; k < n; k++) {
+            rs[k] = random_rect();
+            STDL_DirtyPush(&rs[k]);
+        }
+        STDL_DirtyRestore(a);
+        for (k = 0; k < n; k++) {
+            STDL_Rect r = rs[k], d;
+
+            /* only the restore by offset rounds out: with a BLiTTER
+             * at work the rectangles go through STDL_BlitSurfaceEx as
+             * pushed (stdl_dirty.h) */
+            if (whole && !stdl_blitter_active()) {
+                const int x1 = (r.x + r.w + 15) & ~15;
+
+                r.x = (int16_t)(r.x & ~15);
+                r.w = (uint16_t)(x1 - r.x);
+            }
+            d = r;
+            STDL_BlitSurfaceEx(bg, &r, b, &d, 0);
+        }
+        CHECK(same(a, b), "direct restore differs (whole %d), iteration %d",
+              whole, it);
+    }
+    STDL_DirtyWholeGroups(0);
+    STDL_DirtyQuit();
+    STDL_FreeSurface(bg);
+    STDL_FreeSurface(a);
+    STDL_FreeSurface(b);
+}
+
 int main(void)
 {
     test_one_page();
     test_two_pages();
+    test_direct();
+#ifndef __m68k__
+    /* and with a BLiTTER present (the host's model), which every
+     * STE has: the restore is then the general blit's, whole groups
+     * or not - DTCHK met that on an STE after only ever running on a
+     * plain ST. On the machine the BLiTTER is whatever it has. */
+    stdl.mach.has_blitter = 1;
+    test_direct();
+    stdl.mach.has_blitter = 0;
+#endif
     if (failures == 0) {
         printf("dirty-list tests passed\n");
         return 0;

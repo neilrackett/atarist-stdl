@@ -20,6 +20,13 @@
  *    must not wrap round into the picture, and edges taller than
  *    32767 rows must step right (the 68000's divs.w takes a 16-bit
  *    divisor, so they take the long way).
+ *  - The fast path - a polygon inside the clip's columns, no taller
+ *    than 256 rows, on a surface with no mask - steps its edges in
+ *    16.16 fixed point. Polygons placed to take it, every operation
+ *    and colour, and tall ones either side of 256 rows so both paths
+ *    meet the same reference; and, natively, the arithmetic it rests
+ *    on, for every edge up to 256 rows, with the first edge it gets
+ *    wrong at 257 to show the check can fail.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -70,13 +77,23 @@ static int getmask(const STDL_Surface *s, int x, int y)
     return (m[x >> 4] >> (15 - (x & 15))) & 1;
 }
 
+/* random pixels below 1 << budget, a plane word at a time: a pixel
+ * at a time through STDL_PutPixel was most of PGCHK's time on a plain
+ * ST */
 static void randomise(STDL_Surface *s, int budget)
 {
-    int x, y;
+    int y, g, p;
 
     for (y = 0; y < s->h; y++) {
-        for (x = 0; x < s->w; x++) {
-            STDL_PutPixel(s, x, y, (uint8_t)rnd(1 << budget));
+        uint16_t *w = (uint16_t *)(s->pixels + y * s->stride);
+
+        for (g = 0; g < s->stride / 8; g++) {
+            for (p = 0; p < 4; p++) {
+                rs ^= rs << 13;
+                rs ^= rs >> 17;
+                rs ^= rs << 5;
+                *w++ = p < budget ? (uint16_t)rs : 0;
+            }
         }
     }
 }
@@ -352,6 +369,200 @@ static void test_rect(void)
     }
 }
 
+/* a convex polygon with every vertex in [x0, x1) x [y0, y1) */
+static int convex_in(STDL_Point *out, int x0, int y0, int x1, int y1)
+{
+    STDL_Point pts[10];
+    int k = 3 + rnd(7), i, n = 0, lo;
+
+    for (i = 0; i < k; i++) {
+        pts[i].x = (int16_t)(x0 + rnd(x1 - x0));
+        pts[i].y = (int16_t)(y0 + rnd(y1 - y0));
+    }
+    qsort(pts, (size_t)k, sizeof pts[0], cmp_pt);
+    for (i = 0; i < k; i++) {
+        while (n >= 2 && cross(&out[n - 2], &out[n - 1], &pts[i]) <= 0) n--;
+        out[n++] = pts[i];
+    }
+    lo = n + 1;
+    for (i = k - 2; i >= 0; i--) {
+        while (n >= lo && cross(&out[n - 2], &out[n - 1], &pts[i]) <= 0) n--;
+        out[n++] = pts[i];
+    }
+    if (rnd(2)) {                       /* either winding */
+        for (i = 0; i < (n - 1) / 2; i++) {
+            STDL_Point t = out[i]; out[i] = out[n - 2 - i]; out[n - 2 - i] = t;
+        }
+    }
+    return n - 1;
+}
+
+/* fill p on a w x h surface of random pixels, clipped to clip, and
+ * check every pixel against the reference */
+static void fill_and_check(int w, int h, const STDL_Point *p, int n,
+                           int col, int op, int budget, STDL_Rect clip,
+                           const char *what, int it)
+{
+    STDL_Surface *s = STDL_CreateSurface(w, h);
+    uint8_t *before = malloc((size_t)w * h);
+    int x, y, bad = 0;
+
+    STDL_SetPlaneBudget(budget);
+    randomise(s, budget);
+    STDL_SetClipRect(s, &clip);
+    clip = s->clip;
+    for (y = 0; y < h; y++) {
+        for (x = 0; x < w; x++) {
+            before[y * w + x] = (uint8_t)getpix(s, x, y);
+        }
+    }
+    STDL_FillPolygon(s, p, n, (uint8_t)col, op);
+    col &= (1 << budget) - 1;
+    for (y = 0; y < h && bad < 3; y++) {
+        int first, end;
+
+        section(p, n, y, &first, &end);
+        for (x = 0; x < w && bad < 3; x++) {
+            const int in = x >= clip.x && x < clip.x + clip.w
+                && y >= clip.y && y < clip.y + clip.h
+                && x >= first && x < end
+                && (op == STDL_DRAW_SET || col != 0);
+            const int want = in ? apply(before[y * w + x], col, op)
+                                : before[y * w + x];
+
+            if (getpix(s, x, y) != want) {
+                CHECK(0, "%s %d op %d col %d budget %d: (%d,%d) got %d "
+                      "want %d", what, it, op, col, budget, x, y,
+                      getpix(s, x, y), want);
+                bad++;
+            }
+        }
+    }
+    free(before);
+    STDL_FreeSurface(s);
+    STDL_SetPlaneBudget(4);
+}
+
+/* polygons inside the clip's columns, for the 16.16 path: every
+ * operation, every colour, every budget, the clip around them */
+static void test_inside(void)
+{
+    static const int budgets[3] = { 4, 2, 3 };
+    int it;
+
+    for (it = 0; it < POLY_ITERS; it++) {
+        STDL_Point p[20];
+        STDL_Rect clip;
+        const int bx = rnd(W - 8), by = rnd(H - 8);
+        const int bw = 1 + rnd(W - bx), bh = 1 + rnd(H - by);
+        int n = convex_in(p, bx, by, bx + bw, by + bh), i, minx = W;
+        int maxx = 0;
+
+        if (n < 3) {
+            continue;
+        }
+        for (i = 0; i < n; i++) {
+            if (p[i].x < minx) minx = p[i].x;
+            if (p[i].x > maxx) maxx = p[i].x;
+        }
+        /* columns that hold it (its right edge at the clip's end
+         * included); rows that sometimes cut it */
+        clip.x = (int16_t)rnd(minx + 1);
+        clip.w = (uint16_t)(maxx - clip.x + rnd(W - maxx + 1));
+        clip.y = (int16_t)(it & 1 ? 0 : rnd(H));
+        clip.h = (uint16_t)(it & 1 ? H : rnd(H + 1));
+        fill_and_check(W, H, p, n, rnd(17), (it / 3) & 3, budgets[it % 3],
+                       clip, "inside", it);
+    }
+}
+
+/* polygons 240 to 280 rows tall, wholly inside: those up to 256 take
+ * the 16.16 path, the rest the tables, and both meet the reference */
+static void test_tall(void)
+{
+    enum { TW = 48, TH = 300 };
+    int it;
+
+    for (it = 0; it < POLY_ITERS / 30; it++) {
+        STDL_Point p[20];
+        /* every other one with its top cut 120 to 220 rows down, so
+         * an edge starts far below its vertex */
+        STDL_Rect clip = { 0, (int16_t)(it & 1 ? 120 + rnd(101) : 0), TW,
+                           TH };
+        const int top = rnd(10), tall = 240 + rnd(41);
+        int n = convex_in(p, 0, top, TW, top + tall + 1);
+
+        if (n < 3) {
+            continue;
+        }
+        fill_and_check(TW, TH, p, n, 1 + rnd(15), it & 3 ? STDL_DRAW_XOR
+                       : STDL_DRAW_SET, 4, clip, "tall", it);
+    }
+    /* edges just past the limit that 16.16 would step a column wrong,
+     * as the left side and as the right: these fail if the fast path
+     * is ever let past 256 rows */
+    {
+        static const int16_t past[4][2] = {
+            { -1, 257 }, { 18, 271 }, { -11, 274 }, { -7, 286 }
+        };
+        int k;
+
+        for (k = 0; k < 8; k++) {
+            const int dx = past[k >> 1][0], dy = past[k >> 1][1];
+            STDL_Point p[3];
+            STDL_Rect clip = { 0, 0, TW, TH };
+
+            p[0].x = 24;                    p[0].y = 5;
+            p[1].x = (int16_t)(24 + dx);    p[1].y = (int16_t)(5 + dy);
+            p[2].x = (int16_t)(k & 1 ? 2 : 46);
+            p[2].y = (int16_t)(5 + dy);
+            fill_and_check(TW, TH, p, 3, 6, STDL_DRAW_SET, 4, clip,
+                           "past 256", k);
+        }
+    }
+}
+
+#ifndef __m68k__
+/* The claim the 16.16 path rests on: floor(65536 * dx / dy) stepped t
+ * rows (t < dy) from 0xFFFF lands on ceil(t * dx / dy) for every dy up
+ * to 256. Returns the first t that does not, or -1. */
+static int stepped_wrong(int dx, int dy)
+{
+    const long long s = (long long)dx * 65536 >= 0
+        ? (long long)dx * 65536 / dy
+        : -((-(long long)dx * 65536 + dy - 1) / dy);
+    int t;
+
+    for (t = 0; t < dy; t++) {
+        const long long v = 0xFFFF + t * s;
+        const long long got = v >= 0 ? v / 65536 : -((-v + 65535) / 65536);
+
+        if (got != ceil_div((long long)t * dx, dy)) {
+            return t;
+        }
+    }
+    return -1;
+}
+
+static void test_fixed_point(void)
+{
+    int dy, dx, ok = 1;
+
+    for (dy = 1; dy <= 256 && ok; dy++) {
+        for (dx = -400; dx <= 400; dx++) {
+            if (stepped_wrong(dx, dy) >= 0) {
+                CHECK(0, "16.16 off at dx %d dy %d row %d", dx, dy,
+                      stepped_wrong(dx, dy));
+                ok = 0;
+                break;
+            }
+        }
+    }
+    CHECK(stepped_wrong(-258, 257) == 256,
+          "the 257-row edge that 16.16 gets wrong no longer does");
+}
+#endif
+
 /* every pixel of the surface against the reference */
 static void check_against(const STDL_Point *p, int n, const char *what)
 {
@@ -409,8 +620,13 @@ static void test_extremes(void)
 
 int main(void)
 {
+#ifndef __m68k__
+    test_fixed_point();
+#endif
     test_extremes();
     test_random();
+    test_inside();
+    test_tall();
     test_tiling();
     test_rect();
     if (failures) {

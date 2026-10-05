@@ -59,6 +59,13 @@ warnings** with the Makefile's `-Wall -Wextra`.
   cycles a pixel. Plane-word fills, a table decode and a
   shift-register generator took the full pass to 16 minutes; the
   sampling took the hardware build to seconds.
+  The emulator has a ceiling too: `run.sh`'s `waitfor` gives up
+  after two minutes of host time and the log simply stops, which
+  reads exactly like a hang. PGCHK, given a second suite, outgrew it
+  by seconds and was chased as a crash in new asm until a trace
+  showed it still running; filling its test surfaces a plane word at
+  a time rather than through `STDL_PutPixel` put it back at 84
+  seconds. Time a CHK runner after adding cases to it.
   `tests/hatari/sprcost.c` times sprites, restores, blits and fills
   (with the fixed cost of a call taken apart), twice per run so each
   run carries its own noise floor, and `tests/hatari/sccmp.py`

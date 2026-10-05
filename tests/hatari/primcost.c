@@ -19,6 +19,9 @@
  *       tests/hatari/primcost.c libstdl.a
  *   TOS=$PWD/tmp/tos/etos256uk.img MACHINE=st EXTRA="--memsize 4" \
  *       tests/hatari/run.sh pc dist/PRIMCOST.TOS 8 "waitfor SC:done"
+ *
+ * Built with -DPC_ONLY='"polygon"' it runs only the cases whose
+ * label holds that string.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -166,6 +169,56 @@ static void op_poly_set(int i)
     (void)i;
     STDL_FillPolygon(dst, diamond, 4, 9, STDL_DRAW_SET);
 }
+static void op_poly_t1(int i)
+{
+    (void)i;
+    STDL_FillPolygon(dst, tri, 3, 4, STDL_DRAW_XOR);
+}
+/* the same triangle cut by the left edge: the column tables' path */
+static const STDL_Point tric[3] = { { 5, 50 }, { 35, 70 }, { -5, 72 } };
+static void op_poly_tc(int i)
+{
+    (void)i;
+    STDL_FillPolygon(dst, tric, 3, 4, STDL_DRAW_XOR);
+}
+
+/* a glenz-like frame: two fans of twelve triangles round one centre,
+ * the front fan XORed in colours 4 and 8, the back fan - turned half
+ * a step - in 1 and 2, each colour a single plane; up to 60 rows a
+ * triangle */
+static const int8_t rim_c[24] = {
+    60, 58, 52, 42, 30, 16, 0, -16, -30, -42, -52, -58,
+    -60, -58, -52, -42, -30, -16, 0, 16, 30, 42, 52, 58
+};
+static STDL_Point glz[24][3];
+static uint8_t glzc[24];
+
+static void glenz_init(void)
+{
+    int k;
+
+    for (k = 0; k < 24; k++) {
+        const int a = (k < 12 ? 2 * k : 2 * (k - 12) + 1) % 24;
+        const int b = (a + 2) % 24;
+
+        glz[k][0].x = 160;
+        glz[k][0].y = 100;
+        glz[k][1].x = (int16_t)(160 + rim_c[a]);
+        glz[k][1].y = (int16_t)(100 + rim_c[(a + 18) % 24]);
+        glz[k][2].x = (int16_t)(160 + rim_c[b]);
+        glz[k][2].y = (int16_t)(100 + rim_c[(b + 18) % 24]);
+        glzc[k] = (uint8_t)(k < 12 ? (k & 1 ? 8 : 4) : (k & 1 ? 2 : 1));
+    }
+}
+static void op_glenz(int i)
+{
+    int k;
+
+    (void)i;
+    for (k = 0; k < 24; k++) {
+        STDL_FillPolygon(dst, glz[k], 3, glzc[k], STDL_DRAW_XOR);
+    }
+}
 
 static void op_hline32(int i)  { (void)i; STDL_HLine(dst, 37, 68, 60, 5); }
 static void op_hline300(int i) { (void)i; STDL_HLine(dst, 7, 306, 60, 5); }
@@ -227,6 +280,11 @@ static void report(const char *label, op_fn f)
 {
     uint32_t cpu, lib;
 
+#ifdef PC_ONLY
+    if (strstr(label, PC_ONLY) == NULL) {
+        return;
+    }
+#endif
     STDL_UseBlitter(0);
     cpu = measure(f);
     if (have_blitter) {
@@ -301,6 +359,7 @@ int main(void)
 
     ndsp = spans_of(diamond, 4, dsp);
     ntsp = spans_of(tri, 3, tsp);
+    glenz_init();
     for (pass_name = 'A'; pass_name <= 'B'; pass_name++) {
         report("tile 16x16", op_tile);
         report("tile 16x16 masked", op_tilem);
@@ -335,6 +394,9 @@ int main(void)
         report("polygon 22 rows xor", op_poly_t);
         report("xorhspans same 21", op_spans_t);
         report("polygon 160 rows set", op_poly_set);
+        report("polygon 22 rows xor c4", op_poly_t1);
+        report("polygon 22 rows clipped c4", op_poly_tc);
+        report("polygon glenz 24 tris", op_glenz);
     }
     printf("SC:done\n");
     fflush(stdout);

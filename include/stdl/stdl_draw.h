@@ -138,12 +138,21 @@ void STDL_XorVSpans(STDL_Surface *dst, const STDL_Span *spans,
  * polygon that is not convex is drawn as something, but not as
  * itself.
  *
- * The edges are stepped down the rows into column tables and the
- * rows filled from them, with no span list. Measured on a plain ST
- * (PRIMCOST): a 160-row diamond XORed into two planes took 15.1ms
- * against 23.9 for the same rows through STDL_XorHSpans, and a
- * 22-row triangle 2.3ms, the same as spans - each edge costs about
- * 1000 cycles to set up, so below that size spans win. CPU only. Its own object: a program that never calls it does not carry
+ * The edges are stepped down the rows with no span list. A polygon
+ * inside the clip's columns, no taller than 256 rows, SET or XORed
+ * onto a surface with no mask - a 3D object's face, a glenz's - is
+ * filled start to finish in 68000, both edges in 16.16 fixed point in
+ * registers (exact at that height: the same pixels as the general
+ * path); anything else goes through column tables. XOR, OR and CLEAR
+ * touch only the planes `col` has, so a one-plane colour writes one
+ * word a group. Measured on a plain ST (PRIMCOST): a 160-row diamond
+ * XORed into two planes 12.6ms against 23.9 for the same rows through
+ * STDL_XorHSpans; a 22-row triangle 1.55ms against 2.26, and 1.27ms
+ * in one plane; 24 one-plane triangles of a glenz-like object 49ms.
+ * A polygon's set-up - the vertex scan, and two divides an edge - is
+ * about 5000 cycles (a 2-row triangle takes 0.68ms), so from those
+ * figures spans are the cheaper way below about ten rows. CPU only.
+ * Its own object, 6KB: a program that never calls it does not carry
  * it.
  */
 void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,

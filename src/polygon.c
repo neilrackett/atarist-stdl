@@ -164,8 +164,10 @@ static int edge_next(Edge *e, const STDL_Point *pts, int n, int dir,
  * tall (see free_ in STDL_FillPolygon). Five instructions a row where
  * the clamped loop takes about ten: on a glenz's triangles, about 30
  * rows each, the side walkers had been costing more than the edge
- * set-ups. PRIMCOST on a plain ST: the 22-row triangle 2.71 ->
- * 2.29ms, the 160-row diamond 17.3 -> 15.1.
+ * set-ups. PRIMCOST on a plain ST, when its cases still came this
+ * way: the 22-row triangle 2.71 -> 2.29ms, the 160-row diamond 17.3
+ * -> 15.1. (Since the 16.16 path below, those take that, and this is
+ * the path of polygons it declines.)
  * Returns the column after the last; *ep is the remainder in and out.
  */
 static __inline__ int side_steps(int16_t *out, int rows, int x, int *ep,
@@ -305,6 +307,33 @@ ROW_OP(row_xor4, OP_XOR, MID_XOR, 1)
 ROW_OP(row_andor2, OP_ANDOR, MID_ANDOR, 0)
 ROW_OP(row_andor4, OP_ANDOR, MID_ANDOR, 1)
 
+/* XOR into a single plane: g is that plane's word in group 0, and
+ * the plane's words are four apart */
+static __inline__ __attribute__((always_inline)) void row_xor1(
+        stdl_wlong *gl, int x1, int x2, uint32_t l01, uint32_t l23,
+        uint32_t k01, uint32_t k23)
+{
+    uint16_t *g = (uint16_t *)gl + ((x1 >> 4) << 2);
+    int n = (x2 >> 4) - (x1 >> 4);
+    uint16_t lm = lmask[x1 & 15], rm = rmask[x2 & 15];
+
+    (void)l01;
+    (void)l23;
+    (void)k01;
+    (void)k23;
+    if (n == 0) {
+        *g ^= (uint16_t)(lm & rm);
+        return;
+    }
+    *g ^= lm;
+    g += 4;
+    while (--n != 0) {
+        *g = (uint16_t)~*g;
+        g += 4;
+    }
+    *g ^= rm;
+}
+
 /* rows from the column tables, in C */
 #define C_ROWS(NAME, ROW)                                                 \
 static void NAME(uint8_t *row, int32_t stride, const int16_t *xl,         \
@@ -322,6 +351,7 @@ C_ROWS(rows_andor4, row_andor4)
 #ifndef __m68k__
 C_ROWS(rows_set2, row_set2)
 C_ROWS(rows_set4, row_set4)
+C_ROWS(rows_xor1, row_xor1)
 C_ROWS(rows_xor2, row_xor2)
 C_ROWS(rows_xor4, row_xor4)
 #else
@@ -330,8 +360,9 @@ C_ROWS(rows_xor4, row_xor4)
  * the edge masks from edge_masks, the middle groups as stores or
  * eor.l to memory. About 30 instructions of a row's set-up against
  * the C's hundred; written once and stamped out per operation and
- * plane pair (EDGE01/EDGE23 merge the edge groups under the long
- * mask in register M, MID the groups between).
+ * plane count (EDGE merges an edge group under the mask in register
+ * M - copied into both words by REP where a pair is written - and MID
+ * does the groups between).
  */
 #define XOR_EDGE(M, OFF, L) \
     "move.l " L ",%%d7\n\t" "and.l " M ",%%d7\n\t" \
@@ -339,7 +370,11 @@ C_ROWS(rows_xor4, row_xor4)
 #define SET_EDGE(M, OFF, L) \
     "move.l " OFF "(%%a3),%%d7\n\t" "eor.l " L ",%%d7\n\t" \
     "and.l " M ",%%d7\n\t" "eor.l %%d7," OFF "(%%a3)\n\t"
-#define ROWS_ASM(NAME, EDGE, MID, P23)                                    \
+#define XOR1_EDGE(M, OFF, L) "eor.w " M ",(%%a3)\n\t"
+#define REP2(M) "move.w " M ",%%d7\n\t" "swap " M "\n\t" \
+                "move.w %%d7," M "\n\t"
+#define REP1(M)
+#define ROWS_ASM(NAME, EDGE, MID, P23, REP)                               \
 static void NAME(uint8_t *row, int32_t stride, const int16_t *xl,         \
                  const int16_t *xr, int rows, uint32_t l01, uint32_t l23, \
                  uint32_t k01, uint32_t k23)                              \
@@ -354,39 +389,39 @@ static void NAME(uint8_t *row, int32_t stride, const int16_t *xl,         \
         "move.w (%[R])+,%%d1\n\t"                                         \
         "cmp.w  %%d0,%%d1\n\t"                                            \
         "blt    9f\n\t"                 /* empty row */                   \
-        "move.w %%d0,%%d2\n\t"                                            \
-        "lsr.w  #4,%%d2\n\t"            /* first group */                 \
-        "move.w %%d1,%%d3\n\t"                                            \
-        "lsr.w  #4,%%d3\n\t"                                              \
-        "sub.w  %%d2,%%d3\n\t"          /* groups after it */             \
-        "lsl.w  #3,%%d2\n\t"                                              \
+        "moveq  #-16,%%d2\n\t"                                            \
+        "and.w  %%d0,%%d2\n\t"                                            \
+        "eor.w  %%d2,%%d0\n\t"          /* the left's column in group */  \
+        "moveq  #-16,%%d3\n\t"                                            \
+        "and.w  %%d1,%%d3\n\t"                                            \
+        "eor.w  %%d3,%%d1\n\t"                                            \
+        "lsr.w  #1,%%d2\n\t"            /* its group's byte offset */     \
         "lea    0(%[row],%%d2.w),%%a3\n\t"                                \
-        "moveq  #15,%%d7\n\t"                                             \
-        "and.w  %%d7,%%d0\n\t"                                            \
         "add.w  %%d0,%%d0\n\t"                                            \
         "move.w 0(%[t],%%d0.w),%%d0\n\t"  /* left mask */                 \
-        "and.w  %%d7,%%d1\n\t"                                            \
         "add.w  %%d1,%%d1\n\t"                                            \
         "move.w 32(%[t],%%d1.w),%%d1\n\t" /* right mask */                \
-        "tst.w  %%d3\n\t"                                                 \
+        "lsr.w  #1,%%d3\n\t"                                              \
+        "sub.w  %%d2,%%d3\n\t"          /* 8 x the groups after it */     \
         "bne.s  2f\n\t"                                                   \
         "and.w  %%d1,%%d0\n\t"          /* one group */                   \
-        "move.w %%d0,%%d7\n\t" "swap %%d0\n\t" "move.w %%d7,%%d0\n\t"     \
+        REP("%%d0")                                                       \
         EDGE("%%d0", "0", "%[l01]")                                       \
         P23(EDGE("%%d0", "4", "%[l23]"))                                  \
         "bra    9f\n"                                                     \
         "2:\n\t"                                                          \
-        "move.w %%d0,%%d7\n\t" "swap %%d0\n\t" "move.w %%d7,%%d0\n\t"     \
+        REP("%%d0")                                                       \
         EDGE("%%d0", "0", "%[l01]")                                       \
         P23(EDGE("%%d0", "4", "%[l23]"))                                  \
         "addq.l #8,%%a3\n\t"                                              \
+        "lsr.w  #3,%%d3\n\t"                                              \
         "subq.w #2,%%d3\n\t"                                              \
         "bmi.s  4f\n"                                                     \
         "3:\n\t"                                                          \
         MID                                                               \
         "dbf    %%d3,3b\n"                                                \
         "4:\n\t"                                                          \
-        "move.w %%d1,%%d7\n\t" "swap %%d1\n\t" "move.w %%d7,%%d1\n\t"     \
+        REP("%%d1")                                                       \
         EDGE("%%d1", "0", "%[l01]")                                       \
         P23(EDGE("%%d1", "4", "%[l23]"))                                  \
         "9:\n\t"                                                          \
@@ -401,18 +436,538 @@ static void NAME(uint8_t *row, int32_t stride, const int16_t *xl,         \
 #define WITH23(x) x
 #define NO23(x)
 ROWS_ASM(rows_set2, SET_EDGE,
-         "move.l %[l01],(%%a3)\n\t" "addq.l #8,%%a3\n\t", NO23)
+         "move.l %[l01],(%%a3)\n\t" "addq.l #8,%%a3\n\t", NO23, REP2)
 ROWS_ASM(rows_set4, SET_EDGE,
-         "move.l %[l01],(%%a3)+\n\t" "move.l %[l23],(%%a3)+\n\t", WITH23)
+         "move.l %[l01],(%%a3)+\n\t" "move.l %[l23],(%%a3)+\n\t", WITH23,
+         REP2)
+ROWS_ASM(rows_xor1, XOR1_EDGE,
+         "not.w (%%a3)\n\t" "addq.l #8,%%a3\n\t", NO23, REP1)
 ROWS_ASM(rows_xor2, XOR_EDGE,
-         "eor.l %[l01],(%%a3)\n\t" "addq.l #8,%%a3\n\t", NO23)
+         "eor.l %[l01],(%%a3)\n\t" "addq.l #8,%%a3\n\t", NO23, REP2)
 ROWS_ASM(rows_xor4, XOR_EDGE,
-         "eor.l %[l01],(%%a3)+\n\t" "eor.l %[l23],(%%a3)+\n\t", WITH23)
+         "eor.l %[l01],(%%a3)+\n\t" "eor.l %[l23],(%%a3)+\n\t", WITH23,
+         REP2)
 #endif
 
 typedef void (*rows_fn)(uint8_t *, int32_t, const int16_t *,
                         const int16_t *, int, uint32_t, uint32_t,
                         uint32_t, uint32_t);
+
+/*
+ * The fast path: no column tables. Both edges are stepped in 16.16
+ * fixed point inside the row loop, a trapezoid at a time - the rows
+ * between two vertices, where neither edge changes - as a demo's own
+ * filler does it. The tables cost a store and a load a row on each
+ * side, the clamped stepping besides, and the call into the row loop
+ * nine arguments. With the planes below, this took 24 one-plane
+ * glenz-like triangles from 85ms to 58 on a plain ST (PRIMCOST); the
+ * 68000 walk below, to 49.
+ *
+ * 16.16 is exact here. The left edge's first column at row a.y + t
+ * is ceil(a.x + t * dx / dy). With the step s = floor(65536 * dx /
+ * dy), s falls short of the true slope by f / 65536 for some f in
+ * [0, 1), so after t rows the stepped x is short by under t / 65536.
+ * The true x is a whole column plus k / dy; short of a whole column
+ * by less than one, it rounds up to the same column, and with k >= 1
+ * it stays above the column below as long as t / 65536 < 1 / dy -
+ * which, since t < dy, holds for every dy up to 256. (The right's
+ * last column is the same ceiling less one.) So for edges up to 256
+ * rows this draws exactly the pixels the tables do, and
+ * STDL_FillPolygon takes it only for a polygon no taller than that,
+ * wholly inside the clip's columns and with no mask to keep:
+ * anything else goes the long way.
+ */
+typedef struct {
+    uint8_t *row;           /* this row's group 0, plane offset added */
+    int32_t xl, xr;         /* the left's first column, the right's last */
+    int32_t sl, sr;         /* their steps a row */
+    uint8_t *end;           /* the row after the trapezoid's last */
+    uint32_t l01, l23;      /* the colour's plane words */
+    const uint16_t *masks;  /* edge_masks, for the 68000 */
+    int32_t stride;
+    uint32_t k01, k23;      /* the planes OR and CLEAR clear */
+} Trap;
+typedef void (*trap_fn)(Trap *);
+
+/* rows from two stepped edges, in C: the 68000's twin below, and the
+ * only form of OR and CLEAR */
+#define C_TRAP(NAME, ROW)                                                 \
+static void NAME(Trap *t)                                                 \
+{                                                                         \
+    uint8_t *row = t->row;                                                \
+    int32_t xl = t->xl, xr = t->xr;                                       \
+                                                                          \
+    for (; row != t->end; row += t->stride) {                             \
+        const int a = (int16_t)(xl >> 16), b = (int16_t)(xr >> 16);       \
+                                                                          \
+        if (a <= b) {                                                     \
+            ROW((stdl_wlong *)row, a, b, t->l01, t->l23, t->k01, t->k23); \
+        }                                                                 \
+        xl += t->sl;                                                      \
+        xr += t->sr;                                                      \
+    }                                                                     \
+    t->row = row;                                                         \
+    t->xl = xl;                                                           \
+    t->xr = xr;                                                           \
+}
+#ifndef __m68k__
+C_TRAP(trap_andor2, row_andor2)
+C_TRAP(trap_andor4, row_andor4)
+C_TRAP(stdl_trap_set2, row_set2)
+C_TRAP(stdl_trap_set4, row_set4)
+C_TRAP(stdl_trap_xor1, row_xor1)
+C_TRAP(stdl_trap_xor2, row_xor2)
+C_TRAP(stdl_trap_xor4, row_xor4)
+#else
+/*
+ * The same in 68000, and the walk with it: one call a polygon. The
+ * walk is the C's (fill_traps) - each side's next edge, its step from
+ * a divs.w and a divu.w of the remainder, its start - with its state
+ * in a frame on the stack, and between edges it calls one of the row
+ * loops below. In C, with a call into the rows a trapezoid at a
+ * time, a 2-row triangle took 0.99ms on a plain ST; with this, 0.83.
+ *
+ * The row loops take their state in registers and leave the frame
+ * alone: a0 stride, a1 edge masks, a2 row, a4/a5 the edges' steps, a6
+ * the row to stop at, d4/d5 the edges in 16.16, d6/d7 the plane
+ * words; d0-d3 and a3 are theirs. The row body is ROWS_ASM's; only
+ * the column fetch (the two positions' whole parts) and the step at
+ * the row's end differ.
+ */
+typedef char surface_layout[offsetof(STDL_Surface, stride) == 8
+                           && offsetof(STDL_Surface, clip) == 16 ? 1 : -1];
+int stdl_poly_fast(const STDL_Surface *dst, const STDL_Point *pts, int n,
+                   void (*rows)(void), int off, uint32_t l01, uint32_t l23,
+                   const uint16_t *masks);
+void stdl_prows_set2(void);
+void stdl_prows_set4(void);
+void stdl_prows_xor1(void);
+void stdl_prows_xor2(void);
+void stdl_prows_xor4(void);
+
+#define T_STR2(x) #x
+#define T_STR(x) T_STR2(x)
+#define T_SYM(n) T_STR(__USER_LABEL_PREFIX__) #n
+#define TX_EDGE(M, A, L) \
+    "move.l " L ",%d2\n\t" "and.l " M ",%d2\n\t" "eor.l %d2," A "\n\t"
+#define TS_EDGE(M, A, L) \
+    "move.l " A ",%d2\n\t" "eor.l " L ",%d2\n\t" "and.l " M ",%d2\n\t" \
+    "eor.l %d2," A "\n\t"
+#define T1_EDGE(M, A, L) "eor.w " M "," A "\n\t"
+#define T_REP2(M) "move.w " M ",%d2\n\t" "swap " M "\n\t" \
+                  "move.w %d2," M "\n\t"
+#define T_REP1(M)
+/* BR is the empty-row branch's size: short where the body allows */
+#define PROWS_ASM(NAME, EDGE, MID, P23, REP, BR)                          \
+__asm__(                                                                  \
+    "\t.text\n\t.even\n\t.globl " T_SYM(NAME) "\n"                        \
+    T_SYM(NAME) ":\n"                                                     \
+    "1:\n\t"                                                              \
+    "move.l %d4,%d0\n\t"                                                  \
+    "swap   %d0\n\t"                    /* the left's first column */     \
+    "move.l %d5,%d1\n\t"                                                  \
+    "swap   %d1\n\t"                    /* the right's last */            \
+    "cmp.w  %d0,%d1\n\t"                                                  \
+    "blt" BR " 9f\n\t"                  /* an empty row */                \
+    "moveq  #-16,%d2\n\t"                                                 \
+    "and.w  %d0,%d2\n\t"                                                  \
+    "eor.w  %d2,%d0\n\t"                /* the left's column in group */  \
+    "moveq  #-16,%d3\n\t"                                                 \
+    "and.w  %d1,%d3\n\t"                                                  \
+    "eor.w  %d3,%d1\n\t"                                                  \
+    "lsr.w  #1,%d2\n\t"                 /* its group's byte offset */     \
+    "lea    0(%a2,%d2.w),%a3\n\t"                                         \
+    "add.w  %d0,%d0\n\t"                                                  \
+    "move.w 0(%a1,%d0.w),%d0\n\t"       /* left mask */                   \
+    "add.w  %d1,%d1\n\t"                                                  \
+    "move.w 32(%a1,%d1.w),%d1\n\t"      /* right mask */                  \
+    "lsr.w  #1,%d3\n\t"                                                   \
+    "sub.w  %d2,%d3\n\t"                /* 8 x the groups after it */     \
+    "bne.s  2f\n\t"                                                       \
+    "and.w  %d1,%d0\n\t"                /* one group */                   \
+    REP("%d0")                                                            \
+    EDGE("%d0", "(%a3)", "%d6")                                           \
+    P23(EDGE("%d0", "4(%a3)", "%d7"))                                     \
+    "bra" BR " 9f\n"                                                      \
+    "2:\n\t"                                                              \
+    REP("%d0")                                                            \
+    EDGE("%d0", "(%a3)", "%d6")                                           \
+    P23(EDGE("%d0", "4(%a3)", "%d7"))                                     \
+    "addq.l #8,%a3\n\t"                                                   \
+    "lsr.w  #3,%d3\n\t"                                                   \
+    "subq.w #2,%d3\n\t"                                                   \
+    "bmi.s  4f\n"                                                         \
+    "3:\n\t"                                                              \
+    MID                                                                   \
+    "dbf    %d3,3b\n"                                                     \
+    "4:\n\t"                                                              \
+    REP("%d1")                                                            \
+    EDGE("%d1", "(%a3)", "%d6")                                           \
+    P23(EDGE("%d1", "4(%a3)", "%d7"))                                     \
+    "9:\n\t"                                                              \
+    "add.l  %a4,%d4\n\t"                                                  \
+    "add.l  %a5,%d5\n\t"                                                  \
+    "adda.l %a0,%a2\n\t"                                                  \
+    "cmpa.l %a6,%a2\n\t"                                                  \
+    "bne    1b\n\t"                                                       \
+    "rts\n");
+PROWS_ASM(stdl_prows_set2, TS_EDGE,
+          "move.l %d6,(%a3)\n\t" "addq.l #8,%a3\n\t", NO23, T_REP2, ".s")
+PROWS_ASM(stdl_prows_set4, TS_EDGE,
+          "move.l %d6,(%a3)+\n\t" "move.l %d7,(%a3)+\n\t", WITH23, T_REP2,
+          "")
+PROWS_ASM(stdl_prows_xor1, T1_EDGE,
+          "not.w  (%a3)\n\t" "addq.l #8,%a3\n\t", NO23, T_REP1, ".s")
+PROWS_ASM(stdl_prows_xor2, TX_EDGE,
+          "eor.l %d6,(%a3)\n\t" "addq.l #8,%a3\n\t", NO23, T_REP2, ".s")
+PROWS_ASM(stdl_prows_xor4, TX_EDGE,
+          "eor.l %d6,(%a3)+\n\t" "eor.l %d7,(%a3)+\n\t", WITH23, T_REP2,
+          ".s")
+
+/*
+ * An edge from the vertex at a3 to the one at a6 (d1 its row), for
+ * row d3: the step into SR, the start into X with the rounding added
+ * by BIAS. d0-d2 scratch. The step is floor(65536 * dx / dy): divs.w
+ * gives the quotient and remainder, a negative remainder is moved up
+ * by dy and the quotient down by one, and divu.w of the remainder in
+ * the high word gives the fraction. Below a clipped top, t rows on,
+ * the start moves by t times the step in a muls.w and a mulu.w.
+ */
+#define W_EDGE(X, SR, BIAS)                                               \
+    "sub.w  2(%a3),%d1\n\t"             /* dy */                          \
+    "move.w (%a6),%d0\n\t"                                                \
+    "sub.w  (%a3),%d0\n\t"              /* dx */                          \
+    "ext.l  %d0\n\t"                                                      \
+    "divs.w %d1,%d0\n\t"                /* remainder:quotient */          \
+    "move.l %d0,%d2\n\t"                                                  \
+    "clr.w  %d2\n\t"                    /* remainder:0 */                 \
+    "tst.l  %d2\n\t"                                                      \
+    "bpl.s  5f\n\t"                                                       \
+    "subq.w #1,%d0\n\t"                                                   \
+    "swap   %d2\n\t"                                                      \
+    "add.w  %d1,%d2\n\t"                                                  \
+    "swap   %d2\n"                                                        \
+    "5:\n\t"                                                              \
+    "divu.w %d1,%d2\n\t"                /* the fraction */                \
+    "swap   %d0\n\t"                                                      \
+    "move.w %d2,%d0\n\t"                /* the step */                    \
+    "move.l %d0," SR "\n\t"                                               \
+    "move.w (%a3)," X "\n\t"                                              \
+    "swap   " X "\n\t"                                                    \
+    "clr.w  " X "\n\t"                                                    \
+    BIAS                                                                  \
+    "move.w %d3,%d1\n\t"                                                  \
+    "sub.w  2(%a3),%d1\n\t"             /* rows below the vertex */       \
+    "beq.s  6f\n\t"                                                       \
+    "move.l %d0,%d2\n\t"                                                  \
+    "swap   %d2\n\t"                                                      \
+    "muls.w %d1,%d2\n\t"                                                  \
+    "swap   %d2\n\t"                                                      \
+    "clr.w  %d2\n\t"                                                      \
+    "add.l  %d2," X "\n\t"                                                \
+    "mulu.w %d1,%d0\n\t"                                                  \
+    "add.l  %d0," X "\n"                                                  \
+    "6:\n\t"
+/*
+ * One side: while its edge ends at or above row d3, move to the next
+ * vertex (ADV adds or subtracts the step, wrapping round), stopping
+ * at the bottom vertex; an edge that reaches below the row is set up.
+ * IDX and END are the side's frame slots.
+ */
+#define W_SIDE(IDX, END, ADV, X, SR, BIAS)                                \
+    "1:\n\t"                                                              \
+    "cmp.w  " END "(%sp),%d3\n\t"                                         \
+    "blt    8f\n\t"                     /* its edge reaches below */      \
+    "move.l (%sp),%a3\n\t"              /* the vertices */                \
+    "move.w " IDX "(%sp),%d0\n\t"                                         \
+    "move.w 2(%a3,%d0.w),%d1\n\t"                                         \
+    "cmp.w  24(%sp),%d1\n\t"                                              \
+    "bge    99f\n\t"                    /* at the bottom vertex */        \
+    "move.w %d0,%d2\n\t"                                                  \
+    ADV " 10(%sp),%d2\n\t"                                                \
+    "bpl.s  2f\n\t"                                                       \
+    "add.w  8(%sp),%d2\n\t"             /* below the first: the last */   \
+    "bra.s  3f\n"                                                         \
+    "2:\n\t"                                                              \
+    "cmp.w  8(%sp),%d2\n\t"                                               \
+    "bne.s  3f\n\t"                                                       \
+    "moveq  #0,%d2\n"                   /* past the last: the first */    \
+    "3:\n\t"                                                              \
+    "move.w %d2," IDX "(%sp)\n\t"                                         \
+    "lea    0(%a3,%d2.w),%a6\n\t"                                         \
+    "lea    0(%a3,%d0.w),%a3\n\t"                                         \
+    "move.w 2(%a6),%d1\n\t"                                               \
+    "move.w %d1," END "(%sp)\n\t"                                         \
+    "cmp.w  %d3,%d1\n\t"                                                  \
+    "ble.s  1b\n\t"                     /* flat, or above the row */      \
+    W_EDGE(X, SR, BIAS)                                                   \
+    "8:\n\t"
+/*
+ * stdl_poly_fast(dst, pts, n, rows, off, l01, l23, masks): the whole
+ * of a SET or XOR onto a surface with no mask, when the polygon is
+ * inside the clip's columns and no taller than 256 rows - which is
+ * every polygon of a demo's object or a game's sprite. The vertex
+ * scan, the clip, the test for this path and the winding are the
+ * C's (STDL_FillPolygon), in 68000 because in C they were most of a
+ * small polygon's cost: a 2-row triangle 0.83ms -> 0.69, a 22-row
+ * one in one plane 1.47 -> 1.33. Returns 0 when it has drawn (or found
+ * nothing to draw), 1 to send the polygon the long way: outside the
+ * columns, too tall, or a top vertex its neighbours run straight
+ * through, where only the whole area tells the winding.
+ *
+ * The frame: 0 vertices, 4 row loop, 8 n x 4, 10 step x 4, 12/14 the
+ * left's and right's vertex, 16/18 the rows their edges end on, 20
+ * the row, 22 the last row (exclusive), 24 the bottom vertex's row.
+ * The arguments are 74 bytes up.
+ */
+__asm__(
+    "\t.text\n\t.even\n\t.globl " T_SYM(stdl_poly_fast) "\n"
+    T_SYM(stdl_poly_fast) ":\n\t"
+    "movem.l %d2-%d7/%a2-%a6,-(%sp)\n\t"
+    "lea    -26(%sp),%sp\n\t"
+    "move.l 78(%sp),%a3\n\t"            /* vertices */
+    "move.l 82(%sp),%d0\n\t"            /* n */
+    "move.l (%a3),%d1\n\t"              /* x:y */
+    "move.w %d1,%d2\n\t"                /* top row */
+    "move.w %d1,%d3\n\t"                /* bottom row */
+    "swap   %d1\n\t"
+    "move.w %d1,%d4\n\t"                /* least x */
+    "move.w %d1,%d5\n\t"                /* greatest x */
+    "moveq  #0,%d6\n\t"                 /* top vertex x 4 */
+    "moveq  #4,%d7\n\t"
+    "lea    4(%a3),%a0\n\t"
+    "subq.w #2,%d0\n"
+    "1:\n\t"
+    "move.l (%a0)+,%d1\n\t"
+    "cmp.w  %d2,%d1\n\t"
+    "bge.s  2f\n\t"
+    "move.w %d1,%d2\n\t"
+    "move.w %d7,%d6\n"
+    "2:\n\t"
+    "cmp.w  %d3,%d1\n\t"
+    "ble.s  3f\n\t"
+    "move.w %d1,%d3\n"
+    "3:\n\t"
+    "swap   %d1\n\t"
+    "cmp.w  %d4,%d1\n\t"
+    "bge.s  4f\n\t"
+    "move.w %d1,%d4\n"
+    "4:\n\t"
+    "cmp.w  %d5,%d1\n\t"
+    "ble.s  5f\n\t"
+    "move.w %d1,%d5\n"
+    "5:\n\t"
+    "addq.w #4,%d7\n\t"
+    "dbf    %d0,1b\n\t"
+    "move.l 74(%sp),%a1\n\t"            /* the surface */
+    "move.w 16(%a1),%d0\n\t"            /* clip x */
+    "cmp.w  %d0,%d4\n\t"
+    "blt    98f\n\t"                    /* left of the clip */
+    "add.w  20(%a1),%d0\n\t"
+    "cmp.w  %d0,%d5\n\t"
+    "bgt    98f\n\t"                    /* right of it */
+    "move.w %d3,%d0\n\t"
+    "sub.w  %d2,%d0\n\t"
+    "cmp.w  #256,%d0\n\t"
+    "bhi    98f\n\t"                    /* taller than 256 rows */
+    "move.w %d3,24(%sp)\n\t"            /* bottom */
+    "move.w 18(%a1),%d0\n\t"            /* clip y */
+    "move.w %d2,%d1\n\t"
+    "cmp.w  %d0,%d1\n\t"
+    "bge.s  6f\n\t"
+    "move.w %d0,%d1\n"                  /* the first row */
+    "6:\n\t"
+    "add.w  22(%a1),%d0\n\t"
+    "cmp.w  %d3,%d0\n\t"
+    "ble.s  7f\n\t"
+    "move.w %d3,%d0\n"                  /* the last row, exclusive */
+    "7:\n\t"
+    "cmp.w  %d0,%d1\n\t"
+    "bge    99f\n\t"                    /* no row inside the clip */
+    "move.w %d1,20(%sp)\n\t"
+    "move.w %d0,22(%sp)\n\t"
+    /* the winding, from the top vertex's two edges: ux * vy against
+     * uy * vx, as orientation() */
+    "move.w %d7,8(%sp)\n\t"             /* n x 4 */
+    "move.w %d6,%d0\n\t"
+    "addq.w #4,%d0\n\t"
+    "cmp.w  %d7,%d0\n\t"
+    "bne.s  1f\n\t"
+    "moveq  #0,%d0\n"
+    "1:\n\t"                            /* the next vertex */
+    "move.w %d6,%d1\n\t"
+    "bne.s  2f\n\t"
+    "move.w %d7,%d1\n"
+    "2:\n\t"
+    "subq.w #4,%d1\n\t"                 /* the one before */
+    "move.l 0(%a3,%d6.w),%d2\n\t"       /* top x:y */
+    "move.l 0(%a3,%d0.w),%d3\n\t"
+    "move.l 0(%a3,%d1.w),%d4\n\t"
+    "sub.w  %d2,%d3\n\t"                /* uy */
+    "sub.w  %d2,%d4\n\t"                /* vy */
+    "swap   %d2\n\t"
+    "swap   %d3\n\t"
+    "swap   %d4\n\t"
+    "sub.w  %d2,%d3\n\t"                /* ux */
+    "sub.w  %d2,%d4\n\t"                /* vx */
+    "move.w %d3,%d0\n\t"
+    "swap   %d4\n\t"
+    "muls.w %d4,%d0\n\t"                /* ux * vy */
+    "swap   %d3\n\t"
+    "swap   %d4\n\t"
+    "muls.w %d4,%d3\n\t"                /* uy * vx */
+    "moveq  #4,%d1\n\t"
+    "cmp.l  %d3,%d0\n\t"
+    "blt.s  3f\n\t"
+    "beq    98f\n\t"                    /* straight through: the area */
+    "moveq  #-4,%d1\n"
+    "3:\n\t"
+    "move.w %d1,10(%sp)\n\t"            /* step x 4 */
+    "move.w %d6,12(%sp)\n\t"
+    "move.w %d6,14(%sp)\n\t"
+    "move.w 2(%a3,%d6.w),%d1\n\t"
+    "move.w %d1,16(%sp)\n\t"            /* both edges end at the top */
+    "move.w %d1,18(%sp)\n\t"
+    "move.l %a3,(%sp)\n\t"
+    "move.l 86(%sp),4(%sp)\n\t"         /* row loop */
+    "move.w 20(%sp),%d0\n\t"
+    "mulu.w 8(%a1),%d0\n\t"             /* the first row's offset */
+    "move.l (%a1),%a2\n\t"
+    "add.l  %d0,%a2\n\t"
+    "add.l  90(%sp),%a2\n\t"            /* and the plane's */
+    "move.l 94(%sp),%d6\n\t"
+    "move.l 98(%sp),%d7\n\t"
+    "moveq  #0,%d0\n\t"
+    "move.w 8(%a1),%d0\n\t"
+    "move.l %d0,%a0\n\t"                /* stride */
+    "move.l 102(%sp),%a1\n"             /* edge masks */
+    "0:\n\t"
+    "move.w 20(%sp),%d3\n\t"
+    W_SIDE("12", "16", "add.w", "%d4", "%a4", "add.l #0xFFFF,%d4\n\t")
+    W_SIDE("14", "18", "sub.w", "%d5", "%a5", "subq.l #1,%d5\n\t")
+    "move.w 16(%sp),%d0\n\t"            /* the first edge to end */
+    "cmp.w  18(%sp),%d0\n\t"
+    "ble.s  1f\n\t"
+    "move.w 18(%sp),%d0\n"
+    "1:\n\t"
+    "cmp.w  22(%sp),%d0\n\t"
+    "ble.s  2f\n\t"
+    "move.w 22(%sp),%d0\n"              /* or the clip */
+    "2:\n\t"
+    "move.w %d0,20(%sp)\n\t"
+    "sub.w  %d3,%d0\n\t"                /* rows */
+    "move.w %a0,%d1\n\t"
+    "mulu.w %d1,%d0\n\t"
+    "lea    0(%a2,%d0.l),%a6\n\t"       /* the row to stop at */
+    "move.l 4(%sp),%a3\n\t"
+    "jsr    (%a3)\n\t"
+    "move.w 20(%sp),%d0\n\t"
+    "cmp.w  22(%sp),%d0\n\t"
+    "blt    0b\n"
+    "99:\n\t"
+    "moveq  #0,%d0\n\t"
+    "lea    26(%sp),%sp\n\t"
+    "movem.l (%sp)+,%d2-%d7/%a2-%a6\n\t"
+    "rts\n"
+    "98:\n\t"
+    "moveq  #1,%d0\n\t"
+    "lea    26(%sp),%sp\n\t"
+    "movem.l (%sp)+,%d2-%d7/%a2-%a6\n\t"
+    "rts\n");
+#endif
+
+/* The C walk, the 68000's twin. On the machine OR and CLEAR, which the
+ * 68000 walk leaves out, keep the column tables: rare enough not to
+ * be worth this code in every program that fills a polygon. */
+#ifndef __m68k__
+/* an edge's step a row in 16.16, dx across and dy (1 to 256) down:
+ * floor(65536 * dx / dy), from a divs.w and a divu.w of its
+ * remainder */
+static int32_t slope16(int dx, int dy)
+{
+    int q = dx / dy, r = dx % dy;
+
+    if (r < 0) {            /* floor division: 0 <= r < dy */
+        r += dy;
+        q--;
+    }
+    return (int32_t)(((uint32_t)q << 16)
+                     | STDL_DivU16((uint32_t)r << 16, (unsigned)dy));
+}
+
+/* where an edge from a with step s is at row y (a->y <= y, less than
+ * 256 rows on), in 16.16 with the rounding added: 0xFFFF makes the
+ * left's whole part its first column, -1 the right's its last. Only a
+ * clipped top starts below a, and then the product is two 16-bit
+ * multiplies. */
+static int32_t edge_x(const STDL_Point *a, int32_t s, int y, int32_t bias)
+{
+    int32_t x = (int32_t)((uint32_t)(int32_t)a->x << 16) + bias;
+    const int t = y - a->y;
+
+    if (t > 0) {
+        x += (int32_t)((uint32_t)STDL_MulS16(t, (int16_t)(s >> 16)) << 16)
+             + (int32_t)STDL_MulU16((unsigned)t, (uint16_t)s);
+    }
+    return x;
+}
+
+/* Rows [y, y2) a trapezoid at a time: walk both sides down from the
+ * top vertex as edge_next does - skipping edges that are flat or end
+ * above the row, and stopping at the bottom vertex - and hand the
+ * rows between to fill. */
+static __attribute__((noinline)) void fill_traps(
+        Trap *t, trap_fn fill, const STDL_Point *pts, int n, int top,
+        int dir, int y, int y2, int bottom)
+{
+    int il = top, ir = top, lend = pts[top].y, rend = lend;
+
+    for (;;) {
+        int stop;
+
+        while (lend <= y) {
+            int b = il + dir;
+
+            if (b == n) b = 0;
+            if (b < 0) b = n - 1;
+            if (pts[il].y >= bottom) {
+                return;
+            }
+            if (pts[b].y > y) {
+                t->sl = slope16(pts[b].x - pts[il].x, pts[b].y - pts[il].y);
+                t->xl = edge_x(&pts[il], t->sl, y, 0xFFFF);
+            }
+            lend = pts[b].y;
+            il = b;
+        }
+        while (rend <= y) {
+            int b = ir - dir;
+
+            if (b == n) b = 0;
+            if (b < 0) b = n - 1;
+            if (pts[ir].y >= bottom) {
+                return;
+            }
+            if (pts[b].y > y) {
+                t->sr = slope16(pts[b].x - pts[ir].x, pts[b].y - pts[ir].y);
+                t->xr = edge_x(&pts[ir], t->sr, y, -1);
+            }
+            rend = pts[b].y;
+            ir = b;
+        }
+        stop = lend < rend ? lend : rend;
+        if (stop > y2) {
+            stop = y2;
+        }
+        t->end = t->row + stdl_row_off(stop - y, (uint16_t)t->stride);
+        fill(t);
+        y = stop;
+        if (y >= y2) {
+            return;
+        }
+    }
+}
+#endif
 
 /* the mask words under a span: drawn pixels become opaque, or - a
  * transparent SET - transparent */
@@ -446,6 +1001,20 @@ static int16_t tab_l[CHUNK], tab_r[CHUNK];
  * which, in two 16-bit multiplies - compared, not subtracted, so
  * nothing overflows; only a top vertex its neighbours run straight
  * through needs the polygon's whole signed area. */
+static __attribute__((noinline)) int area_sign(const STDL_Point *pts,
+                                               int n)
+{
+    long long area = 0;
+    int i;
+
+    for (i = 0; i < n; i++) {
+        const STDL_Point *p = &pts[i], *q = &pts[i + 1 < n ? i + 1 : 0];
+
+        area += (long long)p->x * q->y - (long long)q->x * p->y;
+    }
+    return area < 0 ? 1 : area > 0 ? -1 : 0;
+}
+
 static int orientation(const STDL_Point *pts, int n, int top)
 {
     const STDL_Point *t = &pts[top];
@@ -453,8 +1022,6 @@ static int orientation(const STDL_Point *pts, int n, int top)
     const STDL_Point *pv = &pts[top > 0 ? top - 1 : n - 1];
     const int ux = nx->x - t->x, uy = nx->y - t->y;
     const int vx = pv->x - t->x, vy = pv->y - t->y;
-    long long area = 0;
-    int i;
 
     if (ux >= -32768 && ux <= 32767 && vx >= -32768 && vx <= 32767
         && uy <= 32767 && vy <= 32767) {
@@ -464,22 +1031,44 @@ static int orientation(const STDL_Point *pts, int n, int top)
             return a < b ? 1 : -1;
         }
     }
-    for (i = 0; i < n; i++) {
-        const STDL_Point *p = &pts[i], *q = &pts[i + 1 < n ? i + 1 : 0];
-
-        area += (long long)p->x * q->y - (long long)q->x * p->y;
-    }
-    return area < 0 ? 1 : area > 0 ? -1 : 0;
+    return area_sign(pts, n);
 }
+/* the row loops by operation and planes written, for each path */
+enum { K_SET2, K_SET4, K_XOR1, K_XOR2, K_XOR4, K_ANDOR2, K_ANDOR4 };
+static const rows_fn rows_by_kind[7] = {
+    rows_set2, rows_set4, rows_xor1, rows_xor2, rows_xor4, rows_andor2,
+    rows_andor4
+};
+#ifdef __m68k__
+static void (*const prows_by_kind[5])(void) = {
+    stdl_prows_set2, stdl_prows_set4, stdl_prows_xor1, stdl_prows_xor2,
+    stdl_prows_xor4
+};
+#else
+static const trap_fn trap_by_kind[7] = {
+    stdl_trap_set2, stdl_trap_set4, stdl_trap_xor1, stdl_trap_xor2,
+    stdl_trap_xor4, trap_andor2, trap_andor4
+};
+#endif
+
+/* a plane pair's words for the colour's two bits */
+static const uint32_t pair_words[4] = {
+    0, STDL_PACK2(0xFFFFu, 0), STDL_PACK2(0, 0xFFFFu),
+    STDL_PACK2(0xFFFFu, 0xFFFFu)
+};
+
+static void fill_tables(STDL_Surface *dst, const Trap *t, rows_fn fill,
+                        int off, const STDL_Point *pts, int n, int top,
+                        int dir, int y, int y2, int bottom, int lo, int hi,
+                        int free_, int transparent);
 
 void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,
                       uint8_t col, int op)
 {
     int i, top = 0, bottom, y, y2, lo, hi, dir, transparent, free_;
-    int minx, maxx;
+    int minx, maxx, off = 0, kind;
     uint32_t l01, l23, k01 = 0, k23 = 0;
-    rows_fn fill;
-    Edge el, er;
+    Trap t;
 
     if (dst == NULL || pts == NULL || n < 3 || dst->pixels == NULL) {
         return;
@@ -496,6 +1085,48 @@ void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,
     if (col == 0 && op != STDL_DRAW_SET) {
         return;                 /* no plane to flip, set or clear */
     }
+
+    l01 = pair_words[col & 3];
+    l23 = pair_words[(col >> 2) & 3];
+    /* SET writes pair 2-3 whenever the budget has it, to clear it.
+     * The others write only the planes the colour has: a colour with
+     * nothing in planes 0-1 is a pair from the third plane's word, and
+     * an XOR into one plane - each face of a glenz object - touches
+     * that plane's word alone */
+    if (op == STDL_DRAW_SET) {
+        kind = stdl_planes > 2 ? K_SET4 : K_SET2;
+    } else {
+        if ((col & 3) == 0) {
+            off = 4;
+            l01 = l23;
+            l23 = 0;
+        }
+        if (op == STDL_DRAW_XOR) {
+            if ((col & (col - 1)) == 0) {
+                off += (col & 0xA) ? 2 : 0;
+                kind = K_XOR1;
+            } else {
+                kind = l23 != 0 ? K_XOR4 : K_XOR2;
+            }
+        } else {
+            if (op == STDL_DRAW_CLEAR) {
+                k01 = l01;
+                k23 = l23;
+                l01 = l23 = 0;
+            }
+            kind = (k23 | l23) != 0 ? K_ANDOR4 : K_ANDOR2;
+        }
+    }
+#ifdef __m68k__
+    /* the 16.16 path, start to finish in 68000; it hands back what it
+     * does not take */
+    if (kind < K_ANDOR2 && dst->mask == NULL && n <= 8191
+        && stdl_poly_fast(dst, pts, n, prows_by_kind[kind], off, l01, l23,
+                          edge_masks) == 0) {
+        return;
+    }
+#endif
+
     bottom = pts[0].y;
     minx = maxx = pts[0].x;
     for (i = 1; i < n; i++) {
@@ -537,29 +1168,42 @@ void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,
      * clip's columns has nothing to clamp, and one under 32768 rows
      * tall keeps every edge's remainder in sixteen bits */
     free_ = minx >= lo && maxx <= hi + 1 && bottom - pts[top].y <= 32767;
+
+    t.stride = dst->stride;
+    t.l01 = l01;
+    t.l23 = l23;
+    t.k01 = k01;
+    t.k23 = k23;
+#ifndef __m68k__
+    if (dst->mask == NULL && free_ && bottom - pts[top].y <= 256) {
+        t.row = dst->pixels + stdl_row_off(y, dst->stride) + off;
+        t.masks = edge_masks;
+        fill_traps(&t, trap_by_kind[kind], pts, n, top, dir, y, y2,
+                   bottom);
+        return;
+    }
+#endif
+    fill_tables(dst, &t, rows_by_kind[kind], off, pts, n, top, dir, y, y2,
+                bottom, lo, hi, free_, transparent);
+}
+
+/* the long way, a chunk of rows at a time through the column tables:
+ * a polygon cut by the clip's columns, taller than 256 rows, or on a
+ * surface with a mask to keep. Out of line, so the fast path's
+ * registers are not spent on it. */
+static __attribute__((noinline)) void fill_tables(
+        STDL_Surface *dst, const Trap *t, rows_fn fill, int off,
+        const STDL_Point *pts, int n, int top, int dir, int y, int y2,
+        int bottom, int lo, int hi, int free_, int transparent)
+{
+    Edge el, er;
+    int i;
+
     el.v = er.v = top;
     el.yend = er.yend = pts[top].y;
-
-    l01 = STDL_PACK2((col & 1) ? 0xFFFFu : 0, (col & 2) ? 0xFFFFu : 0);
-    l23 = STDL_PACK2((col & 4) ? 0xFFFFu : 0, (col & 8) ? 0xFFFFu : 0);
-    /* SET writes pair 2-3 whenever the budget has it, to clear it;
-     * the others only when the colour has something there */
-    if (op == STDL_DRAW_SET) {
-        fill = stdl_planes > 2 ? rows_set4 : rows_set2;
-    } else if (op == STDL_DRAW_XOR) {
-        fill = l23 != 0 ? rows_xor4 : rows_xor2;
-    } else {
-        if (op == STDL_DRAW_CLEAR) {
-            k01 = l01;
-            k23 = l23;
-            l01 = l23 = 0;
-        }
-        fill = (k23 | l23) != 0 ? rows_andor4 : rows_andor2;
-    }
     if (dst->mask != NULL) {
         dst->opaque_state = 0;
     }
-
     while (y < y2) {
         const int y1 = y + CHUNK < y2 ? y + CHUNK : y2;
         const int rows = y1 - y;
@@ -571,7 +1215,8 @@ void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,
                            hi, 1, free_)) {
             break;
         }
-        fill(row, dst->stride, tab_l, tab_r, rows, l01, l23, k01, k23);
+        fill(row + off, dst->stride, tab_l, tab_r, rows, t->l01, t->l23,
+             t->k01, t->k23);
         if (dst->mask != NULL) {
             uint8_t *mrow = dst->mask + stdl_row_off(y, dst->maskstride);
 

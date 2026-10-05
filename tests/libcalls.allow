@@ -44,7 +44,7 @@ polygon.o edge_next __divsi3 2              # once an edge, and only for a
 polygon.o edge_next __mulsi3 2              # step past 16 bits or a clipped top
 polygon.o edge_next __divdi3 1              # a clipped top from the far ends
 polygon.o edge_next __muldi3 1              # of int16_t: 64 bits, rarely
-polygon.o STDL_FillPolygon __muldi3 1       # orientation of a straight-through top
+polygon.o area_sign __muldi3 1              # orientation of a straight-through top
 
 # Borders: at open, close and calibration, never from the ISRs
 overscan.o ovsc_measure_one __divsi3 1

@@ -8,8 +8,10 @@
  * tests/host/test_polygon.c checks the fill against an exact
  * reference, but natively, where SET and XOR rows are the C twins.
  * The 68000 rows are only covered here. Rerun it after touching
- * src/polygon.c. A tenth of the host's polygons, a minute or so on a
- * plain ST under fast-forward.
+ * src/polygon.c - the 68000 fast path (stdl_poly_fast and its row
+ * loops) runs nowhere else. A tenth of the host's polygons, about 85
+ * seconds on a plain ST under fast-forward, against run.sh's two
+ * minute wait.
  *
  *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -std=gnu99 \
  *       -Iinclude -Isrc -Ilib/xpad/src \

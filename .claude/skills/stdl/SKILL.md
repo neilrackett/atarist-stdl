@@ -250,11 +250,17 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
      inside), so faces sharing an edge tile with no seam, which XOR
      needs. Like the other drawing primitives it ignores the surface
      origin. A rectangle's four corners with an op is a plane-masked
-     rectangle fill. Measured on a plain ST (PRIMCOST): a 160-row
-     diamond XORed in 15.1ms against 23.9 through `STDL_XorHSpans`,
-     a 22-row triangle 2.3ms, level with spans: each edge costs about
-     1000 cycles to set up, so faces smaller than that go faster as
-     spans. `examples/polydemo.c`
+     rectangle fill. A face inside the clip's columns, at most 256
+     rows tall, SET or XORed onto a surface with no mask, is filled
+     entirely in 68000 with both edges in registers; others take
+     column tables. XOR/OR/CLEAR write only the colour's planes, so
+     a one-plane glenz face is one word a group. Measured on a plain
+     ST (PRIMCOST): a 160-row diamond XORed in 12.6ms against 23.9
+     through `STDL_XorHSpans`; a 22-row triangle 1.55ms against
+     2.26 as spans, 1.27ms in one plane; 24 one-plane glenz-like
+     triangles 49ms (85 before this path). Set-up is about 5000
+     cycles a polygon, so from those figures only faces under about
+     ten rows are cheaper as spans. `examples/polydemo.c`
    - a *loop* of short spans (terrain profiles, column fields,
      raycaster walls) -> fill an `STDL_Span` array and make one
      `STDL_XorVSpans` / `STDL_VSpans` / `STDL_XorHSpans` /

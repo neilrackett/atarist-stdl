@@ -21,7 +21,10 @@
  *    random rectangles at every phase and width, under random clip
  *    rectangles on the page, byte for byte; and with
  *    STDL_DirtyWholeGroups, against the same blit of each rectangle
- *    rounded out to whole groups.
+ *    rounded out to whole groups. Then again with the host's BLiTTER
+ *    model present, where the restore is the general blit's and
+ *    whole groups do not apply - the case every STE takes, which
+ *    this test had never run until DTCHK failed on one.
  */
 #include <stdio.h>
 #include <string.h>
@@ -236,7 +239,10 @@ static void test_direct_whole(int whole)
         for (k = 0; k < n; k++) {
             STDL_Rect r = rs[k], d;
 
-            if (whole) {
+            /* only the restore by offset rounds out: with a BLiTTER
+             * at work the rectangles go through STDL_BlitSurfaceEx as
+             * pushed (stdl_dirty.h) */
+            if (whole && !stdl_blitter_active()) {
                 const int x1 = (r.x + r.w + 15) & ~15;
 
                 r.x = (int16_t)(r.x & ~15);
@@ -260,6 +266,15 @@ int main(void)
     test_one_page();
     test_two_pages();
     test_direct();
+#ifndef __m68k__
+    /* and with a BLiTTER present (the host's model), which every
+     * STE has: the restore is then the general blit's, whole groups
+     * or not - DTCHK met that on an STE after only ever running on a
+     * plain ST. On the machine the BLiTTER is whatever it has. */
+    stdl.mach.has_blitter = 1;
+    test_direct();
+    stdl.mach.has_blitter = 0;
+#endif
     if (failures == 0) {
         printf("dirty-list tests passed\n");
         return 0;

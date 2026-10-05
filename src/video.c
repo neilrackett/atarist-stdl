@@ -293,6 +293,11 @@ int STDL_Init(uint32_t flags)
         return 0;
     }
     memset(&stdl, 0, sizeof(stdl));
+    /* -1 is "never changed": left at 0, every program that inits
+     * without a video mode wrote 60Hz into the sync register on its
+     * way out - seen on a Mega STE whose desktop came back at 60Hz
+     * after a test program */
+    stdl.old_sync = -1;
 
     /*
      * Supervisor mode from here on - low memory (the cookie jar

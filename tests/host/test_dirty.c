@@ -50,12 +50,22 @@ static unsigned rnd(void)
 
 enum { W = 96, H = 48, MAXR = 12 };
 
+/* random pixels a plane word at a time from a shift-register
+ * generator: STDL_PutPixel and a 32-bit multiply a pixel made this
+ * most of DTCHK's several minutes on a real Mega STE */
 static void randomise(STDL_Surface *s)
 {
-    int x, y;
-    for (y = 0; y < s->h; y++)
-        for (x = 0; x < s->w; x++)
-            STDL_PutPixel(s, x, y, (uint8_t)(rnd() & 15));
+    static uint32_t x = 0x9E3779B9u;
+    uint16_t *w = (uint16_t *)s->pixels;
+    size_t i;
+    const size_t n = (size_t)s->stride * s->h / 2;
+
+    for (i = 0; i < n; i++) {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        w[i] = (uint16_t)x;
+    }
 }
 
 static int same(const STDL_Surface *a, const STDL_Surface *b)

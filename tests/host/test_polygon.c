@@ -483,7 +483,8 @@ static void test_tall(void)
     enum { TW = 48, TH = 300 };
     int it;
 
-    for (it = 0; it < POLY_ITERS / 30; it++) {
+    /* at least two, so a sampled run has the deeply clipped one */
+    for (it = 0; it < (POLY_ITERS >= 60 ? POLY_ITERS / 30 : 2); it++) {
         STDL_Point p[20];
         /* every other one with its top cut 120 to 220 rows down, so
          * an edge starts far below its vertex */

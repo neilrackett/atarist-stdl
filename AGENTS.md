@@ -65,7 +65,11 @@ warnings** with the Makefile's `-Wall -Wextra`.
   by seconds and was chased as a crash in new asm until a trace
   showed it still running; filling its test surfaces a plane word at
   a time rather than through `STDL_PutPixel` put it back at 84
-  seconds. Time a CHK runner after adding cases to it.
+  seconds. And that was the emulator: on a real Mega STE at 8MHz the
+  same build took 28 minutes, the reference's exact arithmetic doing
+  the work, so PGCHK now samples by default and `-DPGCHK_FULL` is the
+  emulator's. Time a CHK runner after adding cases to it, on the
+  machine as well as under fast-forward.
   `tests/hatari/sprcost.c` times sprites, restores, blits and fills
   (with the fixed cost of a call taken apart), twice per run so each
   run carries its own noise floor, and `tests/hatari/sccmp.py`

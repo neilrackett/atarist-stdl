@@ -438,45 +438,55 @@ warnings** with the Makefile's `-Wall -Wextra`.
   named `BLITCOST2.TOS` beside `BLITCOST.TOS` silently runs
   `BLITCOST.TOS`; four runs of "the fix" measured the old binary.
   Keep test program stems to eight characters.
-- **Drawing with a border open is what flickers a Mega STE, and
-  only with its cache on.** A probe whose status strip repainted
-  every frame flickered the bottom border constantly at 16MHz with
-  the cache enabled, was solid at 8MHz with the same drawing, and
-  solid at 16MHz with the cache off. Stop the per-frame drawing and
-  it is steady at every speed, back to the one-flicker-a-minute the
-  border has always had. So the suspect is the blit policy's cost
-  model: it places each operation against the beam from estimates
-  that do not know the CPU got faster while the bus did not.
-  **It is the BLiTTER path, and `STDL_UseBlitter(0)` is the
-  workaround.** Measured on the machine at 16MHz with the cache on,
-  a full-width 16-row fill every frame with the bottom border open:
-  with the BLiTTER allowed the border disappears and returns only
-  in brief flashes once or twice a second; forced through the CPU
-  path the same drawing leaves it solid. So the fault is in how a
-  BLiTTER operation is driven around the border's window, not in
-  the ISR's own timing - the two candidates being the blit policy's
-  placement against the beam and `stdl_ovsc_bpause`'s pause and
-  resume across the window, and the next measurement is which.
-  Taking those two apart did not settle it, which is itself the
-  result: with the BLiTTER allowed and drawing on, removing the
-  placement (`stdl_blit_policy = NULL`) makes the *whole screen*
-  flicker, and removing the ISR's pause (`stdl_ovsc_blit = 0`)
-  leaves the bottom border flickering constantly. Neither half is
-  the culprit alone and both are needed, so the fault is in the
-  model they share rather than in either mechanism - and the
-  obvious candidates do not explain it: `cpl` is bus time and does
-  not move with the CPU clock, and `OVSC_RESERVE` is six lines
-  against a decision latency that *shrinks* at 16MHz.
-  It cannot be chased in the emulator. At 16MHz Hatari's video
-  counter is not cycle-correct, so the bottom border takes the
-  Timer B path there while hardware takes the counter path - the
-  failing code is the path the emulator does not run. That leaves
-  hardware experiments, which are expensive, so this is parked with
-  a workaround rather than half-fixed: report it to a port as a
-  known limitation, and with a border open on a cached Mega STE
-  call `STDL_UseBlitter(0)`. It costs little, since with a border
-  open the BLiTTER already loses to the CPU at the sizes a game
-  blits.
+- **The Mega STE's cache decides the bottom border's flick, word by
+  word.** Drawing with a border open flickered the bottom border at
+  16MHz with the cache on, never at 8MHz or with it off, and worst
+  through the BLiTTER. This file used to blame the blit policy and
+  recommend `STDL_UseBlitter(0)`; the cause was the cache, and it is
+  fixed in the ISR (2026-10-06).
+  The facts that settle it are in Hatari's source, from Christian
+  Zietz's reading of the schematics: the cache is 8192 lines of
+  *one word each*, direct-mapped on address bits 1-13, it is emptied
+  *entirely* whenever another master takes the bus - every BLiTTER
+  operation - and every word the CPU reads or writes replaces the
+  line it maps to. A miss costs a 16MHz CPU up to a bus slot. So by
+  the time the bottom ISR runs, the frame's drawing has decided which
+  words of the flick are cold, and its warm-up pass, which entered
+  the path at the table read with slot 15's entries, left the poll's
+  branch target, the nops slot 15 skips and both table words of the
+  slot actually caught to be fetched cold inside a window of a few
+  cycles.
+  `tests/hatari/ovcache.c` proved it on the machine by toggling one
+  thing at a time in one binary, 150 frames each, 16MHz with the
+  cache: idle 146 open; clear-and-set the cache bit once a frame -
+  no BLiTTER, no drawing at all - 30; one BLiTTER operation of one
+  word 25; a 16-row fill 43; a 24K CPU copy 53. With the cache off,
+  150 in every case. The ISR now reads all 32 table words in at its
+  head on a cached CPU, runs the whole path from the poll's entry
+  with a table of zeros (no turns, every nop), keeps its code, tables
+  and variables in one block so no two can share a line, and returns
+  from the flick through a register so no stack write lands between
+  the warm pass and the 50Hz write. Same binary, same boot, every
+  case above: 150 of 150 (149 with the copy). The demo's overscan
+  part lost the bottom border in 37% of frames on that machine
+  before.
+  Two lessons. The pre-touch tried on 2026-09-17 read four words 16
+  bytes apart, on the assumption of 16-byte lines; with one-word
+  lines it warmed 4 of the 32 words, and "the same either way" was
+  measuring nothing. An A/B is only a control if the toggled thing
+  can change the state, and that includes the granularity of the
+  hardware it acts on - look it up before designing the toggle. And
+  the earlier experiments here (policy off made the whole screen
+  flicker, pause off made the bottom flicker constantly) were all
+  run on top of a flick that was already failing; changing how the
+  BLiTTER was driven moved the shape of the failure, never its
+  cause. When every lever moves the symptom and none removes it,
+  look for something all of them share - here, that every BLiTTER
+  operation flushes the cache.
+  Hatari cannot show any of it: at 16MHz its video counter is not
+  cycle-correct, so the border takes the Timer B path there, which
+  reads no table. Any future change to the bottom ISR wants
+  OVCACHE on the machine.
   A caution about reading hardware reports, which cost a wrong
   entry in this file. "The top half of the top border is wrong" was
   read here as half the screen and written up as a fill running
@@ -487,16 +497,6 @@ warnings** with the Makefile's `-Wall -Wextra`.
   28 rows above the old picture. Get the picture before theorising
   from the words, and put a probe's own drawing somewhere it cannot
   be mistaken for the thing being measured.
-  The cache-residency theory is dead, and how it died is worth
-  keeping. The idea was that the flick's timing table falls out of
-  the cache between frames. The first A/B ran on an idle screen,
-  where nothing competes for those lines, so the "off" state
-  measured a table the "on" state had warmed - indistinguishable by
-  construction. The second ran with drawing on, which is what
-  evicts it, and came out the same either way twice. An A/B is only
-  a control if the thing being toggled can actually change between
-  the two states; an idle machine quietly holds the state you were
-  trying to remove.
 - **Tested and dead: memcpy's `movem.l` as a border disturber.** A
   port's game flickers its bottom border in proportion to how much
   it draws - solid with the top border alone, flickering in play,
@@ -515,10 +515,13 @@ warnings** with the Makefile's `-Wall -Wextra`.
   CPU copies a frame on `--machine st` gives 300/300 with zero
   misses. The ISR polls for its line rather than relying on exact
   entry, which is presumably what absorbs the jitter.
-  Recorded so nobody spends a day on the same reasoning. What is
-  still unexplained is the dose-response itself: something about
-  drawing volume moves that border on hardware, at any CPU speed,
-  through neither the BLiTTER nor the disk.
+  Recorded so nobody spends a day on the same reasoning. At 16MHz
+  with the cache on, drawing volume did move the border, through the
+  cache (see the Mega STE cache entry above: a 24K CPU copy a frame
+  opened it 53 times in 150, fixed since). What that does not
+  explain is the same port's report at 8MHz, where the cache cannot
+  be on; if it recurs on a build with the cache fix, it is something
+  else.
 - **Possible future improvement: an unblocking flip.** `STDL_Flip`
   waits for the vertical blank, so a port whose frame takes 34-40ms
   is quantised to 40ms - 25fps on a 50Hz display - and pays a whole

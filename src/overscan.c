@@ -56,7 +56,10 @@
  * frame, and the difference between cold and warm instruction
  * fetches is bigger than the window; the ISR therefore runs the
  * path once against a scratch byte before it polls, which is the
- * classic demo answer and costs ~250 cycles a frame.
+ * classic demo answer and costs ~250 cycles a frame. Once means all
+ * of it, and the table too: the Mega STE's cache has one-word lines
+ * and is emptied by every BLiTTER operation, so a warm-up that
+ * skips a word leaves that word cold - see the ISR.
  *
  * Nothing else is cycle-counted: Timer A in delay mode hits the top
  * window from the VBL at any CPU speed because it runs off the
@@ -255,8 +258,10 @@ uint32_t stdl_ovsc_missed;   /* frames whose flip was skipped      */
  * one slot per two bytes, slot 15 = parked at 160); turns between
  * the writes; the address bytes of frame line 262's first word,
  * which the counter shows while parked after line 261; and the
- * byte the warm-up pass writes to */
-uint16_t stdl_ovsc_n1[32];     /* [0..15] turns, [16..31] ladder   */
+ * byte the warm-up pass writes to. Everything the ISR reads from
+ * the warm-up to its 50Hz write is defined in the asm below, in
+ * the same block as its code, not here: see "the hot set" there. */
+extern uint16_t stdl_ovsc_n1[32];   /* [0..15] turns, [16..31] ladder */
 uint16_t stdl_ovsc_test = OVSC_TEST;
 uint8_t  stdl_ovsc_wide;       /* probe only: the first version's
                                 * shape, 60Hz at test-44, 50Hz at
@@ -276,33 +281,29 @@ uint8_t  stdl_ovsc_wide;       /* probe only: the first version's
  * moved within the bound (the border did not open) */
 uint8_t  stdl_ovsc_diag;
 uint8_t  stdl_ovsc_dpolls, stdl_ovsc_dfirst, stdl_ovsc_dlast;
-uint16_t stdl_ovsc_n2;
-uint16_t stdl_ovsc_n2t;      /* tick mode: turns between the writes */
+extern uint16_t stdl_ovsc_n2;
+extern uint16_t stdl_ovsc_n2t;  /* tick mode: turns between the writes */
 uint16_t stdl_ovsc_postn;    /* poll bound for line 263's DE end     */
-uint16_t stdl_ovsc_waitn;    /* poll bound of ~8 lines, any wait     */
-uint8_t  stdl_ovsc_tick;     /* 1 = time from Timer B, not the counter */
-/*
- * Tried twice and abandoned (2026-09-17): pre-touching stdl_ovsc_n1
- * at the top of this ISR, on the theory that the flick reads two of
- * its 32 words, the slot moves per frame, and a line not resident
- * in a Mega STE's cache costs bus cycles the table cannot account
- * for.
- *
- * The first attempt proved nothing because it was toggled on an
- * idle screen, where nothing competes for those cache lines: once
- * the "on" state had pulled the table in, the "off" state went on
- * measuring a resident table. The second attempt fixed that - the
- * probe drew a fill every frame, which is what evicts it - and the
- * answer was the same either way, twice each. So it is not the
- * table, and the cycles are not spent.
- *
- * What that test did find is in AGENTS.md: drawing with a border
- * open on a 16MHz Mega STE with its cache enabled does not merely
- * flicker the border, it corrupts the fill itself.
- */
-uint8_t  stdl_ovsc_l262lo;
-uint8_t  stdl_ovsc_l262mid;
-uint8_t  stdl_ovsc_scratch;
+extern uint16_t stdl_ovsc_waitn; /* poll bound of ~8 lines, any wait */
+extern uint8_t  stdl_ovsc_tick; /* 1 = time from Timer B, not the counter */
+extern uint8_t  stdl_ovsc_l262lo;
+extern uint8_t  stdl_ovsc_l262mid;
+extern uint8_t  stdl_ovsc_scratch;
+/* the CPU runs from a cache (a Mega STE at 16MHz with it on, or an
+ * accelerator): the calibrated dbra turn is quicker than the 8MHz
+ * bus could fetch it. The ISR then reads the whole flick table in
+ * before it polls. Set with the tables. */
+extern uint8_t  stdl_ovsc_cached;
+/* probe only: 0 puts back the warm-up this library had before the
+ * cache was understood - the tail of the flick from slot 15, no
+ * table read-in - so that one binary can compare the two
+ * (tests/hatari/ovcache.c) */
+extern uint8_t  stdl_ovsc_prime;
+/* a dbra turn quicker than this (x16, 9 cycles) is running from a
+ * cache: a plain ST's is 12 cycles (192) and a 16MHz Mega STE with
+ * its cache off measures the same, the bus being the limit, while
+ * with it on it measures 5 (80) */
+#define OVSC_CACHED_C16 144
 /* the calibration's raw measurement, kept for the hardware probe
  * (tests/hatari/ovprobe.c): the polls spent finding the vertical
  * blank and then the first Display Enable event after it, the
@@ -608,6 +609,36 @@ __asm__(
  * cold-versus-warm is wider than the window), and the polls
  * begin.
  *
+ * The warm-up has to fetch every word the real pass will, and on a
+ * Mega STE that is a stricter demand than it looks. Its cache is
+ * 8192 lines of one word each, direct-mapped, and the whole of it
+ * is emptied whenever another bus master takes the bus - every
+ * BLiTTER operation - while any word the CPU reads or writes
+ * replaces the line it maps to. So by the time this ISR runs, the
+ * frame's drawing has decided what is cold, word by word, and a
+ * missed word costs a 16MHz CPU up to a whole 8MHz bus slot. This
+ * warm-up used to enter the path at the table read with slot 15's
+ * entries, which left the poll's branch target, the nops slot 15
+ * skips, and both table words of the slot the poll actually caught
+ * to be fetched cold inside the timed path. On a real Mega STE at
+ * 16MHz with the cache on, a frame that so much as cleared and set
+ * the cache bit opened the border 30 times in 150, one BLiTTER
+ * operation of one word 25, a 16-row fill 43; with the cache off,
+ * 150 every time (tests/hatari/ovcache.c). Hatari's Mega STE takes
+ * the tick path, which reads no table, and cannot show it.
+ *
+ * Hence, on a cached CPU: all 32 table words are read in at the
+ * head, while the ISR is early anyway; the warm pass runs the whole
+ * path from the poll's entry - a threshold the first read is
+ * already past, a table of zeros, so no turns and every rung of the
+ * ladder; and between the warm pass and the 50Hz write nothing
+ * touches memory outside this block, which holds the code, the
+ * tables and the variables together so that no two of them can map
+ * to the same line, whatever the link order. That rules out the
+ * stack too: the flick returns through a4, not rts, because a push
+ * can land on a line the timed path is about to read, and where the
+ * stack is depends on what was interrupted.
+ *
  * The flick itself is a short 60Hz pulse: a register write, two
  * nops, a register write - 16 cycles on a plain ST, 8 at 16MHz -
  * placed so the GLUE's bottom-border test (cycle 500 on an STE,
@@ -660,9 +691,17 @@ __asm__(
  * trace then shows each read position's own cost. */
 "    .even\n"
 "_stdl_ovsc_tb:\n"
-"    movem.l %d0-%d7/%a0-%a3,-(%sp)\n"
+"    movem.l %d0-%d7/%a0-%a4,-(%sp)\n"
 "    bsr    stdl_ovsc_bpause\n"
-"    moveq  #0,%d6\n"
+/* the table read in, 32 words, on a cached CPU only: early, while
+ * the ISR waits for line 261 to end anyway, and before the variables
+ * are loaded, since it takes every data register */
+"    move.b _stdl_ovsc_cached,%d0\n"
+"    and.b  _stdl_ovsc_prime,%d0\n"
+"    beq.s  1f\n"
+"    movem.l _stdl_ovsc_n1,%d0-%d7\n"
+"    movem.l _stdl_ovsc_n1+32,%d0-%d7\n"
+"1:  moveq  #0,%d6\n"
 "    moveq  #2,%d7\n"
 "    lea    0xfffffa21.w,%a0\n"
 "    lea    0xffff8209.w,%a1\n"
@@ -675,14 +714,32 @@ __asm__(
 "    beq.s  3f\n"
 "2:  dbra   %d2,1b\n"
 "    bra    ovsc_tb_late\n"
-"3:  lea    _stdl_ovsc_n1,%a3\n"
-"    move.w _stdl_ovsc_n2,%d3\n"
+"3:  move.w _stdl_ovsc_n2,%d3\n"
 "    move.w _stdl_ovsc_n2t,%d4\n"
 "    lea    _stdl_ovsc_scratch,%a2\n"
 "    tst.b  _stdl_ovsc_tick\n"
 "    bne    ovsc_tb_tick_warm\n"
+"    tst.b  _stdl_ovsc_prime\n"
+"    beq.s  4f\n"
+/* the warm pass: the whole path from the poll, which exits on its
+ * first read (the threshold is the counter now plus 64, and the
+ * counter moves a few bytes at most before that read), into a table
+ * of zeros - no turns, all three nops. d4 keeps line 262's byte; it
+ * is tick mode's, and this is counter mode */
+"    move.b %d0,%d4\n"
+"    move.b (%a1),%d0\n"
+"    add.b  #64,%d0\n"
+"    lea    ovsc_zeros,%a3\n"
+"    lea    5f(%pc),%a4\n"
+"    bra    _stdl_ovsc_flick\n"
+"5:  move.b %d4,%d0\n"
+"    bra.s  6f\n"
+/* prime off: the warm-up as it was, the tail from slot 15 */
+"4:  lea    _stdl_ovsc_n1,%a3\n"
 "    moveq  #30,%d1\n"
-"    bsr    ovsc_flick_tail\n"
+"    lea    6f(%pc),%a4\n"
+"    bra    ovsc_flick_tail\n"
+"6:  lea    _stdl_ovsc_n1,%a3\n"
 "    lea    0xffff820a.w,%a2\n"
 "    move.w #127,%d2\n"
 "1:  cmp.b  (%a1),%d0\n"
@@ -690,8 +747,9 @@ __asm__(
 "    dbra   %d2,1b\n"
 "    bra    ovsc_tb_late\n"
 "2:  addq.b #2,%d0\n"
-"    bsr    _stdl_ovsc_flick\n"
-"    tst.w  %d1\n"
+"    lea    1f(%pc),%a4\n"
+"    bra    _stdl_ovsc_flick\n"
+"1:  tst.w  %d1\n"
 "    bmi    ovsc_tb_late\n"
 "    bra    ovsc_tb_check\n"
 "ovsc_tb_tick_warm:\n"
@@ -739,7 +797,7 @@ __asm__(
 "    move.b #255,0xfffffa21.w\n"
 "    move.b #5,0xfffffa1b.w\n"
 "    move.b #0xFE,0xfffffa0f.w\n"
-"    movem.l (%sp)+,%d0-%d7/%a0-%a3\n"
+"    movem.l (%sp)+,%d0-%d7/%a0-%a4\n"
 "    rte\n"
 "ovsc_tb_late:\n"
 "    addq.l #1,_stdl_ovsc_missed\n"
@@ -752,13 +810,15 @@ __asm__(
  * ends when the fetch passes byte 130; the calibration: 100 less,
  * so it ends at byte 30 with the same arithmetic), a1 = $ff8209,
  * a2 = where the two writes go, a3 = the tables, d3 = turns
- * between the writes, d6 = 0, d7 = 2. Out: d1 = the table slot
+ * between the writes, d6 = 0, d7 = 2, a4 = where to return to.
+ * Out: d1 = the table slot
  * times 2, or negative when the counter never got there, and d2 =
  * the counter's low byte read straight after the 50Hz write - the
  * calibration's clock; in the ISR the counter is parked by then
  * and the read is harmless. Registers d1, d2, d5 are clobbered.
- * The tail entry runs everything after the poll, for the ISR's
- * warm-up pass. */
+ * The tail entry runs everything after the poll, for the old
+ * warm-up (stdl_ovsc_prime off). Entered by bra and left by jmp
+ * (a4), so a call writes nothing to the stack: see the ISR. */
 "_stdl_ovsc_flick:\n"
 "    move.w #63,%d2\n"
 "3:  move.b (%a1),%d1\n"
@@ -766,7 +826,7 @@ __asm__(
 "    bmi.s  4f\n"
 "    dbra   %d2,3b\n"
 "    moveq  #-1,%d1\n"
-"    rts\n"
+"    jmp    (%a4)\n"
 "4:  and.w  #0x3e,%d1\n"
 "ovsc_flick_tail:\n"
 "    move.w 0(%a3,%d1.w),%d2\n"
@@ -781,7 +841,7 @@ __asm__(
 "6:  dbra   %d2,6b\n"
 "    move.b %d7,(%a2)\n"
 "    move.b (%a1),%d2\n"
-"    rts\n"
+"    jmp    (%a4)\n"
 "\n"
 /* void stdl_ovsc_burst(uint8_t *buf, int n): n reads of the
  * counter's low byte back to back into buf - 24 cycles apart on a
@@ -804,9 +864,9 @@ __asm__(
  * threshold byte in bits 8-15 and the counter byte after the write
  * in bits 0-7, or -1. Interrupts must be off. */
 "_stdl_ovsc_sample:\n"
-"    movem.l %d2-%d7/%a2-%a3,-(%sp)\n"
-"    move.l 36(%sp),%a3\n"
-"    move.w 42(%sp),%d3\n"
+"    movem.l %d2-%d7/%a2-%a4,-(%sp)\n"
+"    move.l 40(%sp),%a3\n"
+"    move.w 46(%sp),%d3\n"
 "    lea    0xffff8209.w,%a1\n"
 "    lea    _stdl_ovsc_scratch,%a2\n"
 "    moveq  #0,%d6\n"
@@ -827,8 +887,9 @@ __asm__(
 "    dbra   %d4,3b\n"
 "    bra.s  9f\n"
 "4:  sub.b  #98,%d0\n"
-"    bsr    _stdl_ovsc_flick\n"
-"    tst.w  %d1\n"
+"    lea    5f(%pc),%a4\n"
+"    bra    _stdl_ovsc_flick\n"
+"5:  tst.w  %d1\n"
 "    bmi.s  9f\n"
 "    and.l  #0xff,%d2\n"
 "    and.l  #0xff,%d0\n"
@@ -839,7 +900,7 @@ __asm__(
 "    or.l   %d1,%d0\n"
 "    bra.s  10f\n"
 "9:  moveq  #-1,%d0\n"
-"10: movem.l (%sp)+,%d2-%d7/%a2-%a3\n"
+"10: movem.l (%sp)+,%d2-%d7/%a2-%a4\n"
 "    rts\n"
 "\n"
 
@@ -903,6 +964,51 @@ __asm__(
 "    move.l 4(%sp),%d0\n"
 "1:  dbra   %d0,1b\n"
 "    rts\n"
+"\n"
+/* The bottom ISR's hot set: everything it reads between the table
+ * read-in and its 50Hz write that is not an I/O register. Here in
+ * the code's own section, a few hundred bytes from the code, rather
+ * than in .bss wherever the linker puts it: the Mega STE's cache
+ * maps each word to one of 8192 lines by address bits 1-13, so two
+ * words 16K apart evict each other, and a variable that happened to
+ * share a line with a word of the flick would empty it on every
+ * read - every frame, on the slots it shares, for one link order
+ * and not another. Within one block under 16K nothing can. Written
+ * by the C above (TOS does not protect text). */
+"    .even\n"
+"    .globl _stdl_ovsc_n1\n"
+"_stdl_ovsc_n1:\n"
+"    .skip  64\n"
+"ovsc_zeros:\n"                     /* the warm pass's table */
+"    .skip  64\n"
+"    .globl _stdl_ovsc_n2\n"
+"_stdl_ovsc_n2:\n"
+"    .skip  2\n"
+"    .globl _stdl_ovsc_n2t\n"
+"_stdl_ovsc_n2t:\n"
+"    .skip  2\n"
+"    .globl _stdl_ovsc_waitn\n"
+"_stdl_ovsc_waitn:\n"
+"    .skip  2\n"
+"    .globl _stdl_ovsc_l262lo\n"
+"_stdl_ovsc_l262lo:\n"
+"    .skip  1\n"
+"    .globl _stdl_ovsc_l262mid\n"
+"_stdl_ovsc_l262mid:\n"
+"    .skip  1\n"
+"    .globl _stdl_ovsc_tick\n"
+"_stdl_ovsc_tick:\n"
+"    .skip  1\n"
+"    .globl _stdl_ovsc_cached\n"
+"_stdl_ovsc_cached:\n"
+"    .skip  1\n"
+"    .globl _stdl_ovsc_prime\n"
+"_stdl_ovsc_prime:\n"
+"    .byte  1\n"
+"    .globl _stdl_ovsc_scratch\n"
+"_stdl_ovsc_scratch:\n"
+"    .skip  1\n"
+"    .even\n"
 );
 
 extern void stdl_ovsc_vbl_top(void);
@@ -1239,6 +1345,7 @@ static void ovsc_table(int c)
                  : ((int)stdl_ovsc_test + OVSC_AFTER) * 16 - pair;
     int i, n, pad, hit, want;
 
+    stdl_ovsc_cached = (uint8_t)(c < OVSC_CACHED_C16);
     for (i = 0; i < 16; i++) {
         hit = (i < 15) ? (OVSC_HIT_READ + 4 * i) * 16
                        : OVSC_PARK_READ * 16

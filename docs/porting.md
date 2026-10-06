@@ -34,22 +34,25 @@ time, not at runtime.
     holds interrupts off long enough. Loading assets before opening
     the border, or closing it around a read, avoids it; streaming
     from disk during play with a border open does not work.
-  * *The BLiTTER on a 16MHz Mega STE with its cache on.* A program
-    drawing every frame loses the bottom border - it disappears and
-    flashes back once or twice a second. The same drawing forced
-    through the CPU with `STDL_UseBlitter(0)` leaves it solid, and
-    costs little, because with a border open the BLiTTER already
-    loses to the CPU at the sizes a game blits (1.14-1.47x the
-    no-border time). 8MHz, or 16MHz with the cache off, is
-    unaffected.
-  * *Drawing volume, unexplained.* One port sees its bottom border
-    flicker in proportion to how much it draws - solid with the top
-    border alone, flickering in play, worst in cutscenes, steady
-    while an inventory screen redraws 45 icons a frame. It survives
-    8MHz and `STDL_UseBlitter(0)`, so it is neither the clock, the
-    cache, the BLiTTER nor the disk, and it is not understood. A
-    small fixed drawing region appears to be safe where a large
-    varying one is not.
+  * *Drawing on a 16MHz Mega STE with its cache on - fixed in
+    v1.15.1.* Before that release, drawing every frame lost the
+    bottom border on that machine, worst through the BLiTTER (a
+    demo's overscan part lost it in 36% of frames), and the advice
+    here was `STDL_UseBlitter(0)`. The cause was the Mega STE's
+    cache: every BLiTTER operation empties it and the CPU's own
+    memory traffic replaces it word by word, and the border's
+    interrupt ran its timing-critical path partly cold. It now
+    warms all of that path itself, and the same demo loses 1 frame
+    in 1500. No workaround is needed; keep the BLiTTER.
+  * *Drawing volume, unexplained at 8MHz.* One port sees its bottom
+    border flicker in proportion to how much it draws - solid with
+    the top border alone, flickering in play, worst in cutscenes,
+    steady while an inventory screen redraws 45 icons a frame. At
+    16MHz with the cache on, that was at least partly the cache
+    problem above. The same port reported it at 8MHz and with
+    `STDL_UseBlitter(0)` too, where the cache cannot be the reason,
+    and that part is not understood. A small fixed drawing region
+    appears to be safe where a large varying one is not.
   * *Resident firmware.* A cartridge's network driver flickered the
     border a few times a second on this machine and stopped
     entirely when unloaded, its resident code holding interrupts

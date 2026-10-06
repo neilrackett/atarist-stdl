@@ -46,28 +46,14 @@ extern "C" {
  * is open and restored on the final close - opening a border is an
  * active choice, and it always takes effect on ST-class hardware.
  *
- * KNOWN TO AFFECT AN OPEN BORDER, on a 16MHz Mega STE with its
- * cache enabled. A
- * program drawing every frame with a border open loses the bottom
- * border: on a real machine it disappears and flashes back once or
- * twice a second. It needs all three - the 16MHz clock, the cache,
- * and drawing - and it is the BLiTTER path: the same drawing forced
- * through the CPU with STDL_UseBlitter(0) leaves the border solid.
- * Neither half of how a BLiTTER operation is driven around the
- * window accounts for it on its own; removing the beam-aware
- * placement makes the whole screen flicker, and removing the ISR's
- * pause of a running transfer leaves the bottom border flickering
- * constantly. Hatari cannot reproduce it, because at 16MHz its
- * video counter is not cycle-correct and the border takes the
- * Timer B path there while hardware takes the counter path.
- *
- * A port on that machine can have the border or the BLiTTER, and
- * the choice is worth making rather than assuming: STDL_UseBlitter(0)
- * costs little here, because with a border open the BLiTTER already
- * loses to the CPU path at the sizes a game blits - measured
- * 1.14-1.47x the no-border time. On an 8MHz machine, or a 16MHz one
- * with the cache off, none of this arises. See docs/porting.md for
- * the other things measured to disturb an open border.
+ * On a 16MHz Mega STE with its cache enabled, versions before
+ * 1.15.1 lost the bottom border in frames that drew, worst through
+ * the BLiTTER, and the advice here was STDL_UseBlitter(0). The
+ * cause was the cache - every BLiTTER operation empties it - leaving
+ * the border interrupt's timing-critical path partly cold; the
+ * interrupt now warms all of it. No workaround is needed. See
+ * docs/porting.md for the things measured to disturb an open
+ * border.
  *
  * Uses MFP Timer A (vector, IERA/IMRA bit 5) and Timer B's counter
  * with its interrupt masked, and puts a prefix on TOS's Timer C

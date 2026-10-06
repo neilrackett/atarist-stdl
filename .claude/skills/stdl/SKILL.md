@@ -846,16 +846,15 @@ first.
   honest way to measure there - and so a port can decline the
   switch, since a game that needs 16MHz to be playable has a
   rendering problem, not a hardware one.
-- Borders plus the BLiTTER on a Mega STE: open a border and call
-  `STDL_UseBlitter(0)`. At 16MHz with the cache on, drawing every
-  frame with a border open loses the bottom border on real
-  hardware - it disappears and flashes back once or twice a second
-  - and the CPU path is solid under the same drawing. Costs little:
-  with a border open the BLiTTER already loses to the CPU at the
-  sizes a game blits. Unaffected at 8MHz, or at 16MHz with the
-  cache off, and not reproducible in Hatari (its video counter is
-  not cycle-correct at 16MHz, so the border takes a different path
-  there than it does on the machine).
+- Borders plus the BLiTTER on a Mega STE: no workaround needed
+  from v1.15.1. Earlier versions lost the bottom border at 16MHz
+  with the cache on whenever a frame drew (a demo's overscan part:
+  36% of frames), and the advice was `STDL_UseBlitter(0)`. The
+  cause was the cache - one-word lines, emptied by every BLiTTER
+  operation - leaving the border interrupt's timing path partly
+  cold; it now warms all of it (the same demo: 1 frame in 1500). If
+  a port pinned to an older STDL flickers there, bump it before
+  reaching for `STDL_UseBlitter(0)`.
 - Known to affect an open border, all measured on hardware and all
   invisible in Hatari. These are costs to weigh, not prohibitions:
   a port can do any of them and accept the border it gets.
@@ -863,12 +862,9 @@ first.
   5 frames of 300 with the border open from a hard drive and 3 of
   300 from a floppy - both media, so changing storage is not a way
   out. Load assets before opening, or close the border around a
-  read. **The BLiTTER at 16MHz with the cache on**: drawing every
-  frame loses the bottom border; `STDL_UseBlitter(0)` leaves it
-  solid and costs little, since the BLiTTER already loses to the
-  CPU at these sizes with a border open. **Drawing volume**: one
-  port's border flickers in proportion to how much it draws, and
-  survives 8MHz and the CPU path, so it is none of the above and is
+  read. **Drawing volume at 8MHz**: one port's border flickers in
+  proportion to how much it draws, and survives 8MHz and the CPU
+  path, where the Mega STE cache fix above cannot be the reason;
   not understood - a small fixed region looks safe where a large
   varying one does not. **Resident firmware**: a cartridge driver
   holding interrupts off did it too, and stopped when unloaded.

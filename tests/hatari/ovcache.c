@@ -33,9 +33,10 @@
  * each twice, with stdl_ovsc_prime off (p0: the warm-up as it was
  * before 2026-10-06, the tail of the flick from slot 15) and on (p1:
  * the table read in, the whole path warmed), at 16MHz with the cache
- * (mode 1) and then 16MHz without it (mode 2), the control: a
- * machine with no cache cannot have a cold one. Bottom only, then
- * both borders.
+ * (mode 1), then 16MHz without it (mode 2) and 8MHz (mode 0, forced
+ * to 8MHz with the cache off whatever the machine booted with) - the
+ * controls: a machine with no cache cannot have a cold one. Bottom
+ * only, then both borders. ctl= is $FFFF8E21 as each speed ran.
  *
  * Per run: frames the bottom ISR saw line 263 display (bot), the
  * same for the top in combined mode, the miss counter, and the
@@ -212,7 +213,7 @@ static void run(char mode, int speed, int c, int prime)
 
 int main(void)
 {
-    static const int speeds[] = { 1, 2 };
+    static const int speeds[] = { 1, 2, 0 };
     static const char modes[] = { 'b', 'c' };
     const STDL_MachineInfo *mi;
     int si, m, c, p;
@@ -235,11 +236,17 @@ int main(void)
     say("OVCACHE frames=%d machine=%08lx megaste=%d\r\n", FRAMES,
         (unsigned long)mi->mch_cookie, mi->is_megaste);
     stdl_ovsc_diag = 1;
-    for (si = 0; si < 2; si++) {
+    for (si = 0; si < 3; si++) {
         if (!mi->is_megaste && si > 0) {
             break;
         }
         STDL_UseMegaSteSpeedup(speeds[si]);
+        if (mi->is_megaste && speeds[si] == 0) {
+            /* mode 0 is what the machine booted with: make it 8MHz
+             * with the cache off whatever that was. The library has
+             * mode 0 recorded, so the next open recalibrates. */
+            MSTE_CTL = (uint8_t)(MSTE_CTL & ~3);
+        }
         for (m = 0; m < 2; m++) {
             if (modes[m] == 'c') {
                 STDL_OpenTopBorder();
@@ -252,9 +259,10 @@ int main(void)
             stdl_ovsc_cached = 1;
 #endif
             if (m == 0) {
-                say("s%d cal c16=%u tick=%u measured=%u F=%u turn=%u "
-                    "nop=%u found=%u test=%u cached=%u\r\n",
-                    speeds[si], stdl_ovsc_cal_c, stdl_ovsc_tick,
+                say("s%d ctl=%02x cal c16=%u tick=%u measured=%u F=%u "
+                    "turn=%u nop=%u found=%u test=%u cached=%u\r\n",
+                    speeds[si], mi->is_megaste ? MSTE_CTL : 0,
+                    stdl_ovsc_cal_c, stdl_ovsc_tick,
                     stdl_ovsc_measured, stdl_ovsc_mF, stdl_ovsc_mTURN,
                     stdl_ovsc_mNOP, stdl_ovsc_found, stdl_ovsc_test,
                     stdl_ovsc_cached);

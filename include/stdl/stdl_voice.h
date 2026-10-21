@@ -150,7 +150,10 @@ int  STDL_VoicesPaused(void);
  * 3546895 / period), resampled to the device rate. `vol` is 0..64;
  * at 64 a voice is the sample halved, so two voices at full volume
  * sum to the output range exactly and a third or fourth loud voice
- * clips rather than wraps - the mixer clamps. The reserve is half
+ * clips rather than wraps - the mixer clamps. Voices whose volumes
+ * add up to 128 or less cannot clip, and mix as bytes straight into
+ * the ring with no clamp pass: four module channels at 32 or under
+ * cost less than four loud ones. The reserve is half
  * what it was before v1.8.1, which made every port louder and
  * doubled what survives at low volumes: scaling an 8-bit sample
  * into an 8-bit table is lossy, and at the old quarter scale a

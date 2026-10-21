@@ -129,16 +129,21 @@ static void clamp_build(void)
 }
 
 /*
- * Where a voice's frames go. With three or four voices each adds into
- * mixacc's 16-bit sums, the first storing, and the clamp table takes
- * the sums to the ring. One or two cannot overflow a byte - every
- * volume row is half scale, -64..63, so two sum to -128..126 - and
- * they go straight into the ring: no 16-bit block, no clamp pass, the
- * same bytes. That is the usual case for sound effects, one or two at
- * a time. With the one-frame step below, SDL_mixer chunks went from
- * 9% to 5% of an 8MHz STE for one at 6258Hz, 15% to 9% for two and
- * 26% to 20% for four (tests/hatari/mixbench.c); four resampled
- * voices, a module, are where they were.
+ * Where a voice's frames go. With voices that could overflow a byte
+ * together each adds into mixacc's 16-bit sums, the first storing, and
+ * the clamp table takes the sums to the ring. Voices that cannot go
+ * straight into the ring: no 16-bit block, no clamp pass, the same
+ * bytes. A row at volume v holds -v..v-1 (v * s / 128 toward zero for
+ * s from -128), so voices whose volumes add up to 128 or less sum
+ * within -128..127 - any one or two, and the four channels of a
+ * module played at a quarter of full volume or less, as a port mixing
+ * music under its effects does. That is the usual case for sound
+ * effects, one or two at a time. With the one-frame step below,
+ * SDL_mixer chunks went from 9% to 5% of an 8MHz STE for one at
+ * 6258Hz, 15% to 9% for two and 26% to 20% for four
+ * (tests/hatari/mixbench.c). Four resampled voices, a module at 16 a
+ * channel (one port's default music volume): that port's cutscenes
+ * took 5.3% less of an 8MHz STE with the music playing, cycle-exact.
  */
 enum { MIX_WSTORE, MIX_WADD, MIX_BSTORE, MIX_BADD };
 
@@ -436,19 +441,35 @@ void voice_mix_b(voice_t *v, int mode, int8_t *dst)
 
 /* mix one quarter of the ring; returns 0 if it wrote pure silence,
  * which is what the deferred stop in the tick below waits for */
+#ifndef __m68k__
+/* tests/host: non-zero mixes every block through the 16-bit sums, as
+ * before the volume rule, so the two can be compared */
+int stdl_voice_force_word;
+#endif
+
 static int mix_block(int8_t *dst)
 {
-    int active = 0, mode;
+    int active = 0, volsum = 0, mode;
     int i, n;
 
     for (i = 0; i < STDL_VOICES; i++) {
-        active += vc.v[i].active;
+        if (vc.v[i].active) {
+            active++;
+            /* the row's volume, from the row itself: read with it,
+             * so a volume changed under the mix cannot disagree */
+            volsum += (int)((uint32_t)(vc.v[i].vt - vc.voltab) >> 8);
+        }
     }
     if (active == 0) {
         memset(dst, 0, BLOCK_FRAMES);
         return 0;
     }
-    if (active <= 2) {
+#ifndef __m68k__
+    if (stdl_voice_force_word) {
+        volsum = 0x7FFF;
+    }
+#endif
+    if (volsum <= 128) {
         /* no sum that can clip: straight into the ring (see above) */
         mode = MIX_BSTORE;
         for (i = 0; i < STDL_VOICES; i++) {

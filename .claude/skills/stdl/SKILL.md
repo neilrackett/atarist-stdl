@@ -974,7 +974,12 @@ first.
   a 60Hz display too) - module music
   without the ring device's callback cost, though not free: four
   busy voices at 6258Hz take 25% of an 8MHz STE, measured, before
-  the sequencer's own tick. STE only; voices, the
+  the sequencer's own tick. Voices whose volumes add up to 128 or
+  less (a module at 32 a channel or under) cannot clip, so they mix
+  as bytes with no 16-bit sums and no clamp pass: one port's
+  cutscenes, module music at 16 a channel, took 5.3% less of an
+  8MHz STE for it. Music played under effects at a quarter volume
+  gets that for nothing. STE only; voices, the
   ring device and `STDL_PlaySample` are mutually exclusive DMA
   owners.
   An open device is not quite silent on hardware: with the DMA

@@ -23,6 +23,7 @@ extern int stdl_host_dma_running;
 
 extern const int8_t *stdl_host_voltab(void);
 extern uint32_t stdl_voice_late;
+extern int stdl_voice_force_word;
 
 static int failures;
 
@@ -442,6 +443,63 @@ int main(void)
     STDL_ResumeVoices();
     STDL_StopVoice(0);
     STDL_CloseVoices();
+
+    /* Voices whose volumes add up to 128 or less go straight into the
+     * ring as bytes; with more they sum in 16 bits and clamp. Where
+     * the rule picks bytes, the bytes must be the clamped sums': the
+     * same random four-voice mixes both ways, compared over eight
+     * blocks, at volume totals under, at and over 128. */
+    {
+        static int8_t smp[4][3000];
+        static int8_t got[2][8][RING];
+        uint32_t seed = 0x2468ACE1u;
+        int c, k, v, byteCases = 0;
+        for (v = 0; v < 4; v++) {
+            for (i = 0; i < 3000; i++) {
+                seed = seed * 1103515245u + 12345u;
+                smp[v][i] = (int8_t)(seed >> 16);
+            }
+        }
+        for (c = 0; c < 60; c++) {
+            uint32_t len[4], loop[4], llen[4], freq[4];
+            uint8_t vol[4];
+            int sum = 0, pass;
+            for (v = 0; v < 4; v++) {
+                seed = seed * 1103515245u + 12345u;
+                len[v] = 200 + (seed >> 8) % 2800;
+                seed = seed * 1103515245u + 12345u;
+                loop[v] = (seed >> 8) % len[v];
+                seed = seed * 1103515245u + 12345u;
+                llen[v] = ((seed >> 8) & 1) ? 1 + (seed >> 9) % (len[v] - loop[v]) : 0;
+                seed = seed * 1103515245u + 12345u;
+                freq[v] = 2000 + (seed >> 8) % 14000;
+                seed = seed * 1103515245u + 12345u;
+                /* a third each under, at and over the line */
+                vol[v] = (uint8_t)((c % 3 == 0) ? (seed >> 8) % 33
+                                   : (c % 3 == 1) ? 32 : 24 + (seed >> 8) % 41);
+                sum += vol[v];
+            }
+            byteCases += sum <= 128;
+            for (pass = 0; pass < 2; pass++) {
+                stdl_voice_force_word = pass;
+                open_fresh();
+                for (v = 0; v < 4; v++) {
+                    STDL_SetVoice(v, smp[v], len[v], loop[v], llen[v], freq[v], vol[v]);
+                }
+                for (k = 0; k < 8; k++) {
+                    tick_at((uint32_t)(k % 4) * BLOCK);
+                    memcpy(got[pass][k], ring_base(), RING);
+                }
+            }
+            stdl_voice_force_word = 0;
+            if (memcmp(got[0], got[1], sizeof(got[0])) != 0) {
+                CHECK(0, "byte mix case %d (volumes %d %d %d %d) differs from the clamped sums",
+                      c, vol[0], vol[1], vol[2], vol[3]);
+            }
+        }
+        CHECK(byteCases >= 30, "only %d cases took the byte mix", byteCases);
+        STDL_CloseVoices();
+    }
 
     STDL_CloseVoices();
     CHECK(!STDL_VoicesOpen(), "still open after close");

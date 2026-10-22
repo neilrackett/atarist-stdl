@@ -212,7 +212,13 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
    General MIDI program (bass, melody, then pads), with envelopes,
    vibrato and drums as noise or falling-tone bursts; the programs
    shape each part, so keep them in the file; expect a chiptune
-   cover, not the original mix).
+   cover, not the original mix). Music that was written for a
+   YM2151 (arcade, X68000) and logged as VGM goes through
+   `stdlconv opm in.vgm OUT.STM` instead: each FM channel's own
+   envelope and pitch, the three loudest parts (two on A and B,
+   the third on C with the drums, so `STDL_PlaySfx`'s voice C
+   costs the least), `-v` naming the instruments taken for drums.
+   Log a driver's output to VGM rather than re-scoring it.
 2. Build with `-Iinclude/compat` so `#include "SDL.h"` resolves to
    the shim; link `libstdl.a`. Compile errors = the porting TODO
    list.
@@ -800,7 +806,8 @@ first.
   surfaces; blits maintain destination masks; `STDL_SurfaceIsOpaque`
   (cached) skips backdrop under solid tiles; `STDL_PutGroup` for
   runtime asset decoders; `STDL_CreateMask` for built-up surfaces.
-- YM music: `STDL_LoadMusic("SONG.STM")` (from `stdlconv midi`), or
+- YM music: `STDL_LoadMusic("SONG.STM")` (from `stdlconv midi` or
+  `stdlconv opm`), or
   `STDL_MusicFromMemory(data, bytes)` for a stream linked into the
   program, which plays in place without a copy. `STDL_MusicFrame()`
   is the music's own clock, in stream frames, so sync effects to it,

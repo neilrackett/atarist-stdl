@@ -178,8 +178,9 @@ variant / one tile including masks.
 
 ## 7. Music streams (STM)
 
-`stdlconv midi` renders music to a YM2149 register stream replayed
-at 50Hz by `STDL_Music`:
+`stdlconv midi` (General MIDI) and `stdlconv opm` (YM2151 VGM logs)
+render music to a YM2149 register stream replayed at 50Hz by
+`STDL_Music`:
 
 ```
 "STM1"  u16 tick_hz  u16 nframes  u16 loop_frame  u16 reserved
@@ -202,6 +203,9 @@ Rules:
 * A frame holds only the registers that change, so frame 0 should
   set all fourteen (`stdlconv` always does). `STDL_SeekMusic`
   replays from silence: every register 0 and register 7 at 0x3F.
+* `stdlconv` also sets registers 0-12 at the loop frame, whether
+  they changed or not, so a player that jumps there from the last
+  frame lands on exactly the loop's state.
 
 ## 8. Palettes and hardware colour words
 

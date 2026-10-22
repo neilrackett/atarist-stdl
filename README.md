@@ -128,7 +128,7 @@ emulated; see [docs/limits.md](docs/limits.md).
 |                   | bmp, degas, audio, voice, music, sfx, tone, opl, ym, compat, mixer, palstage,       |
 |                   | polygon, raster, spritebatch                                                        |
 | `tools/stdlconv/` | asset converter: image quantise + planar, sprite/tile/font banks, Degas PI1,        |
-|                   | WAV (incl. MS ADPCM) to STE DMA rates, MIDI to YM music, C-array embedding          |
+|                   | WAV (incl. MS ADPCM) to STE DMA rates, MIDI and YM2151 (VGM) to YM music, C-arrays  |
 | `tools/libcalls.sh` | per-function libgcc arithmetic calls (multiply, divide, 64-bit, float) in object files, with an allowlist gate |
 | `examples/`       | ported SDL 1.2 test programs + original STDL demos and their assets (public domain) |
 | `docs/`           | format.md (the contract), porting.md, limits.md, design-overview.md                 |

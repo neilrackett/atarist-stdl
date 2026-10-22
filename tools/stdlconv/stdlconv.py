@@ -30,6 +30,16 @@ Subcommands:
       going by its program (bass, melody, then pads), envelopes and
       vibrato, and drums as noise or falling-tone bursts.
 
+  opm IN OUT [-v]
+      Reduce a YM2151 (OPM) VGM or VGZ log to a YM2149 register
+      stream (STM) for STDL_Music: each FM channel's loudness from
+      its envelopes and its pitch from its key code and operator
+      multiples, the loudest parts on the three voices (the two most
+      important on A and B, the third on C), and instruments that
+      keep to one or two pitches, or are tuned inharmonically, as
+      noise or falling-tone drums on C. The VGM's loop is the
+      stream's. -v lists the instruments taken for drums.
+
   bank OUT SPEC [SPEC...]
       Build an STDL asset bank. Each SPEC is one chunk:
         surface:ID:FILE[:key=N]
@@ -44,6 +54,7 @@ Everything in a bank is big-endian, matching the 68000.
 """
 
 import argparse
+import gzip
 import math
 import struct
 import sys
@@ -51,7 +62,7 @@ from collections import Counter
 
 try:
     # only the image subcommands (bmp16, pi1, bank) need Pillow;
-    # wav, midi and embed run on the standard library alone
+    # wav, midi, opm and embed run on the standard library alone
     from PIL import Image
 except ImportError:
     Image = None
@@ -955,11 +966,15 @@ def midi_to_frames(path):
     return out
 
 
-def delta_encode(frames):
-    """Pack register frames as (mask, changed bytes) deltas."""
+def delta_encode(frames, keyframes=()):
+    """Pack register frames as (mask, changed bytes) deltas. A keyframe
+    (the loop's start) sets registers 0-12 whether they changed or not,
+    so the song loops back to exactly its state."""
     shadow = [None] * 14
     blob = bytearray()
-    for regs in frames:
+    for n, regs in enumerate(frames):
+        if n in keyframes:
+            shadow[:13] = [None] * 13
         mask = 0
         payload = bytearray()
         for r in range(14):
@@ -974,7 +989,7 @@ def delta_encode(frames):
 def cmd_midi(args):
     frames = midi_to_frames(args.input)
     loop = min(args.loop, len(frames) - 1)
-    blob = delta_encode(frames)
+    blob = delta_encode(frames, (loop,))
     with open(args.output, "wb") as f:
         f.write(b"STM1")
         f.write(struct.pack(">HHHH", TICK_HZ, len(frames), loop, 0))
@@ -982,6 +997,523 @@ def cmd_midi(args):
     print("wrote %s (%d frames = %.1fs at %dHz, %d bytes)"
           % (args.output, len(frames), len(frames) / TICK_HZ,
              TICK_HZ, 12 + len(blob)))
+
+
+# ------------------------------------------------------------------
+# YM2151 (OPM) music
+#
+# `opm` reads a VGM log of a YM2151 (eight FM channels of four
+# operators) and reduces it to the YM2149's three square-wave voices
+# and noise. It models each channel frame by frame: its loudness from
+# its carrier operators' total levels and envelopes (the envelope
+# generator worked out stage by stage from its rates), and its pitch
+# from the key code and fraction, the operators' multiples and coarse
+# detunes. Each instrument (a channel's operator settings at a key-on)
+# that keeps to one or two pitches, or whose operators are tuned
+# inharmonically, is a drum, played by kind as noise or a falling tone
+# with the FM envelope's level. The voices go, frame by frame, to the
+# loudest melodic parts, a part keeping its rank while its note
+# sounds; a unison or an octave doubling counts once. The two most
+# important parts play on voices A and B, each keeping its voice, the
+# third on C, where a drum sounds over it (or on a free voice): a
+# player whose YM2149 also plays sound effects can give them voice C
+# and lose the least. The writes take effect in order, as on a chip
+# they reach with time between them: a key off then on restarts a note
+# even within one VGM sample (a log made a tick at a time often has
+# them so).
+
+OPM_REF_CLOCK = 3579545      # the clock the YM2151's note table is for
+VGM_RATE = 44100
+OPM_SUB = 8                  # envelope samples per frame (peak taken)
+OPM_FLOOR = 42               # dB under the song's peak: silent
+OPM_HELD = 6                 # dB of rank a sounding part keeps its voice by
+OPM_KEYED = 6                # dB of rank a keyed note has over a tail
+OPM_MOD_ACTIVE = 0x1C0       # attenuation under which a modulator counts
+OPM_KICK_TOP = 36            # MIDI note: drums under it kick, harmonic
+                             # ones over it are toms
+OPM_HAT_HZ = 2000            # noisy drums brighter than this are hats
+
+# the envelope generator's attenuation increments: per rate, eight
+# steps of four bits (the YM2151's table, as documented by ymfm)
+OPM_EG_STEPS = (
+    0x00000000, 0x00000000, 0x10101010, 0x10101010,
+    0x10101010, 0x10101010, 0x11101110, 0x11101110) + (
+    0x10101010, 0x10111010, 0x11101110, 0x11111110) * 10 + (
+    0x11111111, 0x21112111, 0x21212121, 0x22212221,
+    0x22222222, 0x42224222, 0x42424242, 0x44424442,
+    0x44444444, 0x84448444, 0x84848484, 0x88848884,
+    0x88888888, 0x88888888, 0x88888888, 0x88888888)
+OPM_EG_STEP = [sum((v >> (4 * i)) & 15 for i in range(8)) / 8
+               for v in OPM_EG_STEPS]
+OPM_EG_PERIOD = [1 << max(0, 11 - (r >> 2)) for r in range(64)]
+
+# per algorithm: each carrier and the operators modulating it, as
+# register slot offsets (M1 0, M2 8, C1 16, C2 24)
+OPM_CHAINS = ({24: (0, 16, 8)},) * 4 + (
+    {16: (0,), 24: (8,)}, {8: (0,), 16: (0,), 24: (0,)},
+    {16: (0,), 8: (), 24: ()}, {0: (), 8: (), 16: (), 24: ()})
+OPM_KEYON = (0, 16, 8, 24)   # register $08 bits 3-6: M1 C1 M2 C2
+# a key code's note in semitones over C#: twelve over sixteen codes, the
+# gaps sounding the note above (15 the next octave's C#)
+OPM_NOTE = tuple(c - (c >> 2) for c in range(16))
+OPM_DT2 = (0, 600, 781, 950)  # coarse detune, cents
+EG_ATTACK, EG_DECAY, EG_SUSTAIN, EG_RELEASE = range(4)
+
+
+def read_vgm(path):
+    """YM2151 writes of a VGM (or gzipped VGZ) file: (clock,
+    [(seconds, register, value)], loop start in seconds or None,
+    length in seconds)."""
+    d = open(path, "rb").read()
+    if d[:2] == b"\x1f\x8b":
+        d = gzip.decompress(d)
+    if d[:4] != b"Vgm ":
+        die(path + " is not a VGM file")
+    version = struct.unpack("<I", d[8:12])[0]
+    total, loop_off, loop_samples = struct.unpack("<III", d[0x18:0x24])
+    clock = struct.unpack("<I", d[0x30:0x34])[0] & 0x3FFFFFFF \
+        if version >= 0x110 else 0
+    if not clock:
+        die(path + " has no YM2151")
+    start = 0x34 + struct.unpack("<I", d[0x34:0x38])[0] \
+        if version >= 0x150 else 0x40
+    loop_at = 0x1C + loop_off if loop_off else None
+    loop = None
+    events = []
+    t = 0
+    i = start
+    # operand bytes of the commands that are not the YM2151's
+    sizes = {0x4F: 1, 0x50: 1, 0x90: 4, 0x91: 4, 0x92: 5, 0x93: 10,
+             0x94: 1, 0x95: 4}
+    while i < len(d):
+        if i == loop_at:
+            loop = t
+        c = d[i]
+        if c == 0x54:
+            events.append((t / VGM_RATE, d[i + 1], d[i + 2]))
+            i += 3
+        elif c == 0x61:
+            t += d[i + 1] | d[i + 2] << 8
+            i += 3
+        elif c in (0x62, 0x63):
+            t += 735 if c == 0x62 else 882
+            i += 1
+        elif 0x70 <= c <= 0x8F:
+            t += (c & 15) + (c < 0x80)
+            i += 1
+        elif c == 0x66:
+            break
+        elif c == 0x67:
+            i += 7 + struct.unpack("<I", d[i + 3:i + 7])[0]
+        elif c in sizes:
+            i += 1 + sizes[c]
+        elif 0x30 <= c <= 0x3F:
+            i += 2
+        elif 0x40 <= c <= 0x5F or 0xA0 <= c <= 0xBF:
+            i += 3
+        elif 0xC0 <= c <= 0xDF:
+            i += 4
+        elif c >= 0xE0:
+            i += 5
+        else:
+            die("unknown VGM command 0x%02X at 0x%X" % (c, i))
+    return (clock, events, None if loop is None else loop / VGM_RATE,
+            max(t, total) / VGM_RATE)
+
+
+class _OpmOp:
+    __slots__ = ("att", "state", "key")
+
+    def __init__(self):
+        self.att = 1023.0
+        self.state = EG_RELEASE
+        self.key = False
+
+
+class _Opm:
+    """The registers, and each operator's envelope."""
+
+    def __init__(self, clock):
+        self.clock = clock
+        self.reg = [0] * 256
+        self.ops = [_OpmOp() for _ in range(32)]
+        self.eg_hz = clock / 192.0    # one envelope step per 3 samples
+
+    def rate(self, slot, state):
+        r = self.reg
+        ksr = (r[0x28 + (slot & 7)] >> 2 & 31) >> (r[0x80 + slot] >> 6 ^ 3)
+        if state == EG_RELEASE:
+            raw = (r[0xE0 + slot] & 15) * 4 + 2
+        else:
+            raw = (r[(0x80, 0xA0, 0xC0)[state] + slot] & 31) * 2
+        return min(63, raw + ksr) if raw else 0
+
+    def write(self, a, v):
+        """Returns whether a carrier was keyed on (a note starts)."""
+        r = self.reg
+        r[a] = v
+        if a != 0x08:
+            return False
+        ch = v & 7
+        chains = OPM_CHAINS[r[0x20 + ch] & 7]
+        started = False
+        for i, base in enumerate(OPM_KEYON):
+            op = self.ops[base + ch]
+            on = bool(v & (8 << i))
+            if on and not op.key:
+                op.state = EG_ATTACK
+                if self.rate(base + ch, EG_ATTACK) >= 62:
+                    op.att = 0.0
+                started |= base in chains
+            elif op.key and not on:
+                op.state = EG_RELEASE
+            op.key = on
+        return started
+
+    def advance(self, seconds):
+        """Run every envelope on by this time, each stage in closed
+        form from its average step."""
+        ticks = seconds * self.eg_hz
+        for slot, op in enumerate(self.ops):
+            t = ticks
+            while t > 0 and (op.att < 1023 or op.state == EG_ATTACK):
+                rate = self.rate(slot, op.state)
+                if op.state == EG_ATTACK:
+                    if rate >= 62 or op.att <= 0:
+                        op.att = 0.0
+                        op.state = EG_DECAY
+                        continue
+                    if not rate:
+                        break
+                    k = 1 - OPM_EG_STEP[rate] / 16   # per step taken
+                    p = OPM_EG_PERIOD[rate]
+                    need = math.log(op.att + 1) / -math.log(k) * p
+                    if need >= t:
+                        op.att = (op.att + 1) * k ** (t / p) - 1
+                        break
+                    t -= need
+                    op.att = 0.0
+                    op.state = EG_DECAY
+                    continue
+                slope = OPM_EG_STEP[rate] / OPM_EG_PERIOD[rate]
+                if op.state == EG_DECAY:
+                    sl = self.reg[0xE0 + slot] >> 4
+                    sl = (31 if sl == 15 else sl) << 5
+                    if op.att >= sl:
+                        op.state = EG_SUSTAIN
+                        continue
+                    if not slope:
+                        break
+                    need = (sl - op.att) / slope
+                    if need < t:
+                        t -= need
+                        op.att = float(sl)
+                        op.state = EG_SUSTAIN
+                        continue
+                op.att = min(1023.0, op.att + slope * t)
+                break
+
+    def attenuation(self, slot):
+        return min(1023.0, self.ops[slot].att
+                   + (self.reg[0x60 + slot] & 127) * 8)
+
+    def channel(self, ch):
+        """(amplitude, pitch as a MIDI note, loudest carrier's frequency
+        in Hz, inharmonic): amplitude 1 is one carrier at full level on
+        both sides, the mono mix's, so a channel on one side has half."""
+        r = self.reg
+        sides = (r[0x20 + ch] >> 6 & 1) + (r[0x20 + ch] >> 7)
+        if not sides:
+            return 0.0, 0.0, 0.0, False
+        chains = OPM_CHAINS[r[0x20 + ch] & 7]
+        amps = {base: 2.0 ** (-self.attenuation(base + ch) / 64)
+                for base in chains}
+        loudest = max(amps, key=amps.get)
+        if amps[loudest] < 1e-4:
+            return 0.0, 0.0, 0.0, False
+        # the fundamental: the base frequency times the greatest
+        # common divisor of the multiples of the carriers heard (within
+        # 12dB of the loudest) and of the modulators that count on
+        # them; coarse detunes that differ make the sound inharmonic
+        ops = set()
+        for base, a in amps.items():
+            if a * 4 >= amps[loudest]:
+                ops.add(base)
+                ops.update(m for m in chains[base]
+                           if self.attenuation(m + ch) < OPM_MOD_ACTIVE)
+        g = 0
+        for s in ops:
+            g = math.gcd(g, (r[0x40 + s + ch] & 15) * 2 or 1)
+        dt2 = {r[0xC0 + s + ch] >> 6 for s in ops}
+        kc = r[0x28 + ch]
+        base = ((kc >> 4 & 7) * 12 + OPM_NOTE[kc & 15]
+                + (r[0x30 + ch] >> 2) / 64.0
+                + OPM_DT2[r[0xC0 + loudest + ch] >> 6] / 100.0
+                + 12 * math.log2(self.clock / OPM_REF_CLOCK) + 13)
+        carrier = (440.0 * 2 ** ((base - 69) / 12)
+                   * ((r[0x40 + loudest + ch] & 15) or 0.5))
+        noise = ch == 7 and loudest == 24 and r[0x0F] & 0x80
+        amp = math.sqrt(sum(a * a for a in amps.values())) * sides / 2
+        return (amp, base + 12 * math.log2(g / 2), carrier,
+                len(dt2) > 1 or bool(noise))
+
+
+def _opm_instrument(r, ch):
+    """A channel's instrument: its connection, feedback and operator
+    settings, but for the carriers' total levels (its volume)."""
+    chains = OPM_CHAINS[r[0x20 + ch] & 7]
+    return (r[0x20 + ch] & 0x3F, ch == 7 and r[0x0F] & 0x80) + tuple(
+        (r[0x40 + s + ch], r[0x80 + s + ch], r[0xA0 + s + ch] & 31,
+         r[0xC0 + s + ch], r[0xE0 + s + ch],
+         None if s in chains else r[0x60 + s + ch] & 127)
+        for s in (0, 8, 16, 24))
+
+
+class _OpmPart:
+    """A channel in one frame."""
+    __slots__ = ("amp", "pitch", "hz", "inharmonic", "keyed", "start",
+                 "inst")
+
+
+def opm_analyse(clock, events, nframes):
+    """Each frame's eight channels (_OpmPart, at the frame's loudest
+    moment), and per instrument the notes it starts."""
+    opm = _Opm(clock)
+    inst_ids = {}
+    notes = []                    # per instrument: (frame, channel, kc)
+    inst = [None] * 8
+    start = [-1] * 8              # frame the channel's note started
+    out = []
+    i, t = 0, 0.0
+    step = 1.0 / (TICK_HZ * OPM_SUB)
+    for f in range(nframes):
+        row = []
+        for ch in range(8):
+            p = _OpmPart()
+            p.amp = 0.0
+            p.pitch = p.hz = 0.0
+            p.inharmonic = False
+            row.append(p)
+        for s in range(OPM_SUB):
+            end = (f * OPM_SUB + s + 1) * step
+            while i < len(events) and events[i][0] < end:
+                et, a, v = events[i]
+                i += 1
+                if et > t:
+                    opm.advance(et - t)
+                    t = et
+                if opm.write(a, v):
+                    ch = v & 7
+                    sig = _opm_instrument(opm.reg, ch)
+                    n = inst_ids.setdefault(sig, len(inst_ids))
+                    if n == len(notes):
+                        notes.append([])
+                    notes[n].append((f, ch, opm.reg[0x28 + ch]))
+                    inst[ch], start[ch] = n, f
+            opm.advance(end - t)
+            t = end
+            for ch in range(8):
+                amp, pitch, hz, inharmonic = opm.channel(ch)
+                p = row[ch]
+                if amp > p.amp:
+                    p.amp, p.pitch, p.hz, p.inharmonic = (amp, pitch, hz,
+                                                          inharmonic)
+        for ch in range(8):
+            p = row[ch]
+            p.keyed = any(opm.ops[b + ch].key
+                          for b in OPM_CHAINS[opm.reg[0x20 + ch] & 7])
+            p.start, p.inst = start[ch], inst[ch]
+        out.append(row)
+    return out, notes
+
+
+def opm_drums(frames, notes):
+    """The drum kind of each instrument (None: melodic). A drum keeps
+    to one or two pitches, or is inharmonic; then by its pitch,
+    brightness and length: kick, snare, hi-hats or cymbal, else a
+    (tuned) tom."""
+    kinds = []
+    for n, hits in enumerate(notes):
+        pitches = len({kc for _f, _ch, kc in hits})
+        firsts = [frames[f][ch] for f, ch, _kc in hits]
+        inharmonic = sum(p.inharmonic for p in firsts) * 2 > len(firsts)
+        if not ((pitches <= 2 and len(hits) >= 4)
+                or (inharmonic and pitches <= 4)):
+            kinds.append(None)
+            continue
+        # how long a hit lasts: frames until 18dB under its peak
+        lengths = []
+        for f, ch, _kc in hits:
+            peak = frames[f][ch].amp
+            g = f
+            while (g + 1 < len(frames) and frames[g + 1][ch].start == f
+                   and frames[g + 1][ch].amp * 8 > peak):
+                g += 1
+            lengths.append(g - f + 1)
+        lengths.sort()
+        length = lengths[len(lengths) // 2]
+        pitch = sorted(p.pitch for p in firsts)[len(firsts) // 2]
+        hz = sorted(p.hz for p in firsts)[len(firsts) // 2]
+        if pitch < OPM_KICK_TOP:
+            kind = KICK
+        elif not inharmonic:
+            kind = TOM
+        elif hz < OPM_HAT_HZ:
+            kind = SNARE
+        else:
+            kind = HIHAT if length <= 4 else (OPEN_HIHAT if length <= 15
+                                              else CYMBAL)
+        kinds.append(kind)
+    return kinds
+
+
+def opm_to_frames(clock, events, length):
+    """Render YM2151 writes to 14-byte YM register frames."""
+    nframes = max(1, int(length * TICK_HZ + 0.5))
+    frames, notes = opm_analyse(clock, events, nframes)
+    drums = opm_drums(frames, notes)
+
+    # levels: 3dB a level, the song's loudest moment at 15
+    peaks = sorted(max(p.amp for p in row) for row in frames)
+    ref = peaks[min(len(peaks) - 1, len(peaks) * 999 // 1000)] or 1.0
+    floor = ref * 10 ** (-OPM_FLOOR / 20)
+
+    def level(amp):
+        if amp <= floor:
+            return 0
+        return max(0, min(15, 15 + round(20 * math.log10(amp / ref) / 3)))
+
+    voices = [None, None, None]       # the channel each voice plays
+    periods = [0, 0, 0]
+    noise = 0
+    out = []
+    for row in frames:
+        # the melodic parts by rank: louder, keyed before a tail, a part
+        # already on a voice keeping it; unisons and octave doublings
+        # (started together) count once
+        parts = []
+        for ch, p in enumerate(row):
+            if p.inst is None or drums[p.inst] is not None or p.amp <= floor:
+                continue
+            rank = (20 * math.log10(p.amp / ref) + OPM_KEYED * p.keyed
+                    + OPM_HELD * (ch in voices))
+            parts.append((rank, ch))
+        parts.sort(reverse=True)
+        chosen = []
+        for rank, ch in parts:
+            p = row[ch]
+            for c in chosen:
+                q = row[c]
+                d = abs(p.pitch - q.pitch)
+                if abs(p.start - q.start) <= 1 and min(
+                        abs(d), abs(d - 12), abs(d - 24)) < 0.5:
+                    break
+            else:
+                chosen.append(ch)
+                if len(chosen) == 3:
+                    break
+        # the two most important parts on voices A and B, each keeping
+        # its voice, the third on C
+        top = chosen[:2]
+        for v in (0, 1):
+            if voices[v] not in top:
+                voices[v] = None
+        for ch in top:
+            if ch not in voices[:2]:
+                voices[voices.index(None)] = ch
+        voices[2] = chosen[2] if len(chosen) == 3 else None
+
+        levels = [0, 0, 0]
+        mix = 0x3F
+        for v in range(3):
+            mix &= ~(1 << v)
+            ch = voices[v]
+            if ch is None:
+                continue
+            p = row[ch]
+            pitch = p.pitch
+            while pitch < NOTE_FLOOR:
+                pitch += 12
+            periods[v] = _period(pitch)
+            levels[v] = level(p.amp)
+
+        # the drum: the most important sounding, a new hit before a tail
+        drum = None
+        for ch, p in enumerate(row):
+            if p.inst is None or drums[p.inst] is None:
+                continue
+            lv = level(p.amp) + DRUM_KINDS[drums[p.inst]][3]
+            if lv <= 0:
+                continue
+            key = (drums[p.inst] <= TOM, p.start, lv)
+            if drum is None or key > drum[0]:
+                drum = (key, ch, lv)
+        if drum is not None:
+            _key, ch, lv = drum
+            p = row[ch]
+            kind = drums[p.inst]
+            k = DRUM_KINDS[kind]
+            age = (len(out) - p.start) * SYNTH_HZ // TICK_HZ
+            if k[4] and age >= k[1]:
+                lv = 0                    # a falling tone is short
+            if lv > 0:
+                # C, unless it plays a part and A or B is free
+                v = 2
+                if voices[2] is not None and None in voices:
+                    v = voices.index(None)
+                if k[4]:
+                    if kind == TOM:
+                        pitch = p.pitch
+                        while pitch < NOTE_FLOOR:
+                            pitch += 12
+                        period = _period(pitch)
+                        sweep = period >> 4
+                    else:
+                        period, sweep = k[4], k[5]
+                    periods[v] = min(period + sweep * age, 0xFFF)
+                    mix &= ~(1 << v)
+                    mix |= 8 << v
+                else:
+                    mix |= 1 << v
+                    mix &= ~(8 << v)
+                    noise = k[0]
+                levels[v] = min(15, lv)
+
+        regs = [0] * 14
+        for v in range(3):
+            regs[2 * v] = periods[v] & 0xFF
+            regs[2 * v + 1] = periods[v] >> 8
+            regs[8 + v] = levels[v]
+        regs[6] = noise
+        regs[7] = mix
+        out.append(regs)
+    return out, drums, notes
+
+
+def cmd_opm(args):
+    clock, events, loop, length = read_vgm(args.input)
+    frames, drums, notes = opm_to_frames(clock, events, length)
+    looped = loop is not None
+    loop_frame = min(int(loop * TICK_HZ + 0.5), len(frames) - 1) \
+        if looped else len(frames) - 1
+    if not looped:
+        frames.append([0] * 7 + [0x3F] + [0] * 6)   # then silence
+        loop_frame = len(frames) - 1
+    blob = delta_encode(frames, (loop_frame,))
+    with open(args.output, "wb") as f:
+        f.write(b"STM1")
+        f.write(struct.pack(">HHHH", TICK_HZ, len(frames), loop_frame, 0))
+        f.write(blob)
+    kinds = ("kick", "snare", "clap", "tom", "hi-hat", "open hi-hat",
+             "cymbal", "click")
+    for n, hits in enumerate(notes):
+        if drums[n] is not None and args.verbose:
+            print("  drum: instrument %d on channel %s, %d hits: %s"
+                  % (n, ",".join(str(c) for c in sorted({h[1] for h in hits})),
+                     len(hits), kinds[drums[n]]))
+    print("wrote %s (%d frames = %.1fs at %dHz, loop from %d, %d bytes)"
+          % (args.output, len(frames), len(frames) / TICK_HZ, TICK_HZ,
+             loop_frame, 12 + len(blob)))
 
 
 def parse_spec(text):
@@ -1072,6 +1604,15 @@ def main():
     p.add_argument("--loop", type=int, default=0,
                    help="frame to loop back to (default 0)")
     p.set_defaults(func=cmd_midi)
+
+    p = sub.add_parser("opm",
+                       help="reduce a YM2151 VGM log to a YM2149 "
+                            "register stream (STM) for STDL_Music")
+    p.add_argument("input")
+    p.add_argument("output")
+    p.add_argument("-v", "--verbose", action="store_true",
+                   help="list the instruments taken for drums")
+    p.set_defaults(func=cmd_opm)
 
     p = sub.add_parser("wav",
                        help="convert WAV (incl. MS ADPCM) to u8 mono "

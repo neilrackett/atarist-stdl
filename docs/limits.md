@@ -68,7 +68,14 @@ stop trying and redesign instead.
   before any gets a chord (the bass, then melodic instruments, then
   pads, by General MIDI program) and plays percussion as short noise
   or falling-tone bursts over a free voice or the least important
-  note; notes beyond three voices are dropped. Streams replay at 50Hz and
+  note; notes beyond three voices are dropped. A YM2151 log (VGM)
+  converted with `stdlconv opm` keeps each FM channel's envelope and
+  pitch but not its timbre: the eight channels become the three
+  loudest parts, a unison or octave doubling counted once, the two
+  most important on voices A and B and the third on C, where its
+  drums (instruments that keep to one or two pitches, or are tuned
+  inharmonically) sound as noise or falling tones - and where
+  `STDL_PlaySfx` puts effects first. Chords keep one note. Streams replay at 50Hz and
   assume a 50Hz display (colour low resolution). There is no MOD /
   OGG / MP3 path: sample-based music has no YM equivalent - author
   natively (SNDH-style) or re-score via MIDI.

@@ -12,13 +12,15 @@
  * Each case sets one to four voices - random samples, lengths, loop
  * points, rates and volumes - and mixes a run of blocks with the
  * assembly, then sets the same voices again and mixes the same
- * blocks with stdl_voice_use_c forcing the C. Interrupts are held
+ * blocks with stdl_voice_test forcing the C. Interrupts are held
  * off for each pass, or the device's own VBL would mix the voices
  * on underneath the test, and the voices are stopped before they
  * come back on.
  *
  * Then it times both, four voices a block, with the device paused so
- * the VBL leaves the voices alone.
+ * the VBL leaves the voices alone, and each of the mixer's shortcuts
+ * against its switch: the byte mix (four voices at 16) and the
+ * short-loop copies (16-frame loops).
  *
  * The result goes to VOICECHK.TXT beside the program, and the screen
  * turns green for a pass or red for a failure; any key quits. Needs
@@ -32,7 +34,6 @@
 #include <stdl/stdl.h>
 #include "stdl_internal.h"
 
-extern int stdl_voice_use_c;
 int stdl_voice_mix_block(int8_t *dst);
 
 #define CASES  120
@@ -71,13 +72,13 @@ static void mix(const vparm *p, int nv, int use_c, int8_t *out)
 {
     uint16_t sr = stdl_int_off();
     int b;
-    stdl_voice_use_c = use_c;
+    stdl_voice_test = use_c ? STDL_VT_C : 0;
     setup(p, nv);
     for (b = 0; b < BLOCKS; b++) {
         stdl_voice_mix_block(out + b * BLOCK);
     }
     setup(0, 0);                /* or the VBL plays them on */
-    stdl_voice_use_c = 0;
+    stdl_voice_test = 0;
     stdl_int_restore(sr);
 }
 
@@ -99,30 +100,37 @@ static void pick(vparm *p)
     p->vol = (uint8_t)(rnd() % 65);
 }
 
-/* ms to mix `blocks` blocks of nv voices with one path, at the
- * device's rate (native, a step of one frame) or resampled */
-static long time_path(int use_c, int blocks, int nv, int native)
+/* ms to mix `blocks` blocks of nv voices at volume vol, each a loop of
+ * looplen frames, at the device's rate (native, a step of one frame) or
+ * resampled, with stdl_voice_test's switches `flags` */
+static long time_mix(int flags, int blocks, int nv, int native, uint8_t vol, uint32_t looplen)
 {
     static int8_t out[BLOCK];
     vparm p[STDL_VOICES];
     uint32_t t0;
     int v, b;
     for (v = 0; v < nv; v++) {
-        p[v].len = SLEN;
+        p[v].len = looplen;
         p[v].loop = 0;
-        p[v].looplen = SLEN;
+        p[v].looplen = looplen;
         p[v].freq = native ? 6258 : 8363 + v * 1000;
-        p[v].vol = 48;
+        p[v].vol = vol;
     }
-    stdl_voice_use_c = use_c;
+    stdl_voice_test = flags;
     setup(p, nv);
     t0 = STDL_GetTicks();
     for (b = 0; b < blocks; b++) {
         stdl_voice_mix_block(out);
     }
     t0 = STDL_GetTicks() - t0;
-    stdl_voice_use_c = 0;
+    stdl_voice_test = 0;
     return (long)t0;
+}
+
+/* four voices at 48 sum in 16 bits: the timings before the shortcuts */
+static long time_path(int use_c, int blocks, int nv, int native)
+{
+    return time_mix(use_c ? STDL_VT_C : 0, blocks, nv, native, 48, SLEN);
 }
 
 int main(void)
@@ -197,6 +205,12 @@ int main(void)
                         time_path(0, 400, counts[k], native));
             }
         }
+        fprintf(f, "400 blocks, 4 voices at 16: bytes %ldms, 16-bit sums %ldms\n",
+                time_mix(0, 400, STDL_VOICES, 0, 16, SLEN),
+                time_mix(STDL_VT_WORDS, 400, STDL_VOICES, 0, 16, SLEN));
+        fprintf(f, "400 blocks, 4 voices, 16-frame loops: copies %ldms, none %ldms\n",
+                time_mix(0, 400, STDL_VOICES, 0, 16, 16),
+                time_mix(STDL_VT_NOXLOOP, 400, STDL_VOICES, 0, 16, 16));
         fclose(f);
     }
     setup(0, 0);

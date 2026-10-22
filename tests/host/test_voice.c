@@ -23,8 +23,6 @@ extern int stdl_host_dma_running;
 
 extern const int8_t *stdl_host_voltab(void);
 extern uint32_t stdl_voice_late;
-extern int stdl_voice_force_word;
-extern int stdl_voice_no_xloop;
 
 static int failures;
 
@@ -51,6 +49,58 @@ static void open_fresh(void)
     find_vbl();
     CHECK(vbl_fn != NULL, "no VBL slot claimed");
     CHECK(stdl_host_dma_running, "DMA not started");
+}
+
+/* the comparison tests' random numbers: the usual LCG, 24 bits */
+static uint32_t rnd_seed;
+static uint32_t rnd(void)
+{
+    rnd_seed = rnd_seed * 1103515245u + 12345u;
+    return rnd_seed >> 8;
+}
+
+static void fill_random(int8_t *p, int n)
+{
+    while (n-- > 0) {
+        *p++ = (int8_t)(rnd() >> 8);
+    }
+}
+
+/* a voice for the comparison tests, as STDL_SetVoice takes it */
+typedef struct {
+    const int8_t *data;
+    uint32_t len, loop, llen, freq;
+    uint8_t vol;
+} vcase;
+
+static void start_voices(const vcase *c, int nv)
+{
+    int v;
+    for (v = 0; v < nv; v++) {
+        STDL_SetVoice(v, c[v].data, c[v].len, c[v].loop, c[v].llen, c[v].freq, c[v].vol);
+    }
+}
+
+/* blocks [from, to) mixed as the interrupt would, the ring after each
+ * into out[k] */
+static void mix_blocks(int8_t (*out)[RING], int from, int to)
+{
+    int k;
+    for (k = from; k < to; k++) {
+        tick_at((uint32_t)(k % 4) * BLOCK);
+        memcpy(out[k], ring_base(), RING);
+    }
+}
+
+/* the samples rewritten where they are */
+static void flip_samples(int8_t (*s)[4000], int nv)
+{
+    int v, i;
+    for (v = 0; v < nv; v++) {
+        for (i = 0; i < 4000; i++) {
+            s[v][i] ^= 0x55;
+        }
+    }
 }
 
 int main(void)
@@ -269,6 +319,13 @@ int main(void)
                       lvl, v, row[v & 255], -v, row[(-v) & 255]);
             }
             CHECK(row[0] == 0, "vol %d: silence is not silent", lvl);
+            /* -lvl..lvl-1 and no wider: the byte mix counts on it */
+            for (v = 0; v < 256; v++) {
+                CHECK(row[v] >= -lvl && row[v] <= (lvl ? lvl - 1 : 0),
+                      "vol %d: %d -> %d, outside %d..%d", lvl, (int8_t)v, row[v],
+                      -lvl, lvl ? lvl - 1 : 0);
+            }
+            CHECK(row[0x80] == -lvl, "vol %d: -128 -> %d, want %d", lvl, row[0x80], -lvl);
         }
         /* and the specific case heard on the machine: an ambient
          * effect at vol 16 whose content sits inside +/-4. The
@@ -453,49 +510,38 @@ int main(void)
     {
         static int8_t smp[4][3000];
         static int8_t got[2][8][RING];
-        uint32_t seed = 0x2468ACE1u;
-        int c, k, v, byteCases = 0;
+        vcase vs[4];
+        int c, v, byteCases = 0;
+        rnd_seed = 0x2468ACE1u;
         for (v = 0; v < 4; v++) {
-            for (i = 0; i < 3000; i++) {
-                seed = seed * 1103515245u + 12345u;
-                smp[v][i] = (int8_t)(seed >> 16);
-            }
+            fill_random(smp[v], 3000);
         }
         for (c = 0; c < 60; c++) {
-            uint32_t len[4], loop[4], llen[4], freq[4];
-            uint8_t vol[4];
             int sum = 0, pass;
             for (v = 0; v < 4; v++) {
-                seed = seed * 1103515245u + 12345u;
-                len[v] = 200 + (seed >> 8) % 2800;
-                seed = seed * 1103515245u + 12345u;
-                loop[v] = (seed >> 8) % len[v];
-                seed = seed * 1103515245u + 12345u;
-                llen[v] = ((seed >> 8) & 1) ? 1 + (seed >> 9) % (len[v] - loop[v]) : 0;
-                seed = seed * 1103515245u + 12345u;
-                freq[v] = 2000 + (seed >> 8) % 14000;
-                seed = seed * 1103515245u + 12345u;
+                uint32_t r;
+                vs[v].data = smp[v];
+                vs[v].len = 200 + rnd() % 2800;
+                vs[v].loop = rnd() % vs[v].len;
+                r = rnd();
+                vs[v].llen = (r & 1) ? 1 + (r >> 1) % (vs[v].len - vs[v].loop) : 0;
+                vs[v].freq = 2000 + rnd() % 14000;
+                r = rnd();
                 /* a third each under, at and over the line */
-                vol[v] = (uint8_t)((c % 3 == 0) ? (seed >> 8) % 33
-                                   : (c % 3 == 1) ? 32 : 24 + (seed >> 8) % 41);
-                sum += vol[v];
+                vs[v].vol = (uint8_t)((c % 3 == 0) ? r % 33 : (c % 3 == 1) ? 32 : 24 + r % 41);
+                sum += vs[v].vol;
             }
             byteCases += sum <= 128;
             for (pass = 0; pass < 2; pass++) {
-                stdl_voice_force_word = pass;
+                stdl_voice_test = pass ? STDL_VT_WORDS : 0;
                 open_fresh();
-                for (v = 0; v < 4; v++) {
-                    STDL_SetVoice(v, smp[v], len[v], loop[v], llen[v], freq[v], vol[v]);
-                }
-                for (k = 0; k < 8; k++) {
-                    tick_at((uint32_t)(k % 4) * BLOCK);
-                    memcpy(got[pass][k], ring_base(), RING);
-                }
+                start_voices(vs, 4);
+                mix_blocks(got[pass], 0, 8);
             }
-            stdl_voice_force_word = 0;
+            stdl_voice_test = 0;
             if (memcmp(got[0], got[1], sizeof(got[0])) != 0) {
                 CHECK(0, "byte mix case %d (volumes %d %d %d %d) differs from the clamped sums",
-                      c, vol[0], vol[1], vol[2], vol[3]);
+                      c, vs[0].vol, vs[1].vol, vs[2].vol, vs[3].vol);
             }
         }
         CHECK(byteCases >= 30, "only %d cases took the byte mix", byteCases);
@@ -506,77 +552,68 @@ int main(void)
      * to 1024 or more at its first wrap and plays from the copy: the
      * frames must be the short loop's own. Random loops from one frame
      * to past the threshold, at pitches from well under to several
-     * times the device rate and any first-pass length, over forty
-     * blocks - many wraps of the copy - with the copy and without; then
-     * the same notes again, which use the copies again, and the samples
-     * rewritten after a stop, which must not. */
+     * times the device rate and any first-pass length, over thirty
+     * blocks - many wraps of the copy - with the copy and without;
+     * then the same notes again, which use the copies again; the
+     * samples rewritten after a stop; and the voices moved, with no
+     * stop, to samples that take no copy, the first rewritten while
+     * it is not playing and started again - which must not play from
+     * a copy either. */
     {
-        static int8_t src[4][4000];
-        static int8_t got[2][60][RING];
-        uint32_t seed = 0x13572468u;
-        int c, k, v, shortLoops = 0;
+        static int8_t src[4][4000], other[4][4000];
+        static int8_t got[2][75][RING];
+        vcase vs[4], vo[4];
+        int c, v, shortLoops = 0;
+        rnd_seed = 0x13572468u;
         for (v = 0; v < 4; v++) {
-            for (i = 0; i < 4000; i++) {
-                seed = seed * 1103515245u + 12345u;
-                src[v][i] = (int8_t)(seed >> 16);
-            }
+            fill_random(src[v], 4000);
+            fill_random(other[v], 4000);
         }
         for (c = 0; c < 48; c++) {
-            uint32_t len[4], loop[4], llen[4], freq[4];
             int nv = 1 + c % 4, pass;
             for (v = 0; v < nv; v++) {
-                seed = seed * 1103515245u + 12345u;
-                llen[v] = (c % 6 == 0) ? 1 + (seed >> 8) % 4
-                        : (c % 6 == 5) ? 900 + (seed >> 8) % 300
-                        : 1 + (seed >> 8) % 600;
-                seed = seed * 1103515245u + 12345u;
-                loop[v] = (seed >> 8) % 1500;
-                seed = seed * 1103515245u + 12345u;
-                len[v] = loop[v] + llen[v] + (((seed >> 8) & 1) ? 0 : (seed >> 9) % 800);
-                seed = seed * 1103515245u + 12345u;
-                freq[v] = 1500 + (seed >> 8) % 30000;
-                shortLoops += llen[v] < 1024;
+                uint32_t r = rnd();
+                vs[v].data = src[v];
+                vs[v].llen = (c % 6 == 0) ? 1 + r % 4
+                           : (c % 6 == 5) ? 900 + r % 300
+                           : 1 + r % 600;
+                vs[v].loop = rnd() % 1500;
+                r = rnd();
+                vs[v].len = vs[v].loop + vs[v].llen + ((r & 1) ? 0 : (r >> 1) % 800);
+                vs[v].freq = 1500 + rnd() % 30000;
+                vs[v].vol = (uint8_t)(64 / nv);
+                /* a loop too long to be copied */
+                vo[v] = vs[v];
+                vo[v].data = other[v];
+                vo[v].len = vo[v].llen = 2000;
+                vo[v].loop = 0;
+                shortLoops += vs[v].llen < 1024;
             }
             for (pass = 0; pass < 2; pass++) {
-                stdl_voice_no_xloop = pass;
+                stdl_voice_test = pass ? STDL_VT_NOXLOOP : 0;
                 open_fresh();
+                start_voices(vs, nv);
+                mix_blocks(got[pass], 0, 30);
+                start_voices(vs, nv);
+                mix_blocks(got[pass], 30, 45);
                 for (v = 0; v < nv; v++) {
-                    /* the loop ends where the sample does after the
-                     * first pass's tail: [loop, loop + llen) inside len */
-                    STDL_SetVoice(v, src[v], len[v], loop[v], llen[v], freq[v], 64 / nv);
+                    STDL_StopVoice(v);
                 }
-                for (k = 0; k < 60; k++) {
-                    if (k == 30) {
-                        /* the same notes again on playing voices:
-                         * the copies are used again */
-                        for (v = 0; v < nv; v++) {
-                            STDL_SetVoice(v, src[v], len[v], loop[v], llen[v], freq[v], 64 / nv);
-                        }
-                    } else if (k == 45) {
-                        /* stopped, the samples rewritten where they
-                         * are, started again: the new bytes play */
-                        for (v = 0; v < nv; v++) {
-                            STDL_StopVoice(v);
-                            for (i = 0; i < 4000; i++) {
-                                src[v][i] ^= 0x55;
-                            }
-                            STDL_SetVoice(v, src[v], len[v], loop[v], llen[v], freq[v], 64 / nv);
-                        }
-                    }
-                    tick_at((uint32_t)(k % 4) * BLOCK);
-                    memcpy(got[pass][k], ring_base(), RING);
-                }
-                for (v = 0; v < nv; v++) {      /* the samples as they were */
-                    for (i = 0; i < 4000; i++) {
-                        src[v][i] ^= 0x55;
-                    }
-                }
+                flip_samples(src, nv);
+                start_voices(vs, nv);
+                mix_blocks(got[pass], 45, 60);
+                start_voices(vo, nv);
+                mix_blocks(got[pass], 60, 66);
+                flip_samples(src, nv);          /* and back as they were */
+                start_voices(vs, nv);
+                mix_blocks(got[pass], 66, 75);
             }
-            stdl_voice_no_xloop = 0;
+            stdl_voice_test = 0;
             if (memcmp(got[0], got[1], sizeof(got[0])) != 0) {
                 CHECK(0, "written-out loop case %d (%d voices, loop %u+%u of %u at %uHz) "
                       "differs from the loop as it was", c, nv,
-                      (unsigned)loop[0], (unsigned)llen[0], (unsigned)len[0], (unsigned)freq[0]);
+                      (unsigned)vs[0].loop, (unsigned)vs[0].llen, (unsigned)vs[0].len,
+                      (unsigned)vs[0].freq);
             }
         }
         CHECK(shortLoops >= 60, "only %d short loops", shortLoops);

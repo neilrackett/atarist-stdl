@@ -37,13 +37,16 @@ typedef struct {
     uint32_t loopstart; /* 16.16 restart point after the first pass */
     uint32_t loopsize;  /* 16.16 loop length, 0 = one-shot          */
     uint32_t step;      /* 16.16 resampling step                    */
-    const int8_t *vt;   /* volume table row                         */
-    int8_t *xbuf;       /* XLOOP_BUF bytes for a short loop, or NULL */
-    const int8_t *xsrc; /* the loop xbuf holds a copy of, or NULL    */
-    uint16_t xlen, xn;  /* its length, and the copies' (frames)      */
+    const int8_t *vt;   /* volume table row (VT_ROW)                */
     int16_t repeats;    /* loop passes left; -1 until stopped       */
     uint8_t active;
 } voice_t;
+
+#ifdef __m68k__
+/* 32 bytes, so vc.v[i] and v - vc.v are shifts: at 44, with a short
+ * loop's state in here, each was a chain of adds and subtracts */
+typedef char voice_t_is_32_bytes[sizeof(voice_t) == 32 ? 1 : -1];
+#endif
 
 /*
  * Short loops, written out. Each time a voice reaches the end of a
@@ -57,13 +60,14 @@ typedef struct {
  * there: a whole number of copies, so every frame is the one the short
  * loop would have played, and the voice wraps about once a block. A
  * loop with a pass count keeps its own length, so the count stays
- * exact. The copy is kept for the voice's next note: a module's channel
- * plays one instrument note after note, and copying again for each was
- * 5K cycles a note, more than the wraps it saved (one port's
- * cutscenes 0.8% slower than its own load-time copies). It is dropped
- * when the voice stops or ends, so a sample freed and another loaded at
- * the same address - which needs the voice stopped first, as samples
- * must stay put while a voice plays them - is never played from it.
+ * exact. The copy is kept for the voice's next note of the same loop
+ * started while it plays: a module's channel plays one instrument note
+ * after note, and copying again for each was 5K cycles a note, more
+ * than the wraps it saved (one port's cutscenes 0.8% slower than its
+ * own load-time copies). Any other start drops it (stdl_voice_start), so
+ * a voice only ever holds a copy of the loop it is playing - which the
+ * caller must leave be anyway - never of a sample it has let go and
+ * the caller may have freed, or rewritten in place.
  *
  * Measured and left for later:
  *  - The wrap itself in the inner loop's asm: subtract the loop length
@@ -80,11 +84,15 @@ typedef struct {
 #define XLOOP_MIN 1024
 #define XLOOP_BUF (2 * XLOOP_MIN)
 
-#ifndef __m68k__
-/* tests/host: non-zero leaves short loops as they are, so the two can
- * be compared */
-int stdl_voice_no_xloop;
-#endif
+/* the volume rows: vt[vol][byte] for vol 0..64 (see STDL_OpenVoices) */
+#define VOLTAB_BYTES (65 * 256)
+#define VT_OFFSET(vol) ((uint32_t)(vol) * 256)
+#define VT_ROW(vol) (vc.voltab + VT_OFFSET(vol))
+
+/* the tests' switches (STDL_VT_*, stdl_internal.h): the C loops, the
+ * 16-bit sums always, no short-loop copies - one feature at a time, on
+ * the host and on the machine (tests/hatari/voicechk.c) */
+int stdl_voice_test;
 
 static struct {
     int      open;
@@ -93,6 +101,9 @@ static struct {
     int8_t  *ring;
     void    *ring_alloc;
     int8_t  *voltab;            /* 65 rows of 256 */
+    int8_t  *xbuf;              /* XLOOP_BUF a voice, or NULL     */
+    const int8_t *xsrc[STDL_VOICES]; /* the loop each holds, or NULL */
+    uint16_t xlen[STDL_VOICES]; /* its length in frames            */
     voice_t  v[STDL_VOICES];
     int      fill_block;        /* next quarter to mix */
     uint8_t  pause_req;         /* stop asked for, not yet taken   */
@@ -173,16 +184,16 @@ static void clamp_build(void)
 }
 
 /*
- * Where a voice's frames go. With voices that could overflow a byte
- * together each adds into mixacc's 16-bit sums, the first storing, and
- * the clamp table takes the sums to the ring. Voices that cannot go
+ * Where a voice's frames go. Voices that could overflow a byte together
+ * each add into mixacc's 16-bit sums, the first storing, and the clamp
+ * table takes the sums to the ring. Voices that cannot overflow one go
  * straight into the ring: no 16-bit block, no clamp pass, the same
  * bytes. A row at volume v holds -v..v-1 (v * s / 128 toward zero for
  * s from -128), so voices whose volumes add up to 128 or less sum
- * within -128..127 - any one or two, and the four channels of a
- * module played at a quarter of full volume or less, as a port mixing
- * music under its effects does. That is the usual case for sound
- * effects, one or two at a time. With the one-frame step below,
+ * within -128..127: any one or two, the usual case for sound effects,
+ * and the four channels of a module at a quarter of full volume or
+ * less, as a port playing music under its effects does. With the
+ * one-frame step below,
  * SDL_mixer chunks went from 9% to 5% of an 8MHz STE for one at
  * 6258Hz, 15% to 9% for two and 26% to 20% for four
  * (tests/hatari/mixbench.c). Four resampled voices, a module at 16 a
@@ -232,8 +243,6 @@ static uint32_t voice_run_c(void *dst, const int8_t *data,
 }
 
 #ifdef __m68k__
-/* non-zero forces voice_run_c on target (tests/hatari/voicechk.c) */
-int stdl_voice_use_c;
 
 /* The same loop by hand. The 16.16 position is split: the integer
  * part in a long whose upper word stays clear (frames are at most
@@ -373,7 +382,7 @@ typedef uint32_t (*voice_run_fn)(void *, const int8_t *, const int8_t *,
 static __inline__ __attribute__((always_inline))
 voice_run_fn voice_runner(uint32_t step, int bytes)
 {
-    if (stdl_voice_use_c) {
+    if (stdl_voice_test & STDL_VT_C) {
         return voice_run_c;
     }
     if (step == 0x10000u) {
@@ -411,33 +420,32 @@ static int frames_left(uint32_t d, uint32_t step)
 /* A short loop's copies in the voice's buffer (see XLOOP_MIN), doubled
  * until at least XLOOP_MIN frames - under XLOOP_BUF, as the loop is
  * under XLOOP_MIN - and the voice moved onto them: the loop starts at
- * the buffer's first frame. */
+ * the buffer's first frame. A first doubling of an odd length copies
+ * to an odd address a byte at a time; every one after it is even. */
 static const int8_t *loop_written_out(voice_t *v)
 {
+    const int i = (int)(v - vc.v);
+    int8_t *buf = vc.xbuf + i * XLOOP_BUF;
     const int8_t *src = v->data + (v->loopstart >> 16);
     const uint32_t len = v->loopsize >> 16;
+    uint32_t n = len;
 
-    if (src != v->xsrc || len != v->xlen) {
-        uint32_t n = len;
-        memcpy(v->xbuf, src, n);
-        if (n & 1) {
-            /* twice first, so each doubling below copies between even
-             * addresses, in longs, not a byte at a time */
-            memcpy(v->xbuf + n, src, n);
-            n += n;
+    if (src != vc.xsrc[i] || len != vc.xlen[i]) {
+        memcpy(buf, src, len);
+        for (; n < XLOOP_MIN; n += n) {
+            memcpy(buf + n, buf, n);
         }
+        vc.xsrc[i] = src;
+        vc.xlen[i] = (uint16_t)len;
+    } else {
         while (n < XLOOP_MIN) {
-            memcpy(v->xbuf + n, v->xbuf, n);
             n += n;
         }
-        v->xsrc = src;
-        v->xlen = (uint16_t)len;
-        v->xn = (uint16_t)n;
     }
-    v->data = v->xbuf;
+    v->data = buf;
     v->loopstart = 0;
-    v->loopsize = (uint32_t)v->xn << 16;
-    return v->xbuf;
+    v->loopsize = n << 16;
+    return buf;
 }
 
 /* one voice through the block into dst - mixacc or the ring, as mode
@@ -461,7 +469,6 @@ void voice_mix(voice_t *v, int mode, void *dst, const int bytes)
             uint32_t over = pos - end;
             if (v->loopsize == 0 || v->repeats == 0) {
                 v->active = 0;
-                v->xsrc = NULL;
                 if (mode == MIX_WSTORE) {
                     memset((int16_t *)dst + n, 0,
                            (BLOCK_FRAMES - n) * sizeof(int16_t));
@@ -483,11 +490,7 @@ void voice_mix(voice_t *v, int mode, void *dst, const int bytes)
                 v->repeats--;
             }
             if (v->repeats < 0 && v->loopsize < ((uint32_t)XLOOP_MIN << 16)
-                && v->xbuf != NULL
-#ifndef __m68k__
-                && !stdl_voice_no_xloop
-#endif
-                ) {
+                && vc.xbuf != NULL && !(stdl_voice_test & STDL_VT_NOXLOOP)) {
                 data = loop_written_out(v);
             }
             pos = v->loopstart + over;
@@ -526,35 +529,26 @@ void voice_mix_b(voice_t *v, int mode, int8_t *dst)
 
 /* mix one quarter of the ring; returns 0 if it wrote pure silence,
  * which is what the deferred stop in the tick below waits for */
-#ifndef __m68k__
-/* tests/host: non-zero mixes every block through the 16-bit sums, as
- * before the volume rule, so the two can be compared */
-int stdl_voice_force_word;
-#endif
-
 static int mix_block(int8_t *dst)
 {
-    int active = 0, volsum = 0, mode;
+    int active = 0, mode;
+    uint32_t rows = 0;
     int i, n;
 
     for (i = 0; i < STDL_VOICES; i++) {
         if (vc.v[i].active) {
             active++;
-            /* the row's volume, from the row itself: read with it,
-             * so a volume changed under the mix cannot disagree */
-            volsum += (int)((uint32_t)(vc.v[i].vt - vc.voltab) >> 8);
+            /* the volumes, as their rows' offsets (VT_ROW): from the
+             * rows themselves, so a volume changed under the mix
+             * cannot disagree with the row it reads */
+            rows += (uint32_t)(vc.v[i].vt - vc.voltab);
         }
     }
     if (active == 0) {
         memset(dst, 0, BLOCK_FRAMES);
         return 0;
     }
-#ifndef __m68k__
-    if (stdl_voice_force_word) {
-        volsum = 0x7FFF;
-    }
-#endif
-    if (volsum <= 128) {
+    if (rows <= VT_OFFSET(128) && !(stdl_voice_test & STDL_VT_WORDS)) {
         /* no sum that can clip: straight into the ring (see above) */
         mode = MIX_BSTORE;
         for (i = 0; i < STDL_VOICES; i++) {
@@ -573,7 +567,7 @@ static int mix_block(int8_t *dst)
         }
     }
 #ifdef __m68k__
-    if (!stdl_voice_use_c) {
+    if (!(stdl_voice_test & STDL_VT_C)) {
         /* four frames a pass, as the voices are; a block is a whole
          * number of passes, so there is no part-way entry here */
         const int16_t *acc = mixacc;
@@ -730,13 +724,11 @@ int STDL_OpenVoices(int freq)
     /* the volume rows, then each voice's buffer for a short loop
      * (XLOOP_MIN); without the room for those, short loops wrap as
      * they are */
-    vc.voltab = malloc(65 * 256 + STDL_VOICES * XLOOP_BUF);
+    vc.voltab = malloc(VOLTAB_BYTES + STDL_VOICES * XLOOP_BUF);
     if (vc.voltab != NULL) {
-        for (s = 0; s < STDL_VOICES; s++) {
-            vc.v[s].xbuf = vc.voltab + 65 * 256 + s * XLOOP_BUF;
-        }
+        vc.xbuf = vc.voltab + VOLTAB_BYTES;
     } else {
-        vc.voltab = malloc(65 * 256);
+        vc.voltab = malloc(VOLTAB_BYTES);
     }
     if (vc.ring_alloc == NULL || vc.voltab == NULL) {
         stdl_stram_free(vc.ring_alloc);
@@ -789,7 +781,7 @@ int STDL_OpenVoices(int freq)
      */
     clamp_build();
     for (level = 0; level <= 64; level++) {
-        int8_t *row = vc.voltab + level * 256;
+        int8_t *row = VT_ROW(level);
         for (s = 0; s < 256; s++) {
             const int v = (int)(int8_t)s * level;
             row[s] = (int8_t)(v < 0 ? -((-v) >> 7) : (v >> 7));
@@ -909,7 +901,6 @@ void stdl_voice_start(int v, const int8_t *data, uint32_t len,
     p = &vc.v[v];
     if (data == NULL || len == 0 || freq == 0) {
         p->active = 0;
-        p->xsrc = NULL;
         return;
     }
     if (len > 0xFFFF) {
@@ -939,7 +930,7 @@ void stdl_voice_start(int v, const int8_t *data, uint32_t len,
     loopstart = loop_off << 16;
     loopsize = loop_len << 16;
     step = (freq << 16) / (uint32_t)vc.dma_freq;
-    vt = vc.voltab + (uint32_t)vol * 256;
+    vt = VT_ROW(vol);
     rep = (int16_t)((repeats < 0) ? -1 : (repeats > 0x7FFF ? 0x7FFF : repeats));
     sr = stdl_int_off();
     /*
@@ -954,6 +945,11 @@ void stdl_voice_start(int v, const int8_t *data, uint32_t len,
      * Clearing it here is what makes "not a mute" true.
      */
     vc.silent = 0;
+    /* the short loop's copy goes unless this note, started on a
+     * playing voice, plays the same loop (see XLOOP_MIN) */
+    if (!p->active || rep >= 0 || data + loop_off != vc.xsrc[v] || loop_len != vc.xlen[v]) {
+        vc.xsrc[v] = NULL;
+    }
     p->active = 0;              /* keep the mixer off a half-set voice */
     p->data = data;
     p->pos = 0;
@@ -978,7 +974,6 @@ void STDL_StopVoice(int v)
 {
     if (vc.open && v >= 0 && v < STDL_VOICES) {
         vc.v[v].active = 0;
-        vc.v[v].xsrc = NULL;    /* its sample may go: see XLOOP_MIN */
     }
 }
 
@@ -1003,7 +998,7 @@ void STDL_SetVoiceVolume(int v, uint8_t vol)
         if (vol > 64) {
             vol = 64;
         }
-        vc.v[v].vt = vc.voltab + (uint32_t)vol * 256;
+        vc.v[v].vt = VT_ROW(vol);
     }
 }
 

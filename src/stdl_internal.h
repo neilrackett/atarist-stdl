@@ -1331,6 +1331,12 @@ void stdl_voice_start(int v, const int8_t *data, uint32_t len,
                       uint32_t loop_off, uint32_t loop_len,
                       uint32_t freq, uint8_t vol, int repeats);
 
+/* the voice mixer's switches for its tests (tests/host/test_voice.c,
+ * tests/hatari/voicechk.c), each turning one feature off: the asm
+ * inner loops (target only), the byte mix, the short-loop copies */
+enum { STDL_VT_C = 1, STDL_VT_WORDS = 2, STDL_VT_NOXLOOP = 4 };
+extern int stdl_voice_test;
+
 /* bulk sample conversion to signed 8-bit mono/stereo frames at a
  * new rate (wav.c): the ring device's refill and the mixer's chunk
  * loader */

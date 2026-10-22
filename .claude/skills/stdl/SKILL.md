@@ -983,9 +983,9 @@ first.
   each time a voice wraps the mixer pays about 800 cycles, so a loop
   under 1024 frames that repeats until stopped is played from a copy
   of the voice's own, written out to 1024 frames or more (8K of heap
-  for the four), and kept for the voice's next note. Stop a voice
-  before rewriting its sample, as the header says, and the copy goes
-  with it. STE only; voices, the
+  for the four), and kept for the voice's next note of the same loop -
+  a module channel's run of one instrument copies once. STE only;
+  voices, the
   ring device and `STDL_PlaySample` are mutually exclusive DMA
   owners.
   An open device is not quite silent on hardware: with the DMA

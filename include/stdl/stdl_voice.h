@@ -157,11 +157,10 @@ int  STDL_VoicesPaused(void);
  * the ring with no clamp pass: four module channels at 32 or under
  * cost less than four loud ones. A loop under 1024 frames that repeats
  * until stopped plays, after its first pass, from the voice's own copy
- * of it written out end to end to 1024 frames or more: every wrap of a
- * loop costs the mixer about 800 cycles, and a module's 8- or 16-frame
- * loops wrapped several times a block. The copy is kept for the
- * voice's next note of the same loop and dropped when the voice stops
- * or ends. The reserve is half
+ * written out end to end to 1024 frames or more, so the mixer wraps it
+ * about once a block rather than many times; the copy is kept for the
+ * voice's next note of the same loop started while it plays, and
+ * dropped at any other start. The reserve is half
  * what it was before v1.8.1, which made every port louder and
  * doubled what survives at low volumes: scaling an 8-bit sample
  * into an 8-bit table is lossy, and at the old quarter scale a

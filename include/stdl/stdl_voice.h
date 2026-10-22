@@ -41,7 +41,9 @@ extern "C" {
  * 12517 / 25033 / 50066 - music typically wants 6258 or 12517,
  * mixing cost scales with the rate: four busy voices at 6258Hz
  * take 25% of an 8MHz STE, measured, so 12517 is about half). Claims the sound DMA: mutually
- * exclusive with STDL_OpenAudio and STDL_PlaySample*. Returns 0, or
+ * exclusive with STDL_OpenAudio and STDL_PlaySample*. Takes 8K of heap
+ * beside the volume table for short loops (see STDL_SetVoice), and
+ * opens without it if that is short. Returns 0, or
  * -1 with STDL_GetError set (no STE DMA hardware, chip in use, out
  * of memory, no free VBL slot).
  */
@@ -153,7 +155,13 @@ int  STDL_VoicesPaused(void);
  * clips rather than wraps - the mixer clamps. Voices whose volumes
  * add up to 128 or less cannot clip, and mix as bytes straight into
  * the ring with no clamp pass: four module channels at 32 or under
- * cost less than four loud ones. The reserve is half
+ * cost less than four loud ones. A loop under 1024 frames that repeats
+ * until stopped plays, after its first pass, from the voice's own copy
+ * of it written out end to end to 1024 frames or more: every wrap of a
+ * loop costs the mixer about 800 cycles, and a module's 8- or 16-frame
+ * loops wrapped several times a block. The copy is kept for the
+ * voice's next note of the same loop and dropped when the voice stops
+ * or ends. The reserve is half
  * what it was before v1.8.1, which made every port louder and
  * doubled what survives at low volumes: scaling an 8-bit sample
  * into an 8-bit table is lossy, and at the old quarter scale a

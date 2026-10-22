@@ -24,6 +24,7 @@ extern int stdl_host_dma_running;
 extern const int8_t *stdl_host_voltab(void);
 extern uint32_t stdl_voice_late;
 extern int stdl_voice_force_word;
+extern int stdl_voice_no_xloop;
 
 static int failures;
 
@@ -498,6 +499,87 @@ int main(void)
             }
         }
         CHECK(byteCases >= 30, "only %d cases took the byte mix", byteCases);
+        STDL_CloseVoices();
+    }
+
+    /* A loop under 1024 frames that repeats until stopped is written out
+     * to 1024 or more at its first wrap and plays from the copy: the
+     * frames must be the short loop's own. Random loops from one frame
+     * to past the threshold, at pitches from well under to several
+     * times the device rate and any first-pass length, over forty
+     * blocks - many wraps of the copy - with the copy and without; then
+     * the same notes again, which use the copies again, and the samples
+     * rewritten after a stop, which must not. */
+    {
+        static int8_t src[4][4000];
+        static int8_t got[2][60][RING];
+        uint32_t seed = 0x13572468u;
+        int c, k, v, shortLoops = 0;
+        for (v = 0; v < 4; v++) {
+            for (i = 0; i < 4000; i++) {
+                seed = seed * 1103515245u + 12345u;
+                src[v][i] = (int8_t)(seed >> 16);
+            }
+        }
+        for (c = 0; c < 48; c++) {
+            uint32_t len[4], loop[4], llen[4], freq[4];
+            int nv = 1 + c % 4, pass;
+            for (v = 0; v < nv; v++) {
+                seed = seed * 1103515245u + 12345u;
+                llen[v] = (c % 6 == 0) ? 1 + (seed >> 8) % 4
+                        : (c % 6 == 5) ? 900 + (seed >> 8) % 300
+                        : 1 + (seed >> 8) % 600;
+                seed = seed * 1103515245u + 12345u;
+                loop[v] = (seed >> 8) % 1500;
+                seed = seed * 1103515245u + 12345u;
+                len[v] = loop[v] + llen[v] + (((seed >> 8) & 1) ? 0 : (seed >> 9) % 800);
+                seed = seed * 1103515245u + 12345u;
+                freq[v] = 1500 + (seed >> 8) % 30000;
+                shortLoops += llen[v] < 1024;
+            }
+            for (pass = 0; pass < 2; pass++) {
+                stdl_voice_no_xloop = pass;
+                open_fresh();
+                for (v = 0; v < nv; v++) {
+                    /* the loop ends where the sample does after the
+                     * first pass's tail: [loop, loop + llen) inside len */
+                    STDL_SetVoice(v, src[v], len[v], loop[v], llen[v], freq[v], 64 / nv);
+                }
+                for (k = 0; k < 60; k++) {
+                    if (k == 30) {
+                        /* the same notes again on playing voices:
+                         * the copies are used again */
+                        for (v = 0; v < nv; v++) {
+                            STDL_SetVoice(v, src[v], len[v], loop[v], llen[v], freq[v], 64 / nv);
+                        }
+                    } else if (k == 45) {
+                        /* stopped, the samples rewritten where they
+                         * are, started again: the new bytes play */
+                        for (v = 0; v < nv; v++) {
+                            STDL_StopVoice(v);
+                            for (i = 0; i < 4000; i++) {
+                                src[v][i] ^= 0x55;
+                            }
+                            STDL_SetVoice(v, src[v], len[v], loop[v], llen[v], freq[v], 64 / nv);
+                        }
+                    }
+                    tick_at((uint32_t)(k % 4) * BLOCK);
+                    memcpy(got[pass][k], ring_base(), RING);
+                }
+                for (v = 0; v < nv; v++) {      /* the samples as they were */
+                    for (i = 0; i < 4000; i++) {
+                        src[v][i] ^= 0x55;
+                    }
+                }
+            }
+            stdl_voice_no_xloop = 0;
+            if (memcmp(got[0], got[1], sizeof(got[0])) != 0) {
+                CHECK(0, "written-out loop case %d (%d voices, loop %u+%u of %u at %uHz) "
+                      "differs from the loop as it was", c, nv,
+                      (unsigned)loop[0], (unsigned)llen[0], (unsigned)len[0], (unsigned)freq[0]);
+            }
+        }
+        CHECK(shortLoops >= 60, "only %d short loops", shortLoops);
         STDL_CloseVoices();
     }
 

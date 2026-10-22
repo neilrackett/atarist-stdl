@@ -979,7 +979,13 @@ first.
   as bytes with no 16-bit sums and no clamp pass: one port's
   cutscenes, module music at 16 a channel, took 5.3% less of an
   8MHz STE for it. Music played under effects at a quarter volume
-  gets that for nothing. STE only; voices, the
+  gets that for nothing. Short loops cost no more than long ones:
+  each time a voice wraps the mixer pays about 800 cycles, so a loop
+  under 1024 frames that repeats until stopped is played from a copy
+  of the voice's own, written out to 1024 frames or more (8K of heap
+  for the four), and kept for the voice's next note. Stop a voice
+  before rewriting its sample, as the header says, and the copy goes
+  with it. STE only; voices, the
   ring device and `STDL_PlaySample` are mutually exclusive DMA
   owners.
   An open device is not quite silent on hardware: with the DMA

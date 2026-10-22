@@ -787,7 +787,13 @@ warnings** with the Makefile's `-Wall -Wextra`.
   would. Its inner loop is inline asm with a C twin
   (`voice_run_c`); tests/hatari/voicechk.c runs random mixes
   through both on target, compares them byte for byte and times
-  them. Rerun it after touching either.
+  them. Rerun it after touching either. Each of the mixer's
+  shortcuts - the asm loops, the byte mix, the short-loop copies -
+  has a switch in `stdl_voice_test` (`STDL_VT_*`,
+  stdl_internal.h), on the host and the machine: test_voice.c
+  compares each shortcut's output with it switched off, and VOICECHK
+  times each against its switch. A new shortcut gets a switch and a
+  comparison; break it on purpose once to see the comparison fail.
 - **The library is for a plain 8MHz ST; everything above it is
   progressive enhancement.** 68000, no blitter, no DMA audio, 512K
   to 1M shared between code and heap - that is the machine, and a

@@ -352,6 +352,16 @@ or `pixels[y*pitch+x]` writes corrupt planar data. Rewrite:
   `STDL_DRAW_SET` or XOR/OR/CLEAR into the planes of a colour.
   Shared edges tile exactly (top-left rule), and the edges are
   stepped without a span list.
+* dithered or fill-patterned faces (PICO-8's `fillp`, ordered-dither
+  shading, fog, screen-door transparency) ->
+  `STDL_FillPolygonPattern` with an `STDL_Pattern` built once by
+  `STDL_MakePattern(&pat, col0, col1, bits, transparent)`. Vertices
+  are 12.4 fixed point (`STDL_PointSub`), so a projected face keeps
+  its sub-pixel position and moves smoothly; the coverage rule is
+  `STDL_FillPolygon`'s, exact on those vertices, so faces sharing an
+  edge still tile. The pattern is anchored to the surface (y & 3,
+  x & 3), so neighbouring faces dither as one. A solid colour is
+  just a pattern with col0 == col1.
 * tiny overlays (FPS counters, debug text) -> `STDL_PutPixel`
   (slow path, fine for a handful of pixels) or `STDL_DrawText`
 * 1bpp bitmap expansion -> `STDL_SurfaceFrom1bpp`; byte-per-pixel
@@ -459,8 +469,11 @@ truncates colours to the low N bits rather than rejecting them. See
   multiplied, a value from a loop counter, `/` or `%` by a
   non-power-of-two (constants included) and `-O1` builds all call
   libgcc instead, at about 350 and 630 cycles a time on a plain ST.
-  Use `STDL_MulS16`/`STDL_MulU16`, `STDL_DivS16`/`STDL_DivU16` and
-  `STDL_FixDiv` from `stdl_math.h` on per-frame paths, and run `tools/libcalls.sh` over
+  Use `STDL_MulS16`/`STDL_MulU16`, `STDL_DivS16`/`STDL_DivU16`,
+  `STDL_FixDiv` and `STDL_FixMul` (a 16.16 product, truncated toward
+  minus infinity exactly as `(int32_t)(((int64_t)a * b) >> 16)` -
+  PICO-8's multiply - where that C is a `__muldi3` call) from
+  `stdl_math.h` on per-frame paths, and run `tools/libcalls.sh` over
   the port's objects to list every call per function. With `-a` and
   an allowlist it fails the build on a new one.
 * **libc memcpy in per-frame paths**: mintlib's memcpy overhead

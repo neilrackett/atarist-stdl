@@ -100,6 +100,10 @@ stop trying and redesign instead.
   (a hole in a masked surface); its `STDL_DRAW_XOR`, `STDL_DRAW_OR`
   and `STDL_DRAW_CLEAR` are plane operations and use bits 0-3 of the
   colour, like the XOR primitives below.
+* `STDL_FillPolygonPattern` takes colours (via `STDL_MakePattern`)
+  as bits 0-3 only - no `STDL_TRANSPARENT`: a pattern's own mask
+  leaves pixels untouched instead, and every pixel it does draw is
+  marked opaque on a masked surface. It has no XOR/OR/CLEAR form.
 * The XOR primitives (`STDL_XorRect` and friends) are the one
   exception to `STDL_TRANSPARENT`: only bits 0-3 of the colour are
   used, colour 0 is a no-op, and the pixels they touch are marked

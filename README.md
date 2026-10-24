@@ -78,7 +78,10 @@ holds it), and the vectors put back however the program exits.
 
 `STDL_FillPolygon` fills convex polygons straight from their edges -
 set, or XORed, ORed or cleared into a colour's planes, with shared
-edges tiling exactly - for flat-shaded 3D and glenz. `STDL_StagePalette(1)`
+edges tiling exactly - for flat-shaded 3D and glenz. `STDL_FillPolygonPattern`
+fills them with a two-colour 4x4 pattern (PICO-8's `fillp`: dither
+shading, fog, screen-door transparency) from 12.4 sub-pixel vertices,
+under the same exact edge rule. `STDL_StagePalette(1)`
 holds palette changes for the vertical blank, so a fade or a cycle never
 splits a frame. Music can be played from memory, sought, and read back
 for meters (`STDL_MusicFromMemory`, `STDL_SeekMusic`,
@@ -107,7 +110,8 @@ border forces 50Hz for as long as it is open, the overscan tricks being
 PAL-timed.
 
 `<stdl/stdl_math.h>` is the 68000's own 16-bit multiply and divide
-(`STDL_MulS16`, `STDL_DivS16`, `STDL_FixDiv` for 16.16 slopes), because
+(`STDL_MulS16`, `STDL_DivS16`, `STDL_FixDiv` for 16.16 slopes,
+`STDL_FixMul` for a 16.16 product bit-exact with the 64-bit one), because
 gcc 4.6 silently turns any product it cannot prove 16-bit into a
 `__mulsi3` call eight times the price - a loop counter, two bytes, an
 `int`. `tools/libcalls.sh` lists every such call an object makes, per
@@ -126,7 +130,7 @@ emulated; see [docs/limits.md](docs/limits.md).
 | `src/`            | video, surface, surfacefrom, draw, shapes, blit, blit8, blitter, planes, palette,   |
 |                   | event, cursor, time, dirty, vbl, sprite, tileset, text, drawchar, indexed, asset,   |
 |                   | bmp, degas, audio, voice, music, sfx, tone, opl, ym, compat, mixer, palstage,       |
-|                   | polygon, raster, spritebatch                                                        |
+|                   | polygon, polypat, raster, spritebatch                                               |
 | `tools/stdlconv/` | asset converter: image quantise + planar, sprite/tile/font banks, Degas PI1,        |
 |                   | WAV (incl. MS ADPCM) to STE DMA rates, MIDI and YM2151 (VGM) to YM music, C-arrays  |
 | `tools/libcalls.sh` | per-function libgcc arithmetic calls (multiply, divide, 64-bit, float) in object files, with an allowlist gate |
@@ -192,6 +196,7 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | PLAYMUS.TOS  | YM music (stdlconv midi -> STDL_Music) + sample chunks via the SDL_mixer shim    |
 | MUSICVU.TOS  | YM music from memory: VU meter from the stream's registers, position, seeking    |
 | POLYDEMO.TOS | convex polygons XORed into single planes, a glenz look; seamless shared edges    |
+| PATDEMO.TOS  | pattern-filled polygons: Bayer dither shading, a screen door, sub-pixel motion   |
 | RASTERS.TOS  | Timer B rasters: copper bars in colour 0 edge to edge, a gradient in colour 15   |
 | SFXDEMO.TOS  | Degas splash, YM effects stealing/restoring music voices, joystick key emulation |
 | TONEDEMO.TOS | live notes on the three YM voices: a fourth note displacing and returning        |

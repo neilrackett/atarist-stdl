@@ -21,7 +21,7 @@
  *       tests/hatari/run.sh pc dist/PRIMCOST.TOS 8 "waitfor SC:done"
  *
  * Built with -DPC_ONLY='"polygon"' it runs only the cases whose
- * label holds that string.
+ * label holds that string ("poly" for both polygon fills).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -220,6 +220,56 @@ static void op_glenz(int i)
     }
 }
 
+/* pattern polygons: 12.4 vertices with fractions (so each edge's
+ * set-up takes the general start, as a projected face's does), a
+ * dither, opaque and transparent, and the same shapes as plain
+ * STDL_FillPolygon SETs beside them */
+#define SUB(x, f) ((int16_t)((x) * 16 + (f)))
+static const STDL_PointSub pp_t2[3] = {
+    { SUB(100, 5), SUB(50, 3) }, { SUB(130, 9), SUB(51, 1) },
+    { SUB(95, 2), SUB(52, 7) }
+};
+static const STDL_PointSub pp_t8[3] = {
+    { SUB(100, 5), SUB(50, 3) }, { SUB(130, 9), SUB(55, 1) },
+    { SUB(95, 2), SUB(58, 7) }
+};
+static const STDL_PointSub pp_t22[3] = {
+    { SUB(100, 5), SUB(50, 3) }, { SUB(130, 9), SUB(70, 1) },
+    { SUB(95, 2), SUB(72, 7) }
+};
+static const STDL_PointSub pp_quad[4] = {
+    { SUB(60, 3), SUB(40, 9) }, { SUB(100, 11), SUB(44, 2) },
+    { SUB(96, 6), SUB(60, 13) }, { SUB(58, 1), SUB(56, 5) }
+};
+static const STDL_PointSub pp_dia[4] = {
+    { SUB(160, 5), SUB(20, 3) }, { SUB(240, 9), SUB(100, 1) },
+    { SUB(160, 2), SUB(180, 7) }, { SUB(80, 11), SUB(100, 13) }
+};
+/* the 22-row triangle cut by the left edge: the clamped rows */
+static const STDL_PointSub pp_t22c[3] = {
+    { SUB(5, 5), SUB(50, 3) }, { SUB(35, 9), SUB(70, 1) },
+    { SUB(-5, 2), SUB(72, 7) }
+};
+static const STDL_Point pi_t2[3] = { { 100, 50 }, { 130, 51 }, { 95, 52 } };
+static const STDL_Point pi_t8[3] = { { 100, 50 }, { 130, 55 }, { 95, 58 } };
+static const STDL_Point pi_quad[4] = {
+    { 60, 40 }, { 100, 44 }, { 96, 60 }, { 58, 56 }
+};
+static STDL_Pattern pp_dith, pp_trans;
+
+static void op_pp_t2(int i)   { (void)i; STDL_FillPolygonPattern(dst, pp_t2, 3, &pp_dith); }
+static void op_pp_t8(int i)   { (void)i; STDL_FillPolygonPattern(dst, pp_t8, 3, &pp_dith); }
+static void op_pp_t22(int i)  { (void)i; STDL_FillPolygonPattern(dst, pp_t22, 3, &pp_dith); }
+static void op_pp_quad(int i) { (void)i; STDL_FillPolygonPattern(dst, pp_quad, 4, &pp_dith); }
+static void op_pp_dia(int i)  { (void)i; STDL_FillPolygonPattern(dst, pp_dia, 4, &pp_dith); }
+static void op_pp_t22t(int i) { (void)i; STDL_FillPolygonPattern(dst, pp_t22, 3, &pp_trans); }
+static void op_pp_diat(int i) { (void)i; STDL_FillPolygonPattern(dst, pp_dia, 4, &pp_trans); }
+static void op_pp_t22c(int i) { (void)i; STDL_FillPolygonPattern(dst, pp_t22c, 3, &pp_dith); }
+static void op_pi_t2(int i)   { (void)i; STDL_FillPolygon(dst, pi_t2, 3, 9, STDL_DRAW_SET); }
+static void op_pi_t8(int i)   { (void)i; STDL_FillPolygon(dst, pi_t8, 3, 9, STDL_DRAW_SET); }
+static void op_pi_t22(int i)  { (void)i; STDL_FillPolygon(dst, tri, 3, 9, STDL_DRAW_SET); }
+static void op_pi_quad(int i) { (void)i; STDL_FillPolygon(dst, pi_quad, 4, 9, STDL_DRAW_SET); }
+
 static void op_hline32(int i)  { (void)i; STDL_HLine(dst, 37, 68, 60, 5); }
 static void op_hline300(int i) { (void)i; STDL_HLine(dst, 7, 306, 60, 5); }
 static void op_vline(int i)    { (void)i; STDL_VLine(dst, 77, 20, 69, 5); }
@@ -360,6 +410,8 @@ int main(void)
     ndsp = spans_of(diamond, 4, dsp);
     ntsp = spans_of(tri, 3, tsp);
     glenz_init();
+    STDL_MakePattern(&pp_dith, 9, 4, 0xA5A5, 0);
+    STDL_MakePattern(&pp_trans, 9, 4, 0xA5A5, 1);
     for (pass_name = 'A'; pass_name <= 'B'; pass_name++) {
         report("tile 16x16", op_tile);
         report("tile 16x16 masked", op_tilem);
@@ -397,6 +449,18 @@ int main(void)
         report("polygon 22 rows xor c4", op_poly_t1);
         report("polygon 22 rows clipped c4", op_poly_tc);
         report("polygon glenz 24 tris", op_glenz);
+        report("polygon 2 rows set", op_pi_t2);
+        report("polygon 8 rows set", op_pi_t8);
+        report("polygon 22 rows set", op_pi_t22);
+        report("polygon quad 20 rows set", op_pi_quad);
+        report("polypat 2 rows", op_pp_t2);
+        report("polypat 8 rows", op_pp_t8);
+        report("polypat 22 rows", op_pp_t22);
+        report("polypat quad 20 rows", op_pp_quad);
+        report("polypat 160 rows", op_pp_dia);
+        report("polypat 22 rows transp", op_pp_t22t);
+        report("polypat 160 rows transp", op_pp_diat);
+        report("polypat 22 rows clipped", op_pp_t22c);
     }
     printf("SC:done\n");
     fflush(stdout);

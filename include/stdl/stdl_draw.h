@@ -158,6 +158,72 @@ void STDL_XorVSpans(STDL_Surface *dst, const STDL_Span *spans,
 void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,
                       uint8_t col, int op);
 
+/*
+ * Two-colour 4x4 pattern fills: PICO-8's fillp - ordered-dither
+ * shading, fog, screen-door transparency - for convex polygons with
+ * sub-pixel vertices.
+ *
+ * STDL_Pattern holds a pattern as the plane words it draws: since 4
+ * divides 16, every 16-pixel group of a row is the same four words,
+ * so a row of the pattern is one group, chosen by y & 3 of the
+ * surface's own pixel coordinates (the pattern is anchored to the
+ * surface, not to the polygon, so neighbouring faces dither as one).
+ * mask[] follows the library's convention: a bit set leaves the
+ * destination pixel alone; a row whose mask is 0 is opaque. Build
+ * one with STDL_MakePattern, once, and keep it: the struct is the
+ * caller's, and the fill only reads it.
+ */
+typedef struct {
+    uint16_t planes[4][4];  /* [y & 3][plane]: one 16-pixel group */
+    uint16_t mask[4];       /* [y & 3]: bit set = destination preserved */
+} STDL_Pattern;
+
+/*
+ * `bits` is the 4x4 pattern, bit 15 the top-left pixel (x & 3 == 0,
+ * y & 3 == 0), row-major: bits 15-12 are row 0, x 0 to 3, and bits
+ * 3-0 row 3. A clear bit takes col0 and a set bit col1 - or, when
+ * `transparent` is non-zero, is left untouched. PICO-8's fillp(p)
+ * with colours c0 and c1 is STDL_MakePattern(&pat, c0, c1, p, 0);
+ * its transparency bit is `transparent`. Colours use bits 0-3; at a
+ * plane budget below 4 the fill writes only the planes the budget
+ * keeps, as the other fills do. 0x0000 or col0 == col1 is a solid
+ * colour, and costs exactly what a dither does.
+ */
+void STDL_MakePattern(STDL_Pattern *p, uint8_t col0, uint8_t col1,
+                      uint16_t bits, int transparent);
+
+/* A vertex in 12.4 sub-pixel fixed point: x = 16 is the left edge
+ * of pixel column 1. */
+typedef struct { int16_t x, y; } STDL_PointSub;
+
+/*
+ * Fill the convex polygon pts[0..n-1] (either winding, n >= 3) with
+ * the pattern. The vertices are 12.4 fixed point, and the coverage
+ * rule is STDL_FillPolygon's evaluated exactly on them: a pixel is
+ * drawn when its sample point - its top-left corner, (16x, 16y) -
+ * is inside, with the top and left edges inside and the bottom and
+ * right ones outside. So faces that share an edge tile with no gap
+ * and no pixel drawn twice, a vertex moving by 1/16 of a pixel moves
+ * only the pixels whose sample points it crosses, and integer
+ * vertices shifted left by 4 with a solid pattern draw exactly what
+ * STDL_FillPolygon(..., STDL_DRAW_SET) draws. Zero-area input draws
+ * nothing. Clipped to dst->clip; coordinates are any int16_t (+-2048
+ * pixels). Like STDL_FillPolygon it ignores the surface origin, and
+ * on a masked surface the pixels it draws become opaque (the pattern
+ * mask's preserved pixels keep theirs).
+ *
+ * Opaque rows store their middle groups outright from the pattern
+ * row, so a dither costs what a solid fill does; transparent rows
+ * merge every group under the row's mask. In C for now: measured on
+ * a plain ST (PRIMCOST), a 2-row triangle 1.80ms, an 8-row one 2.97,
+ * a 22-row one 5.90 and a 160-row diamond 53.8 (62.8 transparent),
+ * against 0.70, 1.00, 1.72 and 12.7ms for STDL_FillPolygon SET. CPU
+ * only. Its own object: a program that never calls it does not
+ * carry it.
+ */
+void STDL_FillPolygonPattern(STDL_Surface *dst, const STDL_PointSub *pts,
+                             int n, const STDL_Pattern *pat);
+
 #ifdef __cplusplus
 }
 #endif

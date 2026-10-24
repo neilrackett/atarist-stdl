@@ -144,6 +144,61 @@ static __inline__ int32_t STDL_FixDiv(int a, int b)
     return a < 0 ? -(int32_t)t : (int32_t)t;
 }
 
+/*
+ * a * b >> 16 for two 16.16 values: the 64-bit product shifted down
+ * and truncated to 32 bits, rounding toward minus infinity - exactly
+ * (int32_t)(((int64_t)a * b) >> 16), which is PICO-8's multiply.
+ * Any a and b; a product past 32 bits wraps as that expression does.
+ * Four mulu.w of the halves, with the sign put right in the high
+ * word: 324 cycles on a plain ST, where the C line is a __muldi3
+ * call of 1404 (tests/hatari/mathchk.c).
+ */
+static __inline__ int32_t STDL_FixMul(int32_t a, int32_t b)
+{
+#ifdef __m68k__
+    /* unsigned, bits 16-47 of a * b are
+     *   (al bl >> 16) + al bh + ah bl + (ah bh << 16),
+     * and a signed operand subtracts the other one << 32, which is
+     * the other's low word from the result's high word */
+    uint32_t r, t, u;
+
+    __asm__(
+        "move.w %[a],%[r]\n\t"
+        "mulu.w %[b],%[r]\n\t"      /* al bl */
+        "clr.w  %[r]\n\t"
+        "swap   %[r]\n\t"           /* >> 16 */
+        "move.l %[b],%[t]\n\t"
+        "swap   %[t]\n\t"
+        "mulu.w %[a],%[t]\n\t"      /* al bh */
+        "add.l  %[t],%[r]\n\t"
+        "move.l %[a],%[t]\n\t"
+        "swap   %[t]\n\t"
+        "move.w %[t],%[u]\n\t"      /* ah */
+        "mulu.w %[b],%[t]\n\t"      /* ah bl */
+        "add.l  %[t],%[r]\n\t"
+        "move.l %[b],%[t]\n\t"
+        "swap   %[t]\n\t"           /* bh */
+        "mulu.w %[t],%[u]\n\t"      /* ah bh: its low word counts */
+        "tst.l  %[a]\n\t"
+        "bpl.s  1f\n\t"
+        "sub.w  %[b],%[u]\n"        /* a < 0: less bl */
+        "1:\n\t"
+        "tst.l  %[b]\n\t"
+        "bpl.s  2f\n\t"
+        "sub.w  %[a],%[u]\n"        /* b < 0: less al */
+        "2:\n\t"
+        "swap   %[r]\n\t"
+        "add.w  %[u],%[r]\n\t"
+        "swap   %[r]"
+        : [r] "=&d"(r), [t] "=&d"(t), [u] "=&d"(u)
+        : [a] "d"(a), [b] "d"(b)
+        : "cc");
+    return (int32_t)r;
+#else
+    return (int32_t)(((int64_t)a * b) >> 16);
+#endif
+}
+
 #ifdef __cplusplus
 }
 #endif

@@ -176,6 +176,10 @@ pixel, per row, per object or per frame. `STDL_MulS16`/`STDL_MulU16`
 (16x16->32), `STDL_DivS16`/`STDL_DivU16` (32/16, quotient must fit)
 and `STDL_FixDiv` (`(a << 16) / b` for a 16.16 slope, about 330
 cycles against 630) are the instruction whatever surrounds them.
+`STDL_FixMul(a, b)` is the 16.16 product,
+`(int32_t)(((int64_t)a * b) >> 16)` bit for bit (rounding toward
+minus infinity, as PICO-8 does), from four `mulu.w`: 324 cycles on a plain ST
+against 1404 for that C, a `__muldi3` call (MATHCHK).
 Products with a constant can stay plain C (`y * 160` compiles to
 shifts and adds for an `int`, `muls.w #160` for an `int16_t`).
 Precompute a reciprocal or a table instead of
@@ -267,6 +271,21 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
      triangles 49ms (85 before this path). Set-up is about 5000
      cycles a polygon, so from those figures only faces under about
      ten rows are cheaper as spans. `examples/polydemo.c`
+   - dithered faces, fog and screen doors (PICO-8's `fillp`) ->
+     `STDL_FillPolygonPattern(dst, pts, n, &pat)`, with `pat` built
+     once by `STDL_MakePattern(&pat, col0, col1, bits, transparent)`
+     (bits: 4x4, bit 15 top-left, row-major; set bits take col1, or
+     are left alone when `transparent`). Vertices are 12.4 fixed point
+     (`STDL_PointSub`) and the rule is `STDL_FillPolygon`'s, exact on
+     them: shared edges tile, integer vertices << 4 with a solid
+     pattern draw the identical pixels, and a face moving by 1/16
+     pixel changes only the pixels it crosses. The pattern is anchored
+     to the surface, so a shaded mesh dithers as one. Opaque rows store
+     whole groups straight from the pattern, so a dither costs what a
+     solid colour does. Measured on a plain ST (PRIMCOST), still the
+     C reference: a 2-row triangle 1.8ms, 22 rows 5.9ms, a 160-row
+     diamond 54ms, against 0.70, 1.72 and 12.7ms for
+     `STDL_FillPolygon` SET. `examples/patdemo.c`
    - a *loop* of short spans (terrain profiles, column fields,
      raycaster walls) -> fill an `STDL_Span` array and make one
      `STDL_XorVSpans` / `STDL_VSpans` / `STDL_XorHSpans` /

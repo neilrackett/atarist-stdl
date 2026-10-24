@@ -6,7 +6,9 @@
  * stdl_math.h on the machine: tests/host/test_math.c's cases against
  * the 68000 instructions the functions are on target, then each one
  * timed against the C that gcc 4.6 turns into a libgcc call. The
- * header's cycle figures come from here.
+ * header's cycle figures come from here. STDL_FixMul is checked
+ * against a shift-and-add reference rather than the 64-bit product,
+ * which on the target would be libgcc checking itself.
  *
  *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -std=gnu99 \
  *       -Iinclude -o dist/MATHCHK.TOS tests/hatari/mathchk.c libstdl.a
@@ -26,6 +28,7 @@
  * hoisted out of the loop; the empty loop is the floor */
 static volatile int va = 12345, vb = -321, vd = 77;
 static volatile int32_t vn = 950000L;
+static volatile int32_t vfa = -0x2A51F3L, vfb = 0x13C77L;
 static volatile int32_t sink;
 
 static uint32_t t_floor(void)
@@ -53,6 +56,8 @@ TIMED(t_mulsi3, va * vb)
 TIMED(t_divs,   STDL_DivS16(vn, vd))
 TIMED(t_divsi3, vn / vd)
 TIMED(t_fix,    STDL_FixDiv(va, vd))
+TIMED(t_fixmul, STDL_FixMul(vfa, vfb))
+TIMED(t_muldi3, (int32_t)(((int64_t)vfa * vfb) >> 16))
 
 /* for comparison: the shortest form, a positive divisor and one sign
  * to handle - what FixDiv costs for being general */
@@ -99,6 +104,8 @@ int main(void)
     report("FixDiv", t_fix(), fl);
     report("pos form", t_fixp(), fl);
     report("C fixdiv", t_fixc(), fl);
+    report("FixMul", t_fixmul(), fl);
+    report("C fixmul", t_muldi3(), fl);
     printf("MC:done %s\n", r == 0 ? "PASS" : "FAIL");
     fflush(stdout);
     STDL_Quit();

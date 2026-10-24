@@ -769,8 +769,9 @@ warnings** with the Makefile's `-Wall -Wextra`.
   the C build is what tests/host exercises, and the same host tests
   run on the target gate the asm: `tests/hatari/pixchk.c` for
   test_pixel.c, `tests/hatari/i8chk.c` for test_blit8.c,
-  `tests/hatari/ixchk.c` for test_indexed.c and
-  `tests/hatari/pgchk.c` for test_polygon.c. A pixel
+  `tests/hatari/ixchk.c` for test_indexed.c,
+  `tests/hatari/pgchk.c` for test_polygon.c and
+  `tests/hatari/ppchk.c` for test_polypat.c. A pixel
   file with asm and no such runner has its asm checked by nobody -
   blit8.c's was, until I8CHK, and a deliberately broken gather now
   fails it with 26 differences. (gcc 4.6 earned the asm: it

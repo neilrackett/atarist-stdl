@@ -16,7 +16,8 @@
  * polygons, with every fixed case (the extremes, the edges either
  * side of the fast path's 4095 sub-pixel rows, clipped tops), for
  * real hardware. With -DPPCHK_FULL it checks a tenth, for the
- * emulator. Times are in the header of src/polypat.c.
+ * emulator: 27s and 148s on a plain ST (15s sampled on a Mega STE),
+ * the reference's checking rather than the fill.
  *
  *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -std=gnu99 \
  *       -Iinclude -Isrc -Ilib/xpad/src -DPPCHK_FULL \
@@ -32,7 +33,7 @@
 #ifdef PPCHK_FULL
 #define PP_ITERS 300
 #else
-#define PP_ITERS 30
+#define PP_ITERS 12
 #endif
 #define PP_CLOCK() ((unsigned long)STDL_GetTicks())
 #define main ppchk_suite

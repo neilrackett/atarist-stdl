@@ -96,6 +96,38 @@
  * rather than taken out of each: an edge between two faces of a mesh
  * is set up twice, once by each, at about 680 cycles a time.
  *
+ * The rows. A probe timing parallelograms of 50 and 100 rows, every
+ * row the same width, gives the cost of a row on a plain ST: before
+ * the opaque loops were unrolled by the pattern's row, 414 cycles for
+ * one group, 523 for two, 675 for six; since, 390, 501 and 643 - the
+ * 20 cycles of a pointer step and wrap test gone, at the price of
+ * about 40 a trapezoid for the jump in and 1.9KB of code. PRIMCOST:
+ * 22 rows 1.91 -> 1.87ms, the 160-row diamond 14.5 -> 14.0, the 2-row
+ * triangle 0.645 -> 0.649.
+ *
+ * What a narrow row is made of, counted for one group (68000 cycles):
+ * the plane words 32, the columns and the empty test 26, splitting
+ * them into group and bit 24, the group's address 20, the two edge
+ * masks 52, the group count 20, the read-modify-write of the group's
+ * two longs 104, the two edges' steps about 52, and the row's end 34.
+ * A narrow row near 200 cycles is not in this design: two groups are
+ * 192 cycles of read-modify-write alone, and the bookkeeping has no
+ * register left to move into - a0-a6 and d0-d7 are all taken, which
+ * is what kept the fixes, the row count and the clamp's columns in
+ * memory. Evaluated and not done, by count:
+ *  - a pattern ring (a next pointer per entry) built per polygon:
+ *    16 cycles a row saved against about 230 to build, so a loss
+ *    below 15 rows;
+ *  - a single-group path tested first: about 12 saved on a one-group
+ *    row, 22 lost on every other;
+ *  - the masks PC-relative, to free a1 for the row count: the table
+ *    is 128 bytes and an 8-bit displacement cannot reach both halves
+ *    from the loop;
+ *  - edges as 16.16 plus a fraction: the exact step is already one
+ *    add.l and a carry, with the fix only on a borrow;
+ *  - the middle groups unrolled by two: about 10 saved a pair against
+ *    20 added to every row for the odd one, so a loss on narrow rows.
+ *
  * tests/hatari/ppchk.c runs the host suite on the machine: 27s for
  * the sampled build on a plain ST (15s on a Mega STE), and 148s for
  * -DPPCHK_FULL (13s of host time under fast-forward) - the checking,
@@ -719,6 +751,109 @@ void stdl_pprows_t4c(void);
  * the entry, at -4(a6) once the row's words are loaded), CL the
  * clamp to the clip's columns, MID one middle group.
  */
+/*
+ * The opaque rows, unrolled four ways by the pattern's row: copy k
+ * loads row k's plane words from a fixed offset of the pattern (a6,
+ * which then never moves), so a row has no pointer to step and no
+ * wrap to test - 20 cycles of each row's 52 - and a two-plane row
+ * loads one long, not two. The entry jumps to the copy for the first
+ * row's y & 3 (d3, the row the walker is on); each copy counts the
+ * row off and the last goes round to the first.
+ */
+#define P_OBODY(P23, P23N, CL, MID)                                       \
+    "move.w %d4,%d0\n\t"                /* the left's first column */     \
+    "move.w %d5,%d1\n\t"                /* the right's end */             \
+    CL("cmp.w  " P_LO ",%d0\n\t"                                          \
+       "bcc.s  11f\n\t"                                                   \
+       "move.w " P_LO ",%d0\n"                                            \
+       "11:\n\t"                                                          \
+       "cmp.w  " P_HI ",%d1\n\t"                                          \
+       "bls.s  12f\n\t"                                                   \
+       "move.w " P_HI ",%d1\n"                                            \
+       "12:\n\t")                                                         \
+    "cmp.w  %d0,%d1\n\t"                                                  \
+    "bls    9f\n\t"                     /* an empty row */                \
+    "subq.w #1,%d1\n\t"                 /* the right's last column */     \
+    "moveq  #-16,%d2\n\t"                                                 \
+    "and.w  %d0,%d2\n\t"                                                  \
+    "eor.w  %d2,%d0\n\t"                /* the left's column in group */  \
+    "moveq  #-16,%d3\n\t"                                                 \
+    "and.w  %d1,%d3\n\t"                                                  \
+    "eor.w  %d3,%d1\n\t"                                                  \
+    "lsr.w  #1,%d2\n\t"                 /* its group's byte offset */     \
+    "lea    0(%a2,%d2.w),%a3\n\t"                                         \
+    "add.w  %d0,%d0\n\t"                                                  \
+    "add.w  %d0,%d0\n\t"                                                  \
+    "move.l 0(%a1,%d0.w),%d0\n\t"       /* left mask, in both words */    \
+    "add.w  %d1,%d1\n\t"                                                  \
+    "add.w  %d1,%d1\n\t"                                                  \
+    "move.l 64(%a1,%d1.w),%d1\n\t"      /* right mask */                  \
+    "lsr.w  #1,%d3\n\t"                                                   \
+    "sub.w  %d2,%d3\n\t"                /* 8 x the groups after it */     \
+    "bne.s  2f\n\t"                                                       \
+    "and.l  %d1,%d0\n\t"                /* one group */                   \
+    P_EDGE("%d0", "(%a3)", "%d6")                                         \
+    P23(P_EDGE("%d0", "4(%a3)", "%d7"))                                   \
+    "bra    9f\n"                                                         \
+    "2:\n\t"                                                              \
+    P_EDGEI("%d0", "%d6")                                                 \
+    P23(P_EDGEI("%d0", "%d7"))                                            \
+    P23N("addq.l #4,%a3\n\t")                                             \
+    "lsr.w  #3,%d3\n\t"                                                   \
+    "subq.w #2,%d3\n\t"                                                   \
+    "bmi.s  4f\n\t"                                                       \
+    "3:\n\t"                                                              \
+    MID                                                                   \
+    "dbf    %d3,3b\n"                                                     \
+    "4:\n\t"                                                              \
+    P_EDGE("%d1", "(%a3)", "%d6")                                         \
+    P23(P_EDGE("%d1", "4(%a3)", "%d7"))                                   \
+    "9:\n\t"                                                              \
+    "add.l  %a4,%d4\n\t"                /* carry: no borrow */            \
+    "bcs.s  5f\n\t"                                                       \
+    "add.l  " P_FL ",%d4\n"                                               \
+    "5:\n\t"                                                              \
+    "add.l  %a5,%d5\n\t"                                                  \
+    "bcs.s  6f\n\t"                                                       \
+    "add.l  " P_FR ",%d5\n"                                               \
+    "6:\n\t"                                                              \
+
+#define P_OLOAD(K, P23)                                                   \
+    "move.l " #K "(%a6),%d6\n\t"                                          \
+    P23("move.l " #K "+4(%a6),%d7\n\t")
+#define PPROWS4(NAME, P23, P23N, CL, MID)                                 \
+__asm__(                                                                  \
+    "\t.text\n\t.even\n\t.globl " P_SYM(NAME) "\n"                        \
+    P_SYM(NAME) ":\n\t"                                                    \
+    "moveq  #3,%d0\n\t"                                                   \
+    "and.w  %d3,%d0\n\t"                                                  \
+    "add.w  %d0,%d0\n\t"                                                  \
+    "move.w 90f(%pc,%d0.w),%d0\n\t"                                       \
+    "jmp    90f(%pc,%d0.w)\n"                                              \
+    "90:\n\t"                                                             \
+    ".word  80f-90b,81f-90b,82f-90b,83f-90b\n"                            \
+    "80:\n\t"                                                             \
+    P_OLOAD(0, P23) P_OBODY(P23, P23N, CL, MID)                           \
+    "adda.l %a0,%a2\n\t"                                                  \
+    "subq.w #1," P_CNT "\n\t"                                             \
+    "beq    99f\n"                                                        \
+    "81:\n\t"                                                             \
+    P_OLOAD(8, P23) P_OBODY(P23, P23N, CL, MID)                           \
+    "adda.l %a0,%a2\n\t"                                                  \
+    "subq.w #1," P_CNT "\n\t"                                             \
+    "beq    99f\n"                                                        \
+    "82:\n\t"                                                             \
+    P_OLOAD(16, P23) P_OBODY(P23, P23N, CL, MID)                          \
+    "adda.l %a0,%a2\n\t"                                                  \
+    "subq.w #1," P_CNT "\n\t"                                             \
+    "beq    99f\n"                                                        \
+    "83:\n\t"                                                             \
+    P_OLOAD(24, P23) P_OBODY(P23, P23N, CL, MID)                          \
+    "adda.l %a0,%a2\n\t"                                                  \
+    "subq.w #1," P_CNT "\n\t"                                             \
+    "bne    80b\n"                                                        \
+    "99:\n\t"                                                             \
+    "rts\n");
 #define PPROWS(NAME, ESIZE, P23, P23N, TR, CL, MID)                       \
 __asm__(                                                                  \
     "\t.text\n\t.even\n\t.globl " P_SYM(NAME) "\n"                        \
@@ -799,12 +934,12 @@ __asm__(                                                                  \
 #define MID_O4 "move.l %d6,(%a3)+\n\t" "move.l %d7,(%a3)+\n\t"
 #define MID_T2 P_EDGEI("%d0", "%d6") "addq.l #4,%a3\n\t"
 #define MID_T4 P_EDGEI("%d0", "%d6") P_EDGEI("%d0", "%d7")
-PPROWS(stdl_pprows_o2, 8, P_OFF, P_ON, P_OFF, P_OFF, MID_O2)
-PPROWS(stdl_pprows_o4, 8, P_ON, P_OFF, P_OFF, P_OFF, MID_O4)
+PPROWS4(stdl_pprows_o2, P_OFF, P_ON, P_OFF, MID_O2)
+PPROWS4(stdl_pprows_o4, P_ON, P_OFF, P_OFF, MID_O4)
 PPROWS(stdl_pprows_t2, 12, P_OFF, P_ON, P_ON, P_OFF, MID_T2)
 PPROWS(stdl_pprows_t4, 12, P_ON, P_OFF, P_ON, P_OFF, MID_T4)
-PPROWS(stdl_pprows_o2c, 8, P_OFF, P_ON, P_OFF, P_ON, MID_O2)
-PPROWS(stdl_pprows_o4c, 8, P_ON, P_OFF, P_OFF, P_ON, MID_O4)
+PPROWS4(stdl_pprows_o2c, P_OFF, P_ON, P_ON, MID_O2)
+PPROWS4(stdl_pprows_o4c, P_ON, P_OFF, P_ON, MID_O4)
 PPROWS(stdl_pprows_t2c, 12, P_OFF, P_ON, P_ON, P_ON, MID_T2)
 PPROWS(stdl_pprows_t4c, 12, P_ON, P_OFF, P_ON, P_ON, MID_T4)
 
@@ -1183,7 +1318,7 @@ __asm__(
     "moveq  #3,%d0\n\t"
     "and.w  %d3,%d0\n\t"
     "lsl.w  #3,%d0\n\t"
-    "lea    0(%a1,%d0.w),%a6\n\t"       /* the first row's entry */
+    "move.l %a1,%a6\n\t"                /* opaque rows find their own row */
     "lea    " P_SYM(stdl_pp_lmasks) ",%a1\n\t"
     /* the long edge, the short one from the top if the middle's row
      * is below this one, its rows, then the short one from the
@@ -1382,7 +1517,10 @@ __asm__(
     "move.w %a2,%d2\n\t"
     "lsl.w  #2,%d2\n\t"                 /* four entries */
     "cmp.w  #32,%d2\n\t"
-    "beq.s  4f\n\t"
+    "bne.s  5f\n\t"
+    "moveq  #0,%d0\n\t"                 /* opaque rows find their own row */
+    "bra.s  4f\n"
+    "5:\n\t"
     "add.w  %d1,%d0\n"                  /* x 12 */
     "4:\n\t"
     "lea    0(%a1,%d2.w),%a6\n\t"

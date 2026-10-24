@@ -283,13 +283,14 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
      to the surface, so a shaded mesh dithers as one. Opaque rows store
      whole groups straight from the pattern, so a dither costs what a
      solid colour does. Measured on a plain ST (PRIMCOST): a 2-row
-     triangle 0.645ms, 22 rows 1.91ms, a 20-row quad 2.29ms, a
-     160-row diamond 14.5ms, against 0.70, 1.72, 2.00 and 12.7ms for
+     triangle 0.65ms, 22 rows 1.87ms, a 20-row quad 2.25ms, a
+     160-row diamond 14.0ms, against 0.70, 1.72, 1.99 and 12.7ms for
      `STDL_FillPolygon` SET. Triangles take a path of their own; any
-     face's set-up is about 680 cycles an edge, a narrow row
-     450-550, so a frame of many small faces is set-up bound - merge
-     faces where the model allows. Transparent rows merge every
-     group (a 160-row diamond 21.9ms). On a masked surface, or
+     face's set-up is about 680 cycles an edge, and a row about 390
+     cycles for one group and 500 for two, so a frame of many small
+     faces is set-up and row bound - merge faces where the model
+     allows. Transparent rows merge every group (a 160-row diamond
+     21.7ms). On a masked surface, or
      for an edge over 255 rows, it takes the C path, which measured
      2.3-3.6x slower than the 68000 one. `examples/patdemo.c`
    - a *loop* of short spans (terrain profiles, column fields,

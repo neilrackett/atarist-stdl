@@ -36,36 +36,65 @@
  *
  * Measured on a plain ST (PRIMCOST, Hatari --machine st; 12.4
  * vertices with fractions, a dither between colours 9 and 4, all
- * four planes), the C reference first and then the 68000 path below:
+ * four planes): the C reference, the first 68000 version, and this
+ * one, with its own triangle path:
  *
- *                        C      68000   transparent   FillPolygon SET
- *   2-row triangle     1.80ms   0.79ms                   0.70ms
- *   8-row triangle     2.97     1.15                     1.00
- *   22-row triangle    5.90     2.09      2.46           1.72
- *   20-row quad        6.84     2.36                     2.00
- *   160-row diamond   53.8     14.9      23.4           12.8
- *   22 rows, clipped   5.98     2.24
+ *                        C      68000   now    transp.  FillPolygon SET
+ *   2-row triangle     1.80ms   0.79   0.645            0.70ms
+ *   8-row triangle     2.97     1.15   1.01             1.00
+ *   22-row triangle    5.90     2.09   1.91    2.40     1.72
+ *   20-row quad        6.84     2.36   2.29             2.00
+ *   160-row diamond   53.8     14.9   14.5    21.9     12.7
+ *   22 rows, clipped   5.98     2.24   2.07
  *
- * On a Mega STE at 16MHz (--machine megaste) the 68000 path takes
- * 0.42, 0.61, 1.10, 1.33 and 8.6ms for the first five (FillPolygon
- * SET 0.38, 0.53, 0.91, 1.10, 7.6). In cycles at 8MHz, from a probe
- * timing the call alone: one that clips out entirely is about 1300
- * (the entry's checks, the register save, the vertex scan and the
- * clip), a 2-row triangle about 6200, and each further narrow row
- * about 460-530, plus 34 for each opaque middle group (two move.l
- * and the dbf) or 114 transparent. Of a triangle's set-up, each edge
- * costs about 860 - 620 for its arithmetic (a divs.w, a muls.w, two
- * mulu.w), the rest walking to it - and the winding 350. The first
- * 68000 version came in through a C wrapper and built its call
- * afresh: 0.88ms for the 2-row triangle; entering in 68000 and
- * reading each vertex once took 800 cycles off.
+ * On a Mega STE at 16MHz (--machine megaste) the same five take 0.37,
+ * 0.55, 1.03, 1.29 and 8.5ms (FillPolygon SET 0.38, 0.54, 0.91, 1.10,
+ * 7.6); the first 68000 version took 0.42, 0.61, 1.10, 1.33 and 8.6.
  *
- * A batch entry point was considered and not added: what it could
- * save is the per-call part - the argument push, the entry's checks,
- * the register save and restore and the frame - about 700 cycles a
- * polygon counted from the code (the whole of a call that clips out
- * measures 1300), against 6200 for the smallest and more for any
- * other.
+ * In cycles at 8MHz, from a probe timing the call alone: a 2-row
+ * triangle about 5050 (6165 in the first 68000 version), the same
+ * with its vertices on whole rows 4450 (5890), with a vertical edge
+ * 4840 (6200); a 2-row quad about 5440 (5620). Taken apart on the
+ * triangle by stopping it at each stage: about 1800 before the second
+ * edge (the call, the checks, the register save, the sort, the clip,
+ * the side and the first edge), each edge's set-up about 680 - 290
+ * of it a divs.w, a muls.w and two mulu.w, the rest some fifty other
+ * instructions - and a one-row trapezoid about 500-740. A call that
+ * clips out by rows is about 950; a generic polygon's walk spends
+ * about 2290 before its first edge (a quad).
+ *
+ * What did and did not pay, measured or counted:
+ *  - The triangle path (sorted vertices, one cross product for the
+ *    side, the long edge kept across both trapezoids, no walk): the
+ *    2-row triangle 6165 -> 5230 cycles.
+ *  - Entering in 68000 rather than through a C wrapper, reading each
+ *    vertex once: the first version's 0.88ms -> 0.79 for the 2-row
+ *    triangle.
+ *  - Edge shortcuts: a vertical edge skips the divide and both
+ *    multiplies, a vertex on a sample row (t = 0) both multiplies.
+ *  - The start column from k0 = -B & 15 (one small mulu and one
+ *    borrow) instead of a compare against D and 2D: about 20 cycles an
+ *    edge. Instruction counting promised three times that.
+ *  - Long edge masks with the word in both halves (no swap to
+ *    replicate them), and edge groups written with (a3)+: about 20
+ *    cycles a narrow row.
+ *  - Clipping rows first and the clamp's columns only when clamping:
+ *    a polygon outside the rows 1418 -> 945 cycles, others 80-100.
+ *  - Not done: a reciprocal table for the slopes. q and r exactly from
+ *    a table of 65536 / dy (8KB for the 4095 sub-pixel rows the fast
+ *    path takes) is a lookup, two mulu.w and a correction - about 160
+ *    cycles counted, against the divs.w's 140-158 and its floor fix.
+ *  - Not done: a quad path like the triangle's (sorting four vertices,
+ *    the two chains' cases); the generic walk's own overheads were
+ *    trimmed instead, about 100 cycles a quad.
+ *  - Not done: a batch entry point. What it could save is the
+ *    per-call part - the argument push, the entry's checks, the
+ *    register save and restore - about 500 cycles a polygon counted
+ *    from the code, some 10% of a small face.
+ *
+ * Getting a small face much further needs work shared between faces
+ * rather than taken out of each: an edge between two faces of a mesh
+ * is set up twice, once by each, at about 680 cycles a time.
  *
  * tests/hatari/ppchk.c runs the host suite on the machine: 27s for
  * the sampled build on a plain ST (15s on a Mega STE), and 148s for
@@ -86,6 +115,20 @@ const uint16_t stdl_pp_masks[32] = {
     0x8000, 0xC000, 0xE000, 0xF000, 0xF800, 0xFC00, 0xFE00, 0xFF00,
     0xFF80, 0xFFC0, 0xFFE0, 0xFFF0, 0xFFF8, 0xFFFC, 0xFFFE, 0xFFFF
 };
+#ifdef __m68k__
+/* the same as longs, the word in both halves - a plane pair's mask -
+ * for the 68000 rows */
+const uint32_t stdl_pp_lmasks[32] = {
+    0xFFFFFFFFu, 0x7FFF7FFFu, 0x3FFF3FFFu, 0x1FFF1FFFu,
+    0x0FFF0FFFu, 0x07FF07FFu, 0x03FF03FFu, 0x01FF01FFu,
+    0x00FF00FFu, 0x007F007Fu, 0x003F003Fu, 0x001F001Fu,
+    0x000F000Fu, 0x00070007u, 0x00030003u, 0x00010001u,
+    0x80008000u, 0xC000C000u, 0xE000E000u, 0xF000F000u,
+    0xF800F800u, 0xFC00FC00u, 0xFE00FE00u, 0xFF00FF00u,
+    0xFF80FF80u, 0xFFC0FFC0u, 0xFFE0FFE0u, 0xFFF0FFF0u,
+    0xFFF8FFF8u, 0xFFFCFFFCu, 0xFFFEFFFEu, 0xFFFFFFFFu
+};
+#endif
 #define lmask stdl_pp_masks
 #define rmask (stdl_pp_masks + 16)
 
@@ -144,7 +187,7 @@ static void edge_setup(EStart *s, const STDL_PointSub *a,
     const unsigned dy = (unsigned)((int32_t)b->y - a->y);   /* 1..65535 */
     const unsigned t = (unsigned)((int32_t)y * 16 - a->y);  /* < dy */
     const unsigned ux = (unsigned)(dx < 0 ? -dx : dx);
-    unsigned q0, r0, r, tq;
+    unsigned q0, r0, r, tq, k0;
     int32_t q, bb;
     uint32_t tr, sm;
 
@@ -174,17 +217,21 @@ static void edge_setup(EStart *s, const STDL_PointSub *a,
         bb += (int32_t)k;
         tr -= STDL_MulU16(k, dy);
     }
-    /* N = D (B >> 4) + sm, and sm < 2D */
-    sm = STDL_MulU16((unsigned)(bb & 15), dy) + tr;
+    /* the edge is at x = B + t r / dy sub-pixels, with t r < 16 dy.
+     * With k0 = -B & 15, B + k0 is the multiple of 16 at or right of
+     * B: the column is (B + k0) / 16 if x has not passed it (k0 dy >=
+     * t r) and one more if it has, and the remainder D c - N is
+     * k0 dy - t r, plus D in the second case. One small multiply and
+     * one compare, as the 68000 does it */
+    k0 = (unsigned)(-bb) & 15u;
+    sm = STDL_MulU16(k0, dy);
     s->d = (uint32_t)dy << 4;
-    s->c = bb >> 4;
-    s->e = 0;
-    if (sm > s->d) {
-        s->c += 2;
-        s->e = 2 * s->d - sm;
-    } else if (sm != 0) {
+    s->c = (bb + (int32_t)k0) >> 4;
+    if (sm >= tr) {
+        s->e = sm - tr;
+    } else {
         s->c += 1;
-        s->e = s->d - sm;
+        s->e = sm + s->d - tr;
     }
     s->q = q;
     s->r16 = (uint32_t)r << 4;
@@ -406,6 +453,36 @@ static __inline__ int next_vertex(int i, int dir, int n)
 }
 
 #ifndef __m68k__
+/* rows [y, stop) between edges l and r, as the 68000's row loops do
+ * them; returns the row after */
+static uint8_t *rows_fast(const Walk *w, PEdge *l, PEdge *r, uint8_t *row,
+                          int y, int stop, int clamp)
+{
+    const unsigned lo = (unsigned)(w->lo + 32768);
+    const unsigned hi = (unsigned)(w->hi + 32768);
+
+    for (; y < stop; y++) {
+        unsigned a = (uint16_t)l->x, e = (uint16_t)r->x;
+
+        if (clamp) {
+            if (a < lo) {
+                a = lo;
+            }
+            if (e > hi) {
+                e = hi;
+            }
+        }
+        if (a < e) {
+            span_c(row, (int)a - 32768, (int)e - 32768 - 1, &w->pr[y & 3],
+                   w->np, NULL);
+        }
+        pedge_step(l);
+        pedge_step(r);
+        row += w->stride;
+    }
+    return row;
+}
+
 /*
  * The fast path, in C: the 68000's twin. Both sides walked down from
  * the top vertex - skipping edges that are flat or end above the
@@ -414,8 +491,6 @@ static __inline__ int next_vertex(int i, int dir, int n)
 static void walk_fast(Walk *w, int clamp)
 {
     const STDL_PointSub *pts = w->pts;
-    const unsigned lo = (unsigned)(w->lo + 32768);
-    const unsigned hi = (unsigned)(w->hi + 32768);
     int il = w->top, ir = w->top, lend = CEIL16(pts[w->top].y);
     int rend = lend, y = w->y;
     uint8_t *row = w->row;
@@ -424,12 +499,13 @@ static void walk_fast(Walk *w, int clamp)
     for (;;) {
         int stop;
 
+        /* no test for the bottom vertex here, as in the 68000: a side
+         * stops at the edge reaching it, whose row ceil(bottom / 16)
+         * is at least y2, and the walk ends at y2 - it would never
+         * fire */
         while (lend <= y) {
             const int b = next_vertex(il, w->dir, w->n);
 
-            if (pts[il].y >= w->bottom) {
-                return;
-            }
             lend = CEIL16(pts[b].y);
             if (lend > y) {
                 pedge_start(&l, &pts[il], &pts[b], y);
@@ -439,9 +515,6 @@ static void walk_fast(Walk *w, int clamp)
         while (rend <= y) {
             const int b = next_vertex(ir, -w->dir, w->n);
 
-            if (pts[ir].y >= w->bottom) {
-                return;
-            }
             rend = CEIL16(pts[b].y);
             if (rend > y) {
                 pedge_start(&r, &pts[ir], &pts[b], y);
@@ -452,28 +525,61 @@ static void walk_fast(Walk *w, int clamp)
         if (stop > w->y2) {
             stop = w->y2;
         }
-        for (; y < stop; y++) {
-            unsigned a = (uint16_t)l.x, e = (uint16_t)r.x;
-
-            if (clamp) {
-                if (a < lo) {
-                    a = lo;
-                }
-                if (e > hi) {
-                    e = hi;
-                }
-            }
-            if (a < e) {
-                span_c(row, (int)a - 32768, (int)e - 32768 - 1,
-                       &w->pr[y & 3], w->np, NULL);
-            }
-            pedge_step(&l);
-            pedge_step(&r);
-            row += w->stride;
-        }
+        row = rows_fast(w, &l, &r, row, y, stop, clamp);
+        y = stop;
         if (y >= w->y2) {
             return;
         }
+    }
+}
+
+/*
+ * A triangle, as the 68000 takes one: its vertices sorted by y into
+ * top, middle and bottom, the long edge top-bottom on one side for
+ * every row and the short ones top-middle and middle-bottom on the
+ * other, the side from one cross product. Three edges set up and no
+ * walk: the same pixels as walk_fast.
+ */
+static void walk_tri(Walk *w, int clamp)
+{
+    const STDL_PointSub *t = &w->pts[0], *m = &w->pts[1];
+    const STDL_PointSub *b = &w->pts[2], *u;
+    PEdge lng, sht;
+    int ym, y = w->y;
+    int32_t c1, c2;
+    uint8_t *row = w->row;
+
+    /* the 68000's three compare-and-exchanges */
+    if (m->y < t->y) { u = t; t = m; m = u; }
+    if (b->y < m->y) {
+        u = m; m = b; b = u;
+        if (m->y < t->y) { u = t; t = m; m = u; }
+    }
+    c1 = STDL_MulS16(b->x - t->x, m->y - t->y);
+    c2 = STDL_MulS16(b->y - t->y, m->x - t->x);
+    if (c1 == c2) {
+        return;                 /* no area */
+    }
+    ym = CEIL16(m->y);
+    pedge_start(&lng, t, b, y);
+    if (y < ym) {
+        const int stop = ym < w->y2 ? ym : w->y2;
+
+        pedge_start(&sht, t, m, y);
+        /* c1 < c2: the middle is right of the long edge, which is
+         * then the left side */
+        row = c1 < c2 ? rows_fast(w, &lng, &sht, row, y, stop, clamp)
+                      : rows_fast(w, &sht, &lng, row, y, stop, clamp);
+        y = stop;
+        if (y >= w->y2) {
+            return;
+        }
+    }
+    pedge_start(&sht, m, b, y);
+    if (c1 < c2) {
+        rows_fast(w, &lng, &sht, row, y, w->y2, clamp);
+    } else {
+        rows_fast(w, &sht, &lng, row, y, w->y2, clamp);
     }
 }
 
@@ -594,8 +700,10 @@ void stdl_pprows_t4c(void);
 #define P_EDGE(M, A, L) \
     "move.l " A ",%d2\n\t" "eor.l " L ",%d2\n\t" "and.l " M ",%d2\n\t" \
     "eor.l %d2," A "\n\t"
-#define P_REP(M) "move.w " M ",%d2\n\t" "swap " M "\n\t" \
-                 "move.w %d2," M "\n\t"
+/* the same, stepping A on: (a3)+ */
+#define P_EDGEI(M, L) \
+    "move.l (%a3),%d2\n\t" "eor.l " L ",%d2\n\t" "and.l " M ",%d2\n\t" \
+    "eor.l %d2,(%a3)+\n\t"
 #define P_ON(x) x
 #define P_OFF(x)
 /* the frame, as the row loops see it (the walker's, 4 further up) */
@@ -611,7 +719,7 @@ void stdl_pprows_t4c(void);
  * the entry, at -4(a6) once the row's words are loaded), CL the
  * clamp to the clip's columns, MID one middle group.
  */
-#define PPROWS(NAME, ESIZE, P23, TR, CL, MID)                             \
+#define PPROWS(NAME, ESIZE, P23, P23N, TR, CL, MID)                       \
 __asm__(                                                                  \
     "\t.text\n\t.even\n\t.globl " P_SYM(NAME) "\n"                        \
     P_SYM(NAME) ":\n"                                                     \
@@ -641,24 +749,24 @@ __asm__(                                                                  \
     "lsr.w  #1,%d2\n\t"                 /* its group's byte offset */     \
     "lea    0(%a2,%d2.w),%a3\n\t"                                         \
     "add.w  %d0,%d0\n\t"                                                  \
-    "move.w 0(%a1,%d0.w),%d0\n\t"       /* left mask */                   \
+    "add.w  %d0,%d0\n\t"                                                  \
+    "move.l 0(%a1,%d0.w),%d0\n\t"       /* left mask, in both words */    \
     "add.w  %d1,%d1\n\t"                                                  \
-    "move.w 32(%a1,%d1.w),%d1\n\t"      /* right mask */                  \
+    "add.w  %d1,%d1\n\t"                                                  \
+    "move.l 64(%a1,%d1.w),%d1\n\t"      /* right mask */                  \
     "lsr.w  #1,%d3\n\t"                                                   \
     "sub.w  %d2,%d3\n\t"                /* 8 x the groups after it */     \
     "bne.s  2f\n\t"                                                       \
-    "and.w  %d1,%d0\n\t"                /* one group */                   \
-    P_REP("%d0")                                                          \
+    "and.l  %d1,%d0\n\t"                /* one group */                   \
     TR("and.l  -4(%a6),%d0\n\t")                                          \
     P_EDGE("%d0", "(%a3)", "%d6")                                         \
     P23(P_EDGE("%d0", "4(%a3)", "%d7"))                                   \
     "bra    9f\n"                                                         \
     "2:\n\t"                                                              \
-    P_REP("%d0")                                                          \
     TR("and.l  -4(%a6),%d0\n\t")                                          \
-    P_EDGE("%d0", "(%a3)", "%d6")                                         \
-    P23(P_EDGE("%d0", "4(%a3)", "%d7"))                                   \
-    "addq.l #8,%a3\n\t"                                                   \
+    P_EDGEI("%d0", "%d6")                                                 \
+    P23(P_EDGEI("%d0", "%d7"))                                            \
+    P23N("addq.l #4,%a3\n\t")                                             \
     "lsr.w  #3,%d3\n\t"                                                   \
     "subq.w #2,%d3\n\t"                                                   \
     "bmi.s  4f\n\t"                                                       \
@@ -667,7 +775,6 @@ __asm__(                                                                  \
     MID                                                                   \
     "dbf    %d3,3b\n"                                                     \
     "4:\n\t"                                                              \
-    P_REP("%d1")                                                          \
     TR("and.l  -4(%a6),%d1\n\t")                                          \
     P_EDGE("%d1", "(%a3)", "%d6")                                         \
     P23(P_EDGE("%d1", "4(%a3)", "%d7"))                                   \
@@ -690,17 +797,16 @@ __asm__(                                                                  \
     "rts\n");
 #define MID_O2 "move.l %d6,(%a3)\n\t" "addq.l #8,%a3\n\t"
 #define MID_O4 "move.l %d6,(%a3)+\n\t" "move.l %d7,(%a3)+\n\t"
-#define MID_T2 P_EDGE("%d0", "(%a3)", "%d6") "addq.l #8,%a3\n\t"
-#define MID_T4 P_EDGE("%d0", "(%a3)", "%d6") P_EDGE("%d0", "4(%a3)", "%d7") \
-               "addq.l #8,%a3\n\t"
-PPROWS(stdl_pprows_o2, 8, P_OFF, P_OFF, P_OFF, MID_O2)
-PPROWS(stdl_pprows_o4, 8, P_ON, P_OFF, P_OFF, MID_O4)
-PPROWS(stdl_pprows_t2, 12, P_OFF, P_ON, P_OFF, MID_T2)
-PPROWS(stdl_pprows_t4, 12, P_ON, P_ON, P_OFF, MID_T4)
-PPROWS(stdl_pprows_o2c, 8, P_OFF, P_OFF, P_ON, MID_O2)
-PPROWS(stdl_pprows_o4c, 8, P_ON, P_OFF, P_ON, MID_O4)
-PPROWS(stdl_pprows_t2c, 12, P_OFF, P_ON, P_ON, MID_T2)
-PPROWS(stdl_pprows_t4c, 12, P_ON, P_ON, P_ON, MID_T4)
+#define MID_T2 P_EDGEI("%d0", "%d6") "addq.l #4,%a3\n\t"
+#define MID_T4 P_EDGEI("%d0", "%d6") P_EDGEI("%d0", "%d7")
+PPROWS(stdl_pprows_o2, 8, P_OFF, P_ON, P_OFF, P_OFF, MID_O2)
+PPROWS(stdl_pprows_o4, 8, P_ON, P_OFF, P_OFF, P_OFF, MID_O4)
+PPROWS(stdl_pprows_t2, 12, P_OFF, P_ON, P_ON, P_OFF, MID_T2)
+PPROWS(stdl_pprows_t4, 12, P_ON, P_OFF, P_ON, P_OFF, MID_T4)
+PPROWS(stdl_pprows_o2c, 8, P_OFF, P_ON, P_OFF, P_ON, MID_O2)
+PPROWS(stdl_pprows_o4c, 8, P_ON, P_OFF, P_OFF, P_ON, MID_O4)
+PPROWS(stdl_pprows_t2c, 12, P_OFF, P_ON, P_ON, P_ON, MID_T2)
+PPROWS(stdl_pprows_t4c, 12, P_ON, P_OFF, P_ON, P_ON, MID_T4)
 
 /*
  * An edge from vertex a (x:y in d6) to vertex b (x:y in d7), set up
@@ -722,22 +828,31 @@ PPROWS(stdl_pprows_t4c, 12, P_ON, P_ON, P_ON, MID_T4)
     "swap   %d7\n\t"                                                      \
     "move.w %d6,%d0\n\t"                                                  \
     "ext.l  %d0\n\t"                    /* a.x */                         \
-    "sub.w  %d6,%d7\n\t"                                                  \
+    "sub.w  %d6,%d7\n\t"                /* dx */                          \
+    "bne.s  20f\n\t"                                                      \
+    "moveq  #0,%d6\n\t"                 /* vertical: q = r = 0, B = a.x */ \
+    "moveq  #0,%d7\n\t"                                                   \
+    "moveq  #0," X "\n\t"                                                 \
+    "bra.s  22f\n"                                                        \
+    "20:\n\t"                                                             \
     "move.w %d7,%d6\n\t"                                                  \
-    "ext.l  %d6\n\t"                    /* dx */                          \
+    "ext.l  %d6\n\t"                                                      \
     "divs.w %d1,%d6\n\t"                /* r:q */                         \
     "move.l %d6,%d7\n\t"                                                  \
-    "swap   %d7\n\t"                                                      \
+    "swap   %d7\n\t"                    /* r */                           \
     "tst.w  %d7\n\t"                                                      \
     "bpl.s  21f\n\t"                                                      \
     "add.w  %d1,%d7\n\t"                /* floor: 0 <= r < dy */          \
     "subq.w #1,%d6\n"                                                     \
     "21:\n\t"                                                             \
-    "move.w %d2," X "\n\t"                                                \
-    "muls.w %d6," X "\n\t"                                                \
+    "moveq  #0," X "\n\t"                                                 \
+    "tst.w  %d2\n\t"                                                      \
+    "beq.s  22f\n\t"                    /* a on the row: B = a.x, t r = 0 */\
+    "move.w %d6," X "\n\t"                                                \
+    "muls.w %d2," X "\n\t"              /* t the source: under 16, cheap */\
     "add.l  " X ",%d0\n\t"              /* B = a.x + t q */               \
-    "move.w %d2," X "\n\t"                                                \
-    "mulu.w %d7," X "\n\t"              /* t r */                         \
+    "move.w %d7," X "\n\t"                                                \
+    "mulu.w %d2," X "\n\t"              /* t r */                         \
     "cmp.w  #16,%d2\n\t"                                                  \
     "bcs.s  22f\n\t"                                                      \
     "divu.w %d1," X "\n\t"              /* a clipped top: whole columns */\
@@ -747,32 +862,25 @@ PPROWS(stdl_pprows_t4c, 12, P_ON, P_ON, P_ON, MID_T4)
     "clr.w  " X "\n\t"                                                    \
     "swap   " X "\n"                    /* t r mod dy */                  \
     "22:\n\t"                                                             \
-    "moveq  #15,%d2\n\t"                                                  \
-    "and.w  %d0,%d2\n\t"                                                  \
-    "mulu.w %d1,%d2\n\t"                                                  \
-    "add.l  " X ",%d2\n\t"              /* sm = (B & 15) dy + t r */      \
-    "asr.l  #4,%d0\n\t"                 /* the column, less 0-2 */        \
+    /* x = B + t r / dy sub-pixels, t r < 16 dy. With k0 = -B & 15 the  \
+     * column is (B + k0) / 16 when k0 dy >= t r, else one more; the     \
+     * remainder is k0 dy - t r, plus D in the second case */            \
+    "moveq  #0,%d2\n\t"                                                   \
+    "sub.w  %d0,%d2\n\t"                                                  \
+    "and.w  #15,%d2\n\t"                /* k0 */                          \
+    "add.l  %d2,%d0\n\t"                                                  \
+    "asr.l  #4,%d0\n\t"                 /* (B + k0) / 16 */               \
+    "mulu.w %d1,%d2\n\t"                /* k0 dy */                       \
     "lsl.w  #4,%d1\n\t"                 /* D */                           \
-    "moveq  #0," X "\n\t"                                                 \
-    "move.w %d1," X "\n\t"                                                \
-    "cmp.l  " X ",%d2\n\t"                                                \
-    "bhi.s  23f\n\t"                                                      \
-    "tst.l  %d2\n\t"                                                      \
-    "beq.s  24f\n\t"                                                      \
-    "addq.w #1,%d0\n\t"                 /* 0 < sm <= D */                 \
-    "sub.w  %d2," X "\n\t"                                                \
-    "bra.s  25f\n"                                                        \
+    "sub.l  " X ",%d2\n\t"                                                \
+    "bcc.s  23f\n\t"                                                      \
+    "addq.w #1,%d0\n\t"                                                   \
+    "add.w  %d1,%d2\n"                                                    \
     "23:\n\t"                                                             \
-    "addq.w #2,%d0\n\t"                 /* D < sm < 2D */                 \
-    "add.l  " X "," X "\n\t"                                              \
-    "sub.l  %d2," X "\n\t"                                                \
-    "bra.s  25f\n"                                                        \
-    "24:\n\t"                                                             \
-    "moveq  #0," X "\n"                                                   \
-    "25:\n\t"                                                             \
-    "swap   " X "\n\t"                                                    \
-    "move.w %d0," X "\n\t"                                                \
-    "eor.w  #0x8000," X "\n\t"          /* e:column + 32768 */            \
+    "swap   %d2\n\t"                                                      \
+    "move.w %d0,%d2\n\t"                                                  \
+    "eor.w  #0x8000,%d2\n\t"            /* e:column + 32768 */            \
+    "move.l %d2," X "\n\t"                                                \
     "lsl.w  #4,%d7\n\t"                 /* 16 r */                        \
     "bne.s  26f\n\t"                                                      \
     "tst.w  %d6\n\t"                                                      \
@@ -793,8 +901,10 @@ PPROWS(stdl_pprows_t4c, 12, P_ON, P_ON, P_ON, MID_T4)
     "move.l %d1," F "\n\t"              /* the fix, D:1 */
 /*
  * One side: while its edge ends at or above row d3, move to the next
- * vertex (ADV adds or subtracts the step, wrapping round), stopping
- * at the bottom vertex; an edge reaching below the row is set up.
+ * vertex (ADV adds or subtracts the step, wrapping round); an edge
+ * reaching below the row is set up. No test for the bottom vertex: a
+ * side stops at the edge that reaches it, whose row is at least the
+ * last, and the walk ends at the last row (walk_fast's comment).
  * IDX and END are the side's frame slots, END the pixel row its edge
  * ends on (exclusive).
  */
@@ -805,8 +915,6 @@ PPROWS(stdl_pprows_t4c, 12, P_ON, P_ON, P_ON, MID_T4)
     "move.l (%sp),%a3\n\t"              /* the vertices */                \
     "move.w " IDX "(%sp),%d0\n\t"                                         \
     "move.l 0(%a3,%d0.w),%d6\n\t"       /* a, x:y */                      \
-    "cmp.w  24(%sp),%d6\n\t"                                              \
-    "bge    99f\n\t"                    /* at the bottom vertex */        \
     ADV " 10(%sp),%d0\n\t"                                                \
     "bpl.s  2f\n\t"                                                       \
     "add.w  8(%sp),%d0\n\t"             /* below the first: the last */   \
@@ -829,16 +937,36 @@ PPROWS(stdl_pprows_t4c, 12, P_ON, P_ON, P_ON, MID_T4)
     P_SETUP(X, SR, F)                                                     \
     "8:\n\t"
 
+/* the triangle's first trapezoid: rows to the middle's row or the
+ * last, whichever is first, leaving d3 the row reached; done if that
+ * is the last */
+#define P_TRAP1                                                           \
+    "move.w 16(%sp),%d0\n\t"            /* the middle's row */            \
+    "cmp.w  18(%sp),%d0\n\t"                                              \
+    "ble.s  9f\n\t"                                                       \
+    "move.w 18(%sp),%d0\n"              /* or the last */                 \
+    "9:\n\t"                                                              \
+    "move.w %d0,20(%sp)\n\t"                                              \
+    "sub.w  %d3,%d0\n\t"                                                  \
+    "move.w %d0,36(%sp)\n\t"            /* the trapezoid's rows */        \
+    "move.l 4(%sp),%a3\n\t"                                               \
+    "jsr    (%a3)\n\t"                                                    \
+    "move.w 20(%sp),%d3\n\t"                                              \
+    "cmp.w  18(%sp),%d3\n\t"                                              \
+    "bge    99f\n"
+
 /*
  * The frame: 0 vertices, 4 row loop, 8 n x 4, 10 step x 4, 12/14 the
  * left's and right's vertex, 16/18 the rows their edges end on, 20
- * the row, 22 the last row (exclusive), 24 the bottom vertex's y, 26
- * where a declined polygon goes (0: back to the C, else on to
- * stdl_ppoly_wide), 28/32 the edges' fixes, 36 the trapezoid's rows,
- * 40 the pattern's end, 44/46 the clip's columns, biased, 48/52 the
- * row loops, unclamped and clamped, 56 the pattern, 60 its entry's
- * size. The arguments are 112 bytes up: dst, pts, n, then the
- * pattern for the public entry or the rest of stdl_ppoly_walk's.
+ * the row, 22 the last row (exclusive), 26 where a declined polygon
+ * goes (0: back to the C, else on to stdl_ppoly_wide), 28/32 the
+ * edges' fixes, 36 the trapezoid's rows, 40 the pattern's end, 44/46
+ * the clip's columns, biased (only when clamping). The triangle uses
+ * 0, 8 and 12 for its vertices, 16 the middle's row and 22 its side
+ * instead. The arguments are 112 bytes up: dst, pts, n, then the
+ * pattern for the public entry or the rest of stdl_ppoly_walk's. Into
+ * the walk (label 50): a1 the pattern, a2 its entry's size, a4/a5 the
+ * row loops, unclamped and clamped.
  */
 __asm__(
     "\t.text\n\t.even\n\t.globl " P_SYM(STDL_FillPolygonPattern) "\n"
@@ -874,18 +1002,19 @@ __asm__(
     "movem.l %d2-%d7/%a2-%a6,-(%sp)\n\t"
     "lea    -64(%sp),%sp\n\t"
     "move.w #1,26(%sp)\n\t"             /* declined: on to the C's */
-    "move.l %a1,56(%sp)\n\t"
-    "move.w #8,60(%sp)\n\t"
     "cmp.w  #2,%d1\n\t"
     "beq.s  1f\n\t"
-    "move.l #" P_SYM(stdl_pprows_o4) ",48(%sp)\n\t"
-    "move.l #" P_SYM(stdl_pprows_o4c) ",52(%sp)\n\t"
+    "lea    " P_SYM(stdl_pprows_o4) ",%a4\n\t"
+    "lea    " P_SYM(stdl_pprows_o4c) ",%a5\n\t"
     "bra.s  2f\n"
     "1:\n\t"
-    "move.l #" P_SYM(stdl_pprows_o2) ",48(%sp)\n\t"
-    "move.l #" P_SYM(stdl_pprows_o2c) ",52(%sp)\n"
+    "lea    " P_SYM(stdl_pprows_o2) ",%a4\n\t"
+    "lea    " P_SYM(stdl_pprows_o2c) ",%a5\n"
     "2:\n\t"
-    "bra.s  50f\n\t"
+    "cmp.w  #3,122(%sp)\n\t"
+    "beq    60f\n\t"                     /* a triangle */
+    "move.w #8,%a2\n\t"                 /* the pattern's entry: 8 bytes */
+    "bra    50f\n\t"
 
     /* stdl_ppoly_walk(dst, pts, n, rows, rows_clamp, pat, esize): the
      * same from the C, which has made the pattern's copy; 0 when it
@@ -895,11 +1024,205 @@ __asm__(
     "movem.l %d2-%d7/%a2-%a6,-(%sp)\n\t"
     "lea    -64(%sp),%sp\n\t"
     "clr.w  26(%sp)\n\t"
-    "move.l 124(%sp),48(%sp)\n\t"
-    "move.l 128(%sp),52(%sp)\n\t"
-    "move.l 132(%sp),56(%sp)\n\t"
-    "move.w 138(%sp),60(%sp)\n"
+    "move.l 124(%sp),%a4\n\t"           /* the rows, unclamped */
+    "move.l 128(%sp),%a5\n\t"           /* and clamped */
+    "move.l 132(%sp),%a1\n\t"           /* the pattern */
+    "move.l 136(%sp),%a2\n\t"           /* its entry's size */
+    "bra    50f\n"
 
+    /* A triangle (the public entry only - an opaque pattern read in
+     * place, so the entry is 8 bytes): walk_tri. The vertices sorted
+     * by y into top, middle and bottom, the long edge top-bottom on
+     * one side and the two short ones on the other, the side from
+     * one cross product; everything in registers but the vertices,
+     * kept in the frame across the edges' set-ups. Frame: 0/8/12 top,
+     * middle, bottom (x:y), 4 row loop, 16 the middle's row, 18 the
+     * last row (exclusive), 20 the row, 22 the long edge's side
+     * (0xFF: left). */
+    "60:\n\t"
+    "move.l 116(%sp),%a0\n\t"
+    "move.l (%a0)+,%d0\n\t"
+    "move.l (%a0)+,%d1\n\t"
+    "move.l (%a0),%d2\n\t"
+    "cmp.w  %d0,%d1\n\t"
+    "bge.s  1f\n\t"
+    "exg    %d0,%d1\n"
+    "1:\n\t"
+    "cmp.w  %d1,%d2\n\t"
+    "bge.s  2f\n\t"
+    "exg    %d1,%d2\n\t"
+    "cmp.w  %d0,%d1\n\t"
+    "bge.s  2f\n\t"
+    "exg    %d0,%d1\n"
+    "2:\n\t"
+    /* the rows: ceil(y / 16) of the top and bottom, clipped; out
+     * before any other work if none is left */
+    "moveq  #15,%d7\n\t"
+    "move.w %d0,%d3\n\t"
+    "ext.l  %d3\n\t"
+    "add.l  %d7,%d3\n\t"
+    "asr.l  #4,%d3\n\t"                 /* the first row */
+    "move.w %d2,%d4\n\t"
+    "ext.l  %d4\n\t"
+    "add.l  %d7,%d4\n\t"
+    "asr.l  #4,%d4\n\t"                 /* the last (exclusive) */
+    "move.l 112(%sp),%a0\n\t"           /* the surface */
+    "move.w 18(%a0),%d5\n\t"
+    "cmp.w  %d5,%d3\n\t"
+    "bge.s  1f\n\t"
+    "move.w %d5,%d3\n"
+    "1:\n\t"
+    "add.w  22(%a0),%d5\n\t"
+    "cmp.w  %d5,%d4\n\t"
+    "ble.s  2f\n\t"
+    "move.w %d5,%d4\n"
+    "2:\n\t"
+    "cmp.w  %d4,%d3\n\t"
+    "bge    99f\n\t"                    /* no row inside the clip */
+    "move.w %d3,20(%sp)\n\t"
+    "move.w %d4,18(%sp)\n\t"
+    "move.w %d1,%d5\n\t"
+    "ext.l  %d5\n\t"
+    "add.l  %d7,%d5\n\t"
+    "asr.l  #4,%d5\n\t"
+    "move.w %d5,16(%sp)\n\t"            /* the middle's row */
+    "move.w %d2,%d5\n\t"
+    "sub.w  %d0,%d5\n\t"                /* uy, the long edge's dy */
+    "cmp.w  #4095,%d5\n\t"
+    "bhi    98f\n\t"                    /* taller than 4095 */
+    "move.l %d0,(%sp)\n\t"
+    "move.l %d1,8(%sp)\n\t"
+    "move.l %d2,12(%sp)\n\t"
+    "move.w %d1,%d6\n\t"
+    "sub.w  %d0,%d6\n\t"                /* vy */
+    "swap   %d0\n\t"
+    "swap   %d1\n\t"
+    "swap   %d2\n\t"
+    "move.w %d0,%d4\n\t"                /* least x */
+    "move.w %d0,%d7\n\t"                /* greatest x */
+    "cmp.w  %d1,%d4\n\t"
+    "ble.s  3f\n\t"
+    "move.w %d1,%d4\n"
+    "3:\n\t"
+    "cmp.w  %d1,%d7\n\t"
+    "bge.s  4f\n\t"
+    "move.w %d1,%d7\n"
+    "4:\n\t"
+    "cmp.w  %d2,%d4\n\t"
+    "ble.s  5f\n\t"
+    "move.w %d2,%d4\n"
+    "5:\n\t"
+    "cmp.w  %d2,%d7\n\t"
+    "bge.s  6f\n\t"
+    "move.w %d2,%d7\n"
+    "6:\n\t"
+    "sub.w  %d4,%d7\n\t"
+    "cmp.w  #32767,%d7\n\t"
+    "bhi    98f\n\t"                    /* wider than 32767 */
+    "add.w  %d4,%d7\n\t"
+    /* the columns: out if wholly left (x <= 16 lo) or right
+     * (x >= 16 hi - 15) of the clip; the clamp, and its columns
+     * biased, only if it reaches past either side */
+    "move.w 16(%a0),%d0\n\t"            /* lo */
+    "move.w %d0,%d3\n\t"
+    "add.w  20(%a0),%d3\n\t"            /* hi */
+    "cmp.w  %d3,%d0\n\t"
+    "bge    99f\n\t"                    /* no column */
+    "ext.l  %d4\n\t"
+    "ext.l  %d7\n\t"
+    "move.w %d0,%d1\n\t"
+    "ext.l  %d1\n\t"
+    "lsl.l  #4,%d1\n\t"                 /* 16 lo */
+    "cmp.l  %d1,%d7\n\t"
+    "ble    99f\n\t"                    /* left of the clip */
+    "move.w %d3,%d2\n\t"
+    "ext.l  %d2\n\t"
+    "lsl.l  #4,%d2\n\t"                 /* 16 hi */
+    "move.l %a4,4(%sp)\n\t"             /* the rows, unclamped */
+    "cmp.l  %d2,%d7\n\t"
+    "bgt.s  3f\n\t"
+    "moveq  #15,%d7\n\t"
+    "sub.l  %d7,%d1\n\t"
+    "cmp.l  %d1,%d4\n\t"
+    "bge.s  4f\n"
+    "3:\n\t"
+    "move.l %a5,4(%sp)\n\t"             /* the rows, clamped */
+    "eor.w  #0x8000,%d0\n\t"
+    "move.w %d0,44(%sp)\n\t"
+    "eor.w  #0x8000,%d3\n\t"
+    "move.w %d3,46(%sp)\n"
+    "4:\n\t"
+    "moveq  #15,%d7\n\t"
+    "sub.l  %d7,%d2\n\t"
+    "cmp.l  %d2,%d4\n\t"
+    "bge    99f\n\t"                    /* right of the clip */
+    /* which side the middle is: ux vy against uy vx */
+    "move.w 12(%sp),%d2\n\t"
+    "move.w 8(%sp),%d1\n\t"
+    "move.w (%sp),%d0\n\t"
+    "sub.w  %d0,%d2\n\t"                /* ux */
+    "sub.w  %d0,%d1\n\t"                /* vx */
+    "muls.w %d6,%d2\n\t"
+    "muls.w %d5,%d1\n\t"
+    "cmp.l  %d1,%d2\n\t"
+    "beq    99f\n\t"                    /* no area */
+    "slt    22(%sp)\n\t"                /* the middle right: long left */
+    /* the first row, less the bias; the stride; the pattern's row
+     * for it and its end */
+    "move.w 20(%sp),%d3\n\t"
+    "move.w %d3,%d0\n\t"
+    "mulu.w 8(%a0),%d0\n\t"
+    "move.l (%a0),%a2\n\t"
+    "add.l  %d0,%a2\n\t"
+    "suba.w #16384,%a2\n\t"
+    "moveq  #0,%d0\n\t"
+    "move.w 8(%a0),%d0\n\t"
+    "move.l %d0,%a0\n\t"
+    "lea    32(%a1),%a6\n\t"
+    "move.l %a6,40(%sp)\n\t"            /* the pattern's end */
+    "moveq  #3,%d0\n\t"
+    "and.w  %d3,%d0\n\t"
+    "lsl.w  #3,%d0\n\t"
+    "lea    0(%a1,%d0.w),%a6\n\t"       /* the first row's entry */
+    "lea    " P_SYM(stdl_pp_lmasks) ",%a1\n\t"
+    /* the long edge, the short one from the top if the middle's row
+     * is below this one, its rows, then the short one from the
+     * middle; d3 the row throughout */
+    "move.l (%sp),%d6\n\t"
+    "move.l 12(%sp),%d7\n\t"
+    "tst.b  22(%sp)\n\t"
+    "bne    70f\n\t"
+    P_SETUP("%d5", "%a5", "32(%sp)")    /* long edge right */
+    "cmp.w  16(%sp),%d3\n\t"
+    "bge    1f\n\t"
+    "move.l (%sp),%d6\n\t"
+    "move.l 8(%sp),%d7\n\t"
+    P_SETUP("%d4", "%a4", "28(%sp)")
+    P_TRAP1
+    "1:\n\t"
+    "move.l 8(%sp),%d6\n\t"
+    "move.l 12(%sp),%d7\n\t"
+    P_SETUP("%d4", "%a4", "28(%sp)")
+    "bra    75f\n"
+    "70:\n\t"
+    P_SETUP("%d4", "%a4", "28(%sp)")    /* long edge left */
+    "cmp.w  16(%sp),%d3\n\t"
+    "bge    1f\n\t"
+    "move.l (%sp),%d6\n\t"
+    "move.l 8(%sp),%d7\n\t"
+    P_SETUP("%d5", "%a5", "32(%sp)")
+    P_TRAP1
+    "1:\n\t"
+    "move.l 8(%sp),%d6\n\t"
+    "move.l 12(%sp),%d7\n\t"
+    P_SETUP("%d5", "%a5", "32(%sp)")
+    "75:\n\t"
+    "move.w 18(%sp),%d0\n\t"            /* to the last row */
+    "sub.w  %d3,%d0\n\t"
+    "move.w %d0,36(%sp)\n\t"
+    "move.l 4(%sp),%a3\n\t"
+    "jsr    (%a3)\n\t"
+    "bra    99f\n"
     "50:\n\t"
     "move.l 116(%sp),%a3\n\t"           /* vertices */
     "move.l 120(%sp),%d0\n\t"           /* n */
@@ -936,17 +1259,9 @@ __asm__(
     "addq.w #4,%d7\n\t"
     "dbf    %d0,1b\n\t"
     "move.w %d7,8(%sp)\n\t"             /* n x 4 */
-    "move.w %d3,%d0\n\t"
-    "sub.w  %d2,%d0\n\t"
-    "cmp.w  #4095,%d0\n\t"
-    "bhi    98f\n\t"                    /* taller than 4095 */
-    "move.w %d5,%d0\n\t"
-    "sub.w  %d4,%d0\n\t"
-    "cmp.w  #32767,%d0\n\t"
-    "bhi    98f\n\t"                    /* wider than 32767 */
-    "move.w %d3,24(%sp)\n\t"            /* bottom */
-    /* the pixel rows: ceil(top / 16) to ceil(bottom / 16), clipped */
-    "move.l 112(%sp),%a1\n\t"           /* the surface */
+    /* the pixel rows: ceil(top / 16) to ceil(bottom / 16), clipped;
+     * out before any other work if none is left */
+    "move.l 112(%sp),%a0\n\t"           /* the surface */
     "moveq  #15,%d7\n\t"
     "move.w %d2,%d0\n\t"
     "ext.l  %d0\n\t"
@@ -958,12 +1273,12 @@ __asm__(
     "ext.l  %d1\n\t"
     "add.l  %d7,%d1\n\t"
     "asr.l  #4,%d1\n\t"
-    "move.w 18(%a1),%d7\n\t"            /* clip y */
+    "move.w 18(%a0),%d7\n\t"            /* clip y */
     "cmp.w  %d7,%d0\n\t"
     "bge.s  6f\n\t"
     "move.w %d7,%d0\n"
     "6:\n\t"
-    "add.w  22(%a1),%d7\n\t"
+    "add.w  22(%a0),%d7\n\t"
     "cmp.w  %d7,%d1\n\t"
     "ble.s  7f\n\t"
     "move.w %d7,%d1\n"
@@ -972,37 +1287,50 @@ __asm__(
     "bge    99f\n\t"                    /* no row inside the clip */
     "move.w %d0,20(%sp)\n\t"
     "move.w %d1,22(%sp)\n\t"
-    /* the columns [lo, hi), biased; the clamp only for a polygon that
-     * reaches past them: x < 16 lo - 15 or x > 16 hi */
-    "move.w 16(%a1),%d0\n\t"            /* clip x */
+    "move.w %d3,%d0\n\t"
+    "sub.w  %d2,%d0\n\t"
+    "cmp.w  #4095,%d0\n\t"
+    "bhi    98f\n\t"                    /* taller than 4095 */
+    "move.w %d5,%d0\n\t"
+    "sub.w  %d4,%d0\n\t"
+    "cmp.w  #32767,%d0\n\t"
+    "bhi    98f\n\t"                    /* wider than 32767 */
+    /* the columns: out if wholly left (x <= 16 lo) or right
+     * (x >= 16 hi - 15) of the clip; the clamp, and its columns
+     * biased, only if it reaches past either side */
+    "move.w 16(%a0),%d0\n\t"            /* lo */
     "move.w %d0,%d1\n\t"
-    "add.w  20(%a1),%d1\n\t"
+    "add.w  20(%a0),%d1\n\t"            /* hi */
     "cmp.w  %d1,%d0\n\t"
     "bge    99f\n\t"                    /* no column */
-    "move.w %d0,%d7\n\t"
-    "eor.w  #0x8000,%d7\n\t"
-    "move.w %d7,44(%sp)\n\t"
-    "move.w %d1,%d7\n\t"
-    "eor.w  #0x8000,%d7\n\t"
-    "move.w %d7,46(%sp)\n\t"
-    "move.l 48(%sp),4(%sp)\n\t"         /* the rows, unclamped */
-    "ext.l  %d0\n\t"
-    "lsl.l  #4,%d0\n\t"
+    "ext.l  %d4\n\t"
+    "ext.l  %d5\n\t"
+    "move.w %d0,%d2\n\t"
+    "ext.l  %d2\n\t"
+    "lsl.l  #4,%d2\n\t"                 /* 16 lo */
+    "cmp.l  %d2,%d5\n\t"
+    "ble    99f\n\t"                    /* left of the clip */
+    "move.w %d1,%d3\n\t"
+    "ext.l  %d3\n\t"
+    "lsl.l  #4,%d3\n\t"                 /* 16 hi */
+    "move.l %a4,4(%sp)\n\t"             /* the rows, unclamped */
+    "cmp.l  %d3,%d5\n\t"
+    "bgt.s  8f\n\t"
     "moveq  #15,%d7\n\t"
-    "sub.l  %d7,%d0\n\t"
-    "move.w %d4,%d7\n\t"
-    "ext.l  %d7\n\t"
-    "cmp.l  %d0,%d7\n\t"
-    "blt.s  8f\n\t"
-    "ext.l  %d1\n\t"
-    "lsl.l  #4,%d1\n\t"
-    "move.w %d5,%d7\n\t"
-    "ext.l  %d7\n\t"
-    "cmp.l  %d1,%d7\n\t"
-    "ble.s  9f\n"
+    "sub.l  %d7,%d2\n\t"
+    "cmp.l  %d2,%d4\n\t"
+    "bge.s  9f\n"
     "8:\n\t"
-    "move.l 52(%sp),4(%sp)\n"           /* the rows, clamped */
+    "move.l %a5,4(%sp)\n\t"             /* the rows, clamped */
+    "eor.w  #0x8000,%d0\n\t"
+    "move.w %d0,44(%sp)\n\t"
+    "eor.w  #0x8000,%d1\n\t"
+    "move.w %d1,46(%sp)\n"
     "9:\n\t"
+    "moveq  #15,%d7\n\t"
+    "sub.l  %d7,%d3\n\t"
+    "cmp.l  %d3,%d4\n\t"
+    "bge    99f\n\t"                    /* right of the clip */
     /* the winding, from the top vertex's two edges: ux * vy against
      * uy * vx, as orientation() */
     "move.w 8(%sp),%d7\n\t"
@@ -1043,28 +1371,32 @@ __asm__(
     "move.w %d6,12(%sp)\n\t"
     "move.w %d6,14(%sp)\n\t"
     "move.l %a3,(%sp)\n\t"
-    /* the first row, less the bias; the stride; the pattern's row
-     * for it and its end */
-    "move.w 20(%sp),%d0\n\t"
-    "mulu.w 8(%a1),%d0\n\t"
-    "move.l (%a1),%a2\n\t"
+    /* the pattern's row for the first row (an entry of 8 or 12 bytes)
+     * and its end; then the first row, less the bias, and the stride */
+    "move.w 20(%sp),%d3\n\t"
+    "moveq  #3,%d0\n\t"
+    "and.w  %d3,%d0\n\t"
+    "lsl.w  #2,%d0\n\t"                 /* row x 4 */
+    "move.w %d0,%d1\n\t"
+    "add.w  %d0,%d0\n\t"                /* x 8 */
+    "move.w %a2,%d2\n\t"
+    "lsl.w  #2,%d2\n\t"                 /* four entries */
+    "cmp.w  #32,%d2\n\t"
+    "beq.s  4f\n\t"
+    "add.w  %d1,%d0\n"                  /* x 12 */
+    "4:\n\t"
+    "lea    0(%a1,%d2.w),%a6\n\t"
+    "move.l %a6,40(%sp)\n\t"            /* the pattern's end */
+    "lea    0(%a1,%d0.w),%a6\n\t"       /* the first row's entry */
+    "move.w %d3,%d0\n\t"
+    "mulu.w 8(%a0),%d0\n\t"
+    "move.l (%a0),%a2\n\t"
     "add.l  %d0,%a2\n\t"
     "suba.w #16384,%a2\n\t"
     "moveq  #0,%d0\n\t"
-    "move.w 8(%a1),%d0\n\t"
+    "move.w 8(%a0),%d0\n\t"
     "move.l %d0,%a0\n\t"
-    "move.l 56(%sp),%a6\n\t"            /* the pattern */
-    "move.w 60(%sp),%d1\n\t"            /* its entry's size */
-    "move.w %d1,%d2\n\t"
-    "lsl.w  #2,%d2\n\t"
-    "ext.l  %d2\n\t"
-    "add.l  %a6,%d2\n\t"
-    "move.l %d2,40(%sp)\n\t"            /* its end */
-    "moveq  #3,%d2\n\t"
-    "and.w  20(%sp),%d2\n\t"
-    "mulu.w %d1,%d2\n\t"
-    "adda.l %d2,%a6\n\t"                /* the first row's entry */
-    "lea    " P_SYM(stdl_pp_masks) ",%a1\n"
+    "lea    " P_SYM(stdl_pp_lmasks) ",%a1\n"
     "0:\n\t"
     "move.w 20(%sp),%d3\n\t"
     P_SIDE("12", "16", "add.w", "%d4", "%a4", "28(%sp)")
@@ -1235,7 +1567,13 @@ void STDL_FillPolygonPattern(STDL_Surface *dst, const STDL_PointSub *pts,
 #ifndef __m68k__
     if (dst->mask == NULL && bottom - pts[top].y <= 4095
         && maxx - minx <= 32767) {
-        walk_fast(&w, minx < 16 * w.lo - 15 || maxx > 16 * w.hi);
+        const int clamp = minx < 16 * w.lo - 15 || maxx > 16 * w.hi;
+
+        if (n == 3) {
+            walk_tri(&w, clamp);
+        } else {
+            walk_fast(&w, clamp);
+        }
         return;
     }
 #endif

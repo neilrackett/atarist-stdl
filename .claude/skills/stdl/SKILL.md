@@ -290,9 +290,12 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
      cycles for one group and 500 for two, so a frame of many small
      faces is set-up and row bound - merge faces where the model
      allows. Transparent rows merge every group (a 160-row diamond
-     21.7ms). On a masked surface, or
-     for an edge over 255 rows, it takes the C path, which measured
-     2.3-3.6x slower than the 68000 one. `examples/patdemo.c`
+     21.7ms). A face far taller than the view - a road's nearest,
+     its ends hundreds of rows off the screen - costs only the rows
+     it draws: a quad 800 rows tall cut to 200 by the clip 25.4ms.
+     On a masked surface, or for a polygon over 2047 pixels tall or
+     wide, it takes the C path, which measured 2.3-4.3x slower than
+     the 68000 one. `examples/patdemo.c`
    - a *loop* of short spans (terrain profiles, column fields,
      raycaster walls) -> fill an `STDL_Span` array and make one
      `STDL_XorVSpans` / `STDL_VSpans` / `STDL_XorHSpans` /

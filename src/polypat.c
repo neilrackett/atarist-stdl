@@ -50,6 +50,8 @@
  * On a Mega STE at 16MHz (--machine megaste) the same five take 0.37,
  * 0.55, 1.03, 1.29 and 8.5ms (FillPolygon SET 0.38, 0.54, 0.91, 1.10,
  * 7.6); the first 68000 version took 0.42, 0.61, 1.10, 1.33 and 8.6.
+ * A quad 800 rows tall cut to 200 by the clip takes 25.4ms (16.7 on
+ * the Mega STE): 108.4 (58.4) while edges over 255 rows went to the C.
  *
  * In cycles at 8MHz, from a probe timing the call alone: a 2-row
  * triangle about 5050 (6165 in the first 68000 version), the same
@@ -80,10 +82,18 @@
  *    cycles a narrow row.
  *  - Clipping rows first and the clamp's columns only when clamping:
  *    a polygon outside the rows 1418 -> 945 cycles, others 80-100.
+ *  - Each edge's remainder kept over 16, against r and dy (pedge_start's
+ *    comment): edges to 32767 sub-pixel rows where they were 4095,
+ *    for about ten cycles of the set-up (PRIMCOST's other cases within
+ *    0.5%, its floor 0.25%). A projected road's nearest face, its ends
+ *    hundreds of rows beyond the view, had gone to walk_wide's C rows:
+ *    in one port's race that was 0.2-0.7 faces a frame at some 14ms
+ *    each on a Mega STE. PRIMCOST's 800-row quad 108.4 -> 25.4ms.
  *  - Not done: a reciprocal table for the slopes. q and r exactly from
  *    a table of 65536 / dy (8KB for the 4095 sub-pixel rows the fast
- *    path takes) is a lookup, two mulu.w and a correction - about 160
- *    cycles counted, against the divs.w's 140-158 and its floor fix.
+ *    path then took, 64KB for its 32767 now) is a lookup, two mulu.w
+ *    and a correction - about 160 cycles counted, against the divs.w's
+ *    140-158 and its floor fix.
  *  - Not done: a quad path like the triangle's (sorting four vertices,
  *    the two chains' cases); the generic walk's own overheads were
  *    trimmed instead, about 100 cycles a quad.
@@ -339,21 +349,24 @@ static void span_c(uint8_t *row, int x1, int x2, const PRow *pr, int np,
 #ifndef __m68k__
 /*
  * The fast path's edges, as the 68000 holds them: one long per edge,
- * the remainder e in the high word and the column in the low, biased
- * by 32768 so stepping never carries out of it. A row's step is one
- * add.l of
+ * the remainder in the high word and the column in the low, biased
+ * by 32768 so stepping never carries out of it. The remainder e
+ * only ever moves by 16r and by D = 16 dy, so e & 15 never changes
+ * and e < 16r exactly when e / 16 < r: the high word holds e / 16,
+ * against r and dy, and makes the same decisions as e would. A
+ * row's step is one add.l of
  *
- *   s = (-16r - [q < 0]) << 16 | (q & 0xFFFF)
+ *   s = (-r - [q < 0]) << 16 | (q & 0xFFFF)
  *
  * whose carry out says e did not go below zero: the low word's own
  * carry, which a negative q always makes, is cancelled by the -1 in
- * the high word. With no carry, f = D << 16 | 1 puts D back and the
- * column on by one. (A slope with r = 0 and q >= 0 would carry
+ * the high word. With no carry, f = dy << 16 | 1 puts dy back and
+ * the column on by one. (A slope with r = 0 and q >= 0 would carry
  * never; it is written q - 1 and r = dy instead, which borrows every
- * row and comes to the same.) Valid while D = 16 dy fits sixteen
- * bits - edges up to 4095 sub-pixel rows, 255 pixels - and the
- * columns lie within +-32767, which they do for any polygon whose
- * width fits that.
+ * row and comes to the same.) Valid while dy fits fifteen bits -
+ * edges up to 32767 sub-pixel rows, 2047 pixels, the divs.w's
+ * divisor - and the columns lie within +-32767, which they do for any
+ * polygon whose width fits that.
  */
 typedef struct {
     uint32_t x, s, f;
@@ -364,19 +377,19 @@ static void pedge_start(PEdge *pe, const STDL_PointSub *a,
 {
     EStart s;
     int32_t q;
-    uint32_t r16;
+    uint32_t r;
 
     edge_setup(&s, a, b, y);
     q = s.q;
-    r16 = s.r16;
-    if (r16 == 0 && q >= 0) {
+    r = s.r16 >> 4;
+    if (r == 0 && q >= 0) {
         q--;
-        r16 = s.d;
+        r = s.d >> 4;
     }
-    pe->s = ((uint32_t)(uint16_t)(0u - r16 - (q < 0 ? 1u : 0u)) << 16)
+    pe->s = ((uint32_t)(uint16_t)(0u - r - (q < 0 ? 1u : 0u)) << 16)
             | (uint16_t)q;
-    pe->f = (s.d << 16) | 1u;
-    pe->x = (s.e << 16) | (uint16_t)(s.c + 32768);
+    pe->f = ((s.d >> 4) << 16) | 1u;
+    pe->x = ((s.e >> 4) << 16) | (uint16_t)(s.c + 32768);
 }
 
 static __inline__ void pedge_step(PEdge *pe)
@@ -388,8 +401,8 @@ static __inline__ void pedge_step(PEdge *pe)
 #endif
 
 /* the edges at the polygon's full width: column and remainder in
- * 32 bits each, for edges taller than 255 pixels or wider than the
- * fast path takes, and on masked surfaces */
+ * 32 bits each, for polygons taller than 2047 pixels or wider than
+ * the fast path takes, and on masked surfaces */
 typedef struct {
     int32_t c, q;
     uint32_t e, r16, d;
@@ -698,7 +711,7 @@ static __attribute__((noinline)) void walk_wide(Walk *w, STDL_Surface *dst)
  * masks, a2 the row (less 16384, the column bias halved), a4/a5 the
  * edges' steps, a6 the pattern row, d4/d5 the edges (remainder:column
  * + 32768); d6/d7 are the row's plane words, loaded from the pattern
- * each row, and d0-d3/a3 are theirs. The fixes D:1, the rows left,
+ * each row, and d0-d3/a3 are theirs. The fixes dy:1, the rows left,
  * the pattern's end and the clamp's columns are in the walker's
  * frame. A row is one pattern entry: two longs of plane words, and
  * for a transparent pattern a third, the row's mask inverted into
@@ -999,24 +1012,28 @@ PPROWS(stdl_pprows_t4c, 12, P_ON, P_OFF, P_ON, P_ON, MID_T4)
     "22:\n\t"                                                             \
     /* x = B + t r / dy sub-pixels, t r < 16 dy. With k0 = -B & 15 the  \
      * column is (B + k0) / 16 when k0 dy >= t r, else one more; the     \
-     * remainder is k0 dy - t r, plus D in the second case */            \
+     * remainder e is k0 dy - t r, plus D in the second case, and the    \
+     * edge keeps e / 16 against dy (pedge_start's comment) */           \
     "moveq  #0,%d2\n\t"                                                   \
     "sub.w  %d0,%d2\n\t"                                                  \
     "and.w  #15,%d2\n\t"                /* k0 */                          \
     "add.l  %d2,%d0\n\t"                                                  \
     "asr.l  #4,%d0\n\t"                 /* (B + k0) / 16 */               \
     "mulu.w %d1,%d2\n\t"                /* k0 dy */                       \
-    "lsl.w  #4,%d1\n\t"                 /* D */                           \
     "sub.l  " X ",%d2\n\t"                                                \
     "bcc.s  23f\n\t"                                                      \
     "addq.w #1,%d0\n\t"                                                   \
-    "add.w  %d1,%d2\n"                                                    \
+    "asr.l  #4,%d2\n\t"                                                   \
+    "add.w  %d1,%d2\n\t"                /* (e + D) / 16 = e / 16 + dy */  \
+    "bra.s  24f\n"                                                        \
     "23:\n\t"                                                             \
+    "lsr.l  #4,%d2\n"                                                     \
+    "24:\n\t"                                                             \
     "swap   %d2\n\t"                                                      \
     "move.w %d0,%d2\n\t"                                                  \
-    "eor.w  #0x8000,%d2\n\t"            /* e:column + 32768 */            \
+    "eor.w  #0x8000,%d2\n\t"            /* e / 16:column + 32768 */       \
     "move.l %d2," X "\n\t"                                                \
-    "lsl.w  #4,%d7\n\t"                 /* 16 r */                        \
+    "tst.w  %d7\n\t"                    /* r */                           \
     "bne.s  26f\n\t"                                                      \
     "tst.w  %d6\n\t"                                                      \
     "bmi.s  26f\n\t"                                                      \
@@ -1033,7 +1050,7 @@ PPROWS(stdl_pprows_t4c, 12, P_ON, P_OFF, P_ON, P_ON, MID_T4)
     "move.l %d7," SR "\n\t"             /* the step */                    \
     "swap   %d1\n\t"                                                      \
     "move.w #1,%d1\n\t"                                                   \
-    "move.l %d1," F "\n\t"              /* the fix, D:1 */
+    "move.l %d1," F "\n\t"              /* the fix, dy:1 */
 /*
  * One side: while its edge ends at or above row d3, move to the next
  * vertex (ADV adds or subtracts the step, wrapping round); an edge
@@ -1223,8 +1240,8 @@ __asm__(
     "move.w %d5,16(%sp)\n\t"            /* the middle's row */
     "move.w %d2,%d5\n\t"
     "sub.w  %d0,%d5\n\t"                /* uy, the long edge's dy */
-    "cmp.w  #4095,%d5\n\t"
-    "bhi    98f\n\t"                    /* taller than 4095 */
+    "cmp.w  #32767,%d5\n\t"
+    "bhi    98f\n\t"                    /* taller than 32767 */
     "move.l %d0,(%sp)\n\t"
     "move.l %d1,8(%sp)\n\t"
     "move.l %d2,12(%sp)\n\t"
@@ -1424,8 +1441,8 @@ __asm__(
     "move.w %d1,22(%sp)\n\t"
     "move.w %d3,%d0\n\t"
     "sub.w  %d2,%d0\n\t"
-    "cmp.w  #4095,%d0\n\t"
-    "bhi    98f\n\t"                    /* taller than 4095 */
+    "cmp.w  #32767,%d0\n\t"
+    "bhi    98f\n\t"                    /* taller than 32767 */
     "move.w %d5,%d0\n\t"
     "sub.w  %d4,%d0\n\t"
     "cmp.w  #32767,%d0\n\t"
@@ -1700,10 +1717,10 @@ void STDL_FillPolygonPattern(STDL_Surface *dst, const STDL_PointSub *pts,
         }
         w.pr[i].keep = pat->mask[i];
     }
-    /* sixteen-bit edges: no mask to keep, edges up to 4095 sub-pixel
+    /* sixteen-bit edges: no mask to keep, edges up to 32767 sub-pixel
      * rows, and a width whose deltas fit */
 #ifndef __m68k__
-    if (dst->mask == NULL && bottom - pts[top].y <= 4095
+    if (dst->mask == NULL && bottom - pts[top].y <= 32767
         && maxx - minx <= 32767) {
         const int clamp = minx < 16 * w.lo - 15 || maxx > 16 * w.hi;
 

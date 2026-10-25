@@ -215,12 +215,13 @@ typedef struct { int16_t x, y; } STDL_PointSub;
  * Opaque rows store their middle groups outright from the pattern
  * row, so a dither costs what a solid fill does; transparent rows
  * merge every group under the row's mask. In 68000 from end to end
- * for a surface with no mask and edges up to 255 rows, with a path
- * of its own for triangles; the rest in C. Measured on a plain ST
- * (PRIMCOST): a 2-row triangle 0.65ms, an 8-row one 1.00, a 22-row
- * one 1.87 (2.40 transparent), a 20-row quad 2.25 and a 160-row
- * diamond 14.0 (21.7), against 0.70, 0.99, 1.72, 1.99 and 12.7ms for
- * STDL_FillPolygon SET. Set-up is about 4000 cycles of the 2-row
+ * for a surface with no mask and a polygon up to 2047 pixels tall
+ * and wide, with a path of its own for triangles; the rest in C.
+ * Measured on a plain ST (PRIMCOST): a 2-row triangle 0.65ms, an
+ * 8-row one 1.00, a 22-row one 1.87 (2.40 transparent), a 20-row
+ * quad 2.25 and a 160-row diamond 14.0 (21.7), against 0.70, 0.99,
+ * 1.72, 1.99 and 12.7ms for STDL_FillPolygon SET; a quad 800 rows
+ * tall cut to 200 by the clip 25.4ms. Set-up is about 4000 cycles of the 2-row
  * triangle - some 680 an edge - and a row about 390 cycles for one
  * group, 500 for two, plus about 38 a further opaque group. CPU
  * only. Its own object: a program that never calls it does not

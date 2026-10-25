@@ -250,6 +250,12 @@ static const STDL_PointSub pp_t22c[3] = {
     { SUB(5, 5), SUB(50, 3) }, { SUB(35, 9), SUB(70, 1) },
     { SUB(-5, 2), SUB(72, 7) }
 };
+/* a quad 800 rows tall, cut by the clip on every side but its left:
+ * the nearest face of a road, its ends far above and below a view */
+static const STDL_PointSub pp_tall[4] = {
+    { SUB(120, 3), SUB(-300, 9) }, { SUB(200, 11), SUB(-300, 2) },
+    { SUB(330, 6), SUB(500, 13) }, { SUB(10, 1), SUB(500, 5) }
+};
 static const STDL_Point pi_t2[3] = { { 100, 50 }, { 130, 51 }, { 95, 52 } };
 static const STDL_Point pi_t8[3] = { { 100, 50 }, { 130, 55 }, { 95, 58 } };
 static const STDL_Point pi_quad[4] = {
@@ -265,6 +271,7 @@ static void op_pp_dia(int i)  { (void)i; STDL_FillPolygonPattern(dst, pp_dia, 4,
 static void op_pp_t22t(int i) { (void)i; STDL_FillPolygonPattern(dst, pp_t22, 3, &pp_trans); }
 static void op_pp_diat(int i) { (void)i; STDL_FillPolygonPattern(dst, pp_dia, 4, &pp_trans); }
 static void op_pp_t22c(int i) { (void)i; STDL_FillPolygonPattern(dst, pp_t22c, 3, &pp_dith); }
+static void op_pp_tall(int i) { (void)i; STDL_FillPolygonPattern(dst, pp_tall, 4, &pp_dith); }
 static void op_pi_t2(int i)   { (void)i; STDL_FillPolygon(dst, pi_t2, 3, 9, STDL_DRAW_SET); }
 static void op_pi_t8(int i)   { (void)i; STDL_FillPolygon(dst, pi_t8, 3, 9, STDL_DRAW_SET); }
 static void op_pi_t22(int i)  { (void)i; STDL_FillPolygon(dst, tri, 3, 9, STDL_DRAW_SET); }
@@ -461,6 +468,7 @@ int main(void)
         report("polypat 22 rows transp", op_pp_t22t);
         report("polypat 160 rows transp", op_pp_diat);
         report("polypat 22 rows clipped", op_pp_t22c);
+        report("polypat 800 rows clipped", op_pp_tall);
     }
     printf("SC:done\n");
     fflush(stdout);

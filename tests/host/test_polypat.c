@@ -665,7 +665,9 @@ static void test_random(void)
 }
 
 /* polygons inside the clip's columns, often: the fast path's
- * no-clamp loop; and tall ones either side of 4095 sub-pixel rows */
+ * no-clamp loop; and tall ones, either side of 4095 sub-pixel rows
+ * (the fast path's limit until its remainders were kept over 16) and
+ * of 32767, its limit now */
 static void test_inside_tall(void)
 {
     int it;
@@ -704,15 +706,20 @@ static void test_inside_tall(void)
         STDL_FreeSurface(s);
     }
     /* 240 to 290 pixel rows on a tall surface, every other one with
-     * its top clipped 100 to 200 rows down: under and over 4095 */
-    for (it = 0; it < (PP_ITERS >= 60 ? PP_ITERS / 30 : 4); it++) {
+     * its top clipped 100 to 200 rows down: under and over 4095; and,
+     * every third one, 1000 to 2100 rows about the surface's middle:
+     * under and over 32767 */
+    for (it = 0; it < (PP_ITERS >= 60 ? PP_ITERS / 20 : 6); it++) {
         enum { TW = 48, TH = 320 };
         STDL_Surface *s = STDL_CreateSurface(TW, TH);
         STDL_PointSub p[24];
         STDL_Pattern pat;
         STDL_Rect c = { 0, 0, TW, TH };
-        const int tall = 240 * 16 + rnd(50 * 16);
-        int n = random_sub(p, rnd(TW * 16), 20 * 16 + tall / 2, TW * 8,
+        const int huge = it % 3 == 2;
+        const int tall = huge ? 1000 * 16 + rnd(1100 * 16)
+                              : 240 * 16 + rnd(50 * 16);
+        int n = random_sub(p, rnd(TW * 16),
+                           huge ? TH * 8 : 20 * 16 + tall / 2, TW * 8,
                            tall / 2);
 
         if (it & 1) {
@@ -728,22 +735,26 @@ static void test_inside_tall(void)
         fill_and_check(s, p, n, &pat, 4, "tall", it);
         STDL_FreeSurface(s);
     }
-    /* exactly at the fast path's limit, and one past it */
+    /* exactly at the fast path's limit, and one past it: now and as
+     * it was; the tallest begin 1000 rows above the surface */
     {
-        static const int16_t hgt[4] = { 4094, 4095, 4096, 4097 };
+        static const int32_t hgt[8] = { 4094, 4095, 4096, 4097,
+                                        32766, 32767, 32768, 32769 };
         int k;
 
-        for (k = 0; k < 8; k++) {
+        for (k = 0; k < 16; k++) {
             enum { TW = 48, TH = 300 };
             STDL_Surface *s = STDL_CreateSurface(TW, TH);
             STDL_PointSub p[3];
             STDL_Pattern pat;
+            const int32_t y0 = k >= 8 ? -16000 : 37;
+            const int32_t h = hgt[k >> 1];
 
-            p[0].x = 24 * 16 + 3;            p[0].y = 37;
+            p[0].x = 24 * 16 + 3;            p[0].y = (int16_t)y0;
             p[1].x = (int16_t)(k & 1 ? 2 * 16 + 5 : 45 * 16 + 11);
-            p[1].y = (int16_t)(37 + hgt[k >> 1]);
+            p[1].y = (int16_t)(y0 + h);
             p[2].x = (int16_t)(k & 1 ? 40 * 16 : 7 * 16);
-            p[2].y = (int16_t)(37 + hgt[k >> 1] - 1 - 33 * (k >> 1));
+            p[2].y = (int16_t)(y0 + h - 1 - 33 * ((k >> 1) & 3));
             randomise(s, 4);
             STDL_MakePattern(&pat, 3, 12, 0x5A5A, k & 2);
             fill_and_check(s, p, 3, &pat, 4, "limit", k);

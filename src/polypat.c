@@ -97,14 +97,28 @@
  *  - Not done: a quad path like the triangle's (sorting four vertices,
  *    the two chains' cases); the generic walk's own overheads were
  *    trimmed instead, about 100 cycles a quad.
- *  - Not done: a batch entry point. What it could save is the
- *    per-call part - the argument push, the entry's checks, the
- *    register save and restore - about 500 cycles a polygon counted
- *    from the code, some 10% of a small face.
+ *  - Built, measured and not kept (2026-10-25): a batch entry point,
+ *    STDL_FillPolygonsPattern(dst, list, count). The count above, 500
+ *    cycles a polygon, was what a call pays; a list keeps most of it.
+ *    It walked the list in 68000 and entered the walker in place of a
+ *    call (the walker's exit restoring the list's place from where a
+ *    call keeps its registers), so it saved the argument push, the
+ *    surface's checks and the register save, and still paid each
+ *    polygon's own checks and the exit's restore. PRIMCOST, eight
+ *    small faces (2 to 22 rows): 11.41 -> 11.33ms on a plain ST, 6.23
+ *    -> 6.21 on a Mega STE - under 1%, not worth an entry point.
+ *  - Not done: an edge cache. Faces of a mesh share edges, each set up
+ *    twice at about 680 cycles; but in one port's race only 24-30% of
+ *    the edges a frame sets up repeat one (counted on the host: a
+ *    direct-mapped table of 64-512 entries keyed by both ends, four
+ *    hashes), and a lookup that misses costs about what one that hits
+ *    saves: some 160 cycles counted against 450 saved.
  *
  * Getting a small face much further needs work shared between faces
  * rather than taken out of each: an edge between two faces of a mesh
- * is set up twice, once by each, at about 680 cycles a time.
+ * is set up twice, once by each, at about 680 cycles a time - and as
+ * the cache above found, a real scene shares fewer than the mesh
+ * suggests.
  *
  * The rows. A probe timing parallelograms of 50 and 100 rows, every
  * row the same width, gives the cost of a row on a plain ST: before

@@ -242,11 +242,14 @@ typedef struct {
      * exclusive users of the one channel */
     uint8_t          dma_owner;
 
-    /* screen pages: page[0] = TOS screen, page[1] = allocated */
-    uint8_t         *page[2];
-    void            *page1_alloc;
+    /* screen pages: page[0] = TOS screen, page[1] and page[2] (with
+     * STDL_TRIPLEBUF) allocated */
+    uint8_t         *page[3];
+    void            *page1_alloc, *page2_alloc;
     int              backpage;    /* page currently drawn into */
     int              doublebuf;
+    int              triplebuf;
+    uint32_t         asked;       /* FRCLOCK at the last page request */
 
     /* state saved for restore on quit */
     long             old_ssp;
@@ -525,6 +528,11 @@ static __inline__ int stdl_blitter_active(void)
  * registers differently around it.
  */
 int stdl_blitter_allowed(void);
+/* page 0 is on the screen again (a border closed, the scroll window
+ * reset): drawing moves off it, and a triple buffer counts its next
+ * flip from now. Memory writes only, so the terminate path may call
+ * it. */
+void stdl_page0_shown(void);
 /* the invariant registers once, then one call per plane: a
  * four-plane copy was writing eleven identical registers four times
  * over, half the fitted setup cost */

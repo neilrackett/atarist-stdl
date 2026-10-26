@@ -17,14 +17,15 @@
  * one STDL_DirtyPush fills until the next restore. A single-buffered
  * game only ever names one page and gets exactly the old behaviour.
  *
- * The second list is allocated when a second page first appears, so
- * a single-buffered game pays for one. A third page takes the slot of
- * the page restored least recently, and that page is remembered as
- * owing a whole restore: its list is gone, but when it comes back
- * the background is copied over it entirely, which is always correct.
- * Four such pages are remembered - enough for an off-screen surface
- * restored now and then, or a border opening and bringing its own
- * pair of pages.
+ * A list is allocated when a page first needs one, so a
+ * single-buffered game pays for one and a double-buffered one for
+ * two; a third page - STDL_TRIPLEBUF's, or an off-screen surface -
+ * gets a third. A fourth takes the slot of the page restored least
+ * recently, and that page is remembered as owing a whole restore: its
+ * list is gone, but when it comes back the background is copied over
+ * it entirely, which is always correct. Four such pages are
+ * remembered - enough for an off-screen surface restored now and
+ * then, or a border opening and bringing its own pair of pages.
  */
 
 #include <stdlib.h>
@@ -38,8 +39,12 @@ typedef struct {
     int overflowed;             /* full restore instead of the list  */
 } dirty_list_t;
 
+#define NLISTS 3
+
 static STDL_Surface *bg;
-static dirty_list_t lists[2];
+static dirty_list_t lists[NLISTS];
+static unsigned used[NLISTS];   /* the restore each list last served */
+static unsigned restores;
 static int cur;                 /* the list STDL_DirtyPush fills      */
 static int max_rects;
 /* evicted pages, each owed a whole restore when it next comes back;
@@ -69,9 +74,14 @@ int STDL_DirtyInit(STDL_Surface *background, int max)
 
 void STDL_DirtyQuit(void)
 {
-    free(lists[0].rects);
-    free(lists[1].rects);
+    int i;
+
+    for (i = 0; i < NLISTS; i++) {
+        free(lists[i].rects);
+    }
     memset(lists, 0, sizeof(lists));
+    memset(used, 0, sizeof(used));
+    restores = 0;
     cur = 0;
     memset(owes, 0, sizeof(owes));
     owes_next = 0;
@@ -97,15 +107,17 @@ void STDL_DirtyPush(const STDL_Rect *r)
 /* the list for page `key`, claiming or evicting one if it has none */
 static int list_for(const uint8_t *key)
 {
-    int i, other;
+    int i, pick = -1;
 
     if (shared) {
         lists[0].key = key;
         lists[0].overflowed = 1;
         return 0;
     }
-    for (i = 0; i < 2; i++) {
+    restores++;
+    for (i = 0; i < NLISTS; i++) {
         if (lists[i].key == key) {
+            used[i] = restores;
             return i;
         }
     }
@@ -113,12 +125,28 @@ static int list_for(const uint8_t *key)
      * a page: they belong to the first page restored */
     if (lists[cur].key == NULL) {
         lists[cur].key = key;
+        used[cur] = restores;
         return cur;
     }
-    other = cur ^ 1;
-    if (lists[other].rects == NULL) {
-        lists[other].rects = malloc(sizeof(STDL_Rect) * (unsigned)max_rects);
-        if (lists[other].rects == NULL) {
+    /* a list of its own while there is room for one more */
+    for (i = 0; i < NLISTS && lists[i].rects != NULL; i++) {
+    }
+    if (i < NLISTS) {
+        lists[i].rects = malloc(sizeof(STDL_Rect) * (unsigned)max_rects);
+        if (lists[i].rects != NULL) {
+            pick = i;
+        }
+    }
+    if (pick < 0) {
+        /* else the list restored least recently: its rectangles go,
+         * and its page owes a whole restore */
+        for (i = 0; i < NLISTS; i++) {
+            if (i != cur && lists[i].rects != NULL
+                && (pick < 0 || used[i] < used[pick])) {
+                pick = i;
+            }
+        }
+        if (pick < 0) {
             /*
              * Two pages and room for one list. Share it and restore
              * both pages whole from here on - slower, never wrong.
@@ -128,16 +156,14 @@ static int list_for(const uint8_t *key)
             cur = 0;
             return list_for(key);
         }
-    } else if (lists[other].key != NULL) {
-        /* a third page: the other list's page was restored least
-         * recently; its rectangles go, and it owes a whole restore */
-        owes[owes_next] = lists[other].key;
+        owes[owes_next] = lists[pick].key;
         owes_next = (owes_next + 1) & 3;
     }
-    lists[other].key = key;
-    lists[other].n = 0;
-    lists[other].overflowed = 0;
-    return other;
+    lists[pick].key = key;
+    lists[pick].n = 0;
+    lists[pick].overflowed = 0;
+    used[pick] = restores;
+    return pick;
 }
 
 /*

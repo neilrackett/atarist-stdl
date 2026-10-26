@@ -816,13 +816,29 @@ first.
     below it and write every tile row to both; the window may then
     straddle the join, and scrolling vertically never ends. Twice
     the memory and twice the row writes.
+- Frames longer than a VBL: `STDL_SetVideoMode(320, 200, 4,
+  STDL_TRIPLEBUF)`. Double-buffered, `STDL_Flip` waits for the VBL
+  after its request before the other page is free, so every frame
+  is rounded up to whole VBLs - half a VBL idle on average, a 34ms
+  frame taking 40. With a third page the next frame starts at once
+  and the flip waits only if the previous request has not yet been
+  taken, which in a frame longer than a VBL it has: TRIPCHK's frames
+  of a VBL and a half take 60 VBLs for 40 against 80, and one 3D
+  game's race went from 147 to 135ms a frame on a Mega STE. A frame
+  shorter than a VBL gains nothing (it runs at the display's rate,
+  every frame shown, as double-buffered). The third page costs 32K
+  of ST RAM; without it the mode stays double-buffered, so test the
+  surface's flags for `STDL_TRIPLEBUF`. `STDL_Dirty` keeps a list for
+  each of the three pages. With a border open the overscan module's
+  own two pages flip as before. `examples/polydemo.c` (T switches).
 - Erasing sprites: `STDL_DirtyInit(background, max)` once, then each
   frame `STDL_DirtyRestore(screen)`, draw, and `STDL_DirtyPush` each
   rectangle drawn. Restores come from the clean background, so pushing
   a rectangle twice or pushing too many costs time, never pixels (an
   overflow restores the page whole). Each page keeps its own list, so
   it works as-is with `STDL_DOUBLEBUF` - the back page is erased of
-  what was drawn into it two frames ago. Before that change (v1.13.2
+  what was drawn into it two frames ago - and with `STDL_TRIPLEBUF`,
+  three frames ago. Before that change (v1.13.2
   and earlier) the single list erased the wrong page; a double-buffered
   port that pushed both frames' rectangles to compensate can stop.
   Keep the background the page's shape - same size and stride, no
@@ -1117,7 +1133,8 @@ first.
   whose frame already sits just over a VBL boundary pays a whole
   frame period for the tear-free picture, and should measure its
   drawing pass first - the fix is to get the frame under the
-  boundary, not to avoid the flip. A 60Hz
+  boundary, not to avoid the flip; without a border open,
+  `STDL_TRIPLEBUF` (below) removes the rounding. A 60Hz
   base screen is switched to 50Hz while a border is open and
   restored on close - opening a border is an active choice and it
   always takes effect on ST-class hardware. Cost is one Timer A interrupt plus a

@@ -278,6 +278,8 @@ static void restore_all(void)
     release_hardware();
     stdl_stram_free(stdl.page1_alloc);
     stdl.page1_alloc = NULL;
+    stdl_stram_free(stdl.page2_alloc);
+    stdl.page2_alloc = NULL;
     (void)Cconws("\33e");                               /* cursor back on */
     if (stdl.old_ssp != 0) {
         exit_supervisor(stdl.old_ssp);
@@ -368,7 +370,7 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
         stdl_events_install();
     }
 
-    stdl.doublebuf = (flags & STDL_DOUBLEBUF) ? 1 : 0;
+    stdl.doublebuf = (flags & (STDL_DOUBLEBUF | STDL_TRIPLEBUF)) ? 1 : 0;
     if (stdl.doublebuf && stdl.page[1] == NULL) {
         /* 256-byte alignment satisfies the plain ST's screen base
          * granularity (STE only needs word alignment) */
@@ -381,6 +383,20 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
             stdl.page[1] = (uint8_t *)
                 (((uintptr_t)stdl.page1_alloc + 255) & ~(uintptr_t)255);
             memset(stdl.page[1], 0, STDL_SCREEN_BYTES);
+        }
+    }
+    /* a third, kept once allocated like the second; without the
+     * memory the program is double-buffered and told why */
+    stdl.triplebuf = stdl.doublebuf && (flags & STDL_TRIPLEBUF);
+    if (stdl.triplebuf && stdl.page[2] == NULL) {
+        stdl.page2_alloc = stdl_stram_alloc(STDL_SCREEN_BYTES + 256);
+        if (stdl.page2_alloc == NULL) {
+            STDL_SetError("out of memory for third screen page");
+            stdl.triplebuf = 0;
+        } else {
+            stdl.page[2] = (uint8_t *)
+                (((uintptr_t)stdl.page2_alloc + 255) & ~(uintptr_t)255);
+            memset(stdl.page[2], 0, STDL_SCREEN_BYTES);
         }
     }
 
@@ -408,7 +424,8 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
     stdl_screen.planes = STDL_SCREEN_PLANES;
     stdl_screen.flags = STDL_SCREEN | STDL_HWSURFACE | STDL_FULLSCREEN
                       | STDL_HWPALETTE
-                      | (stdl.doublebuf ? STDL_DOUBLEBUF : 0);
+                      | (stdl.doublebuf ? STDL_DOUBLEBUF : 0)
+                      | (stdl.triplebuf ? STDL_TRIPLEBUF : 0);
     stdl_screen.clip.x = 0;
     stdl_screen.clip.y = 0;
     stdl_screen.clip.w = STDL_SCREEN_W;
@@ -418,6 +435,7 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
     if (stdl.doublebuf) {
         stdl.backpage = 1;
         Setscreen(stdl.page[0], stdl.page[0], -1);
+        stdl.asked = STDL_FRCLOCK - 1;  /* the first flip never waits */
     } else {
         stdl.backpage = 0;
     }
@@ -452,13 +470,40 @@ void STDL_Flip(void)
     if (stdl_ovsc_flip != NULL && stdl_ovsc_flip()) {
         return;
     }
-    if (stdl.doublebuf) {
+    if (stdl.triplebuf) {
+        /*
+         * The page drawn is asked for and the next frame starts at
+         * once, in the third page: the one asked for two flips ago,
+         * on the screen until the last request was taken - at the
+         * VBL after it, as the double-buffered flip assumes. So the
+         * wait is for that request, before this one: in a frame
+         * longer than a VBL it is past and this never waits, and a
+         * program drawing faster than the display waits for it, as
+         * it would double-buffered, rather than drawing frames that
+         * a later request replaces before they are shown.
+         */
+        while (STDL_FRCLOCK == stdl.asked) {
+        }
+        Setscreen((void *)-1L, stdl.page[stdl.backpage], -1);
+        stdl.asked = STDL_FRCLOCK;
+        stdl.backpage = stdl.backpage == 2 ? 0 : stdl.backpage + 1;
+        stdl_screen.pixels = stdl.page[stdl.backpage];
+    } else if (stdl.doublebuf) {
         Setscreen((void *)-1L, stdl.page[stdl.backpage], -1);
         STDL_WaitVBL();
         stdl.backpage ^= 1;
         stdl_screen.pixels = stdl.page[stdl.backpage];
     } else {
         STDL_WaitVBL();
+    }
+}
+
+void stdl_page0_shown(void)
+{
+    stdl.asked = STDL_FRCLOCK;
+    if (stdl.doublebuf && stdl.backpage == 0) {
+        stdl.backpage = 1;
+        stdl_screen.pixels = stdl.page[1];
     }
 }
 

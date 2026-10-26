@@ -28,13 +28,33 @@ void STDL_Quit(void);
 /*
  * v1 always selects 320x200, 4 planes, 16 colours; w/h/bpp are
  * accepted for source compatibility and ignored.  Honoured flags:
- * STDL_DOUBLEBUF.  Returns the screen surface (drawing target: the
- * back buffer when double-buffered, the live screen otherwise).
+ * STDL_DOUBLEBUF and STDL_TRIPLEBUF.  Returns the screen surface
+ * (drawing target: the back buffer when double- or triple-buffered,
+ * the live screen otherwise).
+ *
+ * STDL_TRIPLEBUF adds a third page (32K of ST RAM) and implies
+ * STDL_DOUBLEBUF. Without the memory the mode is double-buffered,
+ * STDL_GetError says why, and the surface's flags carry
+ * STDL_DOUBLEBUF alone - test them for STDL_TRIPLEBUF to know. The
+ * mode can be set again with or without it; the default palette
+ * comes back each time.
  */
 STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags);
 STDL_Surface *STDL_GetVideoSurface(void);
 
-void STDL_Flip(void);                          /* VBL-synced page flip */
+/*
+ * Show the page drawn from the next VBL. Double-buffered, it then
+ * waits for that VBL, after which the other page is off the screen
+ * and free: a frame is rounded up to whole VBLs plus the wait, so one
+ * of 34-40ms takes 40 at 50Hz, and the average frame pays half a VBL
+ * idle. Triple-buffered, the next frame goes into the third page at
+ * once, and the wait is only for the previous request to have been
+ * taken: a frame longer than a VBL never waits (a VBL and a half
+ * takes a VBL and a half: TRIPCHK, 40 such frames 60 VBLs against
+ * 80), and one faster than the display is held to it, every frame
+ * shown. Single-buffered, it waits for the VBL.
+ */
+void STDL_Flip(void);
 void STDL_UpdateRects(int n, STDL_Rect *rects);
 void STDL_WaitVBL(void);
 

@@ -166,7 +166,7 @@ time, not at runtime.
 | `SDL_SetVideoMode` | `STDL_SetVideoMode` | w/h/bpp ignored; always 320x200x4 |
 | `SDL_BlitSurface` | `STDL_BlitSurface` | full SDL semantics incl. dstrect writeback |
 | `SDL_FillRect` | wrapper | colour is a palette index, not mapped RGB |
-| `SDL_Flip` | `STDL_Flip` | VBL-synced; page flip with `SDL_DOUBLEBUF`, including while an overscan border is open |
+| `SDL_Flip` | `STDL_Flip` | VBL-synced; page flip with `SDL_DOUBLEBUF`, including while an overscan border is open; `STDL_TRIPLEBUF` adds a third page so a frame longer than a VBL is not rounded up to whole VBLs |
 | `SDL_UpdateRect(s)` | no-op | single-buffer rendering is direct to screen RAM |
 | `SDL_MapRGB` | `STDL_MapRGB` | nearest palette index |
 | `SDL_LockSurface` | no-op | surfaces are always addressable |
@@ -446,9 +446,9 @@ truncates colours to the low N bits rather than rejecting them. See
   show tearing between overlapping sprites at ST frame rates; use
   `STDL_Dirty` restore or a back buffer for real games. The two
   combine: `STDL_DirtyRestore(screen)` then draw and push, every
-  frame, and with `STDL_DOUBLEBUF` each page keeps its own list, so
-  the back page is erased of what was drawn into it last time rather
-  than of what is on screen.
+  frame, and with `STDL_DOUBLEBUF` (or `STDL_TRIPLEBUF`) each page
+  keeps its own list, so the back page is erased of what was drawn
+  into it last time rather than of what is on screen.
 * **Key repeat**: the IKBD sends no auto-repeats; STDL synthesises
   them only after `SDL_EnableKeyRepeat`, matching SDL.
 * **Slow frames swallow key presses**: when a frame takes longer

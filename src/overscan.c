@@ -2119,6 +2119,7 @@ static int ovsc_close(int which)
                                          * program stages too */
     stdl_ovsc_flip = NULL;
     (void)Setscreen(stdl.page[0], stdl.page[0], -1);
+    stdl_page0_shown();
     STDL_WaitVBL();
     stdl_stram_free(buf_alloc);
     buf_alloc = NULL;

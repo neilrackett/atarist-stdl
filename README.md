@@ -195,7 +195,7 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | TCURSOR.TOS  | software mouse cursor with save-under                                            |
 | PLAYMUS.TOS  | YM music (stdlconv midi -> STDL_Music) + sample chunks via the SDL_mixer shim    |
 | MUSICVU.TOS  | YM music from memory: VU meter from the stream's registers, position, seeking    |
-| POLYDEMO.TOS | convex polygons XORed into single planes, a glenz look; seamless shared edges    |
+| POLYDEMO.TOS | convex polygons XORed into single planes, a glenz look; T: triple buffering      |
 | PATDEMO.TOS  | pattern-filled polygons: Bayer dither shading, a screen door, sub-pixel motion   |
 | RASTERS.TOS  | Timer B rasters: copper bars in colour 0 edge to edge, a gradient in colour 15   |
 | SFXDEMO.TOS  | Degas splash, YM effects stealing/restoring music voices, joystick key emulation |

@@ -20,6 +20,14 @@
  * turns `int * int` into a library call, and a sine-table multiply
  * per vertex per frame is exactly the kind of code where that hides.
  * Double-buffered, cleared each frame. ESC quits.
+ *
+ * T switches to STDL_TRIPLEBUF and back; the bar across the top is
+ * the last frame's time, a pixel a millisecond. A frame that takes a
+ * VBL and a half takes two double-buffered - STDL_Flip waits for the
+ * VBL before the page it hands back is free - and a VBL and a half
+ * with a third page, which is drawn into while the other two are
+ * shown and asked for. That costs 32K of ST RAM; a frame that fits in
+ * a VBL gains nothing from it.
  */
 
 #include <stdio.h>
@@ -84,7 +92,8 @@ int main(int argc, char *argv[])
     STDL_Surface *s;
     STDL_Point star[10];
     int star_angle[10];
-    int frame = 0, quit = 0, k;
+    int frame = 0, quit = 0, triple = 0, k;
+    uint32_t last, took = 0;
 
     (void)argc;
     (void)argv;
@@ -98,6 +107,7 @@ int main(int argc, char *argv[])
     for (k = 0; k < 10; k++) {
         star_angle[k] = k * NSIN / 10;      /* once, so not per frame */
     }
+    last = STDL_GetTicks();
 
     while (!quit) {
         STDL_Event e;
@@ -108,8 +118,22 @@ int main(int argc, char *argv[])
                 && e.key.keysym.sym == STDLK_ESCAPE) {
                 quit = 1;
             }
+            if (e.type == STDL_KEYDOWN && e.key.keysym.sym == STDLK_t) {
+                /* the mode again, with or without the third page;
+                 * it puts the default palette back */
+                triple = !triple;
+                s = STDL_SetVideoMode(320, 200, 4, triple ? STDL_TRIPLEBUF
+                                                         : STDL_DOUBLEBUF);
+                STDL_SetColours(s, pal, 0, 8);
+            }
         }
         STDL_FillRect(s, NULL, 0);
+        {
+            STDL_Rect bar = { 0, 0, 0, 3 };
+
+            bar.w = (uint16_t)(took < 320 ? took : 320);
+            STDL_FillRect(s, &bar, 7);
+        }
 
         place(p, square, 4, frame * 2, 64 + (SIN(frame) >> 9), 130, 100);
         STDL_FillPolygon(s, p, 4, 1, STDL_DRAW_XOR);
@@ -134,6 +158,8 @@ int main(int argc, char *argv[])
             STDL_FillPolygon(s, tri, 3, 4, STDL_DRAW_XOR);
         }
         STDL_Flip();
+        took = STDL_GetTicks() - last;
+        last += took;
         frame++;
     }
     STDL_Quit();

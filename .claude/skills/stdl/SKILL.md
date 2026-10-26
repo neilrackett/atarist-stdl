@@ -380,7 +380,8 @@ exercise; `st` is the correctness floor and `megaste` measures what
 16MHz adds), `FF=off`
 for screenshots that must be at real speed, `SOUND=on` with
 `fifo hatari-shortcut recsound` to record audio, `EXTRA=` for any
-other Hatari option. Interactively, the same run is
+other Hatari option, and `LATE=` for one `--machine` would reset
+(`--fpu 68882`), which goes after it. Interactively, the same run is
 `hatari --tos $TOS --machine ste --memsize 4 dist/GAME.TOS`.
 
 Pitfalls, each of which has cost a day:

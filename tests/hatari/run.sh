@@ -49,7 +49,10 @@
 #           points in the Hatari config - which must be somewhere
 #           writable, so pass EXTRA="--configfile <copy>" with that
 #           key rewritten rather than assuming the default.
-#   EXTRA   extra hatari options
+#   EXTRA   extra hatari options, placed before this script's own
+#           (so a --configfile in it cannot undo them)
+#   LATE    extra hatari options placed after them, just before the
+#           program: for what --machine resets, such as --fpu 68882
 set -u
 NAME=$1
 PROG=$2
@@ -98,11 +101,12 @@ fi
 # EXTRA goes first so this script's own options win: a
 # --configfile in EXTRA (the only way to move the sound capture
 # file) would otherwise replace the TOS and machine chosen here.
+# LATE goes last, because --machine resets the CPU's options.
 "$HATARI" ${EXTRA:-} --tos "$TOS" --machine "$MACHINE" \
   --fast-forward "$FF" \
   --fast-boot on --sound "$SOUND" --statusbar off \
   --conout 2 --cmd-fifo "$FIFO" \
-  --screenshot-dir "$SHOTDIR" --screenshot-format png \
+  --screenshot-dir "$SHOTDIR" --screenshot-format png ${LATE:-} \
   "$PROG" > "$LOG" 2>"$OUT/$NAME.err" &
 HPID=$!
 

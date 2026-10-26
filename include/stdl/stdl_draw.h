@@ -146,12 +146,13 @@ void STDL_XorVSpans(STDL_Surface *dst, const STDL_Span *spans,
  * path); anything else goes through column tables. XOR, OR and CLEAR
  * touch only the planes `col` has, so a one-plane colour writes one
  * word a group. Measured on a plain ST (PRIMCOST): a 160-row diamond
- * XORed into two planes 12.6ms against 23.9 for the same rows through
- * STDL_XorHSpans; a 22-row triangle 1.55ms against 2.26, and 1.27ms
- * in one plane; 24 one-plane triangles of a glenz-like object 49ms.
- * A polygon's set-up - the vertex scan, and two divides an edge - is
- * about 5000 cycles (a 2-row triangle takes 0.68ms), so from those
- * figures spans are the cheaper way below about ten rows. CPU only.
+ * XORed into two planes 12.5ms against 23.9 for the same rows through
+ * STDL_XorHSpans; a 22-row triangle 1.47ms against 2.26, and 1.18ms
+ * in one plane; 24 one-plane triangles of a glenz-like object 47ms.
+ * A polygon's set-up - the checks, the vertex scan, and two divides an
+ * edge - is about 4400 cycles (a 2-row triangle takes 0.62ms), so from
+ * those figures spans are the cheaper way below about ten rows. CPU
+ * only.
  * Its own object, 6KB: a program that never calls it does not carry
  * it.
  */

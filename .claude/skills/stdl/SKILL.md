@@ -271,10 +271,10 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
      entirely in 68000 with both edges in registers; others take
      column tables. XOR/OR/CLEAR write only the colour's planes, so
      a one-plane glenz face is one word a group. Measured on a plain
-     ST (PRIMCOST): a 160-row diamond XORed in 12.6ms against 23.9
-     through `STDL_XorHSpans`; a 22-row triangle 1.55ms against
-     2.26 as spans, 1.27ms in one plane; 24 one-plane glenz-like
-     triangles 49ms (85 before this path). Set-up is about 5000
+     ST (PRIMCOST): a 160-row diamond XORed in 12.5ms against 23.9
+     through `STDL_XorHSpans`; a 22-row triangle 1.47ms against
+     2.26 as spans, 1.18ms in one plane; 24 one-plane glenz-like
+     triangles 47ms (85 before this path). Set-up is about 4400
      cycles a polygon, so from those figures only faces under about
      ten rows are cheaper as spans. `examples/polydemo.c`
    - dithered faces, fog and screen doors (PICO-8's `fillp`) ->

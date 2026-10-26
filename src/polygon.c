@@ -32,12 +32,13 @@
 
 /* 0xFFFF >> n, then 0xFFFF << (15 - n): a table read where the shift
  * costs 8 + 2n cycles */
-static const uint16_t edge_masks[32] = {
+const uint16_t stdl_poly_masks[32] = {
     0xFFFF, 0x7FFF, 0x3FFF, 0x1FFF, 0x0FFF, 0x07FF, 0x03FF, 0x01FF,
     0x00FF, 0x007F, 0x003F, 0x001F, 0x000F, 0x0007, 0x0003, 0x0001,
     0x8000, 0xC000, 0xE000, 0xF000, 0xF800, 0xFC00, 0xFE00, 0xFF00,
     0xFF80, 0xFFC0, 0xFFE0, 0xFFF0, 0xFFF8, 0xFFFC, 0xFFFE, 0xFFFF
 };
+#define edge_masks stdl_poly_masks
 #define lmask edge_masks
 #define rmask (edge_masks + 16)
 
@@ -536,9 +537,8 @@ C_TRAP(stdl_trap_xor4, row_xor4)
  */
 typedef char surface_layout[offsetof(STDL_Surface, stride) == 8
                            && offsetof(STDL_Surface, clip) == 16 ? 1 : -1];
-int stdl_poly_fast(const STDL_Surface *dst, const STDL_Point *pts, int n,
-                   void (*rows)(void), int off, uint32_t l01, uint32_t l23,
-                   const uint16_t *masks);
+void stdl_poly_c(STDL_Surface *dst, const STDL_Point *pts, int n,
+                 uint8_t col, int op);
 void stdl_prows_set2(void);
 void stdl_prows_set4(void);
 void stdl_prows_xor1(void);
@@ -703,28 +703,115 @@ PROWS_ASM(stdl_prows_xor4, TX_EDGE,
     W_EDGE(X, SR, BIAS)                                                   \
     "8:\n\t"
 /*
- * stdl_poly_fast(dst, pts, n, rows, off, l01, l23, masks): the whole
- * of a SET or XOR onto a surface with no mask, when the polygon is
- * inside the clip's columns and no taller than 256 rows - which is
- * every polygon of a demo's object or a game's sprite. The vertex
- * scan, the clip, the test for this path and the winding are the
- * C's (STDL_FillPolygon), in 68000 because in C they were most of a
- * small polygon's cost: a 2-row triangle 0.83ms -> 0.69, a 22-row
- * one in one plane 1.47 -> 1.33. Returns 0 when it has drawn (or found
- * nothing to draw), 1 to send the polygon the long way: outside the
- * columns, too tall, or a top vertex its neighbours run straight
- * through, where only the whole area tells the winding.
+ * STDL_FillPolygon itself on the machine: the whole of a SET or XOR
+ * onto a surface with no mask, when the polygon is inside the clip's
+ * columns and no taller than 256 rows - which is every polygon of a
+ * demo's object or a game's sprite. The checks, the colour's plane
+ * words and row loop, the vertex scan, the clip, the test for this
+ * path and the winding are the C's (stdl_poly_c), in 68000 because in
+ * C they were most of a small polygon's cost: a 2-row triangle 0.83ms
+ * -> 0.69, a 22-row one in one plane 1.47 -> 1.33. Taking the checks
+ * and the colour's set-up out of a C wrapper that passed them on as
+ * eight arguments saved about 700 cycles more (PRIMCOST, plain ST:
+ * the 2-row triangle 0.70 -> 0.62ms, the one-plane 22-row one 1.27
+ * -> 1.18; a polygon declined for the clip's columns pays the attempt,
+ * 1%). What it does not take - a mask, OR or
+ * CLEAR, a polygon outside the columns or too tall, a top vertex its
+ * neighbours run straight through, where only the whole area tells
+ * the winding - it hands to stdl_poly_c with the caller's arguments
+ * as they were.
  *
  * The frame: 0 vertices, 4 row loop, 8 n x 4, 10 step x 4, 12/14 the
  * left's and right's vertex, 16/18 the rows their edges end on, 20
  * the row, 22 the last row (exclusive), 24 the bottom vertex's row.
- * The arguments are 74 bytes up.
+ * The arguments are 74 bytes up. Until the walk: a4 the row loop, a5
+ * the plane's offset, a6/a2 the plane words, pairs 0-1 and 2-3.
  */
 __asm__(
-    "\t.text\n\t.even\n\t.globl " T_SYM(stdl_poly_fast) "\n"
-    T_SYM(stdl_poly_fast) ":\n\t"
+    "\t.text\n\t.even\n\t.globl " T_SYM(STDL_FillPolygon) "\n"
+    T_SYM(STDL_FillPolygon) ":\n\t"
+    /* what the C must see to: no surface, no pixels, a mask, no
+     * vertices, too few or too many, OR and CLEAR; scratch registers
+     * only */
+    "move.l 4(%sp),%d0\n\t"
+    "beq.s  97f\n\t"
+    "move.l %d0,%a0\n\t"
+    "tst.l  (%a0)\n\t"
+    "beq.s  97f\n\t"
+    "tst.l  24(%a0)\n\t"
+    "bne.s  97f\n\t"
+    "tst.l  8(%sp)\n\t"
+    "beq.s  97f\n\t"
+    "move.l 12(%sp),%d0\n\t"
+    "subq.l #3,%d0\n\t"
+    "cmp.l  #8191-3,%d0\n\t"
+    "bhi.s  97f\n\t"
+    "moveq  #1,%d0\n\t"
+    "cmp.l  20(%sp),%d0\n\t"
+    "bcs.s  97f\n\t"                  /* past XOR */
+    /* the colour within the budget, as STDL_COL_MASK */
+    "move.l " T_SYM(stdl_planes) ",%d1\n\t"
+    "lsl.w  %d1,%d0\n\t"
+    "subq.w #1,%d0\n\t"
+    "and.b  19(%sp),%d0\n\t"
+    "tst.l  20(%sp)\n\t"
+    "beq.s  1f\n\t"
+    "tst.w  %d0\n\t"
+    "bne.s  1f\n\t"
+    "rts\n"                            /* XOR with no plane to flip */
+    "97:\n\t"
+    "jmp    " T_SYM(stdl_poly_c) "\n"
+    "1:\n\t"
     "movem.l %d2-%d7/%a2-%a6,-(%sp)\n\t"
     "lea    -26(%sp),%sp\n\t"
+    "lea    91f(%pc),%a0\n\t"         /* a plane pair's words */
+    "moveq  #3,%d2\n\t"
+    "and.w  %d0,%d2\n\t"
+    "add.w  %d2,%d2\n\t"
+    "add.w  %d2,%d2\n\t"
+    "move.l 0(%a0,%d2.w),%a6\n\t"
+    "move.w %d0,%d2\n\t"
+    "lsr.w  #2,%d2\n\t"
+    "add.w  %d2,%d2\n\t"
+    "add.w  %d2,%d2\n\t"
+    "move.l 0(%a0,%d2.w),%a2\n\t"
+    "sub.l  %a5,%a5\n\t"
+    "tst.l  90(%sp)\n\t"
+    "bne.s  2f\n\t"
+    /* SET writes pair 2-3 whenever the budget has it, to clear it */
+    "lea    " T_SYM(stdl_prows_set4) ",%a4\n\t"
+    "moveq  #2,%d2\n\t"
+    "cmp.l  %d2,%d1\n\t"
+    "bgt.s  3f\n\t"
+    "lea    " T_SYM(stdl_prows_set2) ",%a4\n\t"
+    "bra.s  3f\n"
+    /* XOR the planes the colour has: one with nothing in planes 0-1
+     * is a pair from the third plane's word, and one plane alone is
+     * that plane's word */
+    "2:\n\t"
+    "moveq  #3,%d2\n\t"
+    "and.w  %d0,%d2\n\t"
+    "bne.s  4f\n\t"
+    "addq.w #4,%a5\n\t"
+    "move.l %a2,%a6\n\t"
+    "sub.l  %a2,%a2\n"
+    "4:\n\t"
+    "move.w %d0,%d2\n\t"
+    "subq.w #1,%d2\n\t"
+    "and.w  %d0,%d2\n\t"
+    "bne.s  5f\n\t"
+    "lea    " T_SYM(stdl_prows_xor1) ",%a4\n\t"
+    "moveq  #10,%d2\n\t"
+    "and.w  %d0,%d2\n\t"
+    "beq.s  3f\n\t"
+    "addq.w #2,%a5\n\t"
+    "bra.s  3f\n"
+    "5:\n\t"
+    "lea    " T_SYM(stdl_prows_xor4) ",%a4\n\t"
+    "move.l %a2,%d2\n\t"
+    "bne.s  3f\n\t"
+    "lea    " T_SYM(stdl_prows_xor2) ",%a4\n"
+    "3:\n\t"
     "move.l 78(%sp),%a3\n\t"            /* vertices */
     "move.l 82(%sp),%d0\n\t"            /* n */
     "move.l (%a3),%d1\n\t"              /* x:y */
@@ -829,18 +916,18 @@ __asm__(
     "move.w %d1,16(%sp)\n\t"            /* both edges end at the top */
     "move.w %d1,18(%sp)\n\t"
     "move.l %a3,(%sp)\n\t"
-    "move.l 86(%sp),4(%sp)\n\t"         /* row loop */
+    "move.l %a4,4(%sp)\n\t"             /* row loop */
+    "move.l %a6,%d6\n\t"
+    "move.l %a2,%d7\n\t"
     "move.w 20(%sp),%d0\n\t"
     "mulu.w 8(%a1),%d0\n\t"             /* the first row's offset */
     "move.l (%a1),%a2\n\t"
     "add.l  %d0,%a2\n\t"
-    "add.l  90(%sp),%a2\n\t"            /* and the plane's */
-    "move.l 94(%sp),%d6\n\t"
-    "move.l 98(%sp),%d7\n\t"
+    "add.l  %a5,%a2\n\t"                /* and the plane's */
     "moveq  #0,%d0\n\t"
     "move.w 8(%a1),%d0\n\t"
     "move.l %d0,%a0\n\t"                /* stride */
-    "move.l 102(%sp),%a1\n"             /* edge masks */
+    "lea    " T_SYM(stdl_poly_masks) ",%a1\n"
     "0:\n\t"
     "move.w 20(%sp),%d3\n\t"
     W_SIDE("12", "16", "add.w", "%d4", "%a4", "add.l #0xFFFF,%d4\n\t")
@@ -865,15 +952,16 @@ __asm__(
     "cmp.w  22(%sp),%d0\n\t"
     "blt    0b\n"
     "99:\n\t"
-    "moveq  #0,%d0\n\t"
     "lea    26(%sp),%sp\n\t"
     "movem.l (%sp)+,%d2-%d7/%a2-%a6\n\t"
     "rts\n"
     "98:\n\t"
-    "moveq  #1,%d0\n\t"
     "lea    26(%sp),%sp\n\t"
     "movem.l (%sp)+,%d2-%d7/%a2-%a6\n\t"
-    "rts\n");
+    "jmp    " T_SYM(stdl_poly_c) "\n\t"
+    ".even\n"
+    "91:\n\t"
+    ".long  0,0xFFFF0000,0x0000FFFF,0xFFFFFFFF\n");
 #endif
 
 /* The C walk, the 68000's twin. On the machine OR and CLEAR, which the
@@ -1039,12 +1127,7 @@ static const rows_fn rows_by_kind[7] = {
     rows_set2, rows_set4, rows_xor1, rows_xor2, rows_xor4, rows_andor2,
     rows_andor4
 };
-#ifdef __m68k__
-static void (*const prows_by_kind[5])(void) = {
-    stdl_prows_set2, stdl_prows_set4, stdl_prows_xor1, stdl_prows_xor2,
-    stdl_prows_xor4
-};
-#else
+#ifndef __m68k__
 static const trap_fn trap_by_kind[7] = {
     stdl_trap_set2, stdl_trap_set4, stdl_trap_xor1, stdl_trap_xor2,
     stdl_trap_xor4, trap_andor2, trap_andor4
@@ -1062,8 +1145,15 @@ static void fill_tables(STDL_Surface *dst, const Trap *t, rows_fn fill,
                         int dir, int y, int y2, int bottom, int lo, int hi,
                         int free_, int transparent);
 
+/* On the machine, what the 68000's STDL_FillPolygon does not take
+ * itself; on the host, the whole of it. */
+#ifdef __m68k__
+void stdl_poly_c(STDL_Surface *dst, const STDL_Point *pts, int n,
+                 uint8_t col, int op)
+#else
 void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,
                       uint8_t col, int op)
+#endif
 {
     int i, top = 0, bottom, y, y2, lo, hi, dir, transparent, free_;
     int minx, maxx, off = 0, kind;
@@ -1117,16 +1207,6 @@ void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,
             kind = (k23 | l23) != 0 ? K_ANDOR4 : K_ANDOR2;
         }
     }
-#ifdef __m68k__
-    /* the 16.16 path, start to finish in 68000; it hands back what it
-     * does not take */
-    if (kind < K_ANDOR2 && dst->mask == NULL && n <= 8191
-        && stdl_poly_fast(dst, pts, n, prows_by_kind[kind], off, l01, l23,
-                          edge_masks) == 0) {
-        return;
-    }
-#endif
-
     bottom = pts[0].y;
     minx = maxx = pts[0].x;
     for (i = 1; i < n; i++) {

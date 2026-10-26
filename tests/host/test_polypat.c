@@ -664,6 +664,57 @@ static void test_random(void)
     }
 }
 
+/* polygons a few rows tall and a few columns wide, as a distant
+ * mesh's faces: triangles and small hulls of up to twelve vertices,
+ * anywhere on the surface, inside the clip's columns three times in
+ * four, with vertices often on sample rows and columns, where the
+ * edges' rules decide, and sometimes in a line */
+static void test_tiny(void)
+{
+    static const int budgets[4] = { 4, 2, 3, 1 };
+    int it, i;
+
+    for (it = 0; it < PP_ITERS; it++) {
+        const int budget = budgets[it & 3];
+        STDL_Surface *s = STDL_CreateSurface(W, H);
+        STDL_PointSub p[24];
+        STDL_Pattern pat;
+        const int cx = rnd(W * 16), cy = rnd(H * 16);
+        const int rx = 1 + rnd(300), ry = 1 + rnd(80);
+        int n = 3;
+
+        for (i = 0; i < 3; i++) {
+            p[i].x = (int16_t)(cx + rnd(2 * rx + 1) - rx);
+            p[i].y = (int16_t)(cy + rnd(2 * ry + 1) - ry);
+            if (rnd(3) == 0) {
+                p[i].x = (int16_t)(p[i].x & ~15);
+            }
+            if (rnd(3) == 0) {
+                p[i].y = (int16_t)(p[i].y & ~15);
+            }
+        }
+        if (it % 13 == 5) {             /* no area */
+            p[2].x = (int16_t)(2 * p[1].x - p[0].x);
+            p[2].y = (int16_t)(2 * p[1].y - p[0].y);
+        } else if (it & 1) {
+            n = random_sub(p, cx, cy, rx, ry);
+        }
+        if ((it >> 2) % 5 == 2) {
+            STDL_CreateMask(s, 1);
+            random_mask(s);
+        }
+        randomise(s, budget);
+        if (it % 4 == 3) {
+            random_clip(s, W, H);
+        }
+        random_pattern(&pat);
+        if (n >= 3) {
+            fill_and_check(s, p, n, &pat, budget, "tiny", it);
+        }
+        STDL_FreeSurface(s);
+    }
+}
+
 /* polygons inside the clip's columns, often: the fast path's
  * no-clamp loop; and tall ones, either side of 4095 sub-pixel rows
  * (the fast path's limit until its remainders were kept over 16) and
@@ -1180,6 +1231,7 @@ int main(void)
     RUN(test_extremes);
     RUN(test_identity);
     RUN(test_random);
+    RUN(test_tiny);
     RUN(test_inside_tall);
     RUN(test_clip);
     RUN(test_subpixel);

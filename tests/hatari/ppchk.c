@@ -16,7 +16,7 @@
  * polygons, with every fixed case (the extremes, the edges either
  * side of the fast path's 32767 sub-pixel rows and of its old 4095,
  * clipped tops), for real hardware. With -DPPCHK_FULL it checks a
- * tenth, for the emulator: 34s and 157s on a plain ST (19s and 86s
+ * tenth, for the emulator: 36s and 196s on a plain ST (19s and 108s
  * on a Mega STE), the reference's checking rather than the fill.
  *
  *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -std=gnu99 \

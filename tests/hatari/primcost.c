@@ -245,6 +245,20 @@ static const STDL_PointSub pp_dia[4] = {
     { SUB(160, 5), SUB(20, 3) }, { SUB(240, 9), SUB(100, 1) },
     { SUB(160, 2), SUB(180, 7) }, { SUB(80, 11), SUB(100, 13) }
 };
+/* tiny triangles, as a distant mesh's faces: 1 row by 4 columns, 2 by
+ * 8 and 4 by 16 */
+static const STDL_PointSub pp_tiny1[3] = {
+    { SUB(100, 5), SUB(50, 3) }, { SUB(104, 9), SUB(50, 12) },
+    { SUB(101, 2), SUB(51, 7) }
+};
+static const STDL_PointSub pp_tiny2[3] = {
+    { SUB(100, 5), SUB(50, 3) }, { SUB(108, 9), SUB(51, 1) },
+    { SUB(99, 2), SUB(52, 7) }
+};
+static const STDL_PointSub pp_tiny4[3] = {
+    { SUB(100, 5), SUB(50, 3) }, { SUB(115, 9), SUB(52, 1) },
+    { SUB(99, 12), SUB(54, 7) }
+};
 /* the 22-row triangle cut by the left edge: the clamped rows */
 static const STDL_PointSub pp_t22c[3] = {
     { SUB(5, 5), SUB(50, 3) }, { SUB(35, 9), SUB(70, 1) },
@@ -265,6 +279,9 @@ static STDL_Pattern pp_dith, pp_trans;
 
 static void op_pp_t2(int i)   { (void)i; STDL_FillPolygonPattern(dst, pp_t2, 3, &pp_dith); }
 static void op_pp_t8(int i)   { (void)i; STDL_FillPolygonPattern(dst, pp_t8, 3, &pp_dith); }
+static void op_pp_tiny1(int i) { (void)i; STDL_FillPolygonPattern(dst, pp_tiny1, 3, &pp_dith); }
+static void op_pp_tiny2(int i) { (void)i; STDL_FillPolygonPattern(dst, pp_tiny2, 3, &pp_dith); }
+static void op_pp_tiny4(int i) { (void)i; STDL_FillPolygonPattern(dst, pp_tiny4, 3, &pp_dith); }
 static void op_pp_t22(int i)  { (void)i; STDL_FillPolygonPattern(dst, pp_t22, 3, &pp_dith); }
 static void op_pp_quad(int i) { (void)i; STDL_FillPolygonPattern(dst, pp_quad, 4, &pp_dith); }
 static void op_pp_dia(int i)  { (void)i; STDL_FillPolygonPattern(dst, pp_dia, 4, &pp_dith); }
@@ -460,6 +477,9 @@ int main(void)
         report("polygon 8 rows set", op_pi_t8);
         report("polygon 22 rows set", op_pi_t22);
         report("polygon quad 20 rows set", op_pi_quad);
+        report("polypat tiny 1 row", op_pp_tiny1);
+        report("polypat tiny 2 rows", op_pp_tiny2);
+        report("polypat tiny 4 rows", op_pp_tiny4);
         report("polypat 2 rows", op_pp_t2);
         report("polypat 8 rows", op_pp_t8);
         report("polypat 22 rows", op_pp_t22);

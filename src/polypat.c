@@ -113,6 +113,22 @@
  *    direct-mapped table of 64-512 entries keyed by both ends, four
  *    hashes), and a lookup that misses costs about what one that hits
  *    saves: some 160 cycles counted against 450 saved.
+ *  - Built, measured and not kept (2026-10-26): a path for tiny
+ *    polygons, no edge set up. An edge's column on a row is the first
+ *    at or right of the polygon's first column where its function
+ *    (16 c - a.x) dy - (16 y - a.y) dx is non-negative - two muls.w
+ *    and a few adds - and the span is written directly. Triangles of
+ *    one or two rows within sixteen columns, each edge set up once
+ *    and stepped down: 12-16% faster on a plain ST and a Mega STE (a
+ *    1-row one 474 -> 400us on st), slower from three rows. Any
+ *    polygon, the columns found afresh each row: 1-row quads 10-18%
+ *    faster, everything of two rows or more slower - the edges' scan
+ *    and the columns ~1400 cycles a row against the walk's ~450. The
+ *    call, the vertex scan, the clip and the winding, ~2500 cycles,
+ *    stay whatever draws the rows. In one port's race 3-4 triangles
+ *    and 12-13 quads a frame were that small: 0.3-0.5ms a frame on a
+ *    Mega STE at best, against ~50 cycles of test on every other
+ *    polygon.
  *
  * Getting a small face much further needs work shared between faces
  * rather than taken out of each: an edge between two faces of a mesh
@@ -152,11 +168,10 @@
  *  - the middle groups unrolled by two: about 10 saved a pair against
  *    20 added to every row for the odd one, so a loss on narrow rows.
  *
- * tests/hatari/ppchk.c runs the host suite on the machine: 27s for
- * the sampled build on a plain ST (15s on a Mega STE), and 148s for
- * -DPPCHK_FULL (13s of host time under fast-forward) - the checking,
- * not the fill: with the fill in C the times were within a few
- * percent.
+ * tests/hatari/ppchk.c runs the host suite on the machine: 36s for
+ * the sampled build on a plain ST (19s on a Mega STE), and 196s for
+ * -DPPCHK_FULL (108s) - the checking, not the fill: with the fill in
+ * C the times were within a few percent.
  *
  * Its own translation unit: a program that never fills a pattern
  * polygon does not carry it.

@@ -40,12 +40,12 @@ static uint32_t timeit(STDL_Sprite *spr, int x)
             STDL_BlitSprite(spr, 0, dst, x, 40);
         }
         t = STDL_GetTicks() - t0;
-        if (t >= 40) {
+        if (t >= 200) {                 /* STDL_GetTicks: ms */
             break;
         }
         n <<= 1;
     }
-    return (uint32_t)((t * 5000UL) / n);   /* us per op */
+    return (uint32_t)((t * 1000UL) / n);   /* us per op */
 }
 
 static STDL_Surface *art(int w, int h, int kind)

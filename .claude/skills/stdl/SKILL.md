@@ -231,7 +231,8 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
      spans / `STDL_PutPixel` only for tiny overlays
    - 1bpp data -> `STDL_SurfaceFrom1bpp`; byte-per-pixel (chunky)
      art -> `STDL_SurfaceFromIndexed8(bytes, w, h, stride, key)`
-     then `STDL_SpriteFromSurface`. Only reach for `STDL_PutGroup` /
+     then `STDL_SpriteFromSurface` (frames side by side, any width:
+     a strip of 20-pixel frames needs no padding). Only reach for `STDL_PutGroup` /
      `STDL_PutGroup8` when the source is some format of its own.
      Load-time costs on a plain ST: the conversion about 80 cycles a
      pixel (96 keyed), and `STDL_PRESHIFT` 280ms for one 64x64

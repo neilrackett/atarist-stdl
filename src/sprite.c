@@ -36,18 +36,20 @@ static void build_frame(const STDL_Surface *s, int fx, int frame_w,
 {
     const uint8_t *row = s->pixels;
     const uint8_t *mbase = s->mask;
+    const int ng = (s->w + 15) >> 4;    /* source groups a row */
+    const int r = fx & 15;
     int y, g, p;
 
     for (y = 0; y < s->h; y++) {
         const uint16_t *mrow = (const uint16_t *)mbase;
 
         for (g = 0; g < groups; g++) {
-            /* source pixels [fx + g*16, fx + g*16 + 15]; the frame
-             * offset fx is a multiple of 16 (enforced by caller) */
+            /* source pixels [fx + g*16, fx + g*16 + 15]: groups sg and
+             * sg + 1 through a 32-bit window shifted left r, anything
+             * past the surface's last group transparent */
             int sg = (fx >> 4) + g;
-            int in_range = (sg * 16 < s->w);
-            const uint16_t *grp =
-                (const uint16_t *)(row + sg * 8);
+            const uint16_t *grp = (const uint16_t *)(row + sg * 8);
+            uint32_t m;
             uint16_t mask;
             uint16_t visible;
 
@@ -62,18 +64,19 @@ static void build_frame(const STDL_Surface *s, int fx, int frame_w,
                 }
             }
 
-            if (!in_range) {
-                mask = 0xFFFFu;
-            } else {
-                mask = (mrow != NULL) ? mrow[sg] : 0;
-                mask |= pad;
-            }
+            m = sg < ng ? (mrow != NULL ? mrow[sg] : 0) : 0xFFFFu;
+            m = m << 16 | (sg + 1 < ng
+                           ? (mrow != NULL ? mrow[sg + 1] : 0) : 0xFFFFu);
+            mask = (uint16_t)((m << r) >> 16) | pad;
             visible = (uint16_t)~mask;
 
             out[0] = mask;
             for (p = 0; p < 4; p++) {
-                out[1 + p] = in_range
-                    ? (uint16_t)(grp[p] & visible) : 0;
+                uint32_t w = sg < ng ? (uint32_t)grp[p] << 16 : 0;
+                if (sg + 1 < ng) {
+                    w |= grp[4 + p];
+                }
+                out[1 + p] = (uint16_t)((w << r) >> 16) & visible;
             }
             out += SPR_WORDS;
         }
@@ -159,20 +162,13 @@ STDL_Sprite *STDL_SpriteFromSurface(const STDL_Surface *s,
     uint32_t framesize;
 
     /*
-     * A frame starts at f * frame_w in the source, and build_frame
-     * addresses the source by group, so every frame after the first
-     * has to begin on a 16-pixel boundary. That constrains strips of
-     * several frames, not the width of a single sprite: a lone frame
-     * starts at zero whatever it is wide, and the pixels past
-     * frame_w in its last group are masked transparent below.
+     * A frame starts at f * frame_w in the source, at any column:
+     * build_frame shifts each group into place, and the pixels past
+     * frame_w in a frame's last group are masked transparent, so a
+     * strip of 20-pixel frames needs no padding.
      */
     if (s == NULL || frame_w <= 0 || frame_w > s->w) {
         STDL_SetError("bad sprite frame width");
-        return NULL;
-    }
-    if ((frame_w & 15) != 0 && frame_w != s->w) {
-        STDL_SetError("multi-frame sprites must be a multiple of "
-                      "16 wide");
         return NULL;
     }
     nframes = s->w / frame_w;

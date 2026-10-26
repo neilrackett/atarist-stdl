@@ -56,7 +56,8 @@ struct STDL_Font {
 #define STDL_PRESHIFT 0x0001u
 
 /* Build sprites/tilesets in RAM from a surface (mask from colourkey
- * when the surface has one). */
+ * when the surface has one). A sprite's frames lie side by side,
+ * frame_w each, any width: s->w / frame_w of them. */
 STDL_Sprite  *STDL_SpriteFromSurface(const STDL_Surface *s,
                                      int frame_w, uint32_t flags);
 STDL_Tileset *STDL_TilesetFromSurface(const STDL_Surface *s,

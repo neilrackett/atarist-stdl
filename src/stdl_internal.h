@@ -547,11 +547,25 @@ void stdl_blitter_go(uintptr_t src, int16_t sxinc, int16_t syinc,
                      uint16_t nwords, uint16_t nlines,
                      uint8_t hop, uint8_t op, uint8_t skew);
 
-/* sprites: cells (destination words x rows) from which the BLiTTER
- * is worth it - pre-shifted or phase 0, shifted by the chip, and
- * shifted with a border open (pre-shifted ones then stay on the
- * CPU); see spr_blitter in sprite.c */
-#define STDL_SPR_MIN_CELLS         9
+/*
+ * Sprites on the BLiTTER (spr_blitter in sprite.c). Shifted by the
+ * chip, it wins from a handful of cells (destination words x rows):
+ * 16x8 in half the CPU's time on an emulated STE, 0.8 on a Mega STE
+ * at 16MHz. Aligned (pre-shifted, or unshifted at a group edge), it
+ * pays eight passes of set-up, about 700us on an STE, against a CPU
+ * loop that skips transparent groups and stores opaque ones, so what
+ * decides is rows, hardly width: under 32 the CPU wins or ties
+ * everywhere, at 64 the chip wins mixed art by up to 1.6x and loses
+ * solid art by up to 1.3x (1.6 on a Mega STE). Fitted 2026-10-26 on
+ * 16-96 wide by 8-64 rows, solid, disc and ring art: against the
+ * better path in each case this costs 2.7% on an STE and 3.9% on a
+ * Mega STE (geometric means), where the previous 9-cell threshold
+ * for aligned sprites cost 17% and 34%; tests/hatari/sprfit.c is the
+ * sweep, to rerun when a sprite path changes. With a border open
+ * aligned sprites stay on the CPU and shifted ones need
+ * STDL_SPR_BORDER_MIN_CELLS.
+ */
+#define STDL_SPR_MIN_ROWS         32
 #define STDL_SPR_SHIFT_MIN_CELLS   4
 #define STDL_SPR_BORDER_MIN_CELLS 32
 /*

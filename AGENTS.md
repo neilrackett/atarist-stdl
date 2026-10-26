@@ -76,7 +76,8 @@ warnings** with the Makefile's `-Wall -Wextra`.
   compares two logs by geometric mean. `tests/hatari/blitcost.c`
   sweeps the BLiTTER's choice against the CPU forced across five
   kinds of blit - refit its thresholds from it whenever either path
-  changes.
+  changes. `tests/hatari/sprfit.c` does the same for sprites, the
+  BLiTTER forced against the CPU across shapes, art and alignment.
 - **CI runs both builds on every push** (`.github/workflows/ci.yml`):
   the host tests, then the cross build with `sizecheck`, then the
   libcmini archive. Two things it sees that a developer's Mac does

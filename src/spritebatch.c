@@ -13,8 +13,8 @@
  * Here what does not change between them is worked out once, and
  * each one wholly inside the clip goes straight to the row loop
  * STDL_BlitSprite uses (stdl_spr_rows4). Anything else - a sprite cut
- * by the clip, an unshifted one at an odd x, a plane budget of 2, a
- * machine whose BLiTTER the sprite path would use - is handed to
+ * by the clip, an unshifted one at an odd x, a plane budget of 2, one
+ * tall enough for a machine's BLiTTER - is handed to
  * STDL_BlitSprite, so the pixels are the same whichever way it goes -
  * as is an empty sprite, which the row loop, counting with dbf, must
  * never be given.
@@ -33,11 +33,14 @@ void STDL_BlitSprites(STDL_Sprite *spr, const STDL_SpriteAt *at,
     if (spr == NULL || at == NULL || dst == NULL || count <= 0) {
         return;
     }
-    /* the direct route covers what STDL_BlitSprite's own aligned
-     * four-plane loop covers, on the CPU */
-    fast = stdl_planes > 2 && !stdl_blitter_active();
     groups = spr->groups;
     h = spr->h;
+    /* the direct route covers what STDL_BlitSprite's own aligned
+     * four-plane loop covers, on the CPU: with a BLiTTER, only sprites
+     * too short for it (STDL_SPR_MIN_ROWS) */
+    fast = stdl_planes > 2
+        && (!stdl_blitter_active()
+            || (h < STDL_SPR_MIN_ROWS && !STDL_BLIT_FORCED()));
     stride = dst->stride;
     cx1 = dst->clip.x;
     cx2 = dst->clip.x + dst->clip.w;

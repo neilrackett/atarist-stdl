@@ -115,15 +115,20 @@ go in one `STDL_BlitSprites(spr, list, n, dst)` call, a list of
 `STDL_SpriteAt {x, y, frame}`. Each one wholly inside the clip skips
 `STDL_BlitSprite`'s per-call set-up; anything else is drawn by it.
 Measured on a plain ST (SPRCOST): fourteen pre-shifted 16x16 bobs
-13.1ms one call each, 11.1ms batched.
+13.1ms one call each, 11.1ms batched; the same on an emulated STE,
+where sprites that short stay on the CPU (below).
 
 Pre-shifted sprites (`STDL_PRESHIFT`) cost 16x RAM and make
 unaligned sprites as cheap as aligned ones - on a plain ST. With a
 BLiTTER, `STDL_BlitSprite` hands sprites to the chip, which shifts
 them itself: unshifted sprites averaged over positions measured
-2.4-3.5x faster on an emulated STE (a 32x32 6.5ms -> 1.8ms) and cost
-the same as pre-shifted ones, so there pre-shifting only spends RAM
-(a 32x32 sprite is 15KB pre-shifted, 640 bytes not). A port that
+2.4-3.5x faster on an emulated STE (a 32x32 6.5ms -> 1.9ms). Aligned
+ones (pre-shifted, or unshifted on a group edge) under 32 rows stay
+on the CPU, which beats the chip's eight passes there whatever the
+width; from 32 rows they cost what unshifted ones do. So there
+pre-shifting mostly spends RAM (a 32x32 sprite is 15KB pre-shifted,
+640 bytes not): it buys short sprites 11% on an STE (16x16 0.96ms
+against 1.08) and a third on a Mega STE. A port that
 must run on a plain ST and fit in its RAM can decide at init:
 pre-shift only when `STDL_GetMachineInfo()->has_blitter` is 0. With
 a border open, pre-shifted sprites stay on the CPU, where they are

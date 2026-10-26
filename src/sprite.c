@@ -483,12 +483,10 @@ spr_blitter(const uint16_t *fdata, uint32_t rowwords, int xbase, int x,
     dph = dx & 15;
     dn = (dph + w + 15) >> 4;
     /*
-     * Measured on an emulated STE, the BLiTTER wins every sprite
-     * SPRCOST draws, down to 16x16 at phase 0 (796us against 947),
-     * and unshifted ones by 2.7-3.7x; the fit puts the crossover near
-     * eight cells. With a border open every pass first asks the
-     * placement policy, which a pre-shifted sprite's eight passes do
-     * not repay (13% slower than the CPU at 32x32), while an
+     * An aligned sprite shorter than STDL_SPR_MIN_ROWS never gets here
+     * (STDL_BlitSprite keeps it). With a border open every pass first
+     * asks the placement policy, which an aligned sprite's eight
+     * passes do not repay (13% slower than the CPU at 32x32), while an
      * unshifted one still wins by 1.8x from the CPU's shift chain.
      */
     if (!STDL_BLIT_FORCED()) {
@@ -496,8 +494,7 @@ spr_blitter(const uint16_t *fdata, uint32_t rowwords, int xbase, int x,
 
         if (stdl_blit_policy != NULL
             ? (sph == dph || cells < STDL_SPR_BORDER_MIN_CELLS)
-            : cells < (sph != dph ? STDL_SPR_SHIFT_MIN_CELLS
-                                  : STDL_SPR_MIN_CELLS)) {
+            : (sph != dph && cells < STDL_SPR_SHIFT_MIN_CELLS)) {
             return 0;
         }
     }
@@ -605,9 +602,14 @@ void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
      * The BLiTTER, where there is one: it clips horizontally itself,
      * shifts an unshifted sprite, and decides from the size whether
      * to take it at all (spr_blitter). Out of line, so this function
-     * holds a byte test and a call for it and nothing else.
+     * holds a byte test, a row count and a call for it and nothing
+     * else. An aligned sprite (pre-shifted, or unshifted at a group
+     * edge) shorter than STDL_SPR_MIN_ROWS is the CPU's whatever its
+     * width, so it does not pay for the call.
      */
     if (stdl_blitter_active()
+        && (runtime_shift || row1 - row0 >= STDL_SPR_MIN_ROWS
+            || STDL_BLIT_FORCED())
         && spr_blitter(fdata, rowwords,
                                spr->nvariants == 16 ? x - phase : x, x,
                                spr->w, y, row0, row1, dst)) {

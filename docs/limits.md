@@ -100,6 +100,10 @@ stop trying and redesign instead.
   (a hole in a masked surface); its `STDL_DRAW_XOR`, `STDL_DRAW_OR`
   and `STDL_DRAW_CLEAR` are plane operations and use bits 0-3 of the
   colour, like the XOR primitives below.
+* `STDL_FillPolygonPattern` takes colours (via `STDL_MakePattern`)
+  as bits 0-3 only - no `STDL_TRANSPARENT`: a pattern's own mask
+  leaves pixels untouched instead, and every pixel it does draw is
+  marked opaque on a masked surface. It has no XOR/OR/CLEAR form.
 * The XOR primitives (`STDL_XorRect` and friends) are the one
   exception to `STDL_TRANSPARENT`: only bits 0-3 of the colour are
   used, colour 0 is a no-op, and the pixels they touch are marked
@@ -192,8 +196,9 @@ stop trying and redesign instead.
   `STDL_UseBlitter(0)` forces the CPU paths, and BLITCHK.TOS proves
   both paths byte-identical on target. The BLiTTER reads only ST
   RAM: on a machine with alt-RAM, a surface allocated there takes
-  the CPU paths. Sprites go to the BLiTTER too, shifted by the chip,
-  so pre-shifting pays only on a plain ST, where pre-shifted sprites
+  the CPU paths. Sprites go to the BLiTTER too, shifted by the chip
+  (aligned ones only from 32 rows, under which the CPU is faster),
+  so pre-shifting pays mainly on a plain ST, where pre-shifted sprites
   remain the designed answer for free positioning. Except onto the
   screen of a single-buffered program: the chip draws a keyed blit or
   a sprite in several whole-rectangle passes, and on the page being

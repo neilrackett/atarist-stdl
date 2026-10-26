@@ -73,6 +73,7 @@ typedef struct STDL_PixelFormat {
 #define STDL_ANYFORMAT  0x10000000u
 #define STDL_HWPALETTE  0x20000000u
 #define STDL_DOUBLEBUF  0x40000000u
+#define STDL_TRIPLEBUF  0x08000000u  /* STDL's: a third page, see Flip  */
 #define STDL_FULLSCREEN 0x80000000u
 
 typedef struct STDL_Surface {

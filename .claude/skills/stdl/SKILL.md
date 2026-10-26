@@ -115,15 +115,20 @@ go in one `STDL_BlitSprites(spr, list, n, dst)` call, a list of
 `STDL_SpriteAt {x, y, frame}`. Each one wholly inside the clip skips
 `STDL_BlitSprite`'s per-call set-up; anything else is drawn by it.
 Measured on a plain ST (SPRCOST): fourteen pre-shifted 16x16 bobs
-13.1ms one call each, 11.1ms batched.
+13.1ms one call each, 11.1ms batched; the same on an emulated STE,
+where sprites that short stay on the CPU (below).
 
 Pre-shifted sprites (`STDL_PRESHIFT`) cost 16x RAM and make
 unaligned sprites as cheap as aligned ones - on a plain ST. With a
 BLiTTER, `STDL_BlitSprite` hands sprites to the chip, which shifts
 them itself: unshifted sprites averaged over positions measured
-2.4-3.5x faster on an emulated STE (a 32x32 6.5ms -> 1.8ms) and cost
-the same as pre-shifted ones, so there pre-shifting only spends RAM
-(a 32x32 sprite is 15KB pre-shifted, 640 bytes not). A port that
+2.4-3.5x faster on an emulated STE (a 32x32 6.5ms -> 1.9ms). Aligned
+ones (pre-shifted, or unshifted on a group edge) under 32 rows stay
+on the CPU, which beats the chip's eight passes there whatever the
+width; from 32 rows they cost what unshifted ones do. So there
+pre-shifting mostly spends RAM (a 32x32 sprite is 15KB pre-shifted,
+640 bytes not): it buys short sprites 11% on an STE (16x16 0.96ms
+against 1.08) and a third on a Mega STE. A port that
 must run on a plain ST and fit in its RAM can decide at init:
 pre-shift only when `STDL_GetMachineInfo()->has_blitter` is 0. With
 a border open, pre-shifted sprites stay on the CPU, where they are
@@ -176,6 +181,10 @@ pixel, per row, per object or per frame. `STDL_MulS16`/`STDL_MulU16`
 (16x16->32), `STDL_DivS16`/`STDL_DivU16` (32/16, quotient must fit)
 and `STDL_FixDiv` (`(a << 16) / b` for a 16.16 slope, about 330
 cycles against 630) are the instruction whatever surrounds them.
+`STDL_FixMul(a, b)` is the 16.16 product,
+`(int32_t)(((int64_t)a * b) >> 16)` bit for bit (rounding toward
+minus infinity, as PICO-8 does), from four `mulu.w`: 324 cycles on a plain ST
+against 1404 for that C, a `__muldi3` call (MATHCHK).
 Products with a constant can stay plain C (`y * 160` compiles to
 shifts and adds for an `int`, `muls.w #160` for an `int16_t`).
 Precompute a reciprocal or a table instead of
@@ -227,7 +236,8 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
      spans / `STDL_PutPixel` only for tiny overlays
    - 1bpp data -> `STDL_SurfaceFrom1bpp`; byte-per-pixel (chunky)
      art -> `STDL_SurfaceFromIndexed8(bytes, w, h, stride, key)`
-     then `STDL_SpriteFromSurface`. Only reach for `STDL_PutGroup` /
+     then `STDL_SpriteFromSurface` (frames side by side, any width:
+     a strip of 20-pixel frames needs no padding). Only reach for `STDL_PutGroup` /
      `STDL_PutGroup8` when the source is some format of its own.
      Load-time costs on a plain ST: the conversion about 80 cycles a
      pixel (96 keyed), and `STDL_PRESHIFT` 280ms for one 64x64
@@ -261,12 +271,37 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
      entirely in 68000 with both edges in registers; others take
      column tables. XOR/OR/CLEAR write only the colour's planes, so
      a one-plane glenz face is one word a group. Measured on a plain
-     ST (PRIMCOST): a 160-row diamond XORed in 12.6ms against 23.9
-     through `STDL_XorHSpans`; a 22-row triangle 1.55ms against
-     2.26 as spans, 1.27ms in one plane; 24 one-plane glenz-like
-     triangles 49ms (85 before this path). Set-up is about 5000
+     ST (PRIMCOST): a 160-row diamond XORed in 12.5ms against 23.9
+     through `STDL_XorHSpans`; a 22-row triangle 1.47ms against
+     2.26 as spans, 1.18ms in one plane; 24 one-plane glenz-like
+     triangles 47ms (85 before this path). Set-up is about 4400
      cycles a polygon, so from those figures only faces under about
      ten rows are cheaper as spans. `examples/polydemo.c`
+   - dithered faces, fog and screen doors (PICO-8's `fillp`) ->
+     `STDL_FillPolygonPattern(dst, pts, n, &pat)`, with `pat` built
+     once by `STDL_MakePattern(&pat, col0, col1, bits, transparent)`
+     (bits: 4x4, bit 15 top-left, row-major; set bits take col1, or
+     are left alone when `transparent`). Vertices are 12.4 fixed point
+     (`STDL_PointSub`) and the rule is `STDL_FillPolygon`'s, exact on
+     them: shared edges tile, integer vertices << 4 with a solid
+     pattern draw the identical pixels, and a face moving by 1/16
+     pixel changes only the pixels it crosses. The pattern is anchored
+     to the surface, so a shaded mesh dithers as one. Opaque rows store
+     whole groups straight from the pattern, so a dither costs what a
+     solid colour does. Measured on a plain ST (PRIMCOST): a 2-row
+     triangle 0.65ms, 22 rows 1.87ms, a 20-row quad 2.25ms, a
+     160-row diamond 14.0ms, against 0.70, 1.72, 1.99 and 12.7ms for
+     `STDL_FillPolygon` SET. Triangles take a path of their own; any
+     face's set-up is about 680 cycles an edge, and a row about 390
+     cycles for one group and 500 for two, so a frame of many small
+     faces is set-up and row bound - merge faces where the model
+     allows. Transparent rows merge every group (a 160-row diamond
+     21.7ms). A face far taller than the view - a road's nearest,
+     its ends hundreds of rows off the screen - costs only the rows
+     it draws: a quad 800 rows tall cut to 200 by the clip 25.4ms.
+     On a masked surface, or for a polygon over 2047 pixels tall or
+     wide, it takes the C path, which measured 2.3-4.3x slower than
+     the 68000 one. `examples/patdemo.c`
    - a *loop* of short spans (terrain profiles, column fields,
      raycaster walls) -> fill an `STDL_Span` array and make one
      `STDL_XorVSpans` / `STDL_VSpans` / `STDL_XorHSpans` /
@@ -351,7 +386,8 @@ exercise; `st` is the correctness floor and `megaste` measures what
 16MHz adds), `FF=off`
 for screenshots that must be at real speed, `SOUND=on` with
 `fifo hatari-shortcut recsound` to record audio, `EXTRA=` for any
-other Hatari option. Interactively, the same run is
+other Hatari option, and `LATE=` for one `--machine` would reset
+(`--fpu 68882`), which goes after it. Interactively, the same run is
 `hatari --tos $TOS --machine ste --memsize 4 dist/GAME.TOS`.
 
 Pitfalls, each of which has cost a day:
@@ -780,13 +816,29 @@ first.
     below it and write every tile row to both; the window may then
     straddle the join, and scrolling vertically never ends. Twice
     the memory and twice the row writes.
+- Frames longer than a VBL: `STDL_SetVideoMode(320, 200, 4,
+  STDL_TRIPLEBUF)`. Double-buffered, `STDL_Flip` waits for the VBL
+  after its request before the other page is free, so every frame
+  is rounded up to whole VBLs - half a VBL idle on average, a 34ms
+  frame taking 40. With a third page the next frame starts at once
+  and the flip waits only if the previous request has not yet been
+  taken, which in a frame longer than a VBL it has: TRIPCHK's frames
+  of a VBL and a half take 60 VBLs for 40 against 80, and one 3D
+  game's race went from 147 to 135ms a frame on a Mega STE. A frame
+  shorter than a VBL gains nothing (it runs at the display's rate,
+  every frame shown, as double-buffered). The third page costs 32K
+  of ST RAM; without it the mode stays double-buffered, so test the
+  surface's flags for `STDL_TRIPLEBUF`. `STDL_Dirty` keeps a list for
+  each of the three pages. With a border open the overscan module's
+  own two pages flip as before. `examples/polydemo.c` (T switches).
 - Erasing sprites: `STDL_DirtyInit(background, max)` once, then each
   frame `STDL_DirtyRestore(screen)`, draw, and `STDL_DirtyPush` each
   rectangle drawn. Restores come from the clean background, so pushing
   a rectangle twice or pushing too many costs time, never pixels (an
   overflow restores the page whole). Each page keeps its own list, so
   it works as-is with `STDL_DOUBLEBUF` - the back page is erased of
-  what was drawn into it two frames ago. Before that change (v1.13.2
+  what was drawn into it two frames ago - and with `STDL_TRIPLEBUF`,
+  three frames ago. Before that change (v1.13.2
   and earlier) the single list erased the wrong page; a double-buffered
   port that pushed both frames' rectangles to compensate can stop.
   Keep the background the page's shape - same size and stride, no
@@ -1081,7 +1133,8 @@ first.
   whose frame already sits just over a VBL boundary pays a whole
   frame period for the tear-free picture, and should measure its
   drawing pass first - the fix is to get the frame under the
-  boundary, not to avoid the flip. A 60Hz
+  boundary, not to avoid the flip; without a border open,
+  `STDL_TRIPLEBUF` (below) removes the rounding. A 60Hz
   base screen is switched to 50Hz while a border is open and
   restored on close - opening a border is an active choice and it
   always takes effect on ST-class hardware. Cost is one Timer A interrupt plus a

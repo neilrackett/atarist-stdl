@@ -170,8 +170,54 @@ static void test_odd_width_sprite(uint32_t flags, const char *what)
     }
 }
 
-/* A strip of frames still has to be group-aligned, and the library
- * has to say so rather than quietly drawing the wrong pixels. */
+/* A strip's frames start at any column: each must draw exactly its own
+ * pixels, keyed ones transparent, at every phase. */
+static void test_sprite_strip(int fw, uint32_t flags, const char *what)
+{
+    const int nf = 4, h = 3;
+    STDL_Surface *s = STDL_CreateSurface(fw * nf, h);
+    STDL_Sprite *spr;
+    int f, x, px, py;
+
+    for (py = 0; py < h; py++) {
+        for (px = 0; px < fw * nf; px++) {
+            STDL_PutPixel(s, px, py, (uint8_t)((px * 7 + py) % 5 == 0
+                                               ? 0 : 1 + (px + py * 3) % 15));
+        }
+    }
+    STDL_SetColourKey(s, 1, 0);
+    spr = STDL_SpriteFromSurface(s, fw, flags);
+    CHECK(spr != NULL && spr->nframes == nf, "%s %d-wide strip: %s",
+          what, fw, STDL_GetError());
+    for (f = 0; spr != NULL && f < nf; f++) {
+        for (x = 0; x < 17; x++) {
+            STDL_Surface *dst = STDL_CreateSurface(64, 5);
+            int bad = 0;
+            STDL_FillRect(dst, NULL, 6);
+            STDL_BlitSprite(spr, f, dst, x, 1);
+            for (py = 0; py < 5 && !bad; py++) {
+                for (px = 0; px < 64 && !bad; px++) {
+                    uint8_t want = 6, got = STDL_GetPixel(dst, px, py);
+                    if (px >= x && px < x + fw && py >= 1 && py < 1 + h) {
+                        uint8_t c = STDL_GetPixel(s, f * fw + px - x,
+                                                  py - 1);
+                        want = c != 0 ? c : 6;
+                    }
+                    if (got != want) {
+                        CHECK(0, "%s %d-wide frame %d x=%d (%d,%d) got %d"
+                              " want %d", what, fw, f, x, px, py, got,
+                              want);
+                        bad = 1;
+                    }
+                }
+            }
+            STDL_FreeSurface(dst);
+        }
+    }
+    STDL_FreeSprite(spr);
+    STDL_FreeSurface(s);
+}
+
 static void test_sprite_frame_rules(void)
 {
     STDL_Surface *s = STDL_CreateSurface(48, 4);
@@ -182,8 +228,6 @@ static void test_sprite_frame_rules(void)
     CHECK(spr != NULL && spr->nframes == 3, "48/16 gives 3 frames");
     STDL_FreeSprite(spr);
 
-    CHECK(STDL_SpriteFromSurface(s, 12, 0) == NULL,
-          "12-wide frames in a 48-wide strip must be rejected");
     CHECK(STDL_SpriteFromSurface(s, 64, 0) == NULL,
           "frame wider than the surface must be rejected");
     CHECK(STDL_SpriteFromSurface(s, 0, 0) == NULL,
@@ -268,6 +312,10 @@ int main(void)
     test_odd_width_sprite(0, "plain");
     test_odd_width_sprite(STDL_PRESHIFT, "preshift");
     test_sprite_frame_rules();
+    test_sprite_strip(12, 0, "plain");
+    test_sprite_strip(20, STDL_PRESHIFT, "preshift");
+    test_sprite_strip(7, 0, "plain");
+    test_sprite_strip(33, STDL_PRESHIFT, "preshift");
 
     sail = STDL_LoadBMP("../../examples/assets/SAIL.BMP");
     CHECK(sail != NULL, "SAIL.BMP load: %s", STDL_GetError());

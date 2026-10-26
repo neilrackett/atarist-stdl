@@ -166,6 +166,7 @@ static void hws_release(void)
     VID_LINEWIDTH = 0;
     VID_HSCROLL = 0;
     write_base((uint32_t)(uintptr_t)stdl.page[0] & ~0xFFUL);
+    stdl_page0_shown();
 }
 
 int STDL_HasHwScroll(void)

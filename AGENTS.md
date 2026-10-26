@@ -76,7 +76,8 @@ warnings** with the Makefile's `-Wall -Wextra`.
   compares two logs by geometric mean. `tests/hatari/blitcost.c`
   sweeps the BLiTTER's choice against the CPU forced across five
   kinds of blit - refit its thresholds from it whenever either path
-  changes.
+  changes. `tests/hatari/sprfit.c` does the same for sprites, the
+  BLiTTER forced against the CPU across shapes, art and alignment.
 - **CI runs both builds on every push** (`.github/workflows/ci.yml`):
   the host tests, then the cross build with `sizecheck`, then the
   libcmini archive. Two things it sees that a developer's Mac does
@@ -522,18 +523,18 @@ warnings** with the Makefile's `-Wall -Wextra`.
   explain is the same port's report at 8MHz, where the cache cannot
   be on; if it recurs on a build with the cache fix, it is something
   else.
-- **Possible future improvement: an unblocking flip.** `STDL_Flip`
-  waits for the vertical blank, so a port whose frame takes 34-40ms
-  is quantised to 40ms - 25fps on a 50Hz display - and pays a whole
-  frame period for a tear-free picture. Reported by a port that has
-  parked double buffering for exactly this reason. The honest first
-  answer is that its drawing pass should come under the boundary,
-  and a port sitting on a VBL boundary has no stable ground to
-  measure on either (see the layout note below). But a flip that
-  arms the swap for the next blanking and returns, rather than
-  waiting for it, would let such a port draw through. Not designed,
-  not measured - recorded so the next person meets the constraint
-  before adopting the API rather than after.
+- **The unblocking flip is `STDL_TRIPLEBUF`.** `STDL_Flip` waits
+  for the vertical blank, so a port whose frame takes 34-40ms is
+  quantised to 40ms - 25fps on a 50Hz display - and pays half a VBL
+  a frame on average. A third page lets the next frame start at once
+  (2026-10-26); the flip then waits only for the previous request to
+  have been taken, before making its own, so a program faster than
+  the display is held to it with every frame shown, rather than
+  drawing frames a later request replaces. `tests/hatari/tripchk.c`
+  watches the video counter for the page handed back being on the
+  screen and times 0-, 1.5- and 2.25-VBL frames against double
+  buffering; drop the wait and it fails both ways. With a border
+  open, overscan.c's own two pages flip as before.
 - **Parked, measured: an asm middle block for wide unshifted
   sprites.** Carrying the previous source group's five words in the
   high halves of d0-d4 (move.w (a0)+ into the low half, a copy
@@ -769,8 +770,9 @@ warnings** with the Makefile's `-Wall -Wextra`.
   the C build is what tests/host exercises, and the same host tests
   run on the target gate the asm: `tests/hatari/pixchk.c` for
   test_pixel.c, `tests/hatari/i8chk.c` for test_blit8.c,
-  `tests/hatari/ixchk.c` for test_indexed.c and
-  `tests/hatari/pgchk.c` for test_polygon.c. A pixel
+  `tests/hatari/ixchk.c` for test_indexed.c,
+  `tests/hatari/pgchk.c` for test_polygon.c and
+  `tests/hatari/ppchk.c` for test_polypat.c. A pixel
   file with asm and no such runner has its asm checked by nobody -
   blit8.c's was, until I8CHK, and a deliberately broken gather now
   fails it with 26 differences. (gcc 4.6 earned the asm: it

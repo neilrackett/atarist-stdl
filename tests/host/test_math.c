@@ -5,7 +5,10 @@
 /*
  * stdl_math.h against plain wide arithmetic: the 16-bit multiplies
  * and divides at their edges and over random operands, and
- * STDL_FixDiv's two-step division against a 64-bit (a << 16) / b.
+ * STDL_FixDiv's two-step division against a 64-bit (a << 16) / b,
+ * and STDL_FixMul's four partial products against the 64-bit
+ * (a * b) >> 16 it must equal bit for bit: the extremes, every sign,
+ * and random operands of every size.
  * Natively this checks the C twins; tests/hatari/mathchk.c runs the
  * same cases on the target, where the functions are the 68000's own
  * instructions.
@@ -86,6 +89,62 @@ static void check_fix(int a, int b)
           (long)f, (long)w);
 }
 
+/* the 64-bit product's bits 16-47, the reference rounding toward
+ * minus infinity; built from shifts and adds of 32-bit halves rather
+ * than a 64-bit multiply, so on the target it is not the same
+ * __muldi3 call under test against itself - and so it costs the
+ * checker no libgcc multiply either */
+static int32_t fixmul_ref(int32_t a, int32_t b)
+{
+    const uint32_t ua = (uint32_t)a, ub = (uint32_t)b;
+    const uint32_t al = ua & 0xFFFF, ah = ua >> 16;
+    const uint32_t bl = ub & 0xFFFF, bh = ub >> 16;
+    uint32_t r = 0, hi = 0, k;
+    int i;
+
+    /* al * bl >> 16, al * bh, ah * bl, ah * bh << 16, by shift-and-add
+     * of 16-bit operands so nothing calls __mulsi3 */
+    {
+        uint32_t p = 0;
+
+        for (i = 0; i < 16; i++) {
+            if ((bl >> i) & 1) p += al << i;
+        }
+        r = p >> 16;
+    }
+    for (k = 0; k < 2; k++) {
+        const uint32_t x = k ? ah : al, y = k ? bl : bh;
+        uint32_t p = 0;
+
+        for (i = 0; i < 16; i++) {
+            if ((y >> i) & 1) p += x << i;
+        }
+        r += p;
+    }
+    for (i = 0; i < 16; i++) {
+        if ((bh >> i) & 1) hi += ah << i;
+    }
+    r += hi << 16;
+    /* signed operands: less the other one << 32, i.e. << 16 here */
+    if (a < 0) r -= ub << 16;
+    if (b < 0) r -= ua << 16;
+    return (int32_t)r;
+}
+
+static void check_fixmul(int32_t a, int32_t b)
+{
+    const int32_t f = STDL_FixMul(a, b), w = fixmul_ref(a, b);
+
+    CHECK(f == w, "FixMul(%ld, %ld) %ld, want %ld", (long)a, (long)b,
+          (long)f, (long)w);
+#ifndef __m68k__
+    /* and the reference is the 64-bit expression */
+    CHECK(w == (int32_t)(((int64_t)a * b) >> 16),
+          "fixmul_ref(%ld, %ld) is not the 64-bit product", (long)a,
+          (long)b);
+#endif
+}
+
 static int16_t rnd_nz16(void)
 {
     int16_t d;
@@ -117,6 +176,21 @@ int main(void)
             }
         }
     }
+    {
+        static const int32_t fe[] = {
+            0, 1, -1, 2, -2, 0xFFFF, 0x10000, -0x10000, 0x10001, -0x10001,
+            0x7FFF, 0x8000, -0x8000, 0x7FFFFFFF, -0x7FFFFFFF - 1,
+            -0x7FFFFFFF, 0x12345678, -0x12345678, 0x8000 << 1, 3 << 16,
+            -(3 << 16), 0x0000FFFF, (int32_t)0xFFFF0000u, 0x00010000 >> 1
+        };
+        const int nf = (int)(sizeof fe / sizeof fe[0]);
+
+        for (x = 0; x < nf; x++) {
+            for (y = 0; y < nf; y++) {
+                check_fixmul(fe[x], fe[y]);
+            }
+        }
+    }
     /* operands passed as int but wider than 16 bits: truncated */
     CHECK(STDL_MulS16(0x10002, 3) == 6, "MulS16 does not truncate");
     CHECK(STDL_MulU16(0x1FFFF, 2) == 0x1FFFE, "MulU16 does not truncate");
@@ -133,6 +207,13 @@ int main(void)
         check_divu(n, (uint16_t)d);
         if (a != -32768 && d != -32768) {
             check_fix(a, d);
+        }
+        {
+            /* operands of every magnitude, every sign */
+            const int32_t fa = (int32_t)rnd32() >> (r & 31);
+            const int32_t fb = (int32_t)rnd32() >> ((r >> 5) & 31);
+
+            check_fixmul(fa, fb);
         }
     }
 

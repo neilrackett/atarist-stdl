@@ -36,18 +36,20 @@ static void build_frame(const STDL_Surface *s, int fx, int frame_w,
 {
     const uint8_t *row = s->pixels;
     const uint8_t *mbase = s->mask;
+    const int ng = (s->w + 15) >> 4;    /* source groups a row */
+    const int r = fx & 15;
     int y, g, p;
 
     for (y = 0; y < s->h; y++) {
         const uint16_t *mrow = (const uint16_t *)mbase;
 
         for (g = 0; g < groups; g++) {
-            /* source pixels [fx + g*16, fx + g*16 + 15]; the frame
-             * offset fx is a multiple of 16 (enforced by caller) */
+            /* source pixels [fx + g*16, fx + g*16 + 15]: groups sg and
+             * sg + 1 through a 32-bit window shifted left r, anything
+             * past the surface's last group transparent */
             int sg = (fx >> 4) + g;
-            int in_range = (sg * 16 < s->w);
-            const uint16_t *grp =
-                (const uint16_t *)(row + sg * 8);
+            const uint16_t *grp = (const uint16_t *)(row + sg * 8);
+            uint32_t m;
             uint16_t mask;
             uint16_t visible;
 
@@ -62,18 +64,19 @@ static void build_frame(const STDL_Surface *s, int fx, int frame_w,
                 }
             }
 
-            if (!in_range) {
-                mask = 0xFFFFu;
-            } else {
-                mask = (mrow != NULL) ? mrow[sg] : 0;
-                mask |= pad;
-            }
+            m = sg < ng ? (mrow != NULL ? mrow[sg] : 0) : 0xFFFFu;
+            m = m << 16 | (sg + 1 < ng
+                           ? (mrow != NULL ? mrow[sg + 1] : 0) : 0xFFFFu);
+            mask = (uint16_t)((m << r) >> 16) | pad;
             visible = (uint16_t)~mask;
 
             out[0] = mask;
             for (p = 0; p < 4; p++) {
-                out[1 + p] = in_range
-                    ? (uint16_t)(grp[p] & visible) : 0;
+                uint32_t w = sg < ng ? (uint32_t)grp[p] << 16 : 0;
+                if (sg + 1 < ng) {
+                    w |= grp[4 + p];
+                }
+                out[1 + p] = (uint16_t)((w << r) >> 16) & visible;
             }
             out += SPR_WORDS;
         }
@@ -159,20 +162,13 @@ STDL_Sprite *STDL_SpriteFromSurface(const STDL_Surface *s,
     uint32_t framesize;
 
     /*
-     * A frame starts at f * frame_w in the source, and build_frame
-     * addresses the source by group, so every frame after the first
-     * has to begin on a 16-pixel boundary. That constrains strips of
-     * several frames, not the width of a single sprite: a lone frame
-     * starts at zero whatever it is wide, and the pixels past
-     * frame_w in its last group are masked transparent below.
+     * A frame starts at f * frame_w in the source, at any column:
+     * build_frame shifts each group into place, and the pixels past
+     * frame_w in a frame's last group are masked transparent, so a
+     * strip of 20-pixel frames needs no padding.
      */
     if (s == NULL || frame_w <= 0 || frame_w > s->w) {
         STDL_SetError("bad sprite frame width");
-        return NULL;
-    }
-    if ((frame_w & 15) != 0 && frame_w != s->w) {
-        STDL_SetError("multi-frame sprites must be a multiple of "
-                      "16 wide");
         return NULL;
     }
     nframes = s->w / frame_w;
@@ -487,12 +483,10 @@ spr_blitter(const uint16_t *fdata, uint32_t rowwords, int xbase, int x,
     dph = dx & 15;
     dn = (dph + w + 15) >> 4;
     /*
-     * Measured on an emulated STE, the BLiTTER wins every sprite
-     * SPRCOST draws, down to 16x16 at phase 0 (796us against 947),
-     * and unshifted ones by 2.7-3.7x; the fit puts the crossover near
-     * eight cells. With a border open every pass first asks the
-     * placement policy, which a pre-shifted sprite's eight passes do
-     * not repay (13% slower than the CPU at 32x32), while an
+     * An aligned sprite shorter than STDL_SPR_MIN_ROWS never gets here
+     * (STDL_BlitSprite keeps it). With a border open every pass first
+     * asks the placement policy, which an aligned sprite's eight
+     * passes do not repay (13% slower than the CPU at 32x32), while an
      * unshifted one still wins by 1.8x from the CPU's shift chain.
      */
     if (!STDL_BLIT_FORCED()) {
@@ -500,8 +494,7 @@ spr_blitter(const uint16_t *fdata, uint32_t rowwords, int xbase, int x,
 
         if (stdl_blit_policy != NULL
             ? (sph == dph || cells < STDL_SPR_BORDER_MIN_CELLS)
-            : cells < (sph != dph ? STDL_SPR_SHIFT_MIN_CELLS
-                                  : STDL_SPR_MIN_CELLS)) {
+            : (sph != dph && cells < STDL_SPR_SHIFT_MIN_CELLS)) {
             return 0;
         }
     }
@@ -609,9 +602,14 @@ void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
      * The BLiTTER, where there is one: it clips horizontally itself,
      * shifts an unshifted sprite, and decides from the size whether
      * to take it at all (spr_blitter). Out of line, so this function
-     * holds a byte test and a call for it and nothing else.
+     * holds a byte test, a row count and a call for it and nothing
+     * else. An aligned sprite (pre-shifted, or unshifted at a group
+     * edge) shorter than STDL_SPR_MIN_ROWS is the CPU's whatever its
+     * width, so it does not pay for the call.
      */
     if (stdl_blitter_active()
+        && (runtime_shift || row1 - row0 >= STDL_SPR_MIN_ROWS
+            || STDL_BLIT_FORCED())
         && spr_blitter(fdata, rowwords,
                                spr->nvariants == 16 ? x - phase : x, x,
                                spr->w, y, row0, row1, dst)) {

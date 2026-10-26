@@ -68,7 +68,7 @@ void stdl_planes_clear_screens(void)
     if (stdl_planes >= 4 || !stdl.video_set) {
         return;
     }
-    for (i = 0; i < 2; i++) {
+    for (i = 0; i < 3; i++) {
         if (stdl.page[i] != NULL) {
             clear_high(stdl.page[i], STDL_SCREEN_STRIDE,
                        STDL_SCREEN_H, stdl_planes);

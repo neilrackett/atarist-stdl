@@ -14,7 +14,10 @@
  *    broke by replaying one page's rectangles onto the other.
  *  - A list overflowing on one page restores that page whole and
  *    leaves the other's list alone.
- *  - A third page evicts the older list, and the evicted page is
+ *  - Three pages in turn, as a triple-buffered game draws: each
+ *    restored from its own list, never whole - a mark nothing pushed
+ *    survives every restore.
+ *  - A fourth page evicts the oldest list, and the evicted page is
  *    restored whole when it comes back.
  *  - The direct restore, which skips STDL_BlitSurfaceEx when the
  *    background and page are alike, against STDL_BlitSurfaceEx itself:
@@ -207,6 +210,93 @@ static void test_two_pages(void)
     }
 }
 
+/* three pages in turn: each restored from its own list, so a mark left
+ * on a page without a push, where none of its rectangles reach, is
+ * still there when it comes back */
+static void test_three_pages(void)
+{
+    STDL_Surface *bg = STDL_CreateSurface(W, H);
+    STDL_Surface *pg[4];
+    int frame, k, mx[3], my[3], marked[3] = { 0, 0, 0 };
+
+    randomise(bg);
+    for (k = 0; k < 4; k++) {
+        pg[k] = STDL_CreateSurface(W, H);
+        STDL_BlitSurface(bg, NULL, pg[k], NULL);
+    }
+    CHECK(STDL_DirtyInit(bg, MAXR) == 0, "init");
+
+    for (frame = 0; frame < 300; frame++) {
+        const int i = frame % 3;
+        STDL_Surface *p = pg[i];
+        STDL_Rect r[5];
+        int n = (int)(rnd() % 6), j, x, y;
+
+        STDL_DirtyRestore(p);
+        if (marked[i]) {
+            const uint8_t under = STDL_GetPixel(bg, mx[i], my[i]);
+
+            CHECK(STDL_GetPixel(p, mx[i], my[i]) == (uint8_t)(under ^ 1),
+                  "page %d restored whole at frame %d", i, frame);
+            STDL_PutPixel(p, mx[i], my[i], under);
+        }
+        CHECK(same(p, bg), "page %d not clean at frame %d", i, frame);
+        if (!same(p, bg)) {
+            break;
+        }
+        for (j = 0; j < n; j++) {
+            STDL_Rect pushed;
+
+            r[j] = random_rect();
+            pushed = r[j];
+            STDL_FillRect(p, &r[j], (uint8_t)(rnd() & 15));
+            STDL_DirtyPush(&pushed);
+        }
+        /* the mark, not pushed, where no rectangle reaches */
+        marked[i] = 0;
+        for (k = 0; k < 16 && !marked[i]; k++) {
+            x = (int)(rnd() % W);
+            y = (int)(rnd() % H);
+            for (j = 0; j < n; j++) {
+                if (x >= r[j].x && x < r[j].x + r[j].w
+                    && y >= r[j].y && y < r[j].y + r[j].h) {
+                    break;
+                }
+            }
+            if (j == n) {
+                mx[i] = x;
+                my[i] = y;
+                STDL_PutPixel(p, x, y,
+                              (uint8_t)(STDL_GetPixel(bg, x, y) ^ 1));
+                marked[i] = 1;
+            }
+        }
+
+        /* now and then a fourth page: an off-screen surface, which
+         * takes the oldest list and leaves its page owing a whole
+         * restore */
+        if (frame % 50 == 17) {
+            STDL_DirtyRestore(pg[3]);
+            CHECK(same(pg[3], bg), "fourth page not clean at %d", frame);
+            draw_pushed(pg[3], 3);
+            STDL_DirtyRestore(pg[3]);
+            CHECK(same(pg[3], bg), "fourth page twice at %d", frame);
+            for (k = 0; k < 3; k++) {
+                if (marked[k]) {    /* any of them may come back whole */
+                    STDL_PutPixel(pg[k], mx[k], my[k],
+                                  STDL_GetPixel(bg, mx[k], my[k]));
+                    marked[k] = 0;
+                }
+            }
+        }
+    }
+    STDL_DirtyQuit();
+    STDL_FreeSurface(bg);
+    for (k = 0; k < 4; k++) {
+        STDL_FreeSurface(pg[k]);
+    }
+}
+
 static void test_direct_whole(int whole);
 static void test_direct(void)
 {
@@ -275,6 +365,7 @@ int main(void)
 {
     test_one_page();
     test_two_pages();
+    test_three_pages();
     test_direct();
 #ifndef __m68k__
     /* and with a BLiTTER present (the host's model), which every

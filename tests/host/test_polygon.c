@@ -27,6 +27,10 @@
  *    meet the same reference; and, natively, the arithmetic it rests
  *    on, for every edge up to 256 rows, with the first edge it gets
  *    wrong at 257 to show the check can fail.
+ *  - Triangles, which the fast path takes on a way of their own: every
+ *    vertex order, flat, one-row, collinear and point triangles,
+ *    against the reference, each other, and the general walk's quad
+ *    with a corner twice.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -564,6 +568,150 @@ static void test_fixed_point(void)
 }
 #endif
 
+/*
+ * Triangles, which the fast path takes on a way of their own: random
+ * ones - small and large, flat-topped, flat-bottomed, one row, a
+ * point, collinear - every operation, colour and budget, masked or
+ * not, the clip around them or cutting them, against the same three in
+ * another order and the same triangle as a quad with a corner
+ * repeated, which the general walk takes; and one in six against the
+ * reference.
+ */
+static void test_triangle(void)
+{
+    static const int budgets[3] = { 4, 2, 3 };
+    static const uint8_t order[6][3] = {
+        { 0, 1, 2 }, { 0, 2, 1 }, { 1, 0, 2 }, { 1, 2, 0 }, { 2, 0, 1 },
+        { 2, 1, 0 }
+    };
+    int it;
+
+    for (it = 0; it < POLY_ITERS; it++) {
+        const int budget = budgets[it % 3], op = (it / 3) & 3;
+        const int masked = it % 7 == 6, size = it % 5 == 0 ? 3 : it & 1
+                                                           ? 14 : 80;
+        const int cx = rnd(W + 20) - 10, cy = rnd(H + 20) - 10;
+        /* the reference for one in six: on the machine it costs as
+         * much as the rest of a case's checking together */
+        const int ref = it % 6 == 0;
+        STDL_Surface *s[3];
+        STDL_Point p[3], r[3], q[4];
+        STDL_Rect clip;
+        uint8_t before[W * H], mbefore[W * H];
+        const uint8_t *o = order[rnd(6)];
+        int k, x, y, col = rnd(17), bad = 0, trans;
+        size_t bytes;
+
+        STDL_SetPlaneBudget(budget);
+        for (k = 0; k < 3; k++) {
+            p[k].x = (int16_t)(cx + rnd(2 * size + 1) - size);
+            p[k].y = (int16_t)(cy + rnd(size + 1) - size / 2);
+        }
+        switch (rnd(8)) {
+        case 0: p[1].y = p[0].y; break;                 /* flat top or */
+        case 1: p[2].y = p[1].y; break;                 /* bottom      */
+        case 2: p[1].y = p[2].y = p[0].y; break;        /* one row     */
+        case 3: p[1] = p[2] = p[0]; break;              /* a point     */
+        case 4:                                         /* collinear   */
+            p[2].x = (int16_t)(2 * p[1].x - p[0].x);
+            p[2].y = (int16_t)(2 * p[1].y - p[0].y);
+            break;
+        }
+        q[0] = p[0];
+        q[1] = p[1];
+        q[2] = p[1];
+        q[3] = p[2];
+        clip.x = 0; clip.y = 0; clip.w = W; clip.h = H;
+        if (it & 2) {
+            clip.x = (int16_t)(rnd(W) - 10);
+            clip.y = (int16_t)(rnd(H) - 10);
+            clip.w = (uint16_t)rnd(W + 20);
+            clip.h = (uint16_t)rnd(H + 20);
+        }
+        for (k = 0; k < 3; k++) {
+            s[k] = STDL_CreateSurface(W, H);
+            if (masked) {
+                STDL_CreateMask(s[k], 1);
+            }
+            STDL_SetClipRect(s[k], &clip);
+        }
+        clip = s[0]->clip;
+        randomise(s[0], budget);
+        bytes = (size_t)s[0]->stride * H;
+        memcpy(s[1]->pixels, s[0]->pixels, bytes);
+        memcpy(s[2]->pixels, s[0]->pixels, bytes);
+        if (masked) {
+            for (y = 0; y < H; y++) {
+                for (x = 0; x < W; x++) {
+                    if (rnd(2)) {
+                        ((uint16_t *)(s[0]->mask + y * s[0]->maskstride))
+                            [x >> 4] |= (uint16_t)(0x8000u >> (x & 15));
+                    }
+                }
+            }
+            memcpy(s[1]->mask, s[0]->mask, (size_t)s[0]->maskstride * H);
+            memcpy(s[2]->mask, s[0]->mask, (size_t)s[0]->maskstride * H);
+        }
+        for (y = 0; y < H && ref; y++) {
+            for (x = 0; x < W; x++) {
+                before[y * W + x] = (uint8_t)getpix(s[0], x, y);
+                mbefore[y * W + x] = masked ? (uint8_t)getmask(s[0], x, y)
+                                            : 0;
+            }
+        }
+        r[0] = p[o[0]];
+        r[1] = p[o[1]];
+        r[2] = p[o[2]];
+        STDL_FillPolygon(s[0], p, 3, (uint8_t)col, op);
+        STDL_FillPolygon(s[1], r, 3, (uint8_t)col, op);
+        STDL_FillPolygon(s[2], q, 4, (uint8_t)col, op);
+        for (k = 1; k < 3; k++) {
+            CHECK(memcmp(s[0]->pixels, s[k]->pixels, bytes) == 0
+                  && (!masked || memcmp(s[0]->mask, s[k]->mask,
+                                        (size_t)s[0]->maskstride * H) == 0),
+                  "triangle %d (%d,%d) (%d,%d) (%d,%d) op %d col %d: "
+                  "differs from the %s", it, p[0].x, p[0].y, p[1].x,
+                  p[1].y, p[2].x, p[2].y, op, col,
+                  k == 1 ? "same reordered" : "quad");
+        }
+        trans = op == STDL_DRAW_SET && col == STDL_TRANSPARENT && masked;
+        col &= (1 << budget) - 1;
+        if (trans) {
+            col = 0;
+        }
+        for (y = 0; y < H && bad < 3 && ref; y++) {
+            int first, end;
+
+            section(p, 3, y, &first, &end);
+            for (x = 0; x < W && bad < 3; x++) {
+                const int in = x >= clip.x && x < clip.x + clip.w
+                    && y >= clip.y && y < clip.y + clip.h
+                    && x >= first && x < end
+                    && (op == STDL_DRAW_SET || col != 0);
+                const int want = in ? apply(before[y * W + x], col, op)
+                                    : before[y * W + x];
+
+                if (getpix(s[0], x, y) != want) {
+                    CHECK(0, "triangle %d op %d budget %d: (%d,%d) got %d "
+                          "want %d", it, op, budget, x, y,
+                          getpix(s[0], x, y), want);
+                    bad++;
+                }
+                if (masked && getmask(s[0], x, y)
+                              != (in ? trans : mbefore[y * W + x])) {
+                    CHECK(0, "triangle %d: mask (%d,%d) got %d", it, x, y,
+                          getmask(s[0], x, y));
+                    bad++;
+                }
+            }
+        }
+        for (k = 0; k < 3; k++) {
+            STDL_FreeSurface(s[k]);
+        }
+    }
+    STDL_SetPlaneBudget(4);
+}
+
 /* every pixel of the surface against the reference */
 static void check_against(const STDL_Point *p, int n, const char *what)
 {
@@ -628,6 +776,7 @@ int main(void)
     test_random();
     test_inside();
     test_tall();
+    test_triangle();
     test_tiling();
     test_rect();
     if (failures) {

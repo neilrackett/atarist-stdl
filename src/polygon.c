@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * Filled convex polygons, set, XORed, ORed or cleared into the planes
- * of a colour.
+ * of a colour, and triangles, which a mesh draws most.
  *
  * A filled polygon used to mean building a span list and handing it
  * to STDL_HSpans or STDL_XorHSpans, which clip, find the row and work
@@ -25,7 +25,7 @@
  * and a remainder, so no rounding drifts down a long edge.
  *
  * Its own translation unit: a program that never fills a polygon
- * does not carry it.
+ * does not carry it. The triangle path is 872 bytes of it.
  */
 
 #include "stdl_internal.h"
@@ -703,6 +703,58 @@ PROWS_ASM(stdl_prows_xor4, TX_EDGE,
     W_EDGE(X, SR, BIAS)                                                   \
     "8:\n\t"
 /*
+ * A triangle's trapezoid, rows d3 to the row in END(%sp), exclusive:
+ * a6 the row to stop at, and into the row loop.
+ */
+#define T_TRAP(END)                                                       \
+    "move.w " END "(%sp),%d0\n\t"                                         \
+    "sub.w  %d3,%d0\n\t"                /* rows */                        \
+    "move.w %a0,%d1\n\t"                                                  \
+    "mulu.w %d1,%d0\n\t"                                                  \
+    "lea    0(%a2,%d0.l),%a6\n\t"       /* the row to stop at */          \
+    "move.l 4(%sp),%a3\n\t"                                               \
+    "jsr    (%a3)\n\t"
+/*
+ * One edge of a triangle, from the vertex at FROM(%sp) to the one at
+ * TO(%sp), at row d3: W_EDGE's, with the vertices in the frame.
+ */
+#define T_EDGE(FROM, TO, X, SR, BIAS)                                     \
+    "lea    " FROM "(%sp),%a3\n\t"                                        \
+    "lea    " TO "(%sp),%a6\n\t"                                          \
+    "move.w 2(%a6),%d1\n\t"                                               \
+    W_EDGE(X, SR, BIAS)
+/* a side's edge and step registers and its rounding: the left's up to
+ * its first column, the right's down to its last */
+#define T_LEFT  "%d4", "%a4", "add.l #0xFFFF,%d4\n\t"
+#define T_RIGHT "%d5", "%a5", "subq.l #1,%d5\n\t"
+/*
+ * A triangle's rows from its edges, the long one on the side (LX, LS,
+ * LB) and the short ones on (SX, SS, SB): the long edge, then the
+ * short one from the top and its rows if the middle's row is below
+ * this one, then the short one from the middle and the rest. d3 the
+ * row throughout. Through T_HALVES_, so T_LEFT and T_RIGHT spread
+ * into their three arguments each.
+ */
+#define T_HALVES_(LONG, SHORT) T_HALVES(LONG, SHORT)
+#define T_HALVES(LX, LS, LB, SX, SS, SB)                                  \
+    T_EDGE("0", "12", LX, LS, LB)                                         \
+    "cmp.w  16(%sp),%d3\n\t"                                              \
+    "bge    1f\n\t"                     /* the middle at or above it */   \
+    T_EDGE("0", "8", SX, SS, SB)                                          \
+    "move.w 16(%sp),%d0\n\t"                                              \
+    "cmp.w  18(%sp),%d0\n\t"                                              \
+    "ble.s  9f\n\t"                                                       \
+    "move.w 18(%sp),16(%sp)\n"          /* or the last */                 \
+    "9:\n\t"                                                              \
+    T_TRAP("16")                                                          \
+    "move.w 16(%sp),%d3\n\t"                                              \
+    "cmp.w  18(%sp),%d3\n\t"                                              \
+    "bge    99b\n"                                                        \
+    "1:\n\t"                                                              \
+    T_EDGE("8", "12", SX, SS, SB)                                         \
+    T_TRAP("18")                                                          \
+    "bra    99b\n"
+/*
  * STDL_FillPolygon itself on the machine: the whole of a SET or XOR
  * onto a surface with no mask, when the polygon is inside the clip's
  * columns and no taller than 256 rows - which is every polygon of a
@@ -720,6 +772,21 @@ PROWS_ASM(stdl_prows_xor4, TX_EDGE,
  * neighbours run straight through, where only the whole area tells
  * the winding - it hands to stdl_poly_c with the caller's arguments
  * as they were.
+ *
+ * A triangle goes its own way after the colour's set-up (label 60),
+ * as STDL_FillPolygonPattern's does: its vertices sorted by y, which
+ * side the long edge is on from one cross product, the long edge set
+ * up once for both trapezoids, and no walk - the same edges, so the
+ * same pixels. PRIMCOST, plain ST: the 2-row triangle 0.62 -> 0.50ms,
+ * 8 rows 0.91 -> 0.79, 22 rows 1.63 -> 1.51, the glenz 47.2 -> 44.4,
+ * 80 faces of a small mesh 58.0 -> 48.1; Mega STE 0.32 -> 0.26 and
+ * 30.4 -> 25.3; other polygons level, and one declined for the
+ * clip's columns level on a plain ST, 0.7% more on a Mega STE for
+ * the attempt. Built, measured and not
+ * kept: an entry taking a triangle's three vertices where they are,
+ * for a mesh whose faces index one vertex array. What it saved, the
+ * copy of a face's corners into a polygon, was under 1% (PRIMCOST, 80
+ * faces: 48.1ms against 48.4 on a plain ST, level on a Mega STE).
  *
  * The frame: 0 vertices, 4 row loop, 8 n x 4, 10 step x 4, 12/14 the
  * left's and right's vertex, 16/18 the rows their edges end on, 20
@@ -812,6 +879,8 @@ __asm__(
     "bne.s  3f\n\t"
     "lea    " T_SYM(stdl_prows_xor2) ",%a4\n"
     "3:\n\t"
+    "cmp.w  #3,84(%sp)\n\t"
+    "beq    60f\n\t"                    /* a triangle */
     "move.l 78(%sp),%a3\n\t"            /* vertices */
     "move.l 82(%sp),%d0\n\t"            /* n */
     "move.l (%a3),%d1\n\t"              /* x:y */
@@ -958,8 +1027,116 @@ __asm__(
     "98:\n\t"
     "lea    26(%sp),%sp\n\t"
     "movem.l (%sp)+,%d2-%d7/%a2-%a6\n\t"
-    "jmp    " T_SYM(stdl_poly_c) "\n\t"
-    ".even\n"
+    "jmp    " T_SYM(stdl_poly_c) "\n"
+
+    /* A triangle: fill_tri. The vertices sorted by y into top, middle
+     * and bottom, the long edge top-bottom on one side and the two
+     * short ones on the other, the side from one cross product, and
+     * no walk. Frame: 0/8/12 top, middle, bottom (x:y), 4 row loop,
+     * 16 the middle's row, 18 the last row (exclusive), 20 the first,
+     * 22 the long edge's side (0xFF: left). What it declines goes to
+     * stdl_poly_c as the walk's does (98). */
+    "60:\n\t"
+    "move.l 78(%sp),%a0\n\t"
+    "move.l (%a0)+,%d0\n\t"
+    "move.l (%a0)+,%d1\n\t"
+    "move.l (%a0),%d2\n\t"
+    "cmp.w  %d0,%d1\n\t"
+    "bge.s  1f\n\t"
+    "exg    %d0,%d1\n"
+    "1:\n\t"
+    "cmp.w  %d1,%d2\n\t"
+    "bge.s  2f\n\t"
+    "exg    %d1,%d2\n\t"
+    "cmp.w  %d0,%d1\n\t"
+    "bge.s  2f\n\t"
+    "exg    %d0,%d1\n"
+    "2:\n\t"
+    /* the rows, clipped: out before any other work if none is left */
+    "move.l 74(%sp),%a1\n\t"            /* the surface */
+    "move.w 18(%a1),%d5\n\t"            /* clip y */
+    "move.w %d0,%d3\n\t"
+    "cmp.w  %d5,%d3\n\t"
+    "bge.s  1f\n\t"
+    "move.w %d5,%d3\n"                  /* the first row */
+    "1:\n\t"
+    "add.w  22(%a1),%d5\n\t"
+    "move.w %d2,%d4\n\t"
+    "cmp.w  %d5,%d4\n\t"
+    "ble.s  2f\n\t"
+    "move.w %d5,%d4\n"                  /* the last, exclusive */
+    "2:\n\t"
+    "cmp.w  %d4,%d3\n\t"
+    "bge    99b\n\t"                    /* no row inside the clip */
+    "move.w %d3,20(%sp)\n\t"
+    "move.w %d4,18(%sp)\n\t"
+    "move.w %d2,%d5\n\t"
+    "sub.w  %d0,%d5\n\t"                /* uy, the long edge's rows */
+    "cmp.w  #256,%d5\n\t"
+    "bhi    98b\n\t"                    /* taller than 256 rows */
+    "move.l %d0,(%sp)\n\t"
+    "move.l %d1,8(%sp)\n\t"
+    "move.l %d2,12(%sp)\n\t"
+    "move.w %d1,16(%sp)\n\t"            /* the middle's row */
+    "move.w %d1,%d6\n\t"
+    "sub.w  %d0,%d6\n\t"                /* vy */
+    "swap   %d0\n\t"
+    "swap   %d1\n\t"
+    "swap   %d2\n\t"
+    /* the columns: within the clip's, or the C's */
+    "move.w %d0,%d4\n\t"                /* least x */
+    "move.w %d0,%d7\n\t"                /* greatest x */
+    "cmp.w  %d1,%d4\n\t"
+    "ble.s  3f\n\t"
+    "move.w %d1,%d4\n"
+    "3:\n\t"
+    "cmp.w  %d1,%d7\n\t"
+    "bge.s  4f\n\t"
+    "move.w %d1,%d7\n"
+    "4:\n\t"
+    "cmp.w  %d2,%d4\n\t"
+    "ble.s  5f\n\t"
+    "move.w %d2,%d4\n"
+    "5:\n\t"
+    "cmp.w  %d2,%d7\n\t"
+    "bge.s  6f\n\t"
+    "move.w %d2,%d7\n"
+    "6:\n\t"
+    "move.w 16(%a1),%d3\n\t"            /* clip x */
+    "cmp.w  %d3,%d4\n\t"
+    "blt    98b\n\t"                    /* left of the clip */
+    "add.w  20(%a1),%d3\n\t"
+    "cmp.w  %d3,%d7\n\t"
+    "bgt    98b\n\t"                    /* right of it */
+    /* which side the middle is: ux vy against uy vx */
+    "sub.w  %d0,%d2\n\t"                /* ux */
+    "sub.w  %d0,%d1\n\t"                /* vx */
+    "muls.w %d6,%d2\n\t"
+    "muls.w %d5,%d1\n\t"
+    "cmp.l  %d1,%d2\n\t"
+    "beq    99b\n\t"                    /* no area */
+    "slt    22(%sp)\n\t"                /* the middle right: long left */
+    /* the walk's registers: the row loop, the plane words, the first
+     * row's address and the stride */
+    "move.l %a4,4(%sp)\n\t"
+    "move.l %a6,%d6\n\t"
+    "move.l %a2,%d7\n\t"
+    "move.w 20(%sp),%d3\n\t"
+    "move.w %d3,%d0\n\t"
+    "mulu.w 8(%a1),%d0\n\t"
+    "move.l (%a1),%a2\n\t"
+    "add.l  %d0,%a2\n\t"
+    "add.l  %a5,%a2\n\t"
+    "moveq  #0,%d0\n\t"
+    "move.w 8(%a1),%d0\n\t"
+    "move.l %d0,%a0\n\t"
+    "lea    " T_SYM(stdl_poly_masks) ",%a1\n\t"
+    "tst.b  22(%sp)\n\t"
+    "bne    70f\n\t"
+    T_HALVES_(T_RIGHT, T_LEFT)
+    "70:\n\t"
+    T_HALVES_(T_LEFT, T_RIGHT)
+    "\t.even\n"
     "91:\n\t"
     ".long  0,0xFFFF0000,0x0000FFFF,0xFFFFFFFF\n");
 #endif
@@ -1054,6 +1231,65 @@ static __attribute__((noinline)) void fill_traps(
             return;
         }
     }
+}
+
+/* one side's edge, a to b (b below), at row y */
+static void tri_edge(Trap *t, int left, const STDL_Point *a,
+                     const STDL_Point *b, int y)
+{
+    const int32_t s = slope16(b->x - a->x, b->y - a->y);
+
+    if (left) {
+        t->sl = s;
+        t->xl = edge_x(a, s, y, 0xFFFF);
+    } else {
+        t->sr = s;
+        t->xr = edge_x(a, s, y, -1);
+    }
+}
+
+/*
+ * A triangle, as the 68000 takes one: its vertices sorted by y into
+ * top, middle and bottom, the long edge top-bottom on one side for
+ * every row and the short ones top-middle and middle-bottom on the
+ * other, the side from one cross product. Three edges set up and no
+ * walk: the same pixels as fill_traps.
+ */
+static __attribute__((noinline)) void fill_tri(Trap *t, trap_fn fill,
+                                               const STDL_Point *pts,
+                                               int y, int y2)
+{
+    const STDL_Point *a = &pts[0], *m = &pts[1], *b = &pts[2], *u;
+    int32_t c1, c2;
+    int left;
+
+    /* the 68000's three compare-and-exchanges */
+    if (m->y < a->y) { u = a; a = m; m = u; }
+    if (b->y < m->y) {
+        u = m; m = b; b = u;
+        if (m->y < a->y) { u = a; a = m; m = u; }
+    }
+    c1 = STDL_MulS16(b->x - a->x, m->y - a->y);
+    c2 = STDL_MulS16(b->y - a->y, m->x - a->x);
+    if (c1 == c2) {
+        return;                 /* no area */
+    }
+    left = c1 < c2;             /* the middle right: the long edge left */
+    tri_edge(t, left, a, b, y);
+    if (y < m->y) {
+        const int stop = m->y < y2 ? m->y : y2;
+
+        tri_edge(t, !left, a, m, y);
+        t->end = t->row + stdl_row_off(stop - y, (uint16_t)t->stride);
+        fill(t);
+        y = stop;
+        if (y >= y2) {
+            return;
+        }
+    }
+    tri_edge(t, !left, m, b, y);
+    t->end = t->row + stdl_row_off(y2 - y, (uint16_t)t->stride);
+    fill(t);
 }
 #endif
 
@@ -1258,8 +1494,12 @@ void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,
     if (dst->mask == NULL && free_ && bottom - pts[top].y <= 256) {
         t.row = dst->pixels + stdl_row_off(y, dst->stride) + off;
         t.masks = edge_masks;
-        fill_traps(&t, trap_by_kind[kind], pts, n, top, dir, y, y2,
-                   bottom);
+        if (n == 3) {
+            fill_tri(&t, trap_by_kind[kind], pts, y, y2);
+        } else {
+            fill_traps(&t, trap_by_kind[kind], pts, n, top, dir, y, y2,
+                       bottom);
+        }
         return;
     }
 #endif

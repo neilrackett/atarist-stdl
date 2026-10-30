@@ -276,7 +276,16 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
      2.26 as spans, 1.18ms in one plane; 24 one-plane glenz-like
      triangles 47ms (85 before this path). Set-up is about 4400
      cycles a polygon, so from those figures only faces under about
-     ten rows are cheaper as spans. `examples/polydemo.c`
+     ten rows are cheaper as spans. Triangles take a path of their own
+     (sorted vertices, one cross product, three edges, no walk), about
+     a thousand cycles cheaper: 2, 8 and 22 rows in 0.50, 0.79 and
+     1.51ms, the glenz 44ms, 80 faces of a small mesh (~12 pixels
+     each) 48ms against 58 by the general walk; on a Mega STE a 2-row
+     triangle 0.26ms and the mesh 25ms. A mesh whose faces index one
+     array of projected vertices loses nothing by copying a face's
+     three corners into a polygon for the call: an entry taking the
+     vertices in place was built, and measured under 1% faster on a
+     plain ST and level on a Mega STE. `examples/polydemo.c`
    - dithered faces, fog and screen doors (PICO-8's `fillp`) ->
      `STDL_FillPolygonPattern(dst, pts, n, &pat)`, with `pat` built
      once by `STDL_MakePattern(&pat, col0, col1, bits, transparent)`

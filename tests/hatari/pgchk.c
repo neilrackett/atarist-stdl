@@ -9,7 +9,7 @@
  * reference, but natively, where SET and XOR rows are the C twins.
  * The 68000 rows are only covered here. Rerun it after touching
  * src/polygon.c - the 68000 fast path (stdl_poly_fast and its row
- * loops) runs nowhere else.
+ * loops) and the triangle's own path run nowhere else.
  *
  * The default build checks a hundredth of the host's random polygons,
  * with every fixed case (the extremes, the edges past 256 rows, a
@@ -17,7 +17,10 @@
  * a tenth, a job for the emulator: about 85 seconds on a plain ST
  * under fast-forward, against run.sh's two minute wait, but 28
  * minutes on a real Mega STE at 8MHz - the reference's exact
- * arithmetic, not the fill. Run the full build in Hatari:
+ * arithmetic, not the fill. The triangle cases added about a fifth
+ * (235 -> 285s on a slower host, so near 105s here), having had the
+ * reference cut to one case in six to stay inside that wait. Run the
+ * full build in Hatari:
  *
  *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -std=gnu99 \
  *       -Iinclude -Isrc -Ilib/xpad/src -DPGCHK_FULL \

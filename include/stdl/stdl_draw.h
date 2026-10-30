@@ -150,10 +150,14 @@ void STDL_XorVSpans(STDL_Surface *dst, const STDL_Span *spans,
  * STDL_XorHSpans; a 22-row triangle 1.47ms against 2.26, and 1.18ms
  * in one plane; 24 one-plane triangles of a glenz-like object 47ms.
  * A polygon's set-up - the checks, the vertex scan, and two divides an
- * edge - is about 4400 cycles (a 2-row triangle takes 0.62ms), so from
- * those figures spans are the cheaper way below about ten rows. CPU
- * only.
- * Its own object, 6KB: a program that never calls it does not carry
+ * edge - is about 4400 cycles, so from those figures spans are the
+ * cheaper way below about ten rows. A triangle takes a way of its own
+ * - its vertices sorted, one cross product for its sides, three edges
+ * and no walk - about a thousand cycles less: 2, 8 and 22 rows in
+ * 0.50, 0.79 and 1.51ms (0.62, 0.91, 1.63 by the walk), 80 faces of a
+ * small mesh, about 12 pixels each, 48.1ms (58.0); on a Mega STE the
+ * 2-row one 0.26ms (0.32) and the mesh 25.3ms (30.4). CPU only.
+ * Its own object, 7KB: a program that never calls it does not carry
  * it.
  */
 void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,

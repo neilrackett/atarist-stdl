@@ -293,6 +293,49 @@ static void op_pi_t2(int i)   { (void)i; STDL_FillPolygon(dst, pi_t2, 3, 9, STDL
 static void op_pi_t8(int i)   { (void)i; STDL_FillPolygon(dst, pi_t8, 3, 9, STDL_DRAW_SET); }
 static void op_pi_t22(int i)  { (void)i; STDL_FillPolygon(dst, tri, 3, 9, STDL_DRAW_SET); }
 static void op_pi_quad(int i) { (void)i; STDL_FillPolygon(dst, pi_quad, 4, 9, STDL_DRAW_SET); }
+/* a small mesh's faces: a 9 x 6 grid of vertices about 6 columns and 4
+ * rows apart, each cell two triangles of about 12 pixels, the faces
+ * indexing one vertex array as a 3D port keeps them, so each face's
+ * corners are copied into a polygon for the call */
+static STDL_Point mv[54];
+static uint8_t mf[80][3];
+
+static void mesh_init(void)
+{
+    int r, c, k = 0;
+
+    for (r = 0; r < 6; r++) {
+        for (c = 0; c < 9; c++) {
+            mv[r * 9 + c].x = (int16_t)(100 + 6 * c + (c * 7 + r * 3) % 3 - 1);
+            mv[r * 9 + c].y = (int16_t)(50 + 4 * r + (c * 5 + r) % 3 - 1);
+        }
+    }
+    for (r = 0; r < 5; r++) {
+        for (c = 0; c < 8; c++, k += 2) {
+            const int v = r * 9 + c;
+
+            mf[k][0] = (uint8_t)v;
+            mf[k][1] = (uint8_t)(v + 1);
+            mf[k][2] = (uint8_t)(v + 10);
+            mf[k + 1][0] = (uint8_t)v;
+            mf[k + 1][1] = (uint8_t)(v + 10);
+            mf[k + 1][2] = (uint8_t)(v + 9);
+        }
+    }
+}
+static void op_mesh_poly(int i)
+{
+    STDL_Point t[3];
+    int k;
+
+    (void)i;
+    for (k = 0; k < 80; k++) {
+        t[0] = mv[mf[k][0]];
+        t[1] = mv[mf[k][1]];
+        t[2] = mv[mf[k][2]];
+        STDL_FillPolygon(dst, t, 3, (uint8_t)(8 + (k & 7)), STDL_DRAW_SET);
+    }
+}
 
 static void op_hline32(int i)  { (void)i; STDL_HLine(dst, 37, 68, 60, 5); }
 static void op_hline300(int i) { (void)i; STDL_HLine(dst, 7, 306, 60, 5); }
@@ -434,6 +477,7 @@ int main(void)
     ndsp = spans_of(diamond, 4, dsp);
     ntsp = spans_of(tri, 3, tsp);
     glenz_init();
+    mesh_init();
     STDL_MakePattern(&pp_dith, 9, 4, 0xA5A5, 0);
     STDL_MakePattern(&pp_trans, 9, 4, 0xA5A5, 1);
     for (pass_name = 'A'; pass_name <= 'B'; pass_name++) {
@@ -477,6 +521,7 @@ int main(void)
         report("polygon 8 rows set", op_pi_t8);
         report("polygon 22 rows set", op_pi_t22);
         report("polygon quad 20 rows set", op_pi_quad);
+        report("polygon mesh 80 tris set", op_mesh_poly);
         report("polypat tiny 1 row", op_pp_tiny1);
         report("polypat tiny 2 rows", op_pp_tiny2);
         report("polypat tiny 4 rows", op_pp_tiny4);

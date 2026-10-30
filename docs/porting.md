@@ -351,7 +351,8 @@ or `pixels[y*pitch+x]` writes corrupt planar data. Rewrite:
   graphics) -> `STDL_FillPolygon` per convex face, with
   `STDL_DRAW_SET` or XOR/OR/CLEAR into the planes of a colour.
   Shared edges tile exactly (top-left rule), and the edges are
-  stepped without a span list.
+  stepped without a span list. Triangles take a faster path of
+  their own, so a mesh's faces are best left as triangles.
 * dithered or fill-patterned faces (PICO-8's `fillp`, ordered-dither
   shading, fog, screen-door transparency) ->
   `STDL_FillPolygonPattern` with an `STDL_Pattern` built once by

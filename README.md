@@ -78,7 +78,8 @@ holds it), and the vectors put back however the program exits.
 
 `STDL_FillPolygon` fills convex polygons straight from their edges -
 set, or XORed, ORed or cleared into a colour's planes, with shared
-edges tiling exactly - for flat-shaded 3D and glenz. `STDL_FillPolygonPattern`
+edges tiling exactly - for flat-shaded 3D and glenz, with a faster way
+for triangles. `STDL_FillPolygonPattern`
 fills them with a two-colour 4x4 pattern (PICO-8's `fillp`: dither
 shading, fog, screen-door transparency) from 12.4 sub-pixel vertices,
 under the same exact edge rule. `STDL_StagePalette(1)`

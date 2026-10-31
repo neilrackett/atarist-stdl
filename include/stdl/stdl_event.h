@@ -138,6 +138,23 @@ int  STDL_WaitEvent(STDL_Event *e);
 int  STDL_PushEvent(const STDL_Event *e);
 void STDL_PumpEvents(void);
 
+/*
+ * Take the keyboard, mouse, joystick and pad without setting a video
+ * mode. STDL_SetVideoMode does this itself, so most programs never
+ * need it. It is for a program that keeps the screen it was started
+ * on (a tool that prints, as examples/checkkeys.c does) or drives the
+ * screen some other way, such as a TT or Falcon mode set through the
+ * XBIOS, and wants the events all the same.
+ *
+ * Runs STDL_Init if nothing has yet. Returns 0, or -1 when STDL_Init
+ * fails. Calling it again, or setting a mode afterwards, changes
+ * nothing. STDL_Quit and the terminate path give the keyboard back
+ * as they do after a mode, and STDL_Quit leaves alone a screen the
+ * library never set. BIOS console input is dead from here on, as it
+ * is under a mode (docs/limits.md); console output still works.
+ */
+int  STDL_OpenInput(void);
+
 /* Key state array indexed by STDL_Key, valid after each pump. */
 const uint8_t *STDL_GetKeyState(int *numkeys);
 uint16_t       STDL_GetModState(void);

@@ -93,6 +93,10 @@ reads - three ACIA interrupts per movement that, with a border open,
 are enough to delay the timers a flick depends on and flicker the
 screen.
 
+`STDL_OpenInput()` takes the keyboard, mouse, joystick and pad without
+setting a video mode, for a program that keeps the screen it started
+on or sets its own - a TT or Falcon mode through the XBIOS, say.
+
 `STDL_PauseVoices()` and `STDL_ResumeVoices()` stop and restart the
 sample mixer's DMA without giving up the volume table its open call
 spends a frame building - for ports whose device is idle through
@@ -186,7 +190,7 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | TESTWIN.TOS  | BMP loading, surface blits, palette fades                                        |
 | TSPRITE.TOS  | colour-keyed sprite blits, dirty rects, FPS                                      |
 | TPALETTE.TOS | palette animation on a 16-entry budget; `-stage` lands each change in the blank  |
-| CHECKKEY.TOS | raw IKBD keyboard: key-ups, modifiers, unicode                                   |
+| CHECKKEY.TOS | raw IKBD keyboard, no video mode: key-ups, modifiers, unicode                    |
 | TTIMER.TOS   | 200Hz timing, cooperative timers                                                 |
 | TBLITSPD.TOS | blit throughput baseline                                                         |
 | TVIDINFO.TOS | capability report + fill/blit/flip benchmarks                                    |

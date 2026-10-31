@@ -252,6 +252,17 @@ void stdl_events_remove(void)
     }
 }
 
+/* What STDL_SetVideoMode does for input, without the mode; the
+ * teardown is the same whichever installed it */
+int STDL_OpenInput(void)
+{
+    if (STDL_Init(STDL_INIT_VIDEO) < 0) {
+        return -1;
+    }
+    stdl_events_install();
+    return 0;
+}
+
 /* ---------------------------------------------------------------- */
 /* pump-side state                                                  */
 

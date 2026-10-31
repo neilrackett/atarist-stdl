@@ -29,8 +29,14 @@ fixing, not the target raising. Measure on `MACHINE=st` before
 believing any frame-rate claim.
 
 **Targeting a TT or Falcon rather than an ST?** Use Atari SDL 1.2 instead
-(runs on plain TOS, no MiNT): those machines are chunky at 256 colours,
-and TT line-doubles 320x240 so one binary covers both. STDL exists for
+(runs on plain TOS, no MiNT): those machines have 256 colours,
+and TT line-doubles 320x240 so one binary covers both. Their 256-colour
+modes are eight interleaved planes, so SDL converts its chunky surface
+at every update; and one port measured, in Hatari, that SDL's doubled
+TT mode puts an `SDL_UpdateRects` box that does not start at the top on
+line y rather than 2y (whole-screen `SDL_Flip` is right). STDL's input
+needs no STDL screen there: `STDL_OpenInput` takes the keyboard, mouse,
+joystick and pad under a mode the program set itself. STDL exists for
 the ST, where there is no chunky mode at all: SDL degrades to
 greyscale derived from luminance and c2ps every frame, which is
 unusably slow past the basics. A 68030 also has hardware 32-bit multiply
@@ -962,6 +968,15 @@ first.
   Mega STE. Reporting is restored when the library releases the
   keyboard, and `STDL_GetMouseState` stops changing rather than
   failing. `examples/overscan.c`, M.
+- Input without a video mode: `STDL_OpenInput()` takes the keyboard,
+  mouse, joystick and pad as `STDL_SetVideoMode` does, and leaves the
+  screen alone - for a tool that prints on the screen it was started
+  on, in any resolution (`examples/checkkeys.c`), or a program that
+  sets a mode the library does not, such as a TT's or a Falcon's
+  through the XBIOS. It runs `STDL_Init` if nothing has, a mode set
+  later changes nothing, and the keyboard goes back at `STDL_Quit` and
+  down the terminate path. A screen mode the program set is the
+  program's to put back: the library restores only one it set.
 - Display rate: `STDL_SetRefresh(50 | 60)` switches the sync rate
   and returns the rate that actually took effect, `-1` queries. PAL
   machines boot at 50 and NTSC at 60, and 60Hz buys ten more frames

@@ -27,6 +27,8 @@ stop trying and redesign instead.
   width/height/bpp are accepted for source compatibility and
   ignored. On a monochrome monitor it fails (mono emulation is a
   post-v1 feature, see the design overview section 3.4).
+  `STDL_OpenInput` gives a program the events without the mode, on
+  whatever screen it was started on or sets itself.
 * Colour-key masks are snapshots: re-key after modifying pixels.
 * `SDL_SetPalette(SDL_PHYSPAL)` clamps to the 16 hardware entries.
 * The whole program runs in supervisor mode between `STDL_Init` and

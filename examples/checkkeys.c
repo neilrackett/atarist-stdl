@@ -11,7 +11,11 @@
 
    SDL 1.2 test program (public domain), ported to STDL.
    Port notes: the UTF-8 iconv path is replaced with plain ASCII
-   output (the ST keyboard tables are 8-bit), everything else is
+   output (the ST keyboard tables are 8-bit), and no video mode is
+   set: the program only prints, so STDL_OpenInput takes the keyboard
+   and the text stays on the screen it was started on, in any
+   resolution - medium, a mono monitor, a TT's or a Falcon's - where
+   a mode would have put 40 columns of it in low. Everything else is
    unchanged. Exercises the raw IKBD handler: real key-up events,
    modifiers, unicode translation and key repeat.
 */
@@ -93,7 +97,6 @@ int main(int argc, char *argv[])
 {
 	SDL_Event event;
 	int done;
-	Uint32 videoflags;
 
 	/* Initialize SDL */
 	if ( SDL_Init(SDL_INIT_VIDEO) < 0 ) {
@@ -101,20 +104,9 @@ int main(int argc, char *argv[])
 		return(1);
 	}
 
-	videoflags = SDL_SWSURFACE;
-	while( argc > 1 ) {
-		--argc;
-		if ( argv[argc] && !strcmp(argv[argc], "-fullscreen") ) {
-			videoflags |= SDL_FULLSCREEN;
-		} else {
-			fprintf(stderr, "Usage: %s [-fullscreen]\n", argv[0]);
-			quit(1);
-		}
-	}
-
-	/* Set video mode (becomes 320x200x4 on the ST) */
-	if ( SDL_SetVideoMode(640, 480, 0, videoflags) == NULL ) {
-		fprintf(stderr, "Couldn't set video mode: %s\n",
+	/* The keyboard without a video mode (see the port notes) */
+	if ( STDL_OpenInput() < 0 ) {
+		fprintf(stderr, "Couldn't take the keyboard: %s\n",
 							SDL_GetError());
 		quit(2);
 	}

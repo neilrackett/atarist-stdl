@@ -175,7 +175,7 @@ time, not at runtime.
 | `SDL_SetColorKey` | `STDL_SetColourKey` | builds the transparency mask (a snapshot); key >= 16 = use the existing mask, no scan - for surfaces whose transparency is built during decode |
 | `SDL_LoadBMP` | `STDL_LoadBMP` | uncompressed 1/4/8bpp, max 16 colours |
 | `SDL_SetColors` / `SDL_SetPalette` | palette module | `SDL_LOGPAL` / `SDL_PHYSPAL` honoured; `STDL_StagePalette(1)` lands changes in the vertical blank |
-| events / keysyms / `SDL_GetKeyState` | event module | numbering matches SDL 1.2 |
+| events / keysyms / `SDL_GetKeyState` | event module | numbering matches SDL 1.2; the keyboard is taken at `STDL_SetVideoMode`, or by `STDL_OpenInput` for a program that sets no mode |
 | `SDL_GetTicks` / `SDL_Delay` | time module | 200Hz clock: 5ms resolution |
 | `SDL_AddTimer` / `SDL_SetTimer` | compat | cooperative: callbacks fire inside `SDL_Delay` |
 | `SDL_OpenAudio` / `SDL_LoadWAV` | `STDL_Audio` | STE DMA; cooperative refill, 2% of an 8MHz STE plus your callback when it writes signed 8-bit at a DMA rate straight into the ring; other formats are converted at every refill (13% for unsigned 8-bit mono at 12517Hz, 48% for 16-bit stereo at 22050); PCM WAVs only (`stdlconv wav`) |

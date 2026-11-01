@@ -439,6 +439,24 @@ warnings** with the Makefile's `-Wall -Wextra`.
   named `BLITCOST2.TOS` beside `BLITCOST.TOS` silently runs
   `BLITCOST.TOS`; four runs of "the fix" measured the old binary.
   Keep test program stems to eight characters.
+- **A Falcon is STE-class, not an STE.** One port's ST build, run on
+  an emulated Falcon (TOS 4.04, VGA), was silent at 6258Hz, refused
+  to start from a 640x480 16-colour desktop and left a 320x480
+  256-colour one in the wrong mode and colours. Each was the library
+  trusting an STE answer:
+  - 6258Hz: Hatari, which models the crossbar, mutes the DAC there.
+  - `Getrez()` under a VIDEL mode names some other machine's mode
+    (7 under 320x480 in 256 colours, 2 under 640x480 in 16), so it
+    can neither say mono nor put the mode back.
+  - `VgetRGB` read all black under a desktop whose colours the VDI
+    had set; the registers have them.
+  `tests/hatari/falcchk.c` shows all three, in its printout, a sound
+  recording and a screenshot of the desktop after; linked against
+  the release before the fix, it shows each one fail. To get those desktops in
+  Hatari, pass `--tos-res ttlow` or `ttmed` with `--machine falcon`:
+  autostart writes its own NEWDESK.INF, which asks for ST Low
+  whatever the NVRAM says. And Hatari writes its NVRAM back on every
+  exit, so point `HOME` elsewhere for a run that changes it.
 - **The Mega STE's cache decides the bottom border's flick, word by
   word.** Drawing with a border open flickered the bottom border at
   16MHz with the cache on, never at 8MHz or with it off, and worst

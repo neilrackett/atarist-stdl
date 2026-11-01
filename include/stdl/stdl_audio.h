@@ -51,7 +51,8 @@ typedef enum {
  * Playback runs at the STE DMA rate nearest desired->freq (6258,
  * 12517, 25033 or 50066 Hz) with nearest-neighbour resampling from
  * the desired rate; feed data at an exact DMA rate (stdlconv wav)
- * for a pass-through. If `obtained` is non-NULL it receives the
+ * for a pass-through. A Falcon has no 6258Hz, so there 12517 stands
+ * in for it. If `obtained` is non-NULL it receives the
  * actual spec; the callback always sees the *desired* format.
  *
  * Cost on an 8MHz STE with a callback that does nothing (measured,
@@ -94,8 +95,10 @@ void STDL_FreeWAV(uint8_t *audio_buf);
  *
  * Returns 0, or -1 with STDL_GetError set: no DMA hardware, another
  * device (STDL_OpenAudio ring, STDL_OpenVoices) currently owns the
- * chip - the DMA has one channel and its users cannot coexist - or
- * a buffer outside ST RAM.
+ * chip - the DMA has one channel and its users cannot coexist - a
+ * buffer outside ST RAM, or 6258Hz on a Falcon, whose DMA has no
+ * such rate and would play the buffer an octave high (sample at
+ * 12517 or above where a Falcon matters).
  *
  * That last one deserves a word, because it will catch ports that
  * do everything else right. The DMA cannot see alt-RAM, and a

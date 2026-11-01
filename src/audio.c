@@ -47,7 +47,7 @@ static void sample_shutdown(void)
 }
 
 /* index of the DMA rate nearest `freq` */
-int stdl_dma_nearest(int freq)
+static int dma_nearest_of_all(int freq)
 {
     int i, best = 0, bestdiff = 0x7FFFFFFF;
 
@@ -60,6 +60,22 @@ int stdl_dma_nearest(int freq)
         }
     }
     return best;
+}
+
+/*
+ * ...of those the machine plays. A Falcon's STE-compatible DMA has
+ * no 6258Hz: Hatari, which models its crossbar, mutes the DAC there,
+ * and a program asking for 6258 was silent for the whole run. 12517
+ * stands in for it, which the ring device and the voices convert to
+ * like any other rate; the mixing costs what 12517 costs, about
+ * twice 6258's. STDL_PlaySample plays its buffer as it is and so
+ * cannot convert: it refuses instead (sample_start).
+ */
+int stdl_dma_nearest(int freq)
+{
+    int best = dma_nearest_of_all(freq);
+
+    return (best == 0 && stdl_is_falcon()) ? 1 : best;
 }
 
 void stdl_dma_stop(void)
@@ -192,6 +208,13 @@ static int sample_start(const void *data, uint32_t bytes, int freq,
         STDL_SetError("sample buffer is not in ST RAM (the sound DMA "
                       "cannot reach alt-RAM; allocate it with "
                       "Mxalloc mode 0)");
+        return -1;
+    }
+    if (dma_nearest_of_all(freq) == 0 && stdl_is_falcon()) {
+        /* played at 12517 it would be an octave high and over in
+         * half the time */
+        STDL_SetError("a Falcon has no 6258Hz DMA rate (resample "
+                      "the buffer to 12517)");
         return -1;
     }
     stdl_dma_start(data, bytes,

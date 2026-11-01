@@ -439,6 +439,16 @@ truncates colours to the low N bits rather than rejecting them. See
   scribble over low-res screen RAM. Fine for tests, not for games.
 * **Arguments**: programs launched from the desktop get no argv;
   make sure defaults are sensible.
+* **A Falcon runs an STE program**, and the library covers the two
+  places it differs. Its DMA has no 6258Hz: the voices, the SDL_mixer
+  shim and `STDL_OpenAudio` play at 12517 there instead, at 12517's
+  cost, and `STDL_PlaySample`, which cannot convert a buffer it plays
+  in place, refuses 6258 - sample one-shots at 12517 or above if
+  Falcon owners matter. And its desktop is a VIDEL mode that
+  `Getrez()` cannot describe, so `STDL_SetVideoMode` puts back the
+  mode word and all 256 colours at exit, and asks the monitor, not
+  `Getrez()`, whether it is mono. `tests/hatari/falcchk.c` checks
+  both.
 * **Many copies of one sprite**: `STDL_BlitSprites` draws a list of
   positions and frames in one call, and `STDL_DirtyWholeGroups(1)`
   makes their restores plain copies of whole groups, where the scene

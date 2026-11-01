@@ -28,6 +28,7 @@
  * does not carry it. The triangle path is 872 bytes of it.
  */
 
+#include <stdlib.h>
 #include "stdl_internal.h"
 
 /* 0xFFFF >> n, then 0xFFFF << (15 - n): a table read where the shift
@@ -535,8 +536,14 @@ C_TRAP(stdl_trap_xor4, row_xor4)
  * the column fetch (the two positions' whole parts) and the step at
  * the row's end differ.
  */
-typedef char surface_layout[offsetof(STDL_Surface, stride) == 8
-                           && offsetof(STDL_Surface, clip) == 16 ? 1 : -1];
+/* the offsets the 68000 reads (planes for the 8-plane test at the
+ * entry); __builtin_offsetof because libcmini's offsetof is not a
+ * constant expression here */
+typedef char surface_layout[__builtin_offsetof(STDL_Surface, stride) == 8
+                           && __builtin_offsetof(STDL_Surface, planes) == 10
+                           && __builtin_offsetof(STDL_Surface, clip) == 16
+                           && __builtin_offsetof(STDL_Surface, mask) == 24
+                           ? 1 : -1];
 void stdl_poly_c(STDL_Surface *dst, const STDL_Point *pts, int n,
                  uint8_t col, int op);
 void stdl_prows_set2(void);
@@ -797,15 +804,17 @@ PROWS_ASM(stdl_prows_xor4, TX_EDGE,
 __asm__(
     "\t.text\n\t.even\n\t.globl " T_SYM(STDL_FillPolygon) "\n"
     T_SYM(STDL_FillPolygon) ":\n\t"
-    /* what the C must see to: no surface, no pixels, a mask, no
-     * vertices, too few or too many, OR and CLEAR; scratch registers
-     * only */
+    /* what the C must see to: no surface, no pixels, a mask, 8 planes
+     * (planes & 8, stdl_responsive.h), no vertices, too few or too many,
+     * OR and CLEAR; scratch registers only */
     "move.l 4(%sp),%d0\n\t"
     "beq.s  97f\n\t"
     "move.l %d0,%a0\n\t"
     "tst.l  (%a0)\n\t"
     "beq.s  97f\n\t"
     "tst.l  24(%a0)\n\t"
+    "bne.s  97f\n\t"
+    "btst   #3,10(%a0)\n\t"
     "bne.s  97f\n\t"
     "tst.l  8(%sp)\n\t"
     "beq.s  97f\n\t"
@@ -1381,6 +1390,85 @@ static void fill_tables(STDL_Surface *dst, const Trap *t, rows_fn fill,
                         int dir, int y, int y2, int bottom, int lo, int hi,
                         int free_, int transparent);
 
+/*
+ * An 8-plane surface (stdl_responsive.h): the polygon drawn by this
+ * file's own rasteriser, in colour 1, into a 4-plane scratch over its
+ * clipped box (its left edge on a group, so the scratch's groups are
+ * the surface's), and the colour put wherever plane 0 is set. So every
+ * edge rule is the planar one, for the cost of the scratch.
+ */
+static STDL_Surface *poly_scratch;
+static STDL_Point *poly_pts;
+static int poly_npts;
+
+static void poly_8planes(STDL_Surface *dst, const STDL_Point *pts, int n,
+                         uint8_t col, int op)
+{
+    int x0, y0, x1, y1, bx, w, h, i;
+    STDL_Rect clip, all;
+
+    x0 = x1 = pts[0].x;
+    y0 = y1 = pts[0].y;
+    for (i = 1; i < n; i++) {
+        if (pts[i].x < x0) x0 = pts[i].x;
+        if (pts[i].x > x1) x1 = pts[i].x;
+        if (pts[i].y < y0) y0 = pts[i].y;
+        if (pts[i].y > y1) y1 = pts[i].y;
+    }
+    if (x0 < dst->clip.x) x0 = dst->clip.x;
+    if (y0 < dst->clip.y) y0 = dst->clip.y;
+    if (x1 > dst->clip.x + dst->clip.w - 1) x1 = dst->clip.x + dst->clip.w - 1;
+    if (y1 > dst->clip.y + dst->clip.h - 1) y1 = dst->clip.y + dst->clip.h - 1;
+    if (x0 > x1 || y0 > y1) {
+        return;
+    }
+    bx = x0 & ~15;
+    w = x1 - bx + 1;
+    h = y1 - y0 + 1;
+    if (poly_scratch == NULL || poly_scratch->w < w
+        || poly_scratch->h < h) {
+        const int sw = poly_scratch != NULL && poly_scratch->w > w
+                       ? poly_scratch->w : w;
+        const int sh = poly_scratch != NULL && poly_scratch->h > h
+                       ? poly_scratch->h : h;
+
+        STDL_FreeSurface(poly_scratch);
+        poly_scratch = stdl_surface_create(sw, sh);
+        if (poly_scratch == NULL) {
+            return;
+        }
+    }
+    if (n > poly_npts) {
+        STDL_Point *np = realloc(poly_pts, (size_t)n * sizeof(STDL_Point));
+
+        if (np == NULL) {
+            return;
+        }
+        poly_pts = np;
+        poly_npts = n;
+    }
+    for (i = 0; i < n; i++) {
+        poly_pts[i].x = (int16_t)(pts[i].x - bx);
+        poly_pts[i].y = (int16_t)(pts[i].y - y0);
+    }
+    /* the whole groups the coverage is read from cleared, not only
+     * the clip: the scratch is kept from one polygon to the next */
+    all.x = 0;
+    all.y = 0;
+    all.w = (uint16_t)((((x1 >> 4) - (bx >> 4)) + 1) << 4);
+    all.h = (uint16_t)h;
+    STDL_SetClipRect(poly_scratch, NULL);
+    STDL_FillRect(poly_scratch, &all, 0);
+    clip.x = (int16_t)(x0 - bx);
+    clip.y = 0;
+    clip.w = (uint16_t)(x1 - x0 + 1);
+    clip.h = (uint16_t)h;
+    STDL_SetClipRect(poly_scratch, &clip);
+    STDL_FillPolygon(poly_scratch, poly_pts, n, 1, STDL_DRAW_SET);
+    stdl_resp->cover(dst, poly_scratch, bx >> 4, (x1 >> 4) - (bx >> 4) + 1,
+                     y0, h, col, op);
+}
+
 /* On the machine, what the 68000's STDL_FillPolygon does not take
  * itself; on the host, the whole of it. */
 #ifdef __m68k__
@@ -1397,6 +1485,10 @@ void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,
     Trap t;
 
     if (dst == NULL || pts == NULL || n < 3 || dst->pixels == NULL) {
+        return;
+    }
+    if (STDL_IS_RESP(dst)) {
+        poly_8planes(dst, pts, n, col, op);
         return;
     }
     /* as STDL_FillRect: STDL_TRANSPARENT punches a hole in a masked

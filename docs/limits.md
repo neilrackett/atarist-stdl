@@ -28,7 +28,9 @@ stop trying and redesign instead.
   ignored. On a monochrome monitor it fails (mono emulation is a
   post-v1 feature, see the design overview section 3.4). On a TT or
   a Falcon that screen is ST Low, the TT's line-doubled by its
-  monitor; their own 256-colour modes are not STDL's.
+  monitor, unless the program asks for more: `stdl_responsive.h`
+  gives 256 colours there (8-plane surfaces) and a 320x240 screen on
+  every machine, each an option a program names.
 * Borders, STE hardware scrolling and rasters need an ST, STE or Mega
   STE's video timing and are refused on a TT or a Falcon. A Falcon's
   BLiTTER is not used (the 68030's data cache does not see its

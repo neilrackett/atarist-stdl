@@ -27,6 +27,10 @@ STDL_Tileset *STDL_TilesetFromSurface(const STDL_Surface *s, int tw,
         STDL_SetError("tiles must be a multiple of 16 wide");
         return NULL;
     }
+    if (STDL_IS_RESP(s)) {
+        STDL_SetError("a tileset from an 8-plane surface");
+        return NULL;
+    }
     cols = s->w / tw;
     rows = s->h / th;
     if (cols < 1 || rows < 1) {
@@ -263,6 +267,10 @@ void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,
 
     if (ts == NULL || dst == NULL || index < 0
         || index >= ts->ntiles) {
+        return;
+    }
+    if (STDL_IS_RESP(dst)) {
+        STDL_SetError("a tile onto an 8-plane surface");
         return;
     }
     gx0 = x >> 4;

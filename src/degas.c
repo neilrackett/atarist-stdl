@@ -82,7 +82,7 @@ static STDL_Surface *load_degas(const char *file, int trailer,
     if (data == NULL) {
         return NULL;
     }
-    s = STDL_CreateSurface(320, 200);
+    s = stdl_surface_create(320, 200);   /* 4 planes, always */
     if (s != NULL) {
         memcpy(s->pixels, data, 32000);
         stdl_planes_normalise(s->pixels, s->stride, s->h);

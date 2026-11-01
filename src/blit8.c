@@ -74,6 +74,10 @@ void STDL_BlitIndexed8(STDL_Surface *dst, const uint8_t *src,
     if (dst == NULL || src == NULL || map == NULL) {
         return;
     }
+    if (STDL_IS_RESP(dst)) {
+        stdl_resp->blit_indexed8(dst, src, pitch, x, y, w, h, map, flags);
+        return;
+    }
     if (!b8tab_ready) {
         b8tab_build();
     }

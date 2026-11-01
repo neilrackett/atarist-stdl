@@ -907,6 +907,9 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
         STDL_SetError("null surface in blit");
         return -1;
     }
+    if ((src->planes | dst->planes) & 8) {
+        return stdl_resp->blit(src, srcrect, dst, dstrect, flags);
+    }
 
     if (srcrect != NULL) {
         sx = srcrect->x;

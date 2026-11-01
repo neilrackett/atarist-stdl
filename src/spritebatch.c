@@ -33,6 +33,13 @@ void STDL_BlitSprites(STDL_Sprite *spr, const STDL_SpriteAt *at,
     if (spr == NULL || at == NULL || dst == NULL || count <= 0) {
         return;
     }
+    if ((spr->planes | dst->planes) & 8) {
+        /* 8 planes (stdl_responsive.h): a sprite at a time */
+        for (i = 0; i < count; i++) {
+            STDL_BlitSprite(spr, at[i].frame, dst, at[i].x, at[i].y);
+        }
+        return;
+    }
     groups = spr->groups;
     h = spr->h;
     /* the direct route covers what STDL_BlitSprite's own aligned

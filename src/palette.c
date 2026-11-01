@@ -57,6 +57,9 @@ int STDL_SetColours(STDL_Surface *s, const STDL_Colour *cols,
     if (s == NULL || s->format == NULL || s->format->palette == NULL) {
         return 0;
     }
+    if (STDL_IS_RESP(s)) {
+        return stdl_resp->set_colours(s, cols, first, n);
+    }
     dst = s->format->palette->colors;
     count = s->format->palette->ncolors;
     for (i = 0; i < n && first + i < count; i++) {
@@ -70,9 +73,10 @@ int STDL_SetColours(STDL_Surface *s, const STDL_Colour *cols,
 
 void STDL_SetPalette(STDL_Surface *s, const STDL_Palette *pal)
 {
+    /* as many as the surface's palette holds: STDL_SetColours stops
+     * there (16, or an 8-plane screen's 256) */
     if (pal != NULL) {
-        STDL_SetColours(s, pal->colors, 0,
-                        pal->ncolors > 16 ? 16 : pal->ncolors);
+        STDL_SetColours(s, pal->colors, 0, pal->ncolors);
     }
 }
 
@@ -132,6 +136,10 @@ void STDL_FadeTo(const STDL_Palette *target, int frames)
     int f, i, n;
 
     if (target == NULL || frames <= 0) {
+        return;
+    }
+    if (stdl_resp_screen != NULL && STDL_IS_RESP(stdl_resp_screen)) {
+        stdl_resp_video->fade(target, frames);     /* all 256 */
         return;
     }
     if (frames > 32767) {

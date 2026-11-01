@@ -47,6 +47,14 @@ void  (*stdl_shutdown_overscan)(void);
 /* also video.c's: the overscan module's BLiTTER placement policy,
  * NULL while no border is open (test_blitter installs its own) */
 uint16_t (*stdl_blit_policy)(uint16_t nlines, uint32_t cpl);
+const stdl_resp_ops_t *stdl_resp;      /* video.c's on target */
+const stdl_resp_video_t *stdl_resp_video;
+STDL_Surface *stdl_resp_screen;
+int16_t stdl_ovsc_cap;                  /* overscan.c's on target */
+int STDL_OpenBottomBorder(void)
+{
+    return 0;
+}
 
 /* the YM2149 as a register file, and the console-attributes byte */
 volatile uint8_t stdl_host_mfp[0x30];

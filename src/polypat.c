@@ -747,10 +747,12 @@ static __attribute__((noinline)) void walk_wide(Walk *w, STDL_Surface *dst)
  * both words. Opaque rows store the middle groups outright,
  * transparent ones merge them under it.
  */
-/* the offsets the 68000 reads; __builtin_offsetof because libcmini's
- * offsetof is not a constant expression here */
+/* the offsets the 68000 reads (planes for the 8-plane test at the
+ * entry); __builtin_offsetof because libcmini's offsetof is not a
+ * constant expression here */
 typedef char pp_surface_layout[
     __builtin_offsetof(STDL_Surface, stride) == 8
+    && __builtin_offsetof(STDL_Surface, planes) == 10
     && __builtin_offsetof(STDL_Surface, clip) == 16
     && __builtin_offsetof(STDL_Surface, mask) == 24
     && __builtin_offsetof(STDL_Pattern, mask) == 32
@@ -1152,15 +1154,18 @@ PPROWS(stdl_pprows_t4c, 12, P_ON, P_OFF, P_ON, P_ON, MID_T4)
 __asm__(
     "\t.text\n\t.even\n\t.globl " P_SYM(STDL_FillPolygonPattern) "\n"
     P_SYM(STDL_FillPolygonPattern) ":\n\t"
-    /* what the C must see to: no surface, no pixels, a mask, no
-     * pattern, a transparent one, an odd budget, no vertices, too few
-     * or too many; scratch registers only */
+    /* what the C must see to: no surface, no pixels, a mask, 8 planes
+     * (stdl_responsive.h), no pattern, a transparent one, an odd
+     * budget, no vertices, too few or too many; scratch registers
+     * only */
     "move.l 4(%sp),%d0\n\t"
     "beq.s  97f\n\t"
     "move.l %d0,%a0\n\t"
     "tst.l  (%a0)\n\t"
     "beq.s  97f\n\t"
     "tst.l  24(%a0)\n\t"
+    "bne.s  97f\n\t"
+    "btst   #3,10(%a0)\n\t"
     "bne.s  97f\n\t"
     "move.l 16(%sp),%d0\n\t"
     "beq.s  97f\n\t"
@@ -1676,6 +1681,10 @@ void stdl_ppoly_c(STDL_Surface *dst, const STDL_PointSub *pts, int n,
         || dst->pixels == NULL) {
         return;
     }
+    if (STDL_IS_RESP(dst)) {
+        STDL_SetError("a patterned polygon on an 8-plane surface");
+        return;
+    }
     if (dst->mask == NULL && n <= 8191 && fast_68k(dst, pts, n, pat) == 0) {
         return;
     }
@@ -1694,6 +1703,10 @@ void STDL_FillPolygonPattern(STDL_Surface *dst, const STDL_PointSub *pts,
 
     if (dst == NULL || pts == NULL || pat == NULL || n < 3
         || dst->pixels == NULL) {
+        return;
+    }
+    if (STDL_IS_RESP(dst)) {
+        STDL_SetError("a patterned polygon on an 8-plane surface");
         return;
     }
     bottom = pts[0].y;

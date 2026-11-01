@@ -1395,4 +1395,106 @@ void stdl_audio_convert(int8_t *dst, uint32_t dst_frames,
                         const uint8_t *src, uint32_t src_frames,
                         uint16_t format, int channels, int mono_mix);
 
+/*
+ * Responsive screens (stdl_responsive.h; src/responsive.c): what a TT
+ * or a Falcon shows when a program asked for more than an ST has.
+ *
+ * stdl_resp_video is NULL until STDL_UseResponsive, so a program that
+ * never asks links none of it. video.c asks it whether a mode set is
+ * its (wants), hands that set to it, and sends Flip and the shutdown
+ * there while its screen is up; an ST's own mode set calls st_mode,
+ * for what an ST does itself (the bottom border, for a tall screen).
+ */
+typedef struct {
+    int  (*wants)(int w, int h, int bpp);
+    STDL_Surface *(*set_mode)(int w, int h, int bpp, uint32_t flags);
+    void (*flip)(void);
+    void (*shutdown)(void);
+    void (*st_mode)(int h);
+    void (*update)(int n, const STDL_Rect *rects);
+    void (*fade)(const STDL_Palette *target, int frames);
+} stdl_resp_video_t;
+
+extern const stdl_resp_video_t *stdl_resp_video;
+extern STDL_Surface *stdl_resp_screen;  /* while a responsive mode is set */
+
+/*
+ * 8-plane surfaces (STDL_RESPONSIVE_COLOUR; src/planes8.c): one a
+ * program draws 256 colours into says so in its `planes` (8), as an
+ * 8-plane sprite does in its own; every public pixel call tests that
+ * first and hands it on through this table. While a responsive screen
+ * is up, surfaces are created through it too: 8-plane ones on an
+ * 8-plane screen, 4-plane ones on a tall 4-plane screen. On an ST no
+ * surface ever has 8 planes: the test costs a compare and a branch not
+ * taken.
+ */
+typedef struct stdl_resp_ops {
+    STDL_Surface *(*create)(int w, int h);
+    void (*free_surface)(STDL_Surface *s);
+    int  (*set_key)(STDL_Surface *s, int enable, uint8_t key);
+    void (*set_clip)(STDL_Surface *s, const STDL_Rect *r);
+    void (*fill_rect)(STDL_Surface *d, STDL_Rect *r, uint8_t c);
+    void (*hline)(STDL_Surface *d, int x1, int x2, int y, uint8_t c);
+    void (*vline)(STDL_Surface *d, int x, int y1, int y2, uint8_t c);
+    void (*put_pixel)(STDL_Surface *d, int x, int y, uint8_t c);
+    uint8_t (*get_pixel)(const STDL_Surface *s, int x, int y);
+    void (*points)(STDL_Surface *d, const STDL_Point *p, int n,
+                   uint8_t c);
+    void (*points_c)(STDL_Surface *d, const STDL_Point *p,
+                     const uint8_t *c, int n);
+    int  (*blit)(STDL_Surface *src, const STDL_Rect *sr,
+                 STDL_Surface *dst, STDL_Rect *dr, unsigned flags);
+    STDL_Sprite *(*sprite_from)(const STDL_Surface *s, int fw,
+                                uint32_t flags);
+    void (*blit_sprite)(STDL_Sprite *spr, int frame, STDL_Surface *d,
+                        int x, int y);
+    void (*free_sprite)(STDL_Sprite *spr);
+    void (*draw_text)(STDL_Surface *d, const STDL_Font *f, int x, int y,
+                      const char *t, uint8_t c);
+    STDL_Surface *(*from_1bpp)(const uint8_t *bits, int w, int h,
+                               uint8_t fg, uint8_t bg);
+    STDL_Surface *(*from_indexed8)(const uint8_t *bytes, int w, int h,
+                                   int stride, int keycolour);
+    void (*remap)(STDL_Surface *s, const uint8_t map[16]);
+    int  (*set_colours)(STDL_Surface *s, const STDL_Colour *c, int first,
+                        int n);
+    void (*hspans)(STDL_Surface *d, const STDL_Span *s, int n, uint8_t c);
+    void (*vspans)(STDL_Surface *d, const STDL_Span *s, int n, uint8_t c);
+    void (*xor_rect)(STDL_Surface *d, STDL_Rect *r, uint8_t c);
+    void (*xor_hline)(STDL_Surface *d, int x1, int x2, int y, uint8_t c);
+    void (*xor_pixel)(STDL_Surface *d, int x, int y, uint8_t c);
+    void (*xor_hspans)(STDL_Surface *d, const STDL_Span *s, int n,
+                       uint8_t c);
+    void (*xor_vspans)(STDL_Surface *d, const STDL_Span *s, int n,
+                       uint8_t c);
+    void (*draw_char)(STDL_Surface *d, const STDL_Font *f, int x, int y,
+                      int ch, uint8_t c);
+    /* a polygon's coverage, plane 0 of a 4-plane scratch (polygon.c) */
+    void (*cover)(STDL_Surface *d, const STDL_Surface *scratch, int g0,
+                  int ng, int y0, int h, uint8_t c, int op);
+    void (*blit_indexed8)(STDL_Surface *d, const uint8_t *src, int pitch,
+                          int x, int y, int w, int h, const uint8_t *map,
+                          unsigned flags);
+    STDL_Surface *(*dup)(STDL_Surface *s);
+    int  (*create_mask)(STDL_Surface *s, int transparent);
+    void (*put_group)(STDL_Surface *s, int x, int y,
+                      const uint16_t planes[4], uint16_t mask);
+    void (*put_group8)(STDL_Surface *s, int x, int y,
+                       const uint8_t planes[4], uint8_t transmask);
+} stdl_resp_ops_t;
+
+extern const stdl_resp_ops_t *stdl_resp;
+#define STDL_IS_RESP(s) ((s)->planes & 8)
+
+/* 4-plane surfaces whatever the screen, without the 8-plane hooks */
+STDL_Surface *stdl_surface_create(int w, int h);
+STDL_Surface *stdl_surface_from_1bpp(const uint8_t *bits, int w, int h,
+                                     uint8_t fg, uint8_t bg);
+STDL_Surface *stdl_surface_from_indexed8(const uint8_t *bytes, int w,
+                                         int h, int stride, int keycolour);
+
+/* overscan.c: the screen surface's height while a border is open is
+ * at most this, when it is not 0 (a tall responsive screen: 240) */
+extern int16_t stdl_ovsc_cap;
+
 #endif /* STDL_INTERNAL_H */

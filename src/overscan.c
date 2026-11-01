@@ -1921,6 +1921,8 @@ static void ovsc_program(int m)
 
 static int ovsc_flip(void);
 
+int16_t stdl_ovsc_cap;
+
 static void ovsc_surface(void)
 {
     switch (mode) {
@@ -1940,6 +1942,9 @@ static void ovsc_surface(void)
         stdl_screen.pixels = stdl.page[stdl.backpage];
         stdl_screen.h = STDL_SCREEN_H;
         break;
+    }
+    if (stdl_ovsc_cap != 0 && stdl_screen.h > stdl_ovsc_cap) {
+        stdl_screen.h = stdl_ovsc_cap;
     }
     stdl_screen.clip.x = 0;
     stdl_screen.clip.y = 0;

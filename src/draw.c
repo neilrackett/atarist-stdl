@@ -495,6 +495,10 @@ void STDL_FillRect(STDL_Surface *dst, STDL_Rect *r, uint8_t col)
     if (dst == NULL) {
         return;
     }
+    if (STDL_IS_RESP(dst)) {
+        stdl_resp->fill_rect(dst, r, col);
+        return;
+    }
     if (r == NULL) {
         x1 = dst->clip.x;
         y1 = dst->clip.y;
@@ -539,6 +543,10 @@ void STDL_HLine(STDL_Surface *dst, int x1, int x2, int y, uint8_t col)
     int t;
 
     if (dst == NULL) {
+        return;
+    }
+    if (STDL_IS_RESP(dst)) {
+        stdl_resp->hline(dst, x1, x2, y, col);
         return;
     }
     if (x1 > x2) { t = x1; x1 = x2; x2 = t; }
@@ -640,6 +648,10 @@ void STDL_VLine(STDL_Surface *dst, int x, int y1, int y2, uint8_t col)
     if (dst == NULL) {
         return;
     }
+    if (STDL_IS_RESP(dst)) {
+        stdl_resp->vline(dst, x, y1, y2, col);
+        return;
+    }
     if (y1 > y2) { t = y1; y1 = y2; y2 = t; }
     if (x < dst->clip.x || x >= dst->clip.x + dst->clip.w) {
         return;
@@ -710,6 +722,10 @@ void STDL_PutPixel(STDL_Surface *dst, int x, int y, uint8_t col)
     const uint32_t *pl;
     int transparent;
 
+    if (dst != NULL && STDL_IS_RESP(dst)) {
+        stdl_resp->put_pixel(dst, x, y, col);
+        return;
+    }
     if (dst == NULL
         || x < dst->clip.x || x >= dst->clip.x + dst->clip.w
         || y < dst->clip.y || y >= dst->clip.y + dst->clip.h) {
@@ -740,6 +756,9 @@ uint8_t STDL_GetPixel(const STDL_Surface *src, int x, int y)
     uint16_t bit;
     uint8_t col = 0;
 
+    if (src != NULL && STDL_IS_RESP(src)) {
+        return stdl_resp->get_pixel(src, x, y);
+    }
     if (src == NULL || x < 0 || x >= src->w || y < 0 || y >= src->h) {
         return 0;
     }
@@ -869,6 +888,10 @@ void STDL_XorRect(STDL_Surface *dst, STDL_Rect *r, uint8_t col)
     if (dst == NULL) {
         return;
     }
+    if (STDL_IS_RESP(dst)) {
+        stdl_resp->xor_rect(dst, r, col);
+        return;
+    }
     if (r == NULL) {
         x1 = dst->clip.x;
         y1 = dst->clip.y;
@@ -908,6 +931,10 @@ void STDL_XorHLine(STDL_Surface *dst, int x1, int x2, int y,
     int t;
 
     if (dst == NULL) {
+        return;
+    }
+    if (STDL_IS_RESP(dst)) {
+        stdl_resp->xor_hline(dst, x1, x2, y, col);
         return;
     }
     if (x1 > x2) { t = x1; x1 = x2; x2 = t; }
@@ -957,6 +984,10 @@ void STDL_XorPixel(STDL_Surface *dst, int x, int y, uint8_t col)
     stdl_wlong *g;
     uint32_t m;
 
+    if (dst != NULL && STDL_IS_RESP(dst)) {
+        stdl_resp->xor_pixel(dst, x, y, col);
+        return;
+    }
     if (dst == NULL
         || x < dst->clip.x || x >= dst->clip.x + dst->clip.w
         || y < dst->clip.y || y >= dst->clip.y + dst->clip.h) {
@@ -1061,6 +1092,10 @@ void STDL_VSpans(STDL_Surface *dst, const STDL_Span *spans,
 
     if (dst == NULL || spans == NULL || count <= 0
         || dst->clip.w == 0 || dst->clip.h == 0) {
+        return;
+    }
+    if (STDL_IS_RESP(dst)) {
+        stdl_resp->vspans(dst, spans, count, col);
         return;
     }
     transparent = (col >= STDL_TRANSPARENT && dst->mask != NULL);
@@ -1308,6 +1343,10 @@ void STDL_Points(STDL_Surface *dst, const STDL_Point *pts,
         || dst->clip.w == 0 || dst->clip.h == 0) {
         return;
     }
+    if (STDL_IS_RESP(dst)) {
+        stdl_resp->points(dst, pts, count, col);
+        return;
+    }
     transparent = (col >= STDL_TRANSPARENT && dst->mask != NULL);
     col = transparent ? 0 : (uint8_t)(col & STDL_COL_MASK);
     np = stdl_planes;
@@ -1349,6 +1388,10 @@ void STDL_PointsC(STDL_Surface *dst, const STDL_Point *pts,
         || dst->clip.w == 0 || dst->clip.h == 0) {
         return;
     }
+    if (STDL_IS_RESP(dst)) {
+        stdl_resp->points_c(dst, pts, cols, count);
+        return;
+    }
     np = stdl_planes;
     if (dst->mask == NULL && dst->clip.x == 0 && dst->clip.y == 0) {
 #define POINTSC_FAST(np) pointsc_fast(dst, pts, cols, count, (np))
@@ -1371,6 +1414,10 @@ void STDL_HSpans(STDL_Surface *dst, const STDL_Span *spans,
 
     if (dst == NULL || spans == NULL || count <= 0
         || dst->clip.w == 0 || dst->clip.h == 0) {
+        return;
+    }
+    if (STDL_IS_RESP(dst)) {
+        stdl_resp->hspans(dst, spans, count, col);
         return;
     }
     transparent = (col >= STDL_TRANSPARENT && dst->mask != NULL);
@@ -1447,6 +1494,10 @@ void STDL_XorVSpans(STDL_Surface *dst, const STDL_Span *spans,
     if (dst == NULL || spans == NULL || count <= 0) {
         return;
     }
+    if (STDL_IS_RESP(dst)) {
+        stdl_resp->xor_vspans(dst, spans, count, col);
+        return;
+    }
     col &= STDL_COL_MASK;
     if (col == 0 || dst->clip.w == 0 || dst->clip.h == 0) {
         return;
@@ -1470,6 +1521,10 @@ void STDL_XorHSpans(STDL_Surface *dst, const STDL_Span *spans,
     const STDL_Span *s = spans;
 
     if (dst == NULL || spans == NULL || count <= 0) {
+        return;
+    }
+    if (STDL_IS_RESP(dst)) {
+        stdl_resp->xor_hspans(dst, spans, count, col);
         return;
     }
     col &= STDL_COL_MASK;

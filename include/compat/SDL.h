@@ -293,7 +293,25 @@ typedef struct {
 #define SDL_SetVideoMode       STDL_SetVideoMode
 #define SDL_GetVideoSurface    STDL_GetVideoSurface
 #define SDL_UpdateRects(s, n, r) STDL_UpdateRects((n), (r))
-#define SDL_UpdateRect(s, x, y, w, h) ((void)(s))
+/* nothing to do on an ST, where the screen is the picture; a TT's or a
+ * Falcon's 8-plane screen (stdl_responsive.h) hears what changed, all
+ * of it for a rectangle of 0s, as SDL's */
+static __inline__ void SDL_UpdateRect(SDL_Surface *s, Sint32 x, Sint32 y,
+                                      Uint32 w, Uint32 h)
+{
+    STDL_Rect r;
+
+    (void)s;
+    if ((w | h) == 0) {
+        STDL_UpdateRects(0, (STDL_Rect *)0);
+        return;
+    }
+    r.x = (int16_t)x;
+    r.y = (int16_t)y;
+    r.w = (uint16_t)w;
+    r.h = (uint16_t)h;
+    STDL_UpdateRects(1, &r);
+}
 
 #define SDL_LockSurface(s)     ((void)(s), 0)
 #define SDL_UnlockSurface(s)   ((void)(s))

@@ -188,6 +188,11 @@ void STDL_SetCursor(STDL_Cursor *cursor)
 {
     int x, y;
 
+    if (cursor != NULL && stdl_resp_screen != NULL
+        && STDL_IS_RESP(stdl_resp_screen)) {
+        STDL_SetError("the cursor on an 8-plane screen");
+        return;
+    }
     cursor_undraw();
     current = cursor;
     stdl_cursor_hook = (cursor != NULL) ? cursor_motion : NULL;

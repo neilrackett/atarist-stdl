@@ -41,7 +41,7 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/hwscroll.c src/tone.c src/cpuspeed.c src/opl.c \
           src/refresh.c src/mouse.c src/stram.c src/wav.c src/ring.c \
           src/palstage.c src/polygon.c src/polypat.c src/raster.c \
-          src/spritebatch.c
+          src/spritebatch.c src/responsive.c src/planes8.c src/tall4.c
 # Objects live under obj/, mirroring each source's own path. Sources
 # now come from two places, this repo and the xpad submodule, and
 # building beside the source would drop .o files inside lib/xpad. The
@@ -110,9 +110,19 @@ all: $(LIB) sizecheck libcallcheck $(EXAMPLES) assets
 # pre-shifted ones 1.2-1.7x; on a BLiTTER machine PRESHIFT's 16x RAM
 # then buys nothing, which is worth far more than the code to a port
 # that pre-shifted to be fast. A plain ST is unchanged within 1%.
+#
+# Raised 34700 -> 35300 on 2026-11-01: a responsive screen's 8-plane
+# surfaces (stdl_responsive.h). Every pixel call takes them through a
+# test of `planes` at its entry, 620 bytes over these five objects
+# (draw.o 248, surface.o 260, blit.o 68, sprite.o 44), so that a TT
+# or a Falcon draws 256 colours through the same calls. Measured on a
+# plain ST, the tests cost 0.35% of SPRCOST's geometric mean (the
+# smallest blits up to 5.6%, PutPixel 2.4%) against a layout floor of
+# 0.03%, and a program 135-178 bytes; the 8-plane code itself is
+# linked only by a program that asks.
 PIXEL_OBJS = $(addprefix $(OBJDIR)/src/,draw.o blit.o sprite.o \
              surface.o blitter.o)
-PIXEL_MAX  = 34700
+PIXEL_MAX  = 35300
 
 sizecheck: $(PIXEL_OBJS)
 	@n=`$(CROSS)size $(PIXEL_OBJS) | awk 'NR>1 {t+=$$1} END {print t}'`; \

@@ -36,6 +36,7 @@ extern "C" {
 #include <stdl/stdl_sfx.h>
 #include <stdl/stdl_tone.h>
 #include <stdl/stdl_opl.h>
+#include <stdl/stdl_responsive.h>
 
 #ifdef __cplusplus
 }

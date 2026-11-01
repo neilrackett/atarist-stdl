@@ -493,6 +493,85 @@ warnings** with the Makefile's `-Wall -Wextra`.
   Each machine's run of TTCHK is about a minute; the questions Hatari
   cannot answer (a real TT's rate, Timer B, where ST Low sits on a TT
   monitor) are what to hand a tester with the hardware.
+- **256 colours on a TT or a Falcon are eight interleaved planes: not
+  two 4-plane halves, and not chunky.** Before `STDL_RESPONSIVE_COLOUR`
+  was built, three layouts were tried on one port's game, 600 frames of a
+  busy level from a fixed seed in Hatari (TT `--mmu off`, Falcon on
+  VGA), ms a frame:
+
+  | | TT drawing | TT present | Falcon drawing | Falcon present |
+  |---|---|---|---|---|
+  | two halves | 7.3 | 5.9 | 14.8 | 8.3 |
+  | eight planes | 8.6 | 4.1 | 17.1 | 0.0 |
+  | chunky, present only | | 16.0 | | 27.9 |
+
+  - Two halves (a surface's low and high colour nibbles, each a
+    4-plane surface drawn by the planar routines) reach every planar
+    call at once, but Flip has to interleave them into the display on
+    every machine, and a TT carries 128K more ST-RAM. Drawing only the
+    low halves, a bound on any one-bank fast path, still left them
+    behind on a Falcon (17.9).
+  - Eight planes are the display's own layout: the screen is the page,
+    a Falcon presents nothing, a TT copies each changed row to the line
+    under it. Its drawing was behind only in its C sprite routine (3.2ms
+    on a TT against the halves' 2.2, the same bytes moved), which
+    tuning recovers; the halves' interleave cannot be tuned away.
+  - The chunky row converts the same changed boxes with the 68030 c2p
+    from one port's 030 build: its present alone costs more than either
+    planar frame, before any drawing.
+  The two planar models drew identical pages, every frame, on both
+  machines. The halves model is kept as `tests/host/p8ref.c`, the
+  reference `test_responsive` holds the 8-plane routines to: it is the planar
+  routines run twice and shares no code with `src/planes8.c`.
+  Tuned afterwards (the sprite routine's clip and addresses taken out
+  of its rows, the points' mask test out of their loop), the 8 planes
+  drew the same game in 11.1ms a frame on a TT and 14.1 on a Falcon,
+  against the halves' 13.2 and 23.1: sprites 1.76ms against 2.20 on a
+  TT. A restore's whole groups copied by memcpy, a call a row, were 12%
+  slower than the loop: a game's restores are a sprite or two wide.
+- **What 8 planes cost an ST.** Every pixel call tests `planes` at its
+  entry: 620 bytes over the pixel path (PIXEL_MAX was raised for it,
+  with the reason in the Makefile), 135-178 bytes a program, and 0.3%
+  of SPRCOST's and PRIMCOST's geometric means on a plain ST (a
+  clipped-out blit 5%, PutPixel and DrawChar 2.9%) against a layout
+  floor of 0.03%. Putting the tests where the ST already branches off
+  (a clipped-out exit) would have needed 8-plane surfaces to show
+  misleading public fields - an empty clip, no pixels - and was left.
+  A program that asks for the colour links about 21K more (planes8.o
+  17K, responsive.o 3.5K): a 512K machine's game wants a build of its
+  own for a TT and a Falcon, as one port's 030 build is, where a 1M
+  one can carry both.
+- **Console text lands in a responsive page's margins.** A TT shows a
+  200-row screen centred in 240, and what a program printed after the
+  mode set was drawn by TOS into the rows above, which nothing redraws,
+  on one page only: it flickered there. A hash of the whole page
+  differed between two builds for that alone ("model 1" against "model
+  2"). The mode set now moves the console's cursor past the margin,
+  into the picture, where the program's drawing covers it as an ST's
+  does; hash the screen's rows anyway (`STDL_RespStats.page`).
+- **A tall screen in 16 colours needs no hooks** (`STDL_RESPONSIVE_TALL`,
+  `src/tall4.c`): an ST opens its bottom border (240 of 245 lines, the
+  surface capped by `stdl_ovsc_cap`), a Falcon's 4-bit VIDEL modes are
+  the ST's plane layout so the surface is the page, and a TT's Flip
+  compares the 4-plane page with what TT Low shows and copies what
+  changed to both lines, the upper planes left at zero - so a program's
+  own writes reach the screen too. `tests/hatari/tallchk.c` (TALLCHK,
+  TALLCOL with the colour) draws a card to the very edge on each.
+- **Bound a group by the surface's width, not its stride.** A Falcon's
+  overscan line is 384 pixels with the 320 centred, so the screen's
+  stride runs past the picture: STDL_PutGroup on an 8-plane screen,
+  bounded by the stride, wrote into the margin and the next line.
+- **The host suite runs on the machine too** (`RESPCHK.TOS`, built from
+  `tests/host/test_responsive.c` as its main says): the same calls
+  against the reference on the TT's or the Falcon's own screen, page
+  hashes where the host keeps pages. A Hatari run of it takes longer
+  than `run.sh`'s two-minute `waitfor`: chain several, or run.sh stops
+  the emulator (see the SIGTERM note below) before the end.
+- **Hatari ignores `run.sh`'s SIGTERM on this host** (seen with
+  `--machine tt` and `falcon`): `run.sh` then waits out its caller's
+  `timeout`, and the emulator outlives it - 61 of them had piled up
+  over one session. Wait for the program's own "done" line and end
+  that emulator with `kill -9`, matched by its `--cmd-fifo` path.
 - **The Mega STE's cache decides the bottom border's flick, word by
   word.** Drawing with a border open flickered the bottom border at
   16MHz with the cache on, never at 8MHz or with it off, and worst

@@ -176,7 +176,7 @@ STDL_Surface *STDL_LoadSurface(const char *bank, int id)
         free(p);
         return NULL;
     }
-    s = STDL_CreateSurface(w, h);
+    s = stdl_surface_create(w, h);   /* 4 planes, whatever the screen */
     if (s != NULL) {
         memcpy(s->pixels, p + 6, datalen);
         stdl_planes_normalise(s->pixels, s->stride, s->h);

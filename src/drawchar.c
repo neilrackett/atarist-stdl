@@ -54,6 +54,10 @@ void STDL_DrawChar(STDL_Surface *dst, const STDL_Font *font,
     if (dst == NULL || font == NULL) {
         return;
     }
+    if (STDL_IS_RESP(dst)) {
+        stdl_resp->draw_char(dst, font, x, y, ch, col);
+        return;
+    }
     cw = font->cw;
     if (cw <= 0 || cw > 16) {
         return;

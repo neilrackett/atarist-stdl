@@ -23,7 +23,16 @@
 STDL_Surface *STDL_SurfaceFrom1bpp(const uint8_t *bits, int w, int h,
                                    uint8_t fg, uint8_t bg)
 {
-    STDL_Surface *s = STDL_CreateSurface(w, h);
+    if (stdl_resp_screen != NULL) {
+        return stdl_resp->from_1bpp(bits, w, h, fg, bg);
+    }
+    return stdl_surface_from_1bpp(bits, w, h, fg, bg);
+}
+
+STDL_Surface *stdl_surface_from_1bpp(const uint8_t *bits, int w, int h,
+                                     uint8_t fg, uint8_t bg)
+{
+    STDL_Surface *s = stdl_surface_create(w, h);
     const uint8_t *src;
     uint8_t *rowp;
     int bpr, y, g, groups, p;
@@ -187,6 +196,15 @@ STDL_Surface *STDL_SurfaceFromIndexed8(const uint8_t *bytes, int w,
                                        int h, int stride,
                                        int keycolour)
 {
+    if (stdl_resp_screen != NULL) {
+        return stdl_resp->from_indexed8(bytes, w, h, stride, keycolour);
+    }
+    return stdl_surface_from_indexed8(bytes, w, h, stride, keycolour);
+}
+
+STDL_Surface *stdl_surface_from_indexed8(const uint8_t *bytes, int w,
+                                         int h, int stride, int keycolour)
+{
     STDL_Surface *s;
     const uint8_t *src;
     uint8_t *rowp, *mrowp;
@@ -200,7 +218,7 @@ STDL_Surface *STDL_SurfaceFromIndexed8(const uint8_t *bytes, int w,
     if (stride <= 0) {
         stride = w;
     }
-    s = STDL_CreateSurface(w, h);
+    s = stdl_surface_create(w, h);
     if (s == NULL) {
         return NULL;
     }
@@ -294,6 +312,10 @@ void STDL_RemapSurface(STDL_Surface *s, const uint8_t map[16])
     int groups, ncols, y, g, c;
 
     if (s == NULL || map == NULL) {
+        return;
+    }
+    if (STDL_IS_RESP(s)) {
+        stdl_resp->remap(s, map);
         return;
     }
     groups = s->stride / 8;

@@ -35,7 +35,16 @@ static uint8_t *launder(uint8_t *p)
     return p;
 }
 
+/* an 8-plane screen's surfaces have 8 planes (stdl_internal.h) */
 STDL_Surface *STDL_CreateSurface(int w, int h)
+{
+    if (stdl_resp_screen != NULL) {
+        return stdl_resp->create(w, h);
+    }
+    return stdl_surface_create(w, h);
+}
+
+STDL_Surface *stdl_surface_create(int w, int h)
 {
     STDL_Surface *s;
     int groups;
@@ -111,6 +120,10 @@ void STDL_FreeSurface(STDL_Surface *s)
     if (s == NULL || (s->flags & STDL_SCREEN)) {
         return;
     }
+    if (STDL_IS_RESP(s)) {
+        stdl_resp->free_surface(s);
+        return;
+    }
     /* borrowed blocks (STDL_CreateSurfaceFrom) stay the caller's */
     if (!(s->flags & STDL_PREALLOC)) {
         if (s->pixels != NULL) {
@@ -130,7 +143,10 @@ STDL_Surface *STDL_DuplicateSurface(const STDL_Surface *s)
     if (s == NULL) {
         return NULL;
     }
-    d = STDL_CreateSurface(s->w, s->h);
+    if (STDL_IS_RESP(s)) {
+        return stdl_resp->dup((STDL_Surface *)s);
+    }
+    d = stdl_surface_create(s->w, s->h);
     if (d == NULL) {
         return NULL;
     }
@@ -176,6 +192,9 @@ int STDL_SetColourKey(STDL_Surface *s, int enable, uint8_t key)
 
     if (s == NULL || (s->flags & STDL_SCREEN)) {
         return -1;
+    }
+    if (STDL_IS_RESP(s)) {
+        return stdl_resp->set_key(s, enable, key);
     }
     if (!enable) {
         if (s->mask != NULL && !(s->flags & STDL_PREALLOC)) {
@@ -242,6 +261,9 @@ int STDL_CreateMask(STDL_Surface *s, int transparent)
     if (s == NULL || (s->flags & STDL_SCREEN)) {
         return -1;
     }
+    if (STDL_IS_RESP(s)) {
+        return stdl_resp->create_mask(s, transparent);
+    }
     if (mask_alloc(s) < 0) {
         return -1;
     }
@@ -283,6 +305,10 @@ void STDL_PutGroup(STDL_Surface *s, int x, int y,
     if (s == NULL || planes == NULL || y < 0 || y >= s->h) {
         return;
     }
+    if (STDL_IS_RESP(s)) {
+        stdl_resp->put_group(s, x, y, planes, mask);
+        return;
+    }
     g = x >> 4;
     if (g < 0 || g >= s->stride / 8) {
         return;
@@ -315,6 +341,10 @@ void STDL_PutGroup8(STDL_Surface *s, int x, int y,
     if (s == NULL || planes == NULL || y < 0 || y >= s->h || x < 0) {
         return;
     }
+    if (STDL_IS_RESP(s)) {
+        stdl_resp->put_group8(s, x, y, planes, transmask);
+        return;
+    }
     g = x >> 4;
     if (g >= s->stride / 8) {
         return;
@@ -336,6 +366,10 @@ void STDL_SetClipRect(STDL_Surface *s, const STDL_Rect *r)
     int x1, y1, x2, y2;
 
     if (s == NULL) {
+        return;
+    }
+    if (STDL_IS_RESP(s)) {
+        stdl_resp->set_clip(s, r);
         return;
     }
     if (r == NULL) {

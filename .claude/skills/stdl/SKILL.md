@@ -20,6 +20,12 @@ back cleanly where they are not. `STDL_UseBlitter`, `STDL_HasHwScroll`
 and the STE audio calls all report what the machine has, so the
 fallback is a branch at init, not a second build.
 
+**Link libcmini, not mintlib, unless the game needs mintlib.** That
+is the default for every port: mintlib costs about 100K of the
+512K-1M a port has to live in, and buys nothing a game that only
+uses stdio, stdlib, string and the GEMDOS/XBIOS bindings calls.
+Porting workflow step 2 has the build and the checks.
+
 Requiring an STE is allowed but it is a decision, not a default:
 hardware scrolling needs one, and a port built around it should say
 so to the person who asked for the port before that design is
@@ -240,8 +246,42 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
    costs the least), `-v` naming the instruments taken for drums.
    Log a driver's output to VGM rather than re-scoring it.
 2. Build with `-Iinclude/compat` so `#include "SDL.h"` resolves to
-   the shim; link `libstdl.a`. Compile errors = the porting TODO
-   list.
+   the shim, against libcmini, and link `libstdl-cmini.a`. Compile
+   errors = the porting TODO list.
+
+   **libcmini is the default; mintlib is the exception, for a game
+   that needs something only mintlib has** - MiNT's POSIX extras
+   (processes, signals, sockets), or whatever else the libcmini link
+   reports missing that is not worth rewriting. Start every port on
+   libcmini and move to mintlib (`libstdl.a`) only for a reason you
+   can name; do not reach for mintlib because the toolchain links it
+   by default. What it buys: about 100K of program. One port's game
+   went from 242,624 bytes to 141,551, and on a 512K ST its free
+   memory after loading from 23K to 112K - with the TT colour code of
+   `stdl_responsive.h` linked in as well. Same frames (a seeded run's
+   screen hashes matched on an STE, a TT and a Falcon), same saved
+   files byte for byte, and its loading was faster (the art 1.47s to
+   1.20s, the sound set-up 535ms to 50ms). The STDL objects must be
+   built against libcmini's headers too - `libstdl.a` will not mix
+   with it:
+
+       make libstdl-cmini.a
+       m68k-atari-mint-gcc ... -I$CMINI/include -c game.c
+       m68k-atari-mint-gcc -nostdlib -L$CMINI/lib \
+           -Wl,--traditional-format -o GAME.TOS $CMINI/lib/crt0.o \
+           objs... libstdl-cmini.a -lcmini -lgcc
+
+   (`CMINI` is `/freemint/libcmini` in the toolchain container.)
+   Then:
+   - set the stack in the program, `long _stksize = 32768;`:
+     libcmini's start-up reads that, not the link's `--stack`;
+   - read the link errors: a missing symbol is a mintlib feature the
+     game used, and the call to rewrite or keep mintlib for;
+   - `malloc` comes from `Mxalloc`, so a free-memory probe with
+     `Malloc(-1)` still tells the truth;
+   - prove the fit at `--memsize 0` (below); a port moving from
+     mintlib compares a seeded run's frames and saved files with the
+     mintlib build's before switching for good.
 3. Mechanical rewrites (see `docs/porting.md`):
    - direct pixel writes -> `SDL_FillRect` bands / `STDL_HLine`
      spans / `STDL_PutPixel` only for tiny overlays
@@ -1304,6 +1344,10 @@ first.
 - `int * int`, `/` or `%` in anything per pixel, per object or per
   frame: libgcc calls. Use `stdl_math.h` and gate the build with
   `tools/libcalls.sh` (see "Your own arithmetic" above).
+- Linking mintlib (`libstdl.a` and the toolchain's default libc)
+  without a mintlib-only feature the game uses: about 100K of RAM
+  for nothing. Build against libcmini (`libstdl-cmini.a`, porting
+  workflow step 2).
 
 ## Reference
 

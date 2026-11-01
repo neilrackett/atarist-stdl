@@ -8,8 +8,18 @@ time, not at runtime.
 ## Workflow
 
 1. Convert assets with `stdlconv`; verify visually in Hatari.
-2. Add `-Iinclude/compat` and build; let compile and link errors
-   enumerate the work.
+2. Add `-Iinclude/compat` and build against libcmini and
+   `libstdl-cmini.a` (README, "Building"); let compile and link errors
+   enumerate the work. libcmini is the default and mintlib the
+   exception, for a game that needs something only mintlib has
+   (MiNT's processes, signals or sockets, or another symbol the
+   libcmini link reports missing that is not worth rewriting): it
+   costs about 100K of the RAM a port has to live in. A port moving
+   from mintlib sets its stack in the program (`long _stksize`), as
+   libcmini's start-up reads that rather than the link's `--stack`,
+   and compares a seeded run's frames and saved files with the
+   mintlib build's before switching for good; one port's matched
+   frame for frame and byte for byte.
 3. Replace unsupported calls with STDL primitives.
 4. Replace per-pixel drawing with spans or pre-rendered sprites.
 5. Align sprites to 16px or enable `STDL_PRESHIFT` - on a plain ST.

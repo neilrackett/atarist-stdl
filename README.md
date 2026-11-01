@@ -163,6 +163,26 @@ hatari --machine ste dist/TSPRITE.TOS
 Clone with `--recursive`, or run `git submodule update --init`: Xpad is
 a submodule at `lib/xpad`, and the library does not build without it.
 
+**Link your game against libcmini, not mintlib, unless it needs
+mintlib.** The examples link mintlib, the toolchain's default, but a
+game that uses stdio, stdlib, string and the GEMDOS/XBIOS bindings and
+nothing of MiNT's own (processes, signals, sockets) is about 100K
+smaller on libcmini - one port went from 242,624 bytes to 141,551, and
+on a 512K ST from 23K free after loading to 112K. Build STDL against
+libcmini's headers as well, since `libstdl.a` will not mix with it:
+
+```
+stcmd make libstdl-cmini.a
+m68k-atari-mint-gcc -nostdlib -L$CMINI/lib -Wl,--traditional-format \
+    -o GAME.TOS $CMINI/lib/crt0.o objs... libstdl-cmini.a -lcmini -lgcc
+```
+
+with the game's own sources compiled with `-I$CMINI/include`
+(`/freemint/libcmini` in the toolchain container), and its stack set
+in the program (`long _stksize = 32768;`), which libcmini's start-up
+reads in place of the link's `--stack`. `docs/porting.md` has the
+checks to make when switching.
+
 **If your game's Makefile decides when to rebuild `libstdl.a` by
 globbing STDL's sources, glob both directories.** Not every source is
 under `src/` any more:

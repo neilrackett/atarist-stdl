@@ -257,6 +257,11 @@ typedef struct {
     uint16_t         old_palette[16];
     int              old_cpuspeed;
     int              old_sync;    /* -1 until we change the rate  */
+    /* a Falcon's desktop, in a VIDEL mode a Getrez() cannot say: its
+     * VsetMode word and the VIDEL's 256 colours, allocated on a
+     * Falcon only (old_palette holds the 16 ST ones) */
+    int              old_vmode;
+    uint32_t        *old_vpal;
 
     /* logical palette for the screen */
     STDL_Colour      colours[16];
@@ -311,6 +316,14 @@ extern void (*stdl_shutdown_overscan)(void);
 extern volatile uint8_t stdl_host_sync_reg;
 #define STDL_SYNC_REG stdl_host_sync_reg
 #endif
+
+/* _MCH 0x00030000. The Falcon runs ST programs as an STE does, but
+ * keeps its desktop in VIDEL modes a Getrez() cannot describe, and
+ * its DMA has no 6258Hz. */
+static __inline__ int stdl_is_falcon(void)
+{
+    return (stdl.mach.mch_cookie >> 16) == 3;
+}
 
 /* The rate the display is running at now, from the register: what
  * TOS set at boot is the machine's region, and an NTSC machine (or

@@ -36,7 +36,10 @@ at every update; and one port measured, in Hatari, that SDL's doubled
 TT mode puts an `SDL_UpdateRects` box that does not start at the top on
 line y rather than 2y (whole-screen `SDL_Flip` is right). STDL's input
 needs no STDL screen there: `STDL_OpenInput` takes the keyboard, mouse,
-joystick and pad under a mode the program set itself. STDL exists for
+joystick and pad under a mode the program set itself. An ST build
+still runs on a Falcon, as an STE: there the voices and the ring play
+6258Hz at 12517, `STDL_PlaySample` refuses 6258, and the desktop's
+VIDEL mode and colours come back at exit. STDL exists for
 the ST, where there is no chunky mode at all: SDL degrades to
 greyscale derived from luminance and c2ps every frame, which is
 unusably slow past the basics. A 68030 also has hardware 32-bit multiply
@@ -1113,7 +1116,8 @@ first.
   DMA at your buffer and the hardware reads it once - no ring, no
   refill, **no per-frame cost** (`STDL_PlaySampleLoop` for ambient
   loops). Stop before freeing a playing buffer - the DMA reads it
-  live. Monophonic, so arbitrate by
+  live. A Falcon has no 6258Hz, so this refuses it there: sample at
+  12517 or above if Falcon owners matter. Monophonic, so arbitrate by
   priority yourself. It is the one path that costs nothing; when a
   game needs sounds on top of each other, the SDL_mixer shim
   (`Mix_PlayChannel`) plays up to four chunks on the voice mixer from

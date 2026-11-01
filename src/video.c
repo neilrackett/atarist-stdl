@@ -7,6 +7,7 @@
  */
 
 #include <mint/osbind.h>
+#include <mint/falcon.h>
 #include <stdlib.h>
 #include <string.h>
 #include "stdl_internal.h"
@@ -181,6 +182,63 @@ static void megaste_speedrestore(void)
 /* ---------------------------------------------------------------- */
 
 /*
+ * A Falcon's desktop is a VIDEL mode, which Getrez() cannot describe
+ * (TOS 4.04 in Hatari, VGA): under 640x480 in 16 colours it answers
+ * 2, which refused the mode as a mono monitor's, and a Setscreen()
+ * back to what it said under 320x480 in 256, with 16 colours put
+ * back, left that desktop in the wrong mode and colours until a
+ * reset. So a Falcon's mode is its VsetMode word, put back through
+ * Setscreen's mode 3 (a resolution change, the console with it), and
+ * its colours are the registers' own: VgetRGB read all black under a
+ * desktop whose colours the VDI had set. Both run in supervisor mode,
+ * which the library holds from STDL_Init.
+ */
+#define FALCON_VPAL ((volatile uint32_t *)0xFFFF9800UL)
+
+static void falcon_save_desktop(void)
+{
+    int i;
+
+    stdl.old_vmode = VsetMode(-1);
+    for (i = 0; i < 16; i++) {
+        stdl.old_palette[i] = STDL_HWPAL[i];
+    }
+    /* without the memory, only these colours are lost */
+    if (stdl.old_vpal == NULL) {
+        stdl.old_vpal = malloc(256 * sizeof(uint32_t));
+    }
+    if (stdl.old_vpal != NULL) {
+        for (i = 0; i < 256; i++) {
+            stdl.old_vpal[i] = FALCON_VPAL[i];
+        }
+    }
+}
+
+/* hardware and the XBIOS only, as release_hardware is */
+static void falcon_restore_desktop(void)
+{
+    uint32_t fc;
+    long n;
+    int i;
+
+    (void)VsetScreen(stdl.page[0], stdl.page[0], 3, stdl.old_vmode);
+    /* the colours after the next VBL, which lands any the XBIOS
+     * still holds for it; bounded as overscan.c's wait is, since
+     * the counter stands still if the VBL is masked at exit */
+    fc = STDL_FRCLOCK;
+    for (n = 0; n < 400000L && STDL_FRCLOCK == fc; n++) {
+    }
+    for (i = 0; i < 16; i++) {
+        STDL_HWPAL[i] = stdl.old_palette[i];
+    }
+    if (stdl.old_vpal != NULL) {
+        for (i = 0; i < 256; i++) {
+            FALCON_VPAL[i] = stdl.old_vpal[i];
+        }
+    }
+}
+
+/*
  * Everything that outlives the process if it is left installed:
  * interrupt vectors and hardware registers. No GEMDOS calls and no
  * free() - this also runs from the terminate vector below, where the
@@ -234,10 +292,14 @@ static void release_hardware(void)
     stdl_sync_want = -1;
     stdl_events_remove();
     if (stdl.video_set) {
-        for (i = 0; i < 16; i++) {
-            (void)Setcolor(i, stdl.old_palette[i]);
+        if (stdl_is_falcon()) {
+            falcon_restore_desktop();
+        } else {
+            for (i = 0; i < 16; i++) {
+                (void)Setcolor(i, stdl.old_palette[i]);
+            }
+            (void)Setscreen(stdl.page[0], stdl.page[0], stdl.old_rez);
         }
-        (void)Setscreen(stdl.page[0], stdl.page[0], stdl.old_rez);
         stdl.video_set = 0;
     }
     megaste_speedrestore();
@@ -280,6 +342,8 @@ static void restore_all(void)
     stdl.page1_alloc = NULL;
     stdl_stram_free(stdl.page2_alloc);
     stdl.page2_alloc = NULL;
+    free(stdl.old_vpal);
+    stdl.old_vpal = NULL;
     (void)Cconws("\33e");                               /* cursor back on */
     if (stdl.old_ssp != 0) {
         exit_supervisor(stdl.old_ssp);
@@ -352,17 +416,29 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
     if (!stdl.video_set) {
         stdl.old_sync = -1;     /* nothing to put back yet */
         stdl.old_rez = Getrez();
-        if (stdl.old_rez == 2) {
+        /* a Falcon's Getrez() says 2 under a colour desktop too (one
+         * of 640x480 in 16 colours): its monitor is VgetMonitor's to
+         * say */
+        if (stdl_is_falcon() ? VgetMonitor() == MON_MONO
+                             : stdl.old_rez == 2) {
             STDL_SetError("monochrome monitor: low resolution "
                           "unavailable (mono support is post-v1)");
             return NULL;
         }
-        for (i = 0; i < 16; i++) {
-            stdl.old_palette[i] = Setcolor(i, -1);
+        if (stdl_is_falcon()) {
+            falcon_save_desktop();
+        } else {
+            for (i = 0; i < 16; i++) {
+                stdl.old_palette[i] = Setcolor(i, -1);
+            }
         }
         stdl.page[0] = (uint8_t *)Physbase();
         (void)Cconws("\33f\33E");                       /* cursor off, clear */
-        if (stdl.old_rez != 0) {
+        /* on a Falcon whatever Getrez() said: under a VIDEL mode it
+         * names some other machine's (7 under 320x480 in 256
+         * colours, 2 under 640x480 in 16), so a 0 is no promise of
+         * ST Low either */
+        if (stdl.old_rez != 0 || stdl_is_falcon()) {
             (void)Setscreen((void *)-1L, (void *)-1L, 0);
         }
         stdl_vbl_hz = stdl_sync_hz();

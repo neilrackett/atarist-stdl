@@ -11,6 +11,7 @@
  * program that plays samples or voices does not link either.
  */
 
+#include <mint/falcon.h>
 #include "stdl_internal.h"
 
 #define DMA_CTRL   (*(volatile uint8_t *)0xFFFF8901UL)
@@ -36,6 +37,11 @@ const int stdl_dma_rates[4] = { 6258, 12517, 25033, 50066 };
 /* one-shot playback state (STDL_PlaySample); shares the chip with
  * the ring device and the voices, which is why only one may own it */
 static int sample_active;
+
+/* A Falcon's copy of a 6258Hz sample at 12517 (sample_start): ST RAM,
+ * kept and reused, grown when a longer one comes */
+static int8_t *up_buf;
+static uint32_t up_cap;
 
 /* emergency stop for restore_all: the DMA must never keep looping
  * over freed RAM after the program exits */
@@ -87,9 +93,13 @@ void stdl_dma_stop(void)
 
 static void microwire_write(uint16_t data);
 
-/* master and both channels to 0dB */
+/* master and both channels to 0dB; a Falcon has no Microwire (its
+ * levels are the XBIOS Soundcmd's, which the desktop leaves at full) */
 static void set_output_levels(void)
 {
+    if (stdl_is_falcon()) {
+        return;
+    }
     microwire_write(0x4E8);     /* %10 011 101000  master 0dB   */
     microwire_write(0x554);     /* %10 101 010100  left 0dB     */
     microwire_write(0x514);     /* %10 100 010100  right 0dB    */
@@ -97,13 +107,60 @@ static void set_output_levels(void)
 
 static void microwire_write(uint16_t data)
 {
-    long timeout = 10000;
+    uint32_t t0 = STDL_HZ200;
 
     MW_MASK = 0x07FF;
     MW_DATA = data;
-    /* the mask rotates during the ~16us transfer; wait it out */
-    while (MW_MASK != 0x07FF && --timeout > 0)
+    /* the mask rotates during the ~16us transfer; wait it out, bounded
+     * by time rather than by a count, which a 32MHz TT runs through
+     * four times as fast as the 8MHz it was sized for */
+    while (MW_MASK != 0x07FF && STDL_HZ200 - t0 < 2)
         ;
+}
+
+/*
+ * A Falcon's sound goes through its crossbar, which the DMA playback
+ * reaches the DAC by only if it is connected there, at the STE-
+ * compatible clock (prescale 0) that the rates above need. That is how
+ * TOS boots, and it is all the library relied on; a Falcon program run
+ * before this one that routed the sound elsewhere left it silent. So
+ * the first start on a Falcon connects it, adds the matrix to the DAC
+ * mixer's inputs (keeping the ADC input, which is the YM), and saves
+ * what was there to put back at exit: the registers raw, the adder
+ * through its inquiry.
+ */
+#define XB_SRC    (*(volatile uint16_t *)0xFFFF8930UL)
+#define XB_DST    (*(volatile uint16_t *)0xFFFF8932UL)
+#define XB_EXTPRE (*(volatile uint8_t *)0xFFFF8934UL)
+#define XB_INTPRE (*(volatile uint8_t *)0xFFFF8935UL)
+
+static uint16_t xb_src, xb_dst;
+static uint8_t xb_extpre, xb_intpre;
+static long xb_adder;
+
+/* registers and the XBIOS only: it runs from the terminate path */
+static void falcon_unroute(void)
+{
+    XB_SRC = xb_src;
+    XB_DST = xb_dst;
+    XB_EXTPRE = xb_extpre;
+    XB_INTPRE = xb_intpre;
+    (void)Soundcmd(ADDERIN, (short)xb_adder);
+}
+
+static void falcon_route(void)
+{
+    if (stdl_shutdown_route == falcon_unroute) {
+        return;
+    }
+    xb_src = XB_SRC;
+    xb_dst = XB_DST;
+    xb_extpre = XB_EXTPRE;
+    xb_intpre = XB_INTPRE;
+    xb_adder = Soundcmd(ADDERIN, SND_INQUIRE);
+    (void)Devconnect(DMAPLAY, DAC, CLK25M, CLKOLD, NO_SHAKE);
+    (void)Soundcmd(ADDERIN, (short)((xb_adder & 3) | MATIN));
+    stdl_shutdown_route = falcon_unroute;
 }
 
 /*
@@ -158,6 +215,9 @@ void stdl_dma_start(const void *data, uint32_t bytes, uint8_t mode,
     uint32_t start = (uint32_t)data;
     uint32_t end = start + bytes;
 
+    if (stdl_is_falcon()) {
+        falcon_route();
+    }
     DMA_CTRL = 0;
     DMA_MODE = mode;
     DMA_START_H = (uint8_t)(start >> 16);
@@ -179,7 +239,7 @@ static int sample_start(const void *data, uint32_t bytes, int freq,
     if (!stdl.initialised) {
         STDL_Init(STDL_INIT_AUDIO);
     }
-    if (!stdl.mach.is_ste) {
+    if (!stdl.mach.has_dma_sound) {
         STDL_SetError("no DMA sound hardware (STE/Mega STE only)");
         return -1;
     }
@@ -211,11 +271,41 @@ static int sample_start(const void *data, uint32_t bytes, int freq,
         return -1;
     }
     if (dma_nearest_of_all(freq) == 0 && stdl_is_falcon()) {
-        /* played at 12517 it would be an octave high and over in
-         * half the time */
-        STDL_SetError("a Falcon has no 6258Hz DMA rate (resample "
-                      "the buffer to 12517)");
-        return -1;
+        /*
+         * A Falcon has no 6258Hz, and played at 12517 the buffer would
+         * be an octave high and over in half the time: so it plays a
+         * copy at twice the length, every second byte the mean of its
+         * neighbours. The copy is ST RAM the program never sees, on a
+         * Falcon only, kept for the next sample and grown when a longer
+         * one comes; the caller's buffer is read once, here, where on
+         * other machines the DMA reads it live.
+         */
+        uint32_t i, n = bytes * 2;
+
+        if (sample_active) {
+            DMA_CTRL = 0;       /* it may be playing the copy */
+        }
+        if (n > up_cap) {
+            stdl_stram_free(up_buf);
+            up_buf = (int8_t *)stdl_stram_alloc(n);
+            up_cap = (up_buf != NULL) ? n : 0;
+        }
+        if (up_buf == NULL) {
+            sample_active = 0;
+            STDL_SetError("no ST RAM for a Falcon's 12517Hz copy of a "
+                          "6258Hz sample");
+            return -1;
+        }
+        for (i = 0; i + 1 < bytes; i++) {
+            const int a = ((const int8_t *)data)[i];
+            const int b = ((const int8_t *)data)[i + 1];
+            up_buf[2 * i] = (int8_t)a;
+            up_buf[2 * i + 1] = (int8_t)((a + b) >> 1);
+        }
+        up_buf[2 * i] = up_buf[2 * i + 1] = ((const int8_t *)data)[i];
+        data = up_buf;
+        bytes = n;
+        freq = stdl_dma_rates[1];
     }
     stdl_dma_start(data, bytes,
                    (uint8_t)(stdl_dma_nearest(freq) | 0x80), /* mono */

@@ -107,8 +107,10 @@ int main(void)
     stdl_host_sync_reg = 0;
     CHECK(stdl_sync_hz() == 60, "sync 0 read as %d", stdl_sync_hz());
     stdl.mach.mch_cookie = 0x00020000UL;
-    CHECK(stdl_sync_hz() == 50, "a TT read the ST register: %d", stdl_sync_hz());
+    stdl_vbl_hz = 60;           /* what the measurement found */
+    CHECK(stdl_sync_hz() == 60, "a TT read the ST register: %d", stdl_sync_hz());
     stdl.mach.mch_cookie = 0;
+    stdl_vbl_hz = 50;
     stdl_host_sync_reg = 2;
 
     /* A 50Hz stream of 100 frames is two seconds of music. On a
@@ -169,6 +171,18 @@ int main(void)
     CHECK(STDL_SYNC_REG == 2, "the register was written under overscan");
     CHECK(stdl_sync_want == 0, "the request was not recorded for the close");
     stdl_shutdown_overscan = NULL;
+
+    /* A TT's or a Falcon's rate is not the register's: SetRefresh
+     * measures (the host's stand-in returns stdl_vbl_hz) and never
+     * writes it, and -1 returns the last measurement. */
+    stdl.mach.mch_cookie = 0x00030000UL;
+    STDL_SYNC_REG = 2;
+    stdl_vbl_hz = 60;
+    CHECK(STDL_SetRefresh(50) == 60, "a Falcon's rate was not the measured one");
+    CHECK(STDL_SYNC_REG == 2, "a Falcon's sync register was written");
+    CHECK(STDL_SetRefresh(-1) == 60, "-1 on a Falcon did not return the rate");
+    stdl.mach.mch_cookie = 0;
+    stdl_vbl_hz = 50;
 
     printf("test_refresh: %s\n", failures ? "FAILURES" : "all checks passed");
     return failures ? 1 : 0;

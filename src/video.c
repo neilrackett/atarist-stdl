@@ -21,6 +21,7 @@ void (*stdl_shutdown_vbl)(void);
 void (*stdl_shutdown_overscan)(void);
 void (*stdl_shutdown_hwscroll)(void);
 void (*stdl_shutdown_rasters)(void);
+void (*stdl_shutdown_route)(void);
 uint8_t stdl_timerb_owner;
 uint16_t (*stdl_blit_policy)(uint16_t nlines, uint32_t cpl);
 void (*stdl_pal_apply_hook)(void);
@@ -91,13 +92,20 @@ static int altram_present(uintptr_t phystop)
 static void detect_machine(void)
 {
     long *jar = *(long **)0x5A0UL;
+    int has_snd = 0;
+    uint32_t snd = 0;
 
     stdl.mach.mch_cookie = 0;
+    stdl.mach.cpu = 0;
     if (jar != NULL) {
         for (; jar[0] != 0; jar += 2) {
             if (jar[0] == 0x5F4D4348L) {          /* '_MCH' */
                 stdl.mach.mch_cookie = (uint32_t)jar[1];
-                break;
+            } else if (jar[0] == 0x5F435055L) {   /* '_CPU' */
+                stdl.mach.cpu = (uint16_t)jar[1];
+            } else if (jar[0] == 0x5F534E44L) {   /* '_SND' */
+                snd = (uint32_t)jar[1];
+                has_snd = 1;
             }
         }
     }
@@ -105,6 +113,60 @@ static void detect_machine(void)
      * STE-class for the palette (4 bits per channel) */
     stdl.mach.is_ste = (stdl.mach.mch_cookie >= 0x00010000UL);
     stdl.mach.is_megaste = (stdl.mach.mch_cookie == 0x00010010UL);
+    stdl.mach.is_tt = (uint8_t)stdl_is_tt();
+    stdl.mach.is_falcon = (uint8_t)stdl_is_falcon();
+    /* _SND bit 1 is the STE's DMA sound, which a TT's DIP switch can
+     * take away; a TOS without the cookie is an ST's or an STE's, and
+     * the machine type says */
+    stdl.mach.has_dma_sound = (uint8_t)(has_snd ? (snd & 2) != 0
+                                                : stdl.mach.is_ste);
+}
+
+/*
+ * A TT's or a Falcon's display rate, measured: their video does not
+ * run from the sync register stdl_sync_hz() reads on an ST. The 50
+ * assumed there before was wrong on a Falcon on a VGA monitor (60) and
+ * in Hatari's TT (60.6 in ST Low), and every VBL-paced sequencer -
+ * music, effects, the voice tick - ran 20% fast. Twenty frames against
+ * the 200Hz timer, about a third of a second; snapped to 50 or 60
+ * within 2, the rates those sequencers are written for, so the
+ * timer's jitter cannot move a tempo between runs. Bounded both ways,
+ * keeping what it had if the VBL stands still.
+ */
+uint8_t stdl_measure_vbl(void)
+{
+    uint32_t f, t0, t1;
+    uint16_t hz10;
+    int n;
+
+    t0 = STDL_HZ200;
+    f = STDL_FRCLOCK;
+    while (STDL_FRCLOCK == f) {
+        if (STDL_HZ200 - t0 > 100) {
+            return stdl_vbl_hz;
+        }
+    }
+    t0 = STDL_HZ200;
+    for (n = 0; n < 20; n++) {
+        f = STDL_FRCLOCK;
+        while (STDL_FRCLOCK == f) {
+            if (STDL_HZ200 - t0 > 400) {
+                return stdl_vbl_hz;
+            }
+        }
+    }
+    t1 = STDL_HZ200 - t0;
+    if (t1 == 0) {
+        return stdl_vbl_hz;
+    }
+    hz10 = stdl_divu(40000UL + t1 / 2, (uint16_t)t1);  /* tenths */
+    if (hz10 >= 480 && hz10 <= 520) {
+        return 50;
+    }
+    if (hz10 >= 580 && hz10 <= 620) {
+        return 60;
+    }
+    return (uint8_t)stdl_divu((uint32_t)hz10 + 5, 10);
 }
 
 /* Only the Mega STE has the speed register at $FF8E21; touching it
@@ -239,6 +301,50 @@ static void falcon_restore_desktop(void)
 }
 
 /*
+ * A TT's desktop: Getrez() describes its modes (4 TT Medium, 6 TT
+ * High, 7 TT Low), and Setscreen() puts them back, but the 16 Setcolor
+ * reaches are one bank of the 256 TT registers at $FF8400, and a TT Low
+ * desktop uses all of them. So all 256 go back after a VBL, from the 1K
+ * the Falcon uses for its own. Not the EgetShift word as well: written
+ * back after the Setscreen, it left Hatari's TT Medium desktop (TOS
+ * 3.06) shown in another mode, and the library never changes the bank
+ * or the other bits it holds.
+ */
+#define TT_PAL ((volatile uint16_t *)0xFFFF8400UL)
+
+static void tt_save_desktop(void)
+{
+    int i;
+
+    if (stdl.old_vpal == NULL) {
+        stdl.old_vpal = malloc(256 * sizeof(uint32_t));
+    }
+    if (stdl.old_vpal != NULL) {
+        for (i = 0; i < 256; i++) {
+            stdl.old_vpal[i] = TT_PAL[i];
+        }
+    }
+}
+
+/* hardware and the XBIOS only, as release_hardware is */
+static void tt_restore_desktop(void)
+{
+    uint32_t fc;
+    long n;
+    int i;
+
+    (void)Setscreen(stdl.page[0], stdl.page[0], stdl.old_rez);
+    fc = STDL_FRCLOCK;
+    for (n = 0; n < 400000L && STDL_FRCLOCK == fc; n++) {
+    }
+    if (stdl.old_vpal != NULL) {
+        for (i = 0; i < 256; i++) {
+            TT_PAL[i] = (uint16_t)stdl.old_vpal[i];
+        }
+    }
+}
+
+/*
  * Everything that outlives the process if it is left installed:
  * interrupt vectors and hardware registers. No GEMDOS calls and no
  * free() - this also runs from the terminate vector below, where the
@@ -255,6 +361,11 @@ static void release_hardware(void)
     if (stdl_shutdown_audio != NULL) {
         stdl_shutdown_audio();
         stdl_shutdown_audio = NULL;
+    }
+    if (stdl_shutdown_route != NULL) {
+        /* after the DMA has stopped */
+        stdl_shutdown_route();
+        stdl_shutdown_route = NULL;
     }
     if (stdl_shutdown_vbl != NULL) {
         stdl_shutdown_vbl();
@@ -294,6 +405,8 @@ static void release_hardware(void)
     if (stdl.video_set) {
         if (stdl_is_falcon()) {
             falcon_restore_desktop();
+        } else if (stdl_is_tt()) {
+            tt_restore_desktop();
         } else {
             for (i = 0; i < 16; i++) {
                 (void)Setcolor(i, stdl.old_palette[i]);
@@ -384,12 +497,23 @@ int STDL_Init(uint32_t flags)
 
     {
         long bm = Blitmode(-1);
-        stdl.mach.has_blitter = (bm >= 0 && (bm & 2)) ? 1 : 0;
+        /* Not a Falcon's: its 68030 runs with the data cache on, which
+         * the BLiTTER's writes to memory do not update, so a CPU read
+         * after a BLiTTER restore or fill can see what was there before.
+         * Untested on the machine either way, and the 68030 at 16MHz
+         * with its caches has the CPU paths' speed to spare. */
+        stdl.mach.has_blitter = (bm >= 0 && (bm & 2) && !stdl_is_falcon())
+                                ? 1 : 0;
     }
     /* PHYSTOP, in supervisor mode: what the BLiTTER can reach; and
      * whether there is anything beyond it at all */
     stdl.stram_top = (uintptr_t)*(volatile uint32_t *)0x42EUL;
     stdl.altram = (uint8_t)altram_present(stdl.stram_top);
+    if (stdl.mach.mch_cookie >= 0x00020000UL) {
+        /* the desktop's rate, for a program that plays music without
+         * ever setting a mode of ours */
+        stdl_vbl_hz = stdl_measure_vbl();
+    }
 
     stdl.initialised = 1;
     old_term = (void (*)(void))Setexc(0x102, (void *)term_handler);
@@ -418,15 +542,20 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
         stdl.old_rez = Getrez();
         /* a Falcon's Getrez() says 2 under a colour desktop too (one
          * of 640x480 in 16 colours): its monitor is VgetMonitor's to
-         * say */
+         * say. A TT shows ST High on its colour monitor as well, and
+         * TT High (6) only on a mono one: the MFP's monitor-detect
+         * bit (GPIP 7, clear for mono) says which it has. */
         if (stdl_is_falcon() ? VgetMonitor() == MON_MONO
-                             : stdl.old_rez == 2) {
+            : stdl_is_tt() ? (*(volatile uint8_t *)0xFFFFFA01UL & 0x80) == 0
+                           : stdl.old_rez == 2) {
             STDL_SetError("monochrome monitor: low resolution "
                           "unavailable (mono support is post-v1)");
             return NULL;
         }
         if (stdl_is_falcon()) {
             falcon_save_desktop();
+        } else if (stdl_is_tt()) {
+            tt_save_desktop();
         } else {
             for (i = 0; i < 16; i++) {
                 stdl.old_palette[i] = Setcolor(i, -1);
@@ -441,7 +570,10 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
         if (stdl.old_rez != 0 || stdl_is_falcon()) {
             (void)Setscreen((void *)-1L, (void *)-1L, 0);
         }
-        stdl_vbl_hz = stdl_sync_hz();
+        /* a TT's or a Falcon's ST Low runs at the monitor's rate, not
+         * the desktop's, which STDL_Init measured */
+        stdl_vbl_hz = (stdl.mach.mch_cookie >= 0x00020000UL)
+                      ? stdl_measure_vbl() : stdl_sync_hz();
         stdl.video_set = 1;
         stdl_events_install();
     }

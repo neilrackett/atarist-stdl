@@ -269,6 +269,16 @@ int STDL_OpenRasters(int lines, int reg1, int reg2)
         STDL_SetError("no video mode set");
         return -1;
     }
+    if (stdl.mach.mch_cookie >= 0x00020000UL) {
+        /* Timer B counts the lines a TT or a Falcon shows, doubled on
+         * their monitors, and nobody has measured on the machines how
+         * many it sees in a frame: Hatari, which times their video as
+         * an STE's, cannot say. The table is 200 a frame, so refused
+         * there, as the borders are */
+        STDL_SetError("rasters need an ST, STE or Mega STE (not a TT "
+                      "or Falcon)");
+        return -1;
+    }
     if (stdl_timerb_owner == STDL_TB_BORDER) {
         STDL_SetError("a border is using Timer B");
         return -1;

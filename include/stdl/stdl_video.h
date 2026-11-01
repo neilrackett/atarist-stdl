@@ -58,13 +58,26 @@ void STDL_Flip(void);
 void STDL_UpdateRects(int n, STDL_Rect *rects);
 void STDL_WaitVBL(void);
 
-/* Machine information (valid after STDL_Init) */
+/*
+ * Machine information (valid after STDL_Init). A TT and a Falcon are
+ * STE-class (is_ste: 4096 colours, DMA sound): they run an ST program
+ * in ST Low, with the TT's and Falcon's own differences handled by the
+ * library - the desktop's modes and colours put back at exit, the
+ * display rate measured rather than assumed, a Falcon's sound routed
+ * and its missing 6258Hz played at 12517. is_tt and is_falcon are for
+ * a program that wants to do more there; has_dma_sound is what decides
+ * the sound devices, from the _SND cookie where TOS has one (a TT's
+ * DMA sound can be switched off), the machine type where it has not.
+ */
 typedef struct {
     uint8_t  is_ste;       /* STE-class shifter: 4096 colours          */
     uint8_t  is_megaste;
-    uint8_t  has_blitter;
-    uint8_t  unused;
+    uint8_t  has_blitter;  /* and the library uses it (not a Falcon's)  */
+    uint8_t  is_tt;        /* _MCH 0x00020000                          */
     uint32_t mch_cookie;   /* raw _MCH value, 0 if absent              */
+    uint8_t  is_falcon;    /* _MCH 0x00030000                          */
+    uint8_t  has_dma_sound;
+    uint16_t cpu;          /* _CPU: 0, 10, 20, 30, 40 or 60; 0 absent */
 } STDL_MachineInfo;
 
 const STDL_MachineInfo *STDL_GetMachineInfo(void);
@@ -146,6 +159,16 @@ int STDL_UseMegaSteSpeedup(int mode);
  * opt-in for that reason, and the return value is what actually
  * happened, so a port can ask and then believe the answer rather
  * than the request.
+ *
+ * On a TT or a Falcon the rate is not the sync register's, and this
+ * changes nothing: it measures the display's rate - frames against
+ * the 200Hz timer, about a third of a second - and returns that,
+ * which is what the rate-aware devices above then divide by (-1
+ * returns the last measurement without taking another). The
+ * library measures at STDL_Init and after each STDL_SetVideoMode; a
+ * program that sets a TT's or a Falcon's mode itself calls this
+ * with 0 afterwards. A Falcon on a VGA monitor runs at 60, where the 50 the
+ * library once assumed played every sequencer 20% fast.
  */
 int STDL_SetRefresh(int hz);
 

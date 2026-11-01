@@ -27,9 +27,10 @@ extern "C" {
  * larger than the screen and only redraw the strip that scrolls in.
  *
  * STDL_HasHwScroll says whether the machine has those registers (an
- * STE-class Shifter: STE, Mega STE; the TT and Falcon count too but
- * are not STDL's target). On a plain ST the calls below fail cleanly
- * and touch nothing; a port keeps a copy-based fallback for that.
+ * STE's Shifter: STE, Mega STE; not a TT, which has none, nor a
+ * Falcon, whose VIDEL keeps them elsewhere). Elsewhere the calls below
+ * fail cleanly and touch nothing; a port keeps a copy-based fallback
+ * for that.
  */
 int STDL_HasHwScroll(void);
 

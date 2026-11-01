@@ -20,6 +20,7 @@
 #include "ymtest.h"
 
 extern int stdl_host_dma_running;
+extern uint32_t stdl_host_dma_bytes;
 
 extern const int8_t *stdl_host_voltab(void);
 extern uint32_t stdl_voice_late;
@@ -113,6 +114,7 @@ int main(void)
 
     STDL_Init(0);
     stdl.mach.is_ste = 1;
+    stdl.mach.has_dma_sound = 1;
 
     for (i = 0; i < 256; i++) {
         ramp[i] = (int8_t)((i & 63) - 32);
@@ -624,6 +626,37 @@ int main(void)
     CHECK(!STDL_VoicesOpen(), "still open after close");
     CHECK(!stdl_host_dma_running, "DMA still running after close");
     CHECK(stdl.dma_owner == STDL_DMA_FREE, "DMA owner not released");
+
+    /*
+     * The ring's size. 6258 and 12517 on an STE are four blocks (82ms
+     * and 41ms). A Falcon plays 12517 for 6258, and gets eight, so a
+     * late VBL has the 82ms there that 6258 gives it on an STE: the
+     * first tick then mixes seven blocks ahead, where an STE mixes
+     * three.
+     */
+    STDL_CloseVoices();
+    CHECK(STDL_OpenVoices(12517) == 0, "12517: %s", STDL_GetError());
+    CHECK(stdl_host_dma_bytes == 4 * BLOCK, "12517 on an STE: ring %u",
+          (unsigned)stdl_host_dma_bytes);
+    STDL_CloseVoices();
+    stdl.mach.mch_cookie = 0x00030000UL;
+    CHECK(STDL_OpenVoices(6258) == 0, "Falcon 6258: %s", STDL_GetError());
+    find_vbl();
+    CHECK(stdl_host_dma_bytes == 8 * BLOCK, "Falcon 6258: ring %u",
+          (unsigned)stdl_host_dma_bytes);
+    memset(plus, 64, sizeof(plus));
+    STDL_SetVoice(0, plus, sizeof(plus), 0, sizeof(plus), 12517, 64);
+    tick_at(0);                 /* play in block 0: fills 1..7 */
+    r = ring_base();
+    for (i = 1; i < 8; i++) {
+        CHECK(r[i * BLOCK] == 32, "Falcon ring block %d not mixed: %d",
+              i, r[i * BLOCK]);
+    }
+    CHECK(stdl_voice_late == 0, "a fresh eight-block ring read as late");
+    tick_at(7 * BLOCK);         /* play in 7: fills 0..6 again */
+    CHECK(r[0] == 32, "Falcon ring block 0 not refilled: %d", r[0]);
+    STDL_CloseVoices();
+    stdl.mach.mch_cookie = 0;
 
     if (failures) {
         printf("%d FAILURES\n", failures);

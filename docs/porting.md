@@ -439,16 +439,30 @@ truncates colours to the low N bits rather than rejecting them. See
   scribble over low-res screen RAM. Fine for tests, not for games.
 * **Arguments**: programs launched from the desktop get no argv;
   make sure defaults are sensible.
-* **A Falcon runs an STE program**, and the library covers the two
-  places it differs. Its DMA has no 6258Hz: the voices, the SDL_mixer
-  shim and `STDL_OpenAudio` play at 12517 there instead, at 12517's
-  cost, and `STDL_PlaySample`, which cannot convert a buffer it plays
-  in place, refuses 6258 - sample one-shots at 12517 or above if
-  Falcon owners matter. And its desktop is a VIDEL mode that
-  `Getrez()` cannot describe, so `STDL_SetVideoMode` puts back the
-  mode word and all 256 colours at exit, and asks the monitor, not
-  `Getrez()`, whether it is mono. `tests/hatari/falcchk.c` checks
-  both.
+* **A TT or a Falcon runs an STE program**, in ST Low, and the
+  library covers where they differ:
+  - **Rate.** Their display rate is not the sync register's, so it is
+    measured at `STDL_Init` and after each `STDL_SetVideoMode` (about
+    a third of a second there); music, effects and the voice tick
+    divide by it. Hatari's TT runs ST Low at 60, a Falcon on VGA its
+    desktop at 60. `STDL_SetRefresh` changes nothing there: it measures
+    and returns the rate.
+  - **Sound.** DMA sound is decided by the `_SND` cookie (a TT's can be
+    switched off). A Falcon has no 6258Hz: the voices, the SDL_mixer
+    shim and `STDL_OpenAudio` play at 12517 there, and
+    `STDL_PlaySample` plays a 6258Hz buffer from a copy at 12517. Its
+    crossbar is routed DMA-to-DAC on the first start and put back at
+    exit, so a Falcon program run before cannot leave yours silent.
+  - **Desktop.** A Falcon's is a VIDEL mode `Getrez()` cannot describe
+    and a TT's uses more than 16 colours, so the mode and all 256
+    colour registers come back at exit; the monitor,
+    not `Getrez()`, says whether it is mono (a TT shows ST High on
+    colour, TT High only on mono).
+  - **Refused there:** borders, hardware scrolling and rasters (Timer B
+    counts their doubled lines in a way not yet measured on the
+    machines). A Falcon's BLiTTER is left alone: the 68030's data cache
+    does not see its writes.
+  `tests/hatari/ttchk.c` and `tests/hatari/falcchk.c` check all of it.
 * **Many copies of one sprite**: `STDL_BlitSprites` draws a list of
   positions and frames in one call, and `STDL_DirtyWholeGroups(1)`
   makes their restores plain copies of whole groups, where the scene

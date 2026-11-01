@@ -26,9 +26,16 @@
 #include <string.h>
 #include "stdl_internal.h"
 
-/* ring of RING_FRAMES mono s8 frames, mixed in quarters */
-#define RING_FRAMES 512
-#define BLOCK_FRAMES (RING_FRAMES / 4)   /* a multiple of 4: see mix_block */
+/*
+ * A ring of vc.nblocks blocks of BLOCK_FRAMES mono s8 frames, mixed a
+ * block at a time behind the play head. Four blocks is 82ms at 6258Hz,
+ * the slack a late VBL or a disk transfer has before the hardware
+ * replays a block. A Falcon plays 12517 where 6258 is asked for (it has
+ * no 6258), and four blocks there would be 41ms: so it gets eight, the
+ * same 82ms. A device opened at 12517 on purpose keeps its four, and
+ * its 41ms of latency.
+ */
+#define BLOCK_FRAMES 128                 /* a multiple of 4: see mix_block */
 
 typedef struct {
     const int8_t *data;
@@ -105,7 +112,9 @@ static struct {
     const int8_t *xsrc[STDL_VOICES]; /* the loop each holds, or NULL */
     uint16_t xlen[STDL_VOICES]; /* its length in frames            */
     voice_t  v[STDL_VOICES];
-    int      fill_block;        /* next quarter to mix */
+    int      fill_block;        /* next block to mix */
+    uint8_t  nblocks;           /* 4, or 8 (a power of two) */
+    uint16_t ring_frames;       /* nblocks * BLOCK_FRAMES */
     uint8_t  pause_req;         /* stop asked for, not yet taken   */
     uint8_t  paused;            /* DMA actually stopped            */
     uint8_t  silent;            /* consecutive blocks mixed silent */
@@ -625,24 +634,24 @@ static void voice_vbl(void)
         }
     }
     off = stdl_dma_counter() - (uint32_t)(uintptr_t)vc.ring;
-    if (off >= (uint32_t)RING_FRAMES) {
+    if (off >= (uint32_t)vc.ring_frames) {
         return;                 /* counter mid-reload; next tick */
     }
     play_block = (int)(off / BLOCK_FRAMES);
-    /* chase the play head: fill every quarter behind it, stopping
+    /* chase the play head: fill every block behind it, stopping
      * at the one the hardware is reading */
-    for (guard = 0; guard < 3; guard++) {
+    for (guard = 0; guard < vc.nblocks - 1; guard++) {
         if (vc.fill_block == play_block) {
             break;
         }
         if (mix_block(vc.ring + vc.fill_block * BLOCK_FRAMES)) {
             vc.silent = 0;
-        } else if (vc.silent < 4) {
-            vc.silent++;        /* 4 = the whole ring is zeroes */
+        } else if (vc.silent < vc.nblocks) {
+            vc.silent++;        /* nblocks = the whole ring is zeroes */
         }
-        vc.fill_block = (vc.fill_block + 1) & 3;
+        vc.fill_block = (vc.fill_block + 1) & (vc.nblocks - 1);
     }
-    if (guard == 3 && !vc.fresh) {
+    if (guard == vc.nblocks - 1 && !vc.fresh) {
         /* Three blocks filled and still not caught up: this tick
          * arrived so late that the play head has run on past what
          * was ready, and the hardware has replayed or half-read a
@@ -673,7 +682,7 @@ static void voice_vbl(void)
      * an API whose whole purpose is to avoid one. Waiting costs at
      * most a ring (82ms at 6258Hz) and nobody can hear the wait.
      */
-    if (vc.pause_req && vc.silent >= 4) {
+    if (vc.pause_req && vc.silent >= vc.nblocks) {
         stdl_dma_stop();
         vc.paused = 1;
     }
@@ -690,7 +699,7 @@ int STDL_OpenVoices(int freq)
     if (!stdl.initialised) {
         STDL_Init(STDL_INIT_AUDIO);
     }
-    if (!stdl.mach.is_ste) {
+    if (!stdl.mach.has_dma_sound) {
         STDL_SetError("no DMA sound hardware (STE/Mega STE only)");
         return -1;
     }
@@ -703,11 +712,16 @@ int STDL_OpenVoices(int freq)
     memset(&vc, 0, sizeof(vc));
     vc.dma_freq = stdl_dma_rates[stdl_dma_nearest(freq)];
     vc.dma_mode = (uint8_t)(stdl_dma_nearest(freq) | 0x80); /* mono */
+    /* 6258 asked for and 12517 given (a Falcon): twice the blocks */
+    vc.nblocks = (uint8_t)((stdl_dma_nearest(freq) == 1
+                            && freq < (stdl_dma_rates[0]
+                                       + stdl_dma_rates[1]) / 2) ? 8 : 4);
+    vc.ring_frames = (uint16_t)(vc.nblocks * BLOCK_FRAMES);
 
     /* Guard bytes past the ring, and the whole allocation cleared
-     * below - not just the RING_FRAMES the mixer writes.
+     * below - not just the ring_frames the mixer writes.
      *
-     * The DMA is handed start = ring and end = ring + RING_FRAMES,
+     * The DMA is handed start = ring and end = ring + ring_frames,
      * and the frame at `end` should not be played. Should: a real
      * STE clicked once per loop with a ring of pure silence, at
      * 12.2Hz against the 81.8ms this ring takes at 6258Hz, and the
@@ -720,7 +734,7 @@ int STDL_OpenVoices(int freq)
      * or just past the end address is now a zero this code wrote.
      * Four bytes because the DMA fetches words and the ring is
      * aligned up by one. */
-    vc.ring_alloc = stdl_stram_alloc(RING_FRAMES + 8);
+    vc.ring_alloc = stdl_stram_alloc(vc.ring_frames + 8UL);
     /* the volume rows, then each voice's buffer for a short loop
      * (XLOOP_MIN); without the room for those, short loops wrap as
      * they are */
@@ -740,7 +754,7 @@ int STDL_OpenVoices(int freq)
                       : "out of memory for voice mixer");
         return -1;
     }
-    memset(vc.ring_alloc, 0, RING_FRAMES + 8);
+    memset(vc.ring_alloc, 0, vc.ring_frames + 8UL);
     vc.ring = (int8_t *)(((uintptr_t)vc.ring_alloc + 1) & ~(uintptr_t)1);
 
     /*
@@ -800,7 +814,7 @@ int STDL_OpenVoices(int freq)
     vc.open = 1;
     stdl.dma_owner = STDL_DMA_VOICES;
     stdl_shutdown_audio = voice_shutdown;
-    stdl_dma_start(vc.ring, RING_FRAMES, vc.dma_mode, 1);
+    stdl_dma_start(vc.ring, vc.ring_frames, vc.dma_mode, 1);
     return 0;
 }
 
@@ -864,11 +878,11 @@ void STDL_ResumeVoices(void)
      * us here, and a resume that can replay a stale block is exactly
      * the click this API exists to avoid.
      */
-    memset(vc.ring, 0, RING_FRAMES);
+    memset(vc.ring, 0, vc.ring_frames);
     vc.fill_block = 1;
     vc.fresh = 1;
     vc.silent = 0;
-    stdl_dma_start(vc.ring, RING_FRAMES, vc.dma_mode, 1);
+    stdl_dma_start(vc.ring, vc.ring_frames, vc.dma_mode, 1);
     vc.paused = 0;              /* last: re-arms the tick */
 }
 
@@ -936,7 +950,7 @@ void stdl_voice_start(int v, const int8_t *data, uint32_t len,
     /*
      * Any pending pause starts its drain again from here. Without
      * this, a voice programmed while a pause is waiting can be cut
-     * off before it is ever heard: vc.silent saturates at 4 during
+     * off before it is ever heard: vc.silent saturates at nblocks during
      * the quiet, and the deferred stop only needs a tick that mixes
      * nothing to fire - which happens about once in 44, the block
      * period being 20.45ms against the VBL's 20. The DMA would stop

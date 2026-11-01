@@ -42,7 +42,8 @@ extern "C" {
  * mixing cost scales with the rate: four busy voices at 6258Hz
  * take 25% of an 8MHz STE, measured, so 12517 is about half). A
  * Falcon has no 6258Hz, so there the voices run at 12517, at
- * 12517's cost; a voice's own rate is unchanged. Claims the sound DMA: mutually
+ * 12517's cost, with a ring twice as many blocks long to keep 6258's
+ * 82ms of slack; a voice's own rate is unchanged. Claims the sound DMA: mutually
  * exclusive with STDL_OpenAudio and STDL_PlaySample*. Takes 8K of heap
  * beside the volume table for short loops (see STDL_SetVoice), and
  * opens without it if that is short. Returns 0, or

@@ -26,7 +26,13 @@ stop trying and redesign instead.
 * `STDL_SetVideoMode` always yields the 320x200x4 screen; requested
   width/height/bpp are accepted for source compatibility and
   ignored. On a monochrome monitor it fails (mono emulation is a
-  post-v1 feature, see the design overview section 3.4).
+  post-v1 feature, see the design overview section 3.4). On a TT or
+  a Falcon that screen is ST Low, the TT's line-doubled by its
+  monitor; their own 256-colour modes are not STDL's.
+* Borders, STE hardware scrolling and rasters need an ST, STE or Mega
+  STE's video timing and are refused on a TT or a Falcon. A Falcon's
+  BLiTTER is not used (the 68030's data cache does not see its
+  writes).
   `STDL_OpenInput` gives a program the events without the mode, on
   whatever screen it was started on or sets itself.
 * Colour-key masks are snapshots: re-key after modifying pixels.

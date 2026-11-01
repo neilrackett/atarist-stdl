@@ -36,6 +36,12 @@ volatile uint8_t stdl_host_sync_reg = 2;    /* 50Hz, as PAL boots */
  * rate in effect, the rate an application asked for, and the hook
  * that says overscan owns the register right now. */
 uint8_t stdl_vbl_hz = 50;
+/* video.c's, which the host does not build: a TT's or a Falcon's rate
+ * is measured on the machine, and here is whatever a test set */
+uint8_t stdl_measure_vbl(void)
+{
+    return stdl_vbl_hz;
+}
 int     stdl_sync_want = -1;
 void  (*stdl_shutdown_overscan)(void);
 /* also video.c's: the overscan module's BLiTTER placement policy,
@@ -124,7 +130,8 @@ int stdl_dma_nearest(int freq)
             best = i;
         }
     }
-    return best;
+    /* audio.c's: a Falcon has no 6258Hz, and gets 12517 for it */
+    return (best == 0 && stdl_is_falcon()) ? 1 : best;
 }
 
 void stdl_dma_start(const void *data, uint32_t bytes, uint8_t mode,

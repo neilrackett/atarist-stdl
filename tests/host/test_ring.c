@@ -111,6 +111,7 @@ int main(void)
 
     STDL_Init(0);
     stdl.mach.is_ste = 1;
+    stdl.mach.has_dma_sound = 1;
 
     /* direct: S8 at 6258 primes both halves in place, 2048 frames
      * each, straight into the ring the DMA is then handed */

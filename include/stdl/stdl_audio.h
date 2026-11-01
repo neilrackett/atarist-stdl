@@ -93,12 +93,15 @@ void STDL_FreeWAV(uint8_t *audio_buf);
  * snaps to the nearest of 6258/12517/25033/50066. `bytes` is
  * rounded down to even.
  *
+ * A Falcon's DMA has no 6258Hz: there a 6258Hz sample plays from a
+ * copy at 12517, twice its length, made when the call is (so the
+ * buffer is read once there, not live) in ST RAM the library keeps
+ * for the next one and grows when a longer one comes.
+ *
  * Returns 0, or -1 with STDL_GetError set: no DMA hardware, another
  * device (STDL_OpenAudio ring, STDL_OpenVoices) currently owns the
  * chip - the DMA has one channel and its users cannot coexist - a
- * buffer outside ST RAM, or 6258Hz on a Falcon, whose DMA has no
- * such rate and would play the buffer an octave high (sample at
- * 12517 or above where a Falcon matters).
+ * buffer outside ST RAM, or no ST RAM for a Falcon's copy.
  *
  * That last one deserves a word, because it will catch ports that
  * do everything else right. The DMA cannot see alt-RAM, and a

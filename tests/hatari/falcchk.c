@@ -17,10 +17,17 @@
  *
  * Take a screenshot of the bars and one of the desktop afterwards, and
  * record the sound. On a Falcon the triangle has to be heard, the ring
- * has to get 12517 and the 6258 sample has to be refused; on an STE
- * all three play at 6258. A Falcon desktop worth trying is one Getrez()
+ * has to get 12517 and the 6258 sample has to play (from the library's
+ * copy at 12517); on an STE all three play at 6258. A Falcon desktop worth trying is one Getrez()
  * cannot describe: Hatari's --tos-res ttlow is 320x480 in 256 colours
  * on VGA, ttmed 640x480 in 16.
+ *
+ * Built with -DFALCCHK_SCRAMBLE it first does what a Falcon program run
+ * before it might have left behind: the DMA playback connected to
+ * nothing, at a Falcon clock, and the DAC's mixer taking the ADC alone.
+ * The library has to route the sound back for it to be heard, and put
+ * the crossbar back as it found it at exit (FC:crossbar set and
+ * after have to match).
  *
  *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -std=gnu99 \
  *       -Iinclude -Ilib/xpad/src -o dist/FALCCHK.TOS \
@@ -37,6 +44,17 @@
 #include <stdl/stdl.h>
 
 static int8_t tri[64];
+
+#ifdef FALCCHK_SCRAMBLE
+static long xb_regs;
+
+static long read_xb(void)
+{
+    xb_regs = ((long)*(volatile uint16_t *)0xFFFF8930UL << 16)
+              | *(volatile uint16_t *)0xFFFF8932UL;
+    return 0;
+}
+#endif
 
 static void silence(void *userdata, uint8_t *stream, int len)
 {
@@ -97,6 +115,14 @@ int main(void)
         tri[i] = (int8_t)(i * 8 - 128);
         tri[63 - i] = tri[i];
     }
+#ifdef FALCCHK_SCRAMBLE
+    if ((m->mch_cookie >> 16) == 3) {
+        (void)Devconnect(DMAPLAY, 0, CLK25M, 1, NO_SHAKE);
+        (void)Soundcmd(ADDERIN, 1);
+    }
+    (void)Supexec(read_xb);
+    printf("FC:crossbar set %08lx\n", xb_regs);
+#endif
     rc = STDL_OpenVoices(6258);
     outcome(voices, sizeof voices, rc, "opened at 6258");
     if (rc == 0) {
@@ -142,6 +168,10 @@ int main(void)
     }
 
     STDL_Quit();
+#ifdef FALCCHK_SCRAMBLE
+    (void)Supexec(read_xb);
+    printf("FC:crossbar after %08lx\n", xb_regs);
+#endif
     printf("FC:voices %s\nFC:ring at 6258 %s\n", voices, ring);
     printf("FC:sample at 6258 %s\nFC:sample at 12517 %s\nFC:done\n",
            s6258, s12517);

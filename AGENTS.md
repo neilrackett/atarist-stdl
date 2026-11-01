@@ -457,6 +457,42 @@ warnings** with the Makefile's `-Wall -Wextra`.
   autostart writes its own NEWDESK.INF, which asks for ST Low
   whatever the NVRAM says. And Hatari writes its NVRAM back on every
   exit, so point `HOME` elsewhere for a run that changes it.
+- **A TT is STE-class too, and neither machine's display rate is the
+  sync register's.** `tests/hatari/ttchk.c` (TTCHK) measures what the
+  TT and Falcon handling rests on, and was run against the release
+  before it (v1.18.1) on Hatari's ST, STE, Mega STE, TT (TOS 3.06,
+  `LATE="--mmu off"`, desktops `--tos-res` stlow, ttlow, ttmed, sthigh,
+  and `--monitor mono` with tthigh) and Falcon (VGA, RGB):
+  - Hatari's TT runs ST Low at about 60, where the library assumed 50:
+    a silent STM stream played 60 frames a second against the STE's
+    50, VBLCHK failed its boot rate, and every VBL-paced sequencer was
+    20% fast. So the rate is measured on a TT or a Falcon (frames
+    against the 200Hz timer, snapped to 50 or 60 within 2) at
+    `STDL_Init` and after each mode set, and `STDL_SetRefresh` there
+    only measures: on a Falcon it had reported 60 with the display at
+    50. A Falcon on VGA had its desktop at 60 and ST Low at 50.6.
+  - Timer B counted 200 events a frame on every machine, but Hatari
+    times a TT's and a Falcon's video as an STE's, so that settles
+    nothing; rasters are refused there until someone counts on the
+    machines.
+  - `$FF8240` lands in TT register 0-15 of `$FF8400` (bank 0), so an
+    ST Low palette is right on a TT already; but a TT Low desktop uses
+    all 256 registers. Writing the desktop's EgetShift word back after
+    the Setscreen, tried as well, left a TT Medium desktop shown in
+    another mode: Setscreen alone puts the mode back.
+  - The MFP's monitor bit (GPIP 7) is the TT's mono test: a TT shows ST
+    High on its colour monitor (refused for nothing before), and with
+    a mono monitor and a TT High desktop the old library switched to
+    ST Low and Hatari reset in a loop.
+  - CACR reads 0x3111 on both (data cache on); a Falcon's BLiTTER is
+    not used, and BLITCHK there was faster without it anyway (215ms
+    against 275).
+  - A Falcon program that leaves the crossbar elsewhere silenced the
+    old library completely (FALCCHK built with `-DFALCCHK_SCRAMBLE`):
+    the first DMA start routes it, and the exit puts it back.
+  Each machine's run of TTCHK is about a minute; the questions Hatari
+  cannot answer (a real TT's rate, Timer B, where ST Low sits on a TT
+  monitor) are what to hand a tester with the hardware.
 - **The Mega STE's cache decides the bottom border's flick, word by
   word.** Drawing with a border open flickered the bottom border at
   16MHz with the cache on, never at 8MHz or with it off, and worst

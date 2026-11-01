@@ -19,6 +19,15 @@
 
 int STDL_SetRefresh(int hz)
 {
+    if (stdl.initialised && stdl.mach.mch_cookie >= 0x00020000UL) {
+        /* a TT's or a Falcon's video does not run from this register:
+         * the rate is the mode's, so it is measured, never written;
+         * -1 asks for the last measurement, which costs nothing */
+        if (hz != -1) {
+            stdl_vbl_hz = stdl_measure_vbl();
+        }
+        return stdl_vbl_hz;
+    }
     if ((hz == 50 || hz == 60) && stdl.initialised) {
         int want = (hz == 50) ? 2 : 0;
 

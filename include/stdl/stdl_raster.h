@@ -31,8 +31,10 @@ extern "C" {
  * picture when `lines` divides 200), holds to the end of the frame
  * and so colours the bottom border too. Returns the number of entries a frame (200 / lines +
  * 1), or -1 with STDL_GetError() set: no video mode, a bad argument,
- * no VBL slot, or a border open - Timer B, which this runs on, is
- * the borders' too, and each refuses while the other holds it.
+ * no VBL slot, a border open - Timer B, which this runs on, is
+ * the borders' too, and each refuses while the other holds it - or a
+ * TT or Falcon, whose doubled lines Timer B counts in a way nobody has
+ * measured on the machines.
  *
  * Timer B counts displayed lines and interrupts every `lines` of them
  * to write the next entry. Measured on a plain ST (RASTCHK), with

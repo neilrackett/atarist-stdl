@@ -259,7 +259,8 @@ typedef struct {
     int              old_sync;    /* -1 until we change the rate  */
     /* a Falcon's desktop, in a VIDEL mode a Getrez() cannot say: its
      * VsetMode word and the VIDEL's 256 colours, allocated on a
-     * Falcon only (old_palette holds the 16 ST ones) */
+     * Falcon only (old_palette holds the 16 ST ones). A TT's 256
+     * colour registers go in the same 1K, a word apiece */
     int              old_vmode;
     uint32_t        *old_vpal;
 
@@ -299,6 +300,10 @@ extern void (*stdl_shutdown_audio)(void);
 extern void (*stdl_shutdown_music)(void);
 extern void (*stdl_shutdown_vbl)(void);
 extern void (*stdl_shutdown_overscan)(void);
+/* a Falcon's sound crossbar, put back as the program found it (audio.c
+ * routes the DMA to the DAC on its first start): registers and the
+ * XBIOS only, as the others */
+extern void (*stdl_shutdown_route)(void);
 
 /* Sync rate. Bit 1 of $FFFF820A: 2 = 50Hz, 0 = 60Hz (bit 0 is the
  * mono rate and is not ours to touch in low resolution).
@@ -317,6 +322,15 @@ extern volatile uint8_t stdl_host_sync_reg;
 #define STDL_SYNC_REG stdl_host_sync_reg
 #endif
 
+/* _MCH 0x00020000. A TT runs ST Low as an ST does, line-doubled on its
+ * monitor, but keeps its desktop in modes and colours of its own, has
+ * no BLiTTER and no STE scrolling, and its display rate is not the
+ * sync register's. */
+static __inline__ int stdl_is_tt(void)
+{
+    return (stdl.mach.mch_cookie >> 16) == 2;
+}
+
 /* _MCH 0x00030000. The Falcon runs ST programs as an STE does, but
  * keeps its desktop in VIDEL modes a Getrez() cannot describe, and
  * its DMA has no 6258Hz. */
@@ -329,14 +343,17 @@ static __inline__ int stdl_is_falcon(void)
  * TOS set at boot is the machine's region, and an NTSC machine (or
  * one switched before the program ran) starts at 60. Assuming 50
  * ran every VBL-counted sequencer 20% fast there. TT and Falcon video
- * does not run from this register; they keep the 50 they always had. */
+ * does not run from this register: their rate is measured instead
+ * (stdl_measure_vbl), and this keeps whatever that last found. */
+extern uint8_t stdl_vbl_hz;
 static __inline__ uint8_t stdl_sync_hz(void)
 {
     if (stdl.mach.mch_cookie >= 0x00020000UL) {
-        return 50;
+        return stdl_vbl_hz;
     }
     return (STDL_SYNC_REG & 2) ? 50 : 60;
 }
+uint8_t stdl_measure_vbl(void);
 /*
  * Memory the hardware has to reach, which is not the same as memory
  * the CPU can reach. The Shifter and the sound DMA see ST RAM only;
@@ -391,7 +408,6 @@ static __inline__ int stdl_is_stram(const void *p, uint32_t bytes)
 void stdl_ikbd_send(uint8_t b);
 extern uint8_t stdl_mouse_on;
 
-extern uint8_t stdl_vbl_hz;
 extern int     stdl_sync_want;
 extern void (*stdl_shutdown_hwscroll)(void);
 extern void (*stdl_shutdown_rasters)(void);

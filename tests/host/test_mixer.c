@@ -60,6 +60,7 @@ int main(void)
 
     STDL_Init(0);
     stdl.mach.is_ste = 1;
+    stdl.mach.has_dma_sound = 1;
 
     /* 22050, a PC game's usual ask, becomes 12517: a 12517Hz chunk
      * keeps its length and a 6258Hz one doubles */

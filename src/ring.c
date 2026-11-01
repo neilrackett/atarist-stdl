@@ -127,7 +127,7 @@ int STDL_OpenAudio(STDL_AudioSpec *desired, STDL_AudioSpec *obtained)
     if (!stdl.initialised) {
         STDL_Init(STDL_INIT_AUDIO);
     }
-    if (!stdl.mach.is_ste) {
+    if (!stdl.mach.has_dma_sound) {
         STDL_SetError("no DMA sound hardware (STE/Mega STE only)");
         return -1;
     }

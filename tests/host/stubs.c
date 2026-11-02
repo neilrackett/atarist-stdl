@@ -174,3 +174,4 @@ void (*stdl_audio_hook)(void);
 /* defined in video.c on target, which the host tests do not link */
 void (*stdl_pal_apply_hook)(void);
 int (*stdl_pal_raw_hook)(int index, uint16_t word);
+void (*stdl_pal_write)(int index, uint16_t word);

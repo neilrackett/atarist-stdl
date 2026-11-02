@@ -110,7 +110,8 @@ static STDL_Surface *p8_create(int w, int h)
     stride = (uint16_t)(((w + 15) >> 4) << 4);
     d = calloc(1, sizeof(*d));
     if (d != NULL) {
-        d->block = calloc(1, stdl_row_off(h, stride) + 3);
+        /* laundered, so the rounding below survives (stdl_launder) */
+        d->block = stdl_launder(calloc(1, stdl_row_off(h, stride) + 3));
     }
     if (d == NULL || d->block == NULL) {
         free(d);
@@ -182,37 +183,14 @@ static int p8_set_key(STDL_Surface *s, int enable, uint8_t key)
     return 0;
 }
 
-static void p8_set_clip(STDL_Surface *s, const STDL_Rect *r)
-{
-    int x1, y1, x2, y2;
-
-    if (r == NULL) {
-        s->clip.x = 0;
-        s->clip.y = 0;
-        s->clip.w = (uint16_t)s->w;
-        s->clip.h = (uint16_t)s->h;
-        return;
-    }
-    x1 = r->x < 0 ? 0 : r->x;
-    y1 = r->y < 0 ? 0 : r->y;
-    x2 = r->x + r->w > s->w ? s->w : r->x + r->w;
-    y2 = r->y + r->h > s->h ? s->h : r->y + r->h;
-    if (x2 < x1) x2 = x1;
-    if (y2 < y1) y2 = y1;
-    s->clip.x = (int16_t)x1;
-    s->clip.y = (int16_t)y1;
-    s->clip.w = (uint16_t)(x2 - x1);
-    s->clip.h = (uint16_t)(y2 - y1);
-}
-
 /* ---------------------------------------------------------------- */
 /* fills, lines and points                                          */
 
 #define P8_SET STDL_DRAW_SET
 #define P8_XOR STDL_DRAW_XOR
-#define P8_OR  STDL_DRAW_OR
 
-/* the colour in pat into group g where m is set, by op */
+/* the colour in pat into group g where m is set, by op: CLEAR clears
+ * the planes the colour has */
 static __inline__ void p8_op(uint32_t *g, uint32_t m, const uint32_t pat[4],
                              int op)
 {
@@ -221,20 +199,23 @@ static __inline__ void p8_op(uint32_t *g, uint32_t m, const uint32_t pat[4],
     } else if (op == P8_XOR) {
         g[0] ^= pat[0] & m; g[1] ^= pat[1] & m;
         g[2] ^= pat[2] & m; g[3] ^= pat[3] & m;
-    } else {
+    } else if (op == STDL_DRAW_OR) {
         g[0] |= pat[0] & m; g[1] |= pat[1] & m;
         g[2] |= pat[2] & m; g[3] |= pat[3] & m;
+    } else {
+        g[0] &= ~(pat[0] & m); g[1] &= ~(pat[1] & m);
+        g[2] &= ~(pat[2] & m); g[3] &= ~(pat[3] & m);
     }
 }
 
 /* the mask's bits under what was drawn cleared, as the planar fills
  * do: pixels drawn are opaque */
-static void p8_mask_row(STDL_Surface *s, int y, int g0, int g1,
-                        unsigned lm, unsigned rm)
+static void p8_mask_row(uint16_t *m, int g0, int g1, unsigned lm,
+                        unsigned rm)
 {
-    uint16_t *m = (uint16_t *)(s->mask + stdl_row_off(y, s->maskstride)) + g0;
     int g;
 
+    m += g0;
     if (g0 == g1) {
         *m &= (uint16_t)~(lm & rm);
         return;
@@ -284,15 +265,17 @@ static void p8_rows(STDL_Surface *s, int x1, int x2, int y1, int y2,
             p8_op(d, mr, pat, op);
         }
         if (s->mask != NULL) {
-            p8_mask_row(s, y, g0, g1, lm, rm);
+            p8_mask_row((uint16_t *)(s->mask
+                                     + stdl_row_off(y, s->maskstride)),
+                        g0, g1, lm, rm);
         }
     }
     resp_touch(s, x1, y1, x2, y2);
 }
 
-#define p8_fill(s, x1, x2, y1, y2, c) p8_rows(s, x1, x2, y1, y2, c, P8_SET)
-
-static void p8_fill_rect(STDL_Surface *d, STDL_Rect *r, uint8_t c)
+/* r clipped, and set to what was drawn, as the planar fills do; an XOR
+ * of colour 0 draws nothing */
+static void p8_rect(STDL_Surface *d, STDL_Rect *r, unsigned c, int op)
 {
     int x1, y1, x2, y2;
 
@@ -322,13 +305,18 @@ static void p8_fill_rect(STDL_Surface *d, STDL_Rect *r, uint8_t c)
         r->w = (uint16_t)(x2 - x1 + 1);
         r->h = (uint16_t)(y2 - y1 + 1);
     }
-    if (x1 > x2 || y1 > y2) {
-        return;
+    if (x1 <= x2 && y1 <= y2 && (op == P8_SET || c != 0)) {
+        p8_rows(d, x1, x2, y1, y2, c, op);
     }
-    p8_fill(d, x1, x2, y1, y2, c);
 }
 
-static void p8_hline(STDL_Surface *d, int x1, int x2, int y, uint8_t c)
+static void p8_fill_rect(STDL_Surface *d, STDL_Rect *r, uint8_t c)
+{
+    p8_rect(d, r, c, P8_SET);
+}
+
+static void p8_line(STDL_Surface *d, int x1, int x2, int y, unsigned c,
+                    int op)
 {
     int t;
 
@@ -339,10 +327,14 @@ static void p8_hline(STDL_Surface *d, int x1, int x2, int y, uint8_t c)
     if (x1 < d->clip.x) x1 = d->clip.x;
     if (x2 >= d->clip.x + d->clip.w)
         x2 = d->clip.x + d->clip.w - 1;
-    if (x1 > x2) {
-        return;
+    if (x1 <= x2 && (op == P8_SET || c != 0)) {
+        p8_rows(d, x1, x2, y, y, c, op);
     }
-    p8_fill(d, x1, x2, y, y, c);
+}
+
+static void p8_hline(STDL_Surface *d, int x1, int x2, int y, uint8_t c)
+{
+    p8_line(d, x1, x2, y, c, P8_SET);
 }
 
 static void p8_vline(STDL_Surface *d, int x, int y1, int y2, uint8_t c)
@@ -359,7 +351,7 @@ static void p8_vline(STDL_Surface *d, int x, int y1, int y2, uint8_t c)
     if (y1 > y2) {
         return;
     }
-    p8_fill(d, x, x, y1, y2, c);
+    p8_rows(d, x, x, y1, y2, c, P8_SET);
 }
 
 /* spans as the planar calls clip them: a row each (or a column) */
@@ -428,53 +420,12 @@ static void p8_xor_vspans(STDL_Surface *d, const STDL_Span *sp, int n,
 
 static void p8_xor_rect(STDL_Surface *d, STDL_Rect *r, uint8_t c)
 {
-    int x1, y1, x2, y2;
-
-    if (r == NULL) {
-        x1 = d->clip.x;
-        y1 = d->clip.y;
-        x2 = d->clip.x + d->clip.w - 1;
-        y2 = d->clip.y + d->clip.h - 1;
-    } else {
-        x1 = r->x - d->org_x;
-        y1 = r->y - d->org_y;
-        x2 = x1 + r->w - 1;
-        y2 = y1 + r->h - 1;
-        if (x1 < d->clip.x) x1 = d->clip.x;
-        if (y1 < d->clip.y) y1 = d->clip.y;
-        if (x2 > d->clip.x + d->clip.w - 1)
-            x2 = d->clip.x + d->clip.w - 1;
-        if (y2 > d->clip.y + d->clip.h - 1)
-            y2 = d->clip.y + d->clip.h - 1;
-        if (x1 > x2 || y1 > y2) {
-            r->w = 0;
-            r->h = 0;
-            return;
-        }
-        r->x = (int16_t)(x1 + d->org_x);
-        r->y = (int16_t)(y1 + d->org_y);
-        r->w = (uint16_t)(x2 - x1 + 1);
-        r->h = (uint16_t)(y2 - y1 + 1);
-    }
-    if (c != 0 && x1 <= x2 && y1 <= y2) {
-        p8_rows(d, x1, x2, y1, y2, c, P8_XOR);
-    }
+    p8_rect(d, r, c, P8_XOR);
 }
 
 static void p8_xor_hline(STDL_Surface *d, int x1, int x2, int y, uint8_t c)
 {
-    int t;
-
-    if (x1 > x2) { t = x1; x1 = x2; x2 = t; }
-    if (y < d->clip.y || y >= d->clip.y + d->clip.h) {
-        return;
-    }
-    if (x1 < d->clip.x) x1 = d->clip.x;
-    if (x2 >= d->clip.x + d->clip.w)
-        x2 = d->clip.x + d->clip.w - 1;
-    if (x1 <= x2 && c != 0) {
-        p8_rows(d, x1, x2, y, y, c, P8_XOR);
-    }
+    p8_line(d, x1, x2, y, c, P8_XOR);
 }
 
 static void p8_xor_pixel(STDL_Surface *d, int x, int y, uint8_t c)
@@ -609,17 +560,12 @@ static void p8_copy_row(const uint8_t *srow, uint8_t *drow,
     uint32_t *d = (uint32_t *)(drow + (g0 << 4));
     unsigned lm = 0xFFFFu >> (dx & 15);
     unsigned rm = (0xFFFFu << (15 - ((dx + w - 1) & 15))) & 0xFFFFu;
-    uint32_t m;
     int g;
 
     if (g0 == g1) {
         lm &= rm;
     }
-    m = p8_m32(lm);
-    d[0] ^= (d[0] ^ s[0]) & m;
-    d[1] ^= (d[1] ^ s[1]) & m;
-    d[2] ^= (d[2] ^ s[2]) & m;
-    d[3] ^= (d[3] ^ s[3]) & m;
+    p8_merge(d, p8_m32(lm), s);
     if (g1 > g0) {
         /* the whole groups between, a long at a time: a memcpy call a
          * row made a game's restores, a sprite or two wide, 12% slower
@@ -630,23 +576,10 @@ static void p8_copy_row(const uint8_t *srow, uint8_t *drow,
             d[2] = s[2];
             d[3] = s[3];
         }
-        m = p8_m32(rm);
-        d[0] ^= (d[0] ^ s[0]) & m;
-        d[1] ^= (d[1] ^ s[1]) & m;
-        d[2] ^= (d[2] ^ s[2]) & m;
-        d[3] ^= (d[3] ^ s[3]) & m;
+        p8_merge(d, p8_m32(rm), s);
     }
     if (dmrow != NULL) {
-        dmrow += g0;
-        if (g0 == g1) {
-            *dmrow &= (uint16_t)~lm;
-        } else {
-            *dmrow++ &= (uint16_t)~lm;
-            for (g = g1 - g0 - 1; --g >= 0; ) {
-                *dmrow++ = 0;
-            }
-            *dmrow &= (uint16_t)~rm;
-        }
+        p8_mask_row(dmrow, g0, g1, lm, rm);
     }
 }
 
@@ -666,7 +599,7 @@ static void p8_blit_row(const uint8_t *srow, int sng, const uint16_t *smrow,
     for (g = g0; g <= g1; g++) {
         const int wi = (g * 16 + off) >> 4;
         unsigned em = 0xFFFFu, om;
-        uint32_t s[4], m, *d;
+        uint32_t s[4], *d;
 
         if (g == g0) em &= 0xFFFFu >> (dx & 15);
         if (g == g1) em &= 0xFFFFu << (15 - ((dx + w - 1) & 15));
@@ -692,12 +625,8 @@ static void p8_blit_row(const uint8_t *srow, int sng, const uint16_t *smrow,
         if (em == 0) {
             continue;
         }
-        m = p8_m32(em);
         d = (uint32_t *)(drow + (g << 4));
-        d[0] ^= (d[0] ^ s[0]) & m;
-        d[1] ^= (d[1] ^ s[1]) & m;
-        d[2] ^= (d[2] ^ s[2]) & m;
-        d[3] ^= (d[3] ^ s[3]) & m;
+        p8_merge(d, p8_m32(em), s);
         if (dmrow != NULL) {
             dmrow[g] &= (uint16_t)~em;
         }
@@ -965,6 +894,27 @@ static void p8_shifted(const uint32_t *row, int groups, int o, int r,
     }
 }
 
+/* where frame `frame` at phase `phase` starts in a sprite's data, in
+ * the units its framesize counts (words for a 4-plane sprite, longs for
+ * an 8-plane one), and the shift still to do, without a variant for
+ * the phase */
+static __inline__ uint32_t p8_frame_at(const STDL_Sprite *spr, int frame,
+                                       int phase, int *shift)
+{
+    uint32_t idx = (uint32_t)frame;
+
+    *shift = 0;
+    if (spr->nvariants == 16) {
+        idx += stdl_row_off(phase, spr->nframes);
+    } else {
+        *shift = phase;
+    }
+    /* a mulu.w while both fit sixteen bits, as the planar sprites do */
+    return (spr->framesize | idx) <= 0xFFFFu
+           ? stdl_row_off((int)idx, (uint16_t)spr->framesize)
+           : spr->framesize * idx;
+}
+
 /*
  * A 4-plane sprite (made before the screen, or from a 4-plane surface)
  * onto 8 planes: its groups are [mask][p0-p3], the mask transparent and
@@ -979,18 +929,12 @@ static void p8_blit_sprite4(STDL_Sprite *spr, int frame, STDL_Surface *d,
     const int cy1 = d->clip.y, cy2 = d->clip.y + d->clip.h;
     const uint16_t *fd = spr->data;
     const int groups = spr->groups, rowwords = groups * 5;
-    int ng = groups, shift = 0, row0, row1, r, o;
-    uint32_t idx = (uint32_t)frame;
+    int ng = groups, shift, row0, row1, r, o;
 
-    if (spr->nvariants == 16) {
-        idx += stdl_row_off(phase, spr->nframes);
-    } else if (phase != 0) {
-        shift = phase;
+    fd += p8_frame_at(spr, frame, phase, &shift);
+    if (shift != 0) {
         ng++;
     }
-    fd += (spr->framesize | idx) <= 0xFFFFu
-          ? stdl_row_off((int)idx, (uint16_t)spr->framesize)
-          : spr->framesize * idx;
     row0 = y < cy1 ? cy1 - y : 0;
     row1 = y + spr->h > cy2 ? cy2 - y : spr->h;
     fd += stdl_row_off(row0, (uint16_t)rowwords);
@@ -1047,8 +991,7 @@ static void p8_blit_sprite(STDL_Sprite *spr, int frame, STDL_Surface *d,
     const int cy1 = d->clip.y, cy2 = d->clip.y + d->clip.h;
     const uint32_t *fd = (const uint32_t *)spr->data;
     const int rowlongs = spr->groups * SPR_LONGS;
-    int ng = spr->groups, shift = 0, row0, row1, o0, o1, r, o;
-    uint32_t idx = (uint32_t)frame;
+    int ng = spr->groups, shift, row0, row1, o0, o1, r, o;
 
     if (!STDL_IS_RESP(d)) {
         STDL_SetError("an 8-plane sprite onto a 4-plane surface");
@@ -1058,16 +1001,10 @@ static void p8_blit_sprite(STDL_Sprite *spr, int frame, STDL_Surface *d,
         p8_blit_sprite4(spr, frame, d, x, y);
         return;
     }
-    if (spr->nvariants == 16) {
-        idx += stdl_row_off(phase, spr->nframes);
-    } else if (phase != 0) {
-        shift = phase;
+    fd += p8_frame_at(spr, frame, phase, &shift);
+    if (shift != 0) {
         ng++;
     }
-    /* a mulu.w while both fit sixteen bits, as the planar sprites do */
-    fd += (spr->framesize | idx) <= 0xFFFFu
-          ? stdl_row_off((int)idx, (uint16_t)spr->framesize)
-          : spr->framesize * idx;
     row0 = 0;
     row1 = spr->h;
     if (y < cy1) row0 = cy1 - y;
@@ -1303,11 +1240,11 @@ static void p8_remap(STDL_Surface *s, const uint8_t map[16])
 }
 
 /*
- * A polygon's coverage (polygon.c draws it with the planar rasteriser,
- * in colour 1, into a 4-plane scratch whose groups are d's from group
- * g0): the colour by op wherever plane 0 is set, rows y0 on.
+ * A polygon's coverage (p8_fill_polygon, below: plane 0 of a 4-plane
+ * scratch whose groups are d's from group g0): the colour by op
+ * wherever it is set, rows y0 on, and plane 0 left clear again.
  */
-static void p8_cover(STDL_Surface *d, const STDL_Surface *scratch, int g0,
+static void p8_cover(STDL_Surface *d, STDL_Surface *scratch, int g0,
                      int ng, int y0, int h, uint8_t c, int op)
 {
     uint32_t pat[4];
@@ -1315,8 +1252,8 @@ static void p8_cover(STDL_Surface *d, const STDL_Surface *scratch, int g0,
 
     p8_pat(c, pat);
     for (y = 0; y < h; y++) {
-        const uint16_t *sw = (const uint16_t *)(scratch->pixels
-                              + stdl_row_off(y, scratch->stride));
+        uint16_t *sw = (uint16_t *)(scratch->pixels
+                                    + stdl_row_off(y, scratch->stride));
         uint32_t *dg = (uint32_t *)(d->pixels
                                     + stdl_row_off(y0 + y, d->stride))
                      + (g0 << 2);
@@ -1328,6 +1265,7 @@ static void p8_cover(STDL_Surface *d, const STDL_Surface *scratch, int g0,
             const unsigned m = sw[0];
 
             if (m != 0) {
+                sw[0] = 0;
                 p8_op(dg, p8_m32(m), pat, op);
                 if (mw != NULL) {
                     mw[g] &= (uint16_t)~m;
@@ -1336,6 +1274,81 @@ static void p8_cover(STDL_Surface *d, const STDL_Surface *scratch, int g0,
         }
     }
     resp_touch(d, g0 << 4, y0, ((g0 + ng) << 4) - 1, y0 + h - 1);
+}
+
+/*
+ * A polygon: drawn by the planar rasteriser, in colour 1, into a
+ * 4-plane scratch over its clipped box (its left edge on a group, so
+ * the scratch's groups are the surface's), and the colour put wherever
+ * plane 0 is set. So every edge rule is the planar one, for the cost
+ * of the scratch. The rasteriser XORs plane 0 alone, each row's span
+ * once, into a scratch that is clear, and the cover clears what it
+ * read: nothing to clear between polygons. polygon.c hands the
+ * rasteriser over (`raster`): named here, it would link 7K into every
+ * program that asks for the colour, polygons or not.
+ */
+static STDL_Surface *p8_poly_scratch;
+static STDL_Point *p8_poly_pts;
+static int p8_poly_npts;
+
+static void p8_fill_polygon(STDL_Surface *dst, const STDL_Point *pts,
+                            int n, uint8_t col, int op, stdl_poly_fn raster)
+{
+    int x0, y0, x1, y1, bx, w, h, i;
+    STDL_Rect clip;
+
+    x0 = x1 = pts[0].x;
+    y0 = y1 = pts[0].y;
+    for (i = 1; i < n; i++) {
+        if (pts[i].x < x0) x0 = pts[i].x;
+        if (pts[i].x > x1) x1 = pts[i].x;
+        if (pts[i].y < y0) y0 = pts[i].y;
+        if (pts[i].y > y1) y1 = pts[i].y;
+    }
+    if (x0 < dst->clip.x) x0 = dst->clip.x;
+    if (y0 < dst->clip.y) y0 = dst->clip.y;
+    if (x1 > dst->clip.x + dst->clip.w - 1) x1 = dst->clip.x + dst->clip.w - 1;
+    if (y1 > dst->clip.y + dst->clip.h - 1) y1 = dst->clip.y + dst->clip.h - 1;
+    if (x0 > x1 || y0 > y1) {
+        return;
+    }
+    bx = x0 & ~15;
+    w = x1 - bx + 1;
+    h = y1 - y0 + 1;
+    if (p8_poly_scratch == NULL || p8_poly_scratch->w < w
+        || p8_poly_scratch->h < h) {
+        const int sw = p8_poly_scratch != NULL && p8_poly_scratch->w > w
+                       ? p8_poly_scratch->w : w;
+        const int sh = p8_poly_scratch != NULL && p8_poly_scratch->h > h
+                       ? p8_poly_scratch->h : h;
+
+        STDL_FreeSurface(p8_poly_scratch);
+        p8_poly_scratch = stdl_surface_create(sw, sh);
+        if (p8_poly_scratch == NULL) {
+            return;
+        }
+    }
+    if (n > p8_poly_npts) {
+        STDL_Point *np = realloc(p8_poly_pts, (size_t)n * sizeof(STDL_Point));
+
+        if (np == NULL) {
+            return;
+        }
+        p8_poly_pts = np;
+        p8_poly_npts = n;
+    }
+    for (i = 0; i < n; i++) {
+        p8_poly_pts[i].x = (int16_t)(pts[i].x - bx);
+        p8_poly_pts[i].y = (int16_t)(pts[i].y - y0);
+    }
+    clip.x = (int16_t)(x0 - bx);
+    clip.y = 0;
+    clip.w = (uint16_t)(x1 - x0 + 1);
+    clip.h = (uint16_t)h;
+    STDL_SetClipRect(p8_poly_scratch, &clip);
+    raster(p8_poly_scratch, p8_poly_pts, n, 1, STDL_DRAW_XOR);
+    p8_cover(dst, p8_poly_scratch, bx >> 4, (x1 >> 4) - (bx >> 4) + 1,
+             y0, h, col, op);
 }
 
 /* chunky through a 16-entry map, as STDL_BlitIndexed8 (blit8.c) */
@@ -1480,6 +1493,10 @@ static void p8_put_group8(STDL_Surface *s, int x, int y,
 
 static int p8_screen_init(void)
 {
+    /* a Falcon shows the page drawn into as it is */
+    if (stdl_rs.falcon) {
+        stdl_rs.track = NULL;
+    }
     return 0;
 }
 
@@ -1520,17 +1537,43 @@ static void p8_present(int p, const resp_box *b)
 }
 
 static const stdl_resp_ops_t p8_ops = {
-    p8_create, p8_free_surface, p8_set_key, p8_set_clip,
-    p8_fill_rect, p8_hline, p8_vline, p8_put_pixel, p8_get_pixel,
-    p8_points, p8_points_c, p8_blit,
-    p8_sprite_from, p8_blit_sprite, p8_free_sprite, p8_draw_text,
-    p8_from_1bpp, p8_from_indexed8, p8_remap, resp_set_colours,
-    p8_hspans, p8_vspans, p8_xor_rect, p8_xor_hline, p8_xor_pixel,
-    p8_xor_hspans, p8_xor_vspans, p8_draw_char, p8_cover,
-    p8_blit_indexed8, p8_dup, p8_create_mask, p8_put_group, p8_put_group8
+    .create = p8_create,
+    .free_surface = p8_free_surface,
+    .set_key = p8_set_key,
+    .fill_rect = p8_fill_rect,
+    .hline = p8_hline,
+    .vline = p8_vline,
+    .put_pixel = p8_put_pixel,
+    .get_pixel = p8_get_pixel,
+    .points = p8_points,
+    .points_c = p8_points_c,
+    .blit = p8_blit,
+    .sprite_from = p8_sprite_from,
+    .blit_sprite = p8_blit_sprite,
+    .free_sprite = p8_free_sprite,
+    .draw_text = p8_draw_text,
+    .from_1bpp = p8_from_1bpp,
+    .from_indexed8 = p8_from_indexed8,
+    .remap = p8_remap,
+    .set_colours = resp_set_colours,
+    .hspans = p8_hspans,
+    .vspans = p8_vspans,
+    .xor_rect = p8_xor_rect,
+    .xor_hline = p8_xor_hline,
+    .xor_pixel = p8_xor_pixel,
+    .xor_hspans = p8_xor_hspans,
+    .xor_vspans = p8_xor_vspans,
+    .draw_char = p8_draw_char,
+    .fill_polygon = p8_fill_polygon,
+    .blit_indexed8 = p8_blit_indexed8,
+    .dup = p8_dup,
+    .create_mask = p8_create_mask,
+    .put_group = p8_put_group,
+    .put_group8 = p8_put_group8,
 };
 
 const resp_model stdl_resp_colour = {
-    &p8_ops, 8, p8_screen_init, p8_screen_page, p8_screen_free, p8_present,
-    NULL
+    .ops = &p8_ops, .planes = 8,
+    .screen_init = p8_screen_init, .screen_page = p8_screen_page,
+    .screen_free = p8_screen_free, .present = p8_present
 };

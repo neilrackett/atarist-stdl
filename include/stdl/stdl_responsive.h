@@ -44,19 +44,23 @@
  *   writes to its pixels.
  *
  * A responsive screen on a TT or a Falcon is always double-buffered.
- * Its colours 0-15 start as an ST screen's do; set them through the
- * palette calls (STDL_SetColours, STDL_SetPalette, STDL_FadeTo), which
- * reach the TT's and the Falcon's own registers - STDL_SetColour, which
- * writes the ST's, does not.
+ * Its colours 0-15 start as an ST screen's do, and every palette call
+ * reaches the TT's and the Falcon's own registers, staged ones and
+ * STDL_SetColour too; a word for the ST's registers sets its entry at
+ * the ST's 4 bits a channel.
  *
  * What an 8-plane surface does not take: a blit from it onto a 4-plane
  * surface, or one of its sprites onto one; the blit flags (UNDER,
  * MARK); patterned polygons; tilesets, from one or onto one; the
- * cursor on an 8-plane screen. Each sets the error and draws nothing.
+ * cursor on a responsive screen. Each sets the error and draws nothing.
  * Plane budgets apply to 4-plane surfaces alone. A TT or a Falcon has
- * no borders, rasters or hardware
- * scrolling for any screen (stdl_overscan.h, stdl_raster.h,
- * stdl_hwscroll.h).
+ * no borders, rasters or hardware scrolling for any screen
+ * (stdl_overscan.h, stdl_raster.h, stdl_hwscroll.h).
+ *
+ * The mode set moves the console's cursor below the rows a centred
+ * screen leaves above it, so text printed after it lands in the
+ * picture, as on an ST; text a program puts there with its own cursor
+ * escapes lands where it says.
  *
  * STDL_UpdateRects tells an 8-plane screen what a program wrote to its
  * pixels itself, as SDL_UpdateRect would; the library's own calls need
@@ -77,7 +81,8 @@ extern "C" {
 #define STDL_RESPONSIVE_TALL   0x0002u
 
 /*
- * 0, or -1 for an option this library does not know. Inline so that a
+ * 0, or -1 for an option this library does not know, or while a
+ * responsive screen is up (ask before the mode set). Inline so that a
  * constant `what` links the code of the options it names and no other:
  * the colour's 8-plane routines and the tall screen's border code are
  * each several kilobytes.
@@ -106,7 +111,8 @@ static __inline__ int STDL_UseResponsive(unsigned what)
 typedef struct {
     uint32_t flips;
     uint32_t present;       /* clock units spent presenting          */
-    uint32_t cells;         /* 16-pixel groups presented, row by row */
+    uint32_t cells;         /* 16-pixel groups copied to the display,
+                             * a row's each                         */
     const uint8_t *page;    /* the screen's rows on the page the last
                              * Flip showed (not the margins, where
                              * the console may have written)       */

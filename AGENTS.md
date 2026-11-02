@@ -530,7 +530,7 @@ warnings** with the Makefile's `-Wall -Wextra`.
   TT. A restore's whole groups copied by memcpy, a call a row, were 12%
   slower than the loop: a game's restores are a sprite or two wide.
 - **What 8 planes cost an ST.** Every pixel call tests `planes` at its
-  entry: 620 bytes over the pixel path (PIXEL_MAX was raised for it,
+  entry: 604 bytes over the pixel path (PIXEL_MAX was raised for it,
   with the reason in the Makefile), 135-178 bytes a program, and 0.3%
   of SPRCOST's and PRIMCOST's geometric means on a plain ST (a
   clipped-out blit 5%, PutPixel and DrawChar 2.9%) against a layout
@@ -538,17 +538,18 @@ warnings** with the Makefile's `-Wall -Wextra`.
   (a clipped-out exit) would have needed 8-plane surfaces to show
   misleading public fields - an empty clip, no pixels - and was left.
   A program that asks for the colour links about 21K more (planes8.o
-  17K, responsive.o 3.5K): a 512K machine's game wants a build of its
+  17.3K, responsive.o 3.9K): a 512K machine's game wants a build of its
   own for a TT and a Falcon, as one port's 030 build is, where a 1M
   one can carry both.
 - **Console text lands in a responsive page's margins.** A TT shows a
   200-row screen centred in 240, and what a program printed after the
   mode set was drawn by TOS into the rows above, which nothing redraws,
   on one page only: it flickered there. A hash of the whole page
-  differed between two builds for that alone ("model 1" against "model
-  2"). The mode set now moves the console's cursor past the margin,
-  into the picture, where the program's drawing covers it as an ST's
-  does; hash the screen's rows anyway (`STDL_RespStats.page`).
+  differed between two builds for that alone: a line the program
+  printed named the build. The mode set now moves the console's cursor
+  past the margin, into the picture, where the program's drawing covers
+  it as an ST's does (a program's own cursor escapes can still put text
+  in the margin); hash the screen's rows anyway (`STDL_RespStats.page`).
 - **A tall screen in 16 colours needs no hooks** (`STDL_RESPONSIVE_TALL`,
   `src/tall4.c`): an ST opens its bottom border (240 of 245 lines, the
   surface capped by `stdl_ovsc_cap`), a Falcon's 4-bit VIDEL modes are

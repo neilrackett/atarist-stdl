@@ -23,7 +23,7 @@
 STDL_Surface *STDL_SurfaceFrom1bpp(const uint8_t *bits, int w, int h,
                                    uint8_t fg, uint8_t bg)
 {
-    if (stdl_resp_screen != NULL) {
+    if (STDL_RESP_DEEP()) {
         return stdl_resp->from_1bpp(bits, w, h, fg, bg);
     }
     return stdl_surface_from_1bpp(bits, w, h, fg, bg);
@@ -196,7 +196,7 @@ STDL_Surface *STDL_SurfaceFromIndexed8(const uint8_t *bytes, int w,
                                        int h, int stride,
                                        int keycolour)
 {
-    if (stdl_resp_screen != NULL) {
+    if (STDL_RESP_DEEP()) {
         return stdl_resp->from_indexed8(bytes, w, h, stride, keycolour);
     }
     return stdl_surface_from_indexed8(bytes, w, h, stride, keycolour);

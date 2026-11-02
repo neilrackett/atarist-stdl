@@ -50,7 +50,6 @@ typedef struct {
     void *page_alloc[2];
     uint32_t page_bytes;
     int16_t w, h;
-    int16_t lines;              /* the display's lines                */
     int16_t line;               /* bytes a display line               */
     int16_t left;               /* bytes into a line to the picture   */
     int16_t top;                /* the display line of row 0          */
@@ -58,6 +57,8 @@ typedef struct {
     uint8_t falcon;
     uint8_t back;               /* the page drawn into                */
     resp_box box[2];            /* drawn on each since it was shown   */
+    const STDL_Surface *track;  /* the screen, where present reads the
+                                   box; NULL where it never does      */
     STDL_Colour colours[256];
     STDL_Palette palette;
     STDL_PixelFormat format;
@@ -68,13 +69,13 @@ typedef struct {
 extern resp_state stdl_rs;
 
 /* what drawing on an 8-plane screen changed: the page drawn into owes
- * it */
+ * it; none of it where the present reads no box (a Falcon) */
 static __inline__ void resp_touch(const STDL_Surface *d, int x0, int y0,
                                   int x1, int y1)
 {
     resp_box *b;
 
-    if (d != &stdl_rs.screen.s) {
+    if (d != stdl_rs.track) {
         return;
     }
     if (x0 < 0) x0 = 0;

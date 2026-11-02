@@ -24,40 +24,11 @@
 
 static STDL_Surface *t4_page[2];        /* a TT's pages drawn into */
 
-static STDL_Surface *t4_create(int w, int h)
-{
-    return stdl_surface_create(w, h);
-}
-
-static STDL_Surface *t4_from_1bpp(const uint8_t *bits, int w, int h,
-                                  uint8_t fg, uint8_t bg)
-{
-    return stdl_surface_from_1bpp(bits, w, h, fg, bg);
-}
-
-static STDL_Surface *t4_from_indexed8(const uint8_t *bytes, int w, int h,
-                                      int stride, int key)
-{
-    return stdl_surface_from_indexed8(bytes, w, h, stride, key);
-}
-
-/* the screen has 4 planes, so no surface reaches the 8-plane calls:
- * only creation passes through */
-static const stdl_resp_ops_t t4_ops = {
-    t4_create, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL,
-    t4_from_1bpp, t4_from_indexed8, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL
-};
-
 static int t4_screen_init(void)
 {
     int p;
 
+    stdl_rs.track = NULL;       /* the present compares whole pages */
     if (stdl_rs.falcon) {
         return 0;
     }
@@ -142,7 +113,11 @@ static void t4_st_mode(int h)
     }
 }
 
+/* no ops: its surfaces have 4 planes, and are made and drawn as an
+ * ST's are */
 const resp_model stdl_resp_tall = {
-    &t4_ops, 4, t4_screen_init, t4_screen_page, t4_screen_free, t4_present,
-    t4_st_mode
+    .planes = 4,
+    .screen_init = t4_screen_init, .screen_page = t4_screen_page,
+    .screen_free = t4_screen_free, .present = t4_present,
+    .st_mode = t4_st_mode
 };

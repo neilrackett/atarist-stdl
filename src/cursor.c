@@ -188,9 +188,10 @@ void STDL_SetCursor(STDL_Cursor *cursor)
 {
     int x, y;
 
-    if (cursor != NULL && stdl_resp_screen != NULL
-        && STDL_IS_RESP(stdl_resp_screen)) {
-        STDL_SetError("the cursor on an 8-plane screen");
+    /* it draws on the ST's own screen, which a responsive one
+     * (stdl_responsive.h) replaces */
+    if (cursor != NULL && stdl_resp_screen != NULL) {
+        STDL_SetError("the cursor on a responsive screen");
         return;
     }
     cursor_undraw();

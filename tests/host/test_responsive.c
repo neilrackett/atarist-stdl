@@ -342,7 +342,7 @@ static void one_run(int (*use)(void), unsigned seed, run_t *out)
         if (OP(6)) STDL_XorVLine(scr, a0, a1, a2, c0);
         a0 = rr(-1, 320); a1 = rr(-1, 240); c0 = (uint8_t)rnd();
         if (OP(7)) STDL_XorPixel(scr, a0, a1, c0);
-        for (i = 0; i < 3; i++) {
+        for (i = 0; i < 4; i++) {          /* SET, XOR, OR and CLEAR */
             STDL_Point tri[5];
             int v;
 
@@ -563,7 +563,12 @@ static void test_tall4(int falcon, int vga)
     if (scr == NULL) {
         return;
     }
-    CHECK(stdl_pal_apply_hook != NULL, "the colours go to its registers");
+    /* every register write reaches the machine's own registers, a
+     * word for the ST's set straight too */
+    CHECK(stdl_pal_write != NULL, "the colours go to its registers");
+    STDL_SetColour(3, 0x0F01);
+    CHECK(stdl_rs.colours[3].r == 255 && stdl_rs.colours[3].g == 0
+          && stdl_rs.colours[3].b == 34, "STDL_SetColour reaches it");
     /* the screen's own machine: on the host what was asked for, on
      * the machine (RESPCHK) the machine */
     falcon = stdl_rs.falcon;

@@ -184,6 +184,7 @@ static int list_for(const uint8_t *key)
 static int restore_direct(const STDL_Surface *dst)
 {
     return stdl_planes == 4 && !stdl_blitter_active()
+        && !((bg->planes | dst->planes) & 8)
         && bg->w == dst->w && bg->h == dst->h
         && bg->stride == dst->stride && dst->mask == NULL
         && !((bg->flags & STDL_SRCKEY) && bg->mask != NULL)

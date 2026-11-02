@@ -1813,6 +1813,7 @@ static void ovsc_release(void)
 {
     uint16_t sr;
 
+    stdl_ovsc_cap = 0;
     if (!mode) {
         return;
     }
@@ -1943,7 +1944,8 @@ static void ovsc_surface(void)
         stdl_screen.h = STDL_SCREEN_H;
         break;
     }
-    if (stdl_ovsc_cap != 0 && stdl_screen.h > stdl_ovsc_cap) {
+    if (stdl_ovsc_cap != 0 && mode == MODE_BOT
+        && stdl_screen.h > stdl_ovsc_cap) {
         stdl_screen.h = stdl_ovsc_cap;
     }
     stdl_screen.clip.x = 0;

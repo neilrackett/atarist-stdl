@@ -113,13 +113,13 @@ all: $(LIB) sizecheck libcallcheck $(EXAMPLES) assets
 #
 # Raised 34700 -> 35300 on 2026-11-01: a responsive screen's 8-plane
 # surfaces (stdl_responsive.h). Every pixel call takes them through a
-# test of `planes` at its entry, 620 bytes over these five objects
-# (draw.o 248, surface.o 260, blit.o 68, sprite.o 44), so that a TT
+# test of `planes` at its entry, 604 bytes over these five objects
+# (draw.o 248, surface.o 244, blit.o 68, sprite.o 44), so that a TT
 # or a Falcon draws 256 colours through the same calls. Measured on a
-# plain ST, the tests cost 0.35% of SPRCOST's geometric mean (the
-# smallest blits up to 5.6%, PutPixel 2.4%) against a layout floor of
-# 0.03%, and a program 135-178 bytes; the 8-plane code itself is
-# linked only by a program that asks.
+# plain ST, the tests cost 0.3% of SPRCOST's and PRIMCOST's geometric
+# means (a clipped-out blit 5%, PutPixel and DrawChar 2.9%) against a
+# layout floor of 0.03%, and a program 135-178 bytes; the 8-plane code
+# itself is linked only by a program that asks.
 PIXEL_OBJS = $(addprefix $(OBJDIR)/src/,draw.o blit.o sprite.o \
              surface.o blitter.o)
 PIXEL_MAX  = 35300
@@ -165,14 +165,15 @@ $(OBJDIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# libcmini variant. Games that have to fit a stock 520ST link with
-# -nostdlib -lcmini instead of mintlib; libstdl.a compiled against
-# mintlib headers cannot be mixed with that (different FILE, different
-# startup), so build a parallel archive against the libcmini headers:
+# libcmini variant, what a game links unless it needs mintlib (README,
+# "Building"): -nostdlib -lcmini instead of mintlib. libstdl.a compiled
+# against mintlib headers cannot be mixed with that (different FILE,
+# different startup), so build a parallel archive against the libcmini
+# headers:
 #
 #   STCMD_NO_TTY=1 stcmd make libstdl-cmini.a
-#   m68k-atari-mint-gcc -nostdlib -L$(CMINI)/lib -o P.TOS \
-#       $(CMINI)/lib/crt0.o objs... libstdl-cmini.a -lcmini -lgcc
+#   m68k-atari-mint-gcc -nostdlib -L$(CMINI)/lib -Wl,--traditional-format \
+#       -o P.TOS $(CMINI)/lib/crt0.o objs... libstdl-cmini.a -lcmini -lgcc
 #
 # STDL only needs stdio/stdlib/string/ctype plus mint/osbind.h, all of
 # which libcmini provides. Note libcmini's stack is fixed by _stksize

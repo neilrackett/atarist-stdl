@@ -35,12 +35,15 @@ typedef struct {
 static STDL_Surface *sp_page[2][2];     /* the screen's, page by page */
 
 /* the halves of a surface; the screen's are the page drawn into */
+/* a half, clipped as the 8-plane surface is (STDL_SetClipRect sets
+ * the clip on that alone) */
 static STDL_Surface *ref_half(const STDL_Surface *s, int i)
 {
-    if (s == &stdl_rs.screen.s) {
-        return sp_page[stdl_rs.back][i];
-    }
-    return ((const ref_surface *)s)->half[i];
+    STDL_Surface *h = s == &stdl_rs.screen.s ? sp_page[stdl_rs.back][i]
+                                             : ((const ref_surface *)s)->half[i];
+
+    h->clip = s->clip;
+    return h;
 }
 
 #define HALF(s, i) ref_half((s), (i))
@@ -123,13 +126,6 @@ static int sp_set_key(STDL_Surface *s, int enable, uint8_t key)
     }
     sp_sync(s);
     return 0;
-}
-
-static void sp_set_clip(STDL_Surface *s, const STDL_Rect *r)
-{
-    STDL_SetClipRect(HALF(s, 0), r);
-    STDL_SetClipRect(HALF(s, 1), r);
-    s->clip = HALF(s, 0)->clip;
 }
 
 static void sp_fill_rect(STDL_Surface *d, STDL_Rect *r, uint8_t c)
@@ -492,13 +488,89 @@ static void sp_cover(STDL_Surface *d, const STDL_Surface *scratch, int g0,
                 continue;
             }
             v = sp_get_pixel(d, px, y0 + y);
-            v = op == STDL_DRAW_SET ? c : op == STDL_DRAW_XOR ? (v ^ c)
-                                                              : (v | c);
+            v = op == STDL_DRAW_SET ? c
+              : op == STDL_DRAW_XOR ? (v ^ c)
+              : op == STDL_DRAW_OR ? (v | c) : (v & ~c);
             STDL_PutPixel(HALF(d, 0), px, y0 + y, (uint8_t)(v & 15));
             STDL_PutPixel(HALF(d, 1), px, y0 + y, (uint8_t)(v >> 4));
         }
     }
     resp_touch(d, g0 << 4, y0, ((g0 + ng) << 4) - 1, y0 + h - 1);
+}
+
+/* a polygon: the planar rasteriser in colour 1 over a scratch cleared
+ * each time, then the coverage a pixel at a time; planes8.c's own
+ * XORs a scratch it keeps clear, which this checks */
+static STDL_Surface *sp_poly_scratch;
+static STDL_Point *sp_poly_pts;
+static int sp_poly_npts;
+
+static void sp_fill_polygon(STDL_Surface *dst, const STDL_Point *pts,
+                            int n, uint8_t col, int op, stdl_poly_fn raster)
+{
+    int x0, y0, x1, y1, bx, w, h, i;
+    STDL_Rect clip, all;
+
+    x0 = x1 = pts[0].x;
+    y0 = y1 = pts[0].y;
+    for (i = 1; i < n; i++) {
+        if (pts[i].x < x0) x0 = pts[i].x;
+        if (pts[i].x > x1) x1 = pts[i].x;
+        if (pts[i].y < y0) y0 = pts[i].y;
+        if (pts[i].y > y1) y1 = pts[i].y;
+    }
+    if (x0 < dst->clip.x) x0 = dst->clip.x;
+    if (y0 < dst->clip.y) y0 = dst->clip.y;
+    if (x1 > dst->clip.x + dst->clip.w - 1) x1 = dst->clip.x + dst->clip.w - 1;
+    if (y1 > dst->clip.y + dst->clip.h - 1) y1 = dst->clip.y + dst->clip.h - 1;
+    if (x0 > x1 || y0 > y1) {
+        return;
+    }
+    bx = x0 & ~15;
+    w = x1 - bx + 1;
+    h = y1 - y0 + 1;
+    if (sp_poly_scratch == NULL || sp_poly_scratch->w < w
+        || sp_poly_scratch->h < h) {
+        const int sw = sp_poly_scratch != NULL && sp_poly_scratch->w > w
+                       ? sp_poly_scratch->w : w;
+        const int sh = sp_poly_scratch != NULL && sp_poly_scratch->h > h
+                       ? sp_poly_scratch->h : h;
+
+        STDL_FreeSurface(sp_poly_scratch);
+        sp_poly_scratch = stdl_surface_create(sw, sh);
+        if (sp_poly_scratch == NULL) {
+            return;
+        }
+    }
+    if (n > sp_poly_npts) {
+        STDL_Point *np = realloc(sp_poly_pts, (size_t)n * sizeof(STDL_Point));
+
+        if (np == NULL) {
+            return;
+        }
+        sp_poly_pts = np;
+        sp_poly_npts = n;
+    }
+    for (i = 0; i < n; i++) {
+        sp_poly_pts[i].x = (int16_t)(pts[i].x - bx);
+        sp_poly_pts[i].y = (int16_t)(pts[i].y - y0);
+    }
+    /* the whole groups the coverage is read from cleared, not only
+     * the clip: the scratch is kept from one polygon to the next */
+    all.x = 0;
+    all.y = 0;
+    all.w = (uint16_t)((((x1 >> 4) - (bx >> 4)) + 1) << 4);
+    all.h = (uint16_t)h;
+    STDL_SetClipRect(sp_poly_scratch, NULL);
+    STDL_FillRect(sp_poly_scratch, &all, 0);
+    clip.x = (int16_t)(x0 - bx);
+    clip.y = 0;
+    clip.w = (uint16_t)(x1 - x0 + 1);
+    clip.h = (uint16_t)h;
+    STDL_SetClipRect(sp_poly_scratch, &clip);
+    raster(sp_poly_scratch, sp_poly_pts, n, 1, STDL_DRAW_SET);
+    sp_cover(dst, sp_poly_scratch, bx >> 4, (x1 >> 4) - (bx >> 4) + 1,
+             y0, h, col, op);
 }
 
 static void sp_blit_indexed8(STDL_Surface *d, const uint8_t *src, int pitch,
@@ -663,19 +735,45 @@ static void sp_present(int p, const resp_box *b)
 }
 
 static const stdl_resp_ops_t sp_ops = {
-    sp_create, sp_free_surface, sp_set_key, sp_set_clip,
-    sp_fill_rect, sp_hline, sp_vline, sp_put_pixel, sp_get_pixel,
-    sp_points, sp_points_c, sp_blit,
-    sp_sprite_from, sp_blit_sprite, sp_free_sprite, sp_draw_text,
-    sp_from_1bpp, sp_from_indexed8, sp_remap, resp_set_colours,
-    sp_hspans, sp_vspans, sp_xor_rect, sp_xor_hline, sp_xor_pixel,
-    sp_xor_hspans, sp_xor_vspans, sp_draw_char, sp_cover,
-    sp_blit_indexed8, sp_dup, sp_create_mask, sp_put_group, sp_put_group8
+    .create = sp_create,
+    .free_surface = sp_free_surface,
+    .set_key = sp_set_key,
+    .fill_rect = sp_fill_rect,
+    .hline = sp_hline,
+    .vline = sp_vline,
+    .put_pixel = sp_put_pixel,
+    .get_pixel = sp_get_pixel,
+    .points = sp_points,
+    .points_c = sp_points_c,
+    .blit = sp_blit,
+    .sprite_from = sp_sprite_from,
+    .blit_sprite = sp_blit_sprite,
+    .free_sprite = sp_free_sprite,
+    .draw_text = sp_draw_text,
+    .from_1bpp = sp_from_1bpp,
+    .from_indexed8 = sp_from_indexed8,
+    .remap = sp_remap,
+    .set_colours = resp_set_colours,
+    .hspans = sp_hspans,
+    .vspans = sp_vspans,
+    .xor_rect = sp_xor_rect,
+    .xor_hline = sp_xor_hline,
+    .xor_pixel = sp_xor_pixel,
+    .xor_hspans = sp_xor_hspans,
+    .xor_vspans = sp_xor_vspans,
+    .draw_char = sp_draw_char,
+    .fill_polygon = sp_fill_polygon,
+    .blit_indexed8 = sp_blit_indexed8,
+    .dup = sp_dup,
+    .create_mask = sp_create_mask,
+    .put_group = sp_put_group,
+    .put_group8 = sp_put_group8,
 };
 
 static const resp_model sp_model = {
-    &sp_ops, 8, sp_screen_init, sp_screen_page, sp_screen_free, sp_present,
-    NULL
+    .ops = &sp_ops, .planes = 8,
+    .screen_init = sp_screen_init, .screen_page = sp_screen_page,
+    .screen_free = sp_screen_free, .present = sp_present
 };
 
 /* as STDL_UseResponsive, with this standing in for the 8 planes */

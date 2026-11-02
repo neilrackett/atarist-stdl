@@ -28,6 +28,7 @@ const stdl_resp_ops_t *stdl_resp;
 const stdl_resp_video_t *stdl_resp_video;
 STDL_Surface *stdl_resp_screen;
 void (*stdl_pal_apply_hook)(void);
+void (*stdl_pal_write)(int index, uint16_t word);
 int (*stdl_pal_raw_hook)(int index, uint16_t word);
 
 static STDL_Palette screen_palette;
@@ -258,8 +259,6 @@ static void megaste_speedrestore(void)
  * desktop whose colours the VDI had set. Both run in supervisor mode,
  * which the library holds from STDL_Init.
  */
-#define FALCON_VPAL ((volatile uint32_t *)0xFFFF9800UL)
-
 static void falcon_save_desktop(void)
 {
     int i;
@@ -274,7 +273,7 @@ static void falcon_save_desktop(void)
     }
     if (stdl.old_vpal != NULL) {
         for (i = 0; i < 256; i++) {
-            stdl.old_vpal[i] = FALCON_VPAL[i];
+            stdl.old_vpal[i] = STDL_FALCONPAL[i];
         }
     }
 }
@@ -298,7 +297,7 @@ static void falcon_restore_desktop(void)
     }
     if (stdl.old_vpal != NULL) {
         for (i = 0; i < 256; i++) {
-            FALCON_VPAL[i] = stdl.old_vpal[i];
+            STDL_FALCONPAL[i] = stdl.old_vpal[i];
         }
     }
 }
@@ -313,8 +312,6 @@ static void falcon_restore_desktop(void)
  * 3.06) shown in another mode, and the library never changes the bank
  * or the other bits it holds.
  */
-#define TT_PAL ((volatile uint16_t *)0xFFFF8400UL)
-
 static void tt_save_desktop(void)
 {
     int i;
@@ -324,7 +321,7 @@ static void tt_save_desktop(void)
     }
     if (stdl.old_vpal != NULL) {
         for (i = 0; i < 256; i++) {
-            stdl.old_vpal[i] = TT_PAL[i];
+            stdl.old_vpal[i] = STDL_TTPAL[i];
         }
     }
 }
@@ -342,7 +339,7 @@ static void tt_restore_desktop(void)
     }
     if (stdl.old_vpal != NULL) {
         for (i = 0; i < 256; i++) {
-            TT_PAL[i] = (uint16_t)stdl.old_vpal[i];
+            STDL_TTPAL[i] = (uint16_t)stdl.old_vpal[i];
         }
     }
 }
@@ -378,6 +375,7 @@ static void release_hardware(void)
      * again, and staging starts afresh if the program inits again */
     stdl_pal_apply_hook = NULL;
     stdl_pal_raw_hook = NULL;
+    stdl_pal_write = NULL;
     if (stdl_shutdown_hwscroll != NULL) {
         /* LINEWIDTH and HSCROLL back to stock before the Setscreen
          * below repoints the display at page[0] */
@@ -539,14 +537,15 @@ void STDL_Quit(void)
 STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
 {
     int i;
-    /* a TT's or a Falcon's own mode, for a program that asked for
-     * more than an ST has (stdl_responsive.h); ST Low everywhere else */
-    const int resp = stdl_resp_video != NULL
-                     && stdl_resp_video->wants(w, h, bpp);
+    int resp;
 
     if (!stdl.initialised && STDL_Init(STDL_INIT_VIDEO) < 0) {
         return NULL;
     }
+    /* a TT's or a Falcon's own mode, for a program that asked for
+     * more than an ST has (stdl_responsive.h); ST Low everywhere else.
+     * After the init: the machine is not known before it */
+    resp = stdl_resp_video != NULL && stdl_resp_video->wants(w, h, bpp);
 
     if (!stdl.video_set) {
         stdl.old_sync = -1;     /* nothing to put back yet */
@@ -622,15 +621,7 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
         }
     }
 
-    /* default palette: colour 0 black, 15 white, the rest the ST
-     * desktop-ish spread; ports normally set their own right away */
-    for (i = 0; i < 16; i++) {
-        stdl.colours[i].r = (uint8_t)((i & 1) ? 0xAA : 0) + ((i & 8) ? 0x55 : 0);
-        stdl.colours[i].g = (uint8_t)((i & 2) ? 0xAA : 0) + ((i & 8) ? 0x55 : 0);
-        stdl.colours[i].b = (uint8_t)((i & 4) ? 0xAA : 0) + ((i & 8) ? 0x55 : 0);
-    }
-    stdl.colours[0].r = stdl.colours[0].g = stdl.colours[0].b = 0;
-    stdl.colours[15].r = stdl.colours[15].g = stdl.colours[15].b = 255;
+    stdl_default_colours();
     stdl_palette_apply_hw();
 
     screen_palette.ncolors = 16;

@@ -14,22 +14,6 @@
 #include <string.h>
 #include "stdl_internal.h"
 
-/* ST/STE hardware palette word -> RGB888 */
-static void hw_to_rgb(uint16_t hw, STDL_Colour *c)
-{
-    int i;
-    uint8_t v[3];
-
-    for (i = 0; i < 3; i++) {
-        uint8_t n = (uint8_t)((hw >> (8 - i * 4)) & 0x0F);
-        v[i] = (uint8_t)((((n & 7) << 1) | ((n >> 3) & 1)) * 17);
-    }
-    c->r = v[0];
-    c->g = v[1];
-    c->b = v[2];
-    c->unused = 0;
-}
-
 #define PI1_SIZE (34L + 32000L)
 
 /* trailer != 0: the picture is the last PI1_SIZE bytes of the file
@@ -87,7 +71,7 @@ static STDL_Surface *load_degas(const char *file, int trailer,
         memcpy(s->pixels, data, 32000);
         stdl_planes_normalise(s->pixels, s->stride, s->h);
         for (i = 0; i < 16; i++) {
-            hw_to_rgb(hwpal[i], &s->format->palette->colors[i]);
+            stdl_hw_to_rgb(hwpal[i], &s->format->palette->colors[i]);
         }
         if (pal_out != NULL && pal_out->colors != NULL) {
             for (i = 0; i < 16 && i < pal_out->ncolors; i++) {
@@ -116,7 +100,7 @@ static int show_degas(const char *file, int trailer)
     uint16_t hwpal[16];
     uint8_t *data;
     STDL_Surface *screen = STDL_GetVideoSurface();
-    int i;
+    int i, y;
 
     if (screen == NULL) {
         STDL_SetError("no video mode set");
@@ -126,11 +110,32 @@ static int show_degas(const char *file, int trailer)
     if (data == NULL) {
         return -1;
     }
-    memcpy(screen->pixels, data, 32000);
-    stdl_planes_normalise(screen->pixels, screen->stride, screen->h);
+    if (screen->planes == 4) {
+        /* a row at a time, for a line wider than 320 pixels (open side
+         * borders, a Falcon's 4-bit screen on RGB) */
+        for (y = 0; y < 200; y++) {
+            memcpy(screen->pixels + stdl_row_off(y, screen->stride),
+                   data + stdl_row_off(y, 160), 160);
+        }
+        stdl_planes_normalise(screen->pixels, screen->stride, screen->h);
+    } else {
+        /* an 8-plane screen (stdl_responsive.h): the picture blitted
+         * onto it, its colours 0-15, by the 8-plane blit itself - a
+         * call to STDL_BlitSurface linked 14K of 4-plane blits into a
+         * program that shows a splash and draws none */
+        STDL_Surface *pic = stdl_surface_create(320, 200);
+
+        if (pic == NULL) {
+            free(data);
+            return -1;
+        }
+        memcpy(pic->pixels, data, 32000);
+        (void)stdl_resp->blit(pic, NULL, screen, NULL, 0);
+        STDL_FreeSurface(pic);
+    }
     free(data);
     for (i = 0; i < 16; i++) {
-        hw_to_rgb(hwpal[i], &stdl.colours[i]);
+        stdl_hw_to_rgb(hwpal[i], &stdl.colours[i]);
         STDL_SetColour(i, hwpal[i]);
     }
     return 0;

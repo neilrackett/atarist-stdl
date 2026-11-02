@@ -25,8 +25,6 @@
 #ifdef __m68k__
 #include <osbind.h>
 #include <mint/falcon.h>
-#define TT_PAL      ((volatile uint16_t *)0xFFFF8400UL)
-#define FALCON_VPAL ((volatile uint32_t *)0xFFFF9800UL)
 #define MFP_TCDR    (*(volatile uint8_t *)0xFFFFFA23UL)
 #else
 /* host tests: the machine the screen is set on, a TT unless these say
@@ -118,7 +116,7 @@ void resp_touch_points(const STDL_Surface *d, const STDL_Point *p, int n)
 {
     int x0, y0, x1, y1;
 
-    if (d != &stdl_rs.screen.s || n <= 0) {
+    if (d != stdl_rs.track || n <= 0) {
         return;
     }
     x0 = x1 = p->x;
@@ -176,14 +174,14 @@ static void resp_registers(const STDL_Colour *c, int first, int n)
 
     if (stdl_rs.falcon) {
         for (i = first; i < first + n; i++, c++) {
-            FALCON_VPAL[i] = ((uint32_t)(c->r & 0xFC) << 24)
-                           | ((uint32_t)(c->g & 0xFC) << 16)
-                           | (uint32_t)(c->b & 0xFC);
+            STDL_FALCONPAL[i] = ((uint32_t)(c->r & 0xFC) << 24)
+                              | ((uint32_t)(c->g & 0xFC) << 16)
+                              | (uint32_t)(c->b & 0xFC);
         }
     } else {
         for (i = first; i < first + n; i++, c++) {
-            TT_PAL[i] = (uint16_t)(((c->r >> 4) << 8) | (c->g & 0xF0)
-                                   | (c->b >> 4));
+            STDL_TTPAL[i] = (uint16_t)(((c->r >> 4) << 8)
+                                       | (c->g & 0xF0) | (c->b >> 4));
         }
     }
 #else
@@ -191,12 +189,14 @@ static void resp_registers(const STDL_Colour *c, int first, int n)
 #endif
 }
 
-/* a 4-plane screen's sixteen, from wherever the palette calls set
- * them (stdl_pal_apply_hook): a Falcon's 4-bit VIDEL modes do not read
- * the ST's registers, and a TT Low picture's colours are its own */
-static void resp_pal4(void)
+/* every word written to the ST's sixteen registers (stdl_pal_write),
+ * staged or not, onto the TT's or the Falcon's: their modes read their
+ * own. A word is the ST's 4 bits a channel, so an 8-plane screen keeps
+ * that entry at 4 bits too */
+static void resp_pal_word(int index, uint16_t word)
 {
-    resp_registers(stdl.colours, 0, 16);
+    stdl_hw_to_rgb(word, &stdl_rs.colours[index]);
+    resp_registers(&stdl_rs.colours[index], index, 1);
 }
 
 int resp_set_colours(STDL_Surface *s, const STDL_Colour *c, int first,
@@ -254,7 +254,7 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
     const int colour = stdl_rs.colour != NULL && bpp >= 8;
     const int tall = stdl_rs.tall != NULL && h > 200;
     const resp_model *m = colour ? stdl_rs.colour : stdl_rs.tall;
-    int i, rows, wide, vga;
+    int i, rows, wide, vga, lines;
     uint8_t *p;
 #ifdef __m68k__
     int16_t mode = 0;
@@ -283,16 +283,16 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
     stdl_rs.dbl = 0;
     if (!stdl_rs.falcon) {
         /* TT Low, 8 planes whatever the screen's */
-        stdl_rs.lines = 480;
+        lines = 480;
         stdl_rs.line = 320;
         stdl_rs.dbl = 1;
     } else if (vga || rows == 200) {
-        stdl_rs.lines = vga ? 240 : 200;
+        lines = vga ? 240 : 200;
         stdl_rs.line = (int16_t)wide;
     } else {
         /* 240 lines on RGB or a TV take overscan: 384 pixels a line,
          * the picture 32 in */
-        stdl_rs.lines = 240;
+        lines = 240;
         stdl_rs.line = (int16_t)(m->planes == 8 ? 384 : 192);
         stdl_rs.left = (int16_t)(m->planes == 8 ? 32 : 16);
     }
@@ -303,7 +303,7 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
                                 : (PAL | (rows > 200 ? OVERSCAN : 0))));
     }
 #endif
-    stdl_rs.page_bytes = stdl_row_off(stdl_rs.lines, (uint16_t)stdl_rs.line);
+    stdl_rs.page_bytes = stdl_row_off(lines, (uint16_t)stdl_rs.line);
     for (i = 0; i < 2; i++) {
         stdl_rs.page_alloc[i] = stdl_stram_alloc(stdl_rs.page_bytes + 256);
         if (stdl_rs.page_alloc[i] == NULL) {
@@ -318,22 +318,16 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
     }
     stdl_rs.w = 320;
     stdl_rs.h = (int16_t)rows;
-    stdl_rs.top = (int16_t)((((stdl_rs.lines >> stdl_rs.dbl) - rows) >> 1)
+    stdl_rs.top = (int16_t)((((lines >> stdl_rs.dbl) - rows) >> 1)
                             << stdl_rs.dbl);
     for (i = 0; i < 2; i++) {
         stdl_rs.box[i].x0 = 1;
         stdl_rs.box[i].x1 = 0;
     }
 
-    /* the ST's default sixteen (video.c), as an ST screen has; an
-     * 8-plane screen's other 240 black */
-    for (i = 0; i < 16; i++) {
-        stdl.colours[i].r = (uint8_t)(((i & 1) ? 0xAA : 0) + ((i & 8) ? 0x55 : 0));
-        stdl.colours[i].g = (uint8_t)(((i & 2) ? 0xAA : 0) + ((i & 8) ? 0x55 : 0));
-        stdl.colours[i].b = (uint8_t)(((i & 4) ? 0xAA : 0) + ((i & 8) ? 0x55 : 0));
-    }
-    stdl.colours[0].r = stdl.colours[0].g = stdl.colours[0].b = 0;
-    stdl.colours[15].r = stdl.colours[15].g = stdl.colours[15].b = 255;
+    /* the ST's default sixteen, as an ST screen has; an 8-plane
+     * screen's other 240 black */
+    stdl_default_colours();
     memset(stdl_rs.colours, 0, sizeof(stdl_rs.colours));
     memcpy(stdl_rs.colours, stdl.colours, 16 * sizeof(STDL_Colour));
     if (m->planes == 8) {
@@ -353,7 +347,12 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
     stdl_rs.screen.s.flags = STDL_SCREEN | STDL_HWSURFACE | STDL_FULLSCREEN
                            | STDL_HWPALETTE | STDL_DOUBLEBUF;
     stdl_rs.model = m;
-    stdl_resp = m->ops;
+    /* kept after a tall screen, for 8-plane surfaces an earlier
+     * screen left */
+    if (m->ops != NULL) {
+        stdl_resp = m->ops;
+    }
+    stdl_rs.track = &stdl_rs.screen.s;  /* a model's init may clear it */
     if (m->screen_init() < 0) {
         resp_shutdown();
         return NULL;
@@ -386,10 +385,10 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
         (void)Cconws(esc);
     }
 #endif
+    stdl_pal_write = resp_pal_word;
     if (m->planes == 8) {
         resp_registers(stdl_rs.colours, 0, 256);
     } else {
-        stdl_pal_apply_hook = resp_pal4;
         stdl_palette_apply_hw();
     }
     stdl_resp_screen = &stdl_rs.screen.s;
@@ -432,9 +431,8 @@ void resp_shutdown(void)
         stdl_rs.model->screen_free();
         stdl_rs.model = NULL;
     }
-    if (stdl_pal_apply_hook == resp_pal4) {
-        stdl_pal_apply_hook = NULL;
-    }
+    stdl_pal_write = NULL;
+    stdl_rs.track = NULL;
     for (i = 0; i < 2; i++) {
         stdl_stram_free(stdl_rs.page_alloc[i]);
         stdl_rs.page_alloc[i] = NULL;

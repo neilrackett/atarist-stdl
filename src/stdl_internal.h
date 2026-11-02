@@ -18,6 +18,10 @@
 #define STDL_HZ200      (*(volatile uint32_t *)0x4BAUL)
 #define STDL_FRCLOCK    (*(volatile uint32_t *)0x466UL)
 #define STDL_HWPAL      ((volatile uint16_t *)0xFFFF8240UL)
+/* a TT's 256 colour registers (0x0RGB), and a Falcon's VIDEL ones
+ * (6 bits a channel, R and G in the upper word, B in the low byte) */
+#define STDL_TTPAL      ((volatile uint16_t *)0xFFFF8400UL)
+#define STDL_FALCONPAL  ((volatile uint32_t *)0xFFFF9800UL)
 /* TOS vertical-blank queue: nvbls entries at *_vblqueue, each either
  * NULL or a routine the VBL interrupt calls. Shared by the YM sound
  * tick (ym.c) and the public callback API (vbl.c). */
@@ -276,6 +280,24 @@ typedef struct {
 } stdl_state_t;
 
 extern stdl_state_t stdl;
+
+/* the default palette: colour 0 black, 15 white, the rest the ST
+ * desktop-ish spread; ports normally set their own right away. Inline
+ * in its two callers (video.c, responsive.c): as a function, the call
+ * let gcc copy the rest of STDL_SetVideoMode onto an error path, 212
+ * bytes more in every program */
+static __inline__ void stdl_default_colours(void)
+{
+    int i;
+
+    for (i = 0; i < 16; i++) {
+        stdl.colours[i].r = (uint8_t)((i & 1) ? 0xAA : 0) + ((i & 8) ? 0x55 : 0);
+        stdl.colours[i].g = (uint8_t)((i & 2) ? 0xAA : 0) + ((i & 8) ? 0x55 : 0);
+        stdl.colours[i].b = (uint8_t)((i & 4) ? 0xAA : 0) + ((i & 8) ? 0x55 : 0);
+    }
+    stdl.colours[0].r = stdl.colours[0].g = stdl.colours[0].b = 0;
+    stdl.colours[15].r = stdl.colours[15].g = stdl.colours[15].b = 255;
+}
 extern STDL_Surface stdl_screen;
 
 void stdl_palette_apply_hw(void);       /* program all 16 registers  */
@@ -455,6 +477,49 @@ extern uint16_t (*stdl_blit_policy)(uint16_t nlines, uint32_t cpl);
  * writing the registers - palstage.c stages writes into the
  * vertical blanking with it. Defined in video.c (always linked). */
 extern void (*stdl_pal_apply_hook)(void);
+
+/* every word written to an ST colour register is handed to this as
+ * well, while it is set: a responsive screen on a TT or a Falcon
+ * (responsive.c), whose own registers are the ones shown, sets it, so
+ * the staged writes, STDL_SetColour and the SDL shim reach them too.
+ * Defined in video.c. */
+extern void (*stdl_pal_write)(int index, uint16_t word);
+
+/*
+ * Hide a pointer's provenance from the optimiser.
+ *
+ * gcc knows malloc returns memory aligned to MALLOC_ABI_ALIGNMENT,
+ * which is 4 on m68k-atari-mint, so it can prove a block is long
+ * aligned, fold the rounding up to a long to a constant zero and
+ * drop the arithmetic entirely. mintlib's malloc does not honour
+ * that at run time - it hands back word-aligned blocks, which is
+ * the one case the adjustment exists for. So the compiler assumes
+ * away precisely the situation being guarded against, and the
+ * result compiles to `clrb` with no and-with-3 anywhere in the
+ * function. Verified by disassembly, not by reading the source,
+ * because the source looks right either way.
+ */
+static __inline__ void *stdl_launder(void *p)
+{
+    __asm__("" : "+g"(p));
+    return p;
+}
+
+/* an ST/STE register word (STDL_HWColour's rotated nibbles) as RGB888 */
+static __inline__ void stdl_hw_to_rgb(uint16_t hw, STDL_Colour *c)
+{
+    int i;
+    uint8_t v[3];
+
+    for (i = 0; i < 3; i++) {
+        uint8_t n = (uint8_t)((hw >> (8 - i * 4)) & 0x0F);
+        v[i] = (uint8_t)((((n & 7) << 1) | ((n >> 3) & 1)) * 17);
+    }
+    c->r = v[0];
+    c->g = v[1];
+    c->b = v[2];
+    c->unused = 0;
+}
 
 /* while staging, one register's raw word into the staged set (1), or
  * 0 to write it now: SDL_SetPalette(SDL_PHYSPAL), which sets the
@@ -1417,22 +1482,26 @@ typedef struct {
 
 extern const stdl_resp_video_t *stdl_resp_video;
 extern STDL_Surface *stdl_resp_screen;  /* while a responsive mode is set */
+/* an 8-plane screen is up: surfaces are made with 8 planes */
+#define STDL_RESP_DEEP() \
+    (stdl_resp_screen != NULL && STDL_IS_RESP(stdl_resp_screen))
 
 /*
  * 8-plane surfaces (STDL_RESPONSIVE_COLOUR; src/planes8.c): one a
  * program draws 256 colours into says so in its `planes` (8), as an
  * 8-plane sprite does in its own; every public pixel call tests that
- * first and hands it on through this table. While a responsive screen
- * is up, surfaces are created through it too: 8-plane ones on an
- * 8-plane screen, 4-plane ones on a tall 4-plane screen. On an ST no
+ * first and hands it on through this table. While an 8-plane screen is
+ * up (STDL_RESP_DEEP), surfaces are created through it too. On an ST no
  * surface ever has 8 planes: the test costs a compare and a branch not
  * taken.
  */
+typedef void (*stdl_poly_fn)(STDL_Surface *d, const STDL_Point *pts, int n,
+                             uint8_t c, int op);
+
 typedef struct stdl_resp_ops {
     STDL_Surface *(*create)(int w, int h);
     void (*free_surface)(STDL_Surface *s);
     int  (*set_key)(STDL_Surface *s, int enable, uint8_t key);
-    void (*set_clip)(STDL_Surface *s, const STDL_Rect *r);
     void (*fill_rect)(STDL_Surface *d, STDL_Rect *r, uint8_t c);
     void (*hline)(STDL_Surface *d, int x1, int x2, int y, uint8_t c);
     void (*vline)(STDL_Surface *d, int x, int y1, int y2, uint8_t c);
@@ -1469,9 +1538,10 @@ typedef struct stdl_resp_ops {
                        uint8_t c);
     void (*draw_char)(STDL_Surface *d, const STDL_Font *f, int x, int y,
                       int ch, uint8_t c);
-    /* a polygon's coverage, plane 0 of a 4-plane scratch (polygon.c) */
-    void (*cover)(STDL_Surface *d, const STDL_Surface *scratch, int g0,
-                  int ng, int y0, int h, uint8_t c, int op);
+    /* `raster` is STDL_FillPolygon, from polygon.c: a program that
+     * draws no polygons links no rasteriser */
+    void (*fill_polygon)(STDL_Surface *d, const STDL_Point *pts, int n,
+                         uint8_t c, int op, stdl_poly_fn raster);
     void (*blit_indexed8)(STDL_Surface *d, const uint8_t *src, int pitch,
                           int x, int y, int w, int h, const uint8_t *map,
                           unsigned flags);

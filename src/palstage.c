@@ -65,6 +65,9 @@ static void flush(void)
         for (i = 0; i < 16; i++) {
             if (m & (1u << i)) {
                 STDL_HWPAL[i] = pending[i];
+                if (stdl_pal_write != NULL) {
+                    stdl_pal_write(i, pending[i]);
+                }
             }
         }
     }

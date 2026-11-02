@@ -114,10 +114,25 @@ static void sp_and_masks(STDL_Surface *s)
     }
 }
 
+/* half i's colour for a SET in c: STDL_TRANSPARENT in both on a masked
+ * surface, the hole the planar calls punch */
+static uint8_t sp_nib(STDL_Surface *d, unsigned c, int i)
+{
+    if (c == STDL_TRANSPARENT && HALF(d, 0)->mask != NULL) {
+        return STDL_TRANSPARENT;
+    }
+    return (uint8_t)(i ? c >> 4 : c & 15);
+}
+
 static int sp_set_key(STDL_Surface *s, int enable, uint8_t key)
 {
-    if (STDL_SetColourKey(HALF(s, 0), enable, (uint8_t)(key & 15)) < 0
-        || STDL_SetColourKey(HALF(s, 1), enable, (uint8_t)(key >> 4)) < 0) {
+    /* a key of STDL_TRANSPARENT keeps both halves' masks */
+    const int keep = key == STDL_TRANSPARENT;
+
+    if (STDL_SetColourKey(HALF(s, 0), enable,
+                          keep ? key : (uint8_t)(key & 15)) < 0
+        || STDL_SetColourKey(HALF(s, 1), enable,
+                             keep ? key : (uint8_t)(key >> 4)) < 0) {
         return -1;
     }
     if (enable) {
@@ -133,22 +148,22 @@ static void sp_fill_rect(STDL_Surface *d, STDL_Rect *r, uint8_t c)
     STDL_Rect t;
 
     if (r == NULL) {
-        STDL_FillRect(HALF(d, 0), NULL, (uint8_t)(c & 15));
-        STDL_FillRect(HALF(d, 1), NULL, (uint8_t)(c >> 4));
+        STDL_FillRect(HALF(d, 0), NULL, sp_nib(d, c, 0));
+        STDL_FillRect(HALF(d, 1), NULL, sp_nib(d, c, 1));
         resp_touch(d, d->clip.x, d->clip.y, d->clip.x + d->clip.w - 1,
                    d->clip.y + d->clip.h - 1);
         return;
     }
     t = *r;
-    STDL_FillRect(HALF(d, 0), r, (uint8_t)(c & 15));
-    STDL_FillRect(HALF(d, 1), &t, (uint8_t)(c >> 4));
+    STDL_FillRect(HALF(d, 0), r, sp_nib(d, c, 0));
+    STDL_FillRect(HALF(d, 1), &t, sp_nib(d, c, 1));
     resp_touch(d, r->x, r->y, r->x + r->w - 1, r->y + r->h - 1);
 }
 
 static void sp_hline(STDL_Surface *d, int x1, int x2, int y, uint8_t c)
 {
-    STDL_HLine(HALF(d, 0), x1, x2, y, (uint8_t)(c & 15));
-    STDL_HLine(HALF(d, 1), x1, x2, y, (uint8_t)(c >> 4));
+    STDL_HLine(HALF(d, 0), x1, x2, y, sp_nib(d, c, 0));
+    STDL_HLine(HALF(d, 1), x1, x2, y, sp_nib(d, c, 1));
     if (x1 > x2) {
         int t = x1; x1 = x2; x2 = t;
     }
@@ -157,8 +172,8 @@ static void sp_hline(STDL_Surface *d, int x1, int x2, int y, uint8_t c)
 
 static void sp_vline(STDL_Surface *d, int x, int y1, int y2, uint8_t c)
 {
-    STDL_VLine(HALF(d, 0), x, y1, y2, (uint8_t)(c & 15));
-    STDL_VLine(HALF(d, 1), x, y1, y2, (uint8_t)(c >> 4));
+    STDL_VLine(HALF(d, 0), x, y1, y2, sp_nib(d, c, 0));
+    STDL_VLine(HALF(d, 1), x, y1, y2, sp_nib(d, c, 1));
     if (y1 > y2) {
         int t = y1; y1 = y2; y2 = t;
     }
@@ -167,8 +182,8 @@ static void sp_vline(STDL_Surface *d, int x, int y1, int y2, uint8_t c)
 
 static void sp_put_pixel(STDL_Surface *d, int x, int y, uint8_t c)
 {
-    STDL_PutPixel(HALF(d, 0), x, y, (uint8_t)(c & 15));
-    STDL_PutPixel(HALF(d, 1), x, y, (uint8_t)(c >> 4));
+    STDL_PutPixel(HALF(d, 0), x, y, sp_nib(d, c, 0));
+    STDL_PutPixel(HALF(d, 1), x, y, sp_nib(d, c, 1));
     resp_touch(d, x, y, x, y);
 }
 
@@ -181,8 +196,8 @@ static uint8_t sp_get_pixel(const STDL_Surface *s, int x, int y)
 static void sp_points(STDL_Surface *d, const STDL_Point *p, int n,
                       uint8_t c)
 {
-    STDL_Points(HALF(d, 0), p, n, (uint8_t)(c & 15));
-    STDL_Points(HALF(d, 1), p, n, (uint8_t)(c >> 4));
+    STDL_Points(HALF(d, 0), p, n, sp_nib(d, c, 0));
+    STDL_Points(HALF(d, 1), p, n, sp_nib(d, c, 1));
     resp_touch_points(d, p, n);
 }
 
@@ -205,8 +220,8 @@ static void sp_points_c(STDL_Surface *d, const STDL_Point *p,
         sp_ncols = n;
     }
     for (i = 0; i < n; i++) {
-        sp_cols[i] = (uint8_t)(c[i] & 15);
-        sp_cols[sp_ncols + i] = (uint8_t)(c[i] >> 4);
+        sp_cols[i] = sp_nib(d, c[i], 0);
+        sp_cols[sp_ncols + i] = sp_nib(d, c[i], 1);
     }
     STDL_PointsC(HALF(d, 0), p, sp_cols, n);
     STDL_PointsC(HALF(d, 1), p, sp_cols + sp_ncols, n);
@@ -405,15 +420,15 @@ static void sp_touch_spans(STDL_Surface *d, const STDL_Span *sp, int n,
 
 static void sp_hspans(STDL_Surface *d, const STDL_Span *sp, int n, uint8_t c)
 {
-    STDL_HSpans(HALF(d, 0), sp, n, (uint8_t)(c & 15));
-    STDL_HSpans(HALF(d, 1), sp, n, (uint8_t)(c >> 4));
+    STDL_HSpans(HALF(d, 0), sp, n, sp_nib(d, c, 0));
+    STDL_HSpans(HALF(d, 1), sp, n, sp_nib(d, c, 1));
     sp_touch_spans(d, sp, n, 0);
 }
 
 static void sp_vspans(STDL_Surface *d, const STDL_Span *sp, int n, uint8_t c)
 {
-    STDL_VSpans(HALF(d, 0), sp, n, (uint8_t)(c & 15));
-    STDL_VSpans(HALF(d, 1), sp, n, (uint8_t)(c >> 4));
+    STDL_VSpans(HALF(d, 0), sp, n, sp_nib(d, c, 0));
+    STDL_VSpans(HALF(d, 1), sp, n, sp_nib(d, c, 1));
     sp_touch_spans(d, sp, n, 1);
 }
 
@@ -491,6 +506,12 @@ static void sp_cover(STDL_Surface *d, const STDL_Surface *scratch, int g0,
             v = op == STDL_DRAW_SET ? c
               : op == STDL_DRAW_XOR ? (v ^ c)
               : op == STDL_DRAW_OR ? (v | c) : (v & ~c);
+            /* a SET's hole as PutPixel's; the others draw colours */
+            if (op == STDL_DRAW_SET) {
+                STDL_PutPixel(HALF(d, 0), px, y0 + y, sp_nib(d, v, 0));
+                STDL_PutPixel(HALF(d, 1), px, y0 + y, sp_nib(d, v, 1));
+                continue;
+            }
             STDL_PutPixel(HALF(d, 0), px, y0 + y, (uint8_t)(v & 15));
             STDL_PutPixel(HALF(d, 1), px, y0 + y, (uint8_t)(v >> 4));
         }
@@ -611,9 +632,10 @@ static STDL_Surface *sp_dup(STDL_Surface *s)
     STDL_Surface *d = sp_wrap(STDL_DuplicateSurface(HALF(s, 0)),
                               STDL_DuplicateSurface(HALF(s, 1)));
 
-    /* the mask from the key, over both halves */
-    if (d != NULL && (s->flags & STDL_SRCKEY)) {
-        sp_set_key(d, 1, s->colourkey);
+    /* the halves' masks, copied with them */
+    if (d != NULL) {
+        sp_sync(d);
+        d->colourkey = s->colourkey;
     }
     return d;
 }

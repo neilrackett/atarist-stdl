@@ -36,8 +36,8 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/audio.c src/cursor.c src/music.c src/mixer.c \
           src/sfx.c src/degas.c src/ym.c src/blitter.c \
           src/planes.c src/vbl.c src/indexed.c src/drawchar.c \
-          src/surfacefrom.c src/blit8.c src/voice.c \
-          $(XPAD)/xpad.c src/stdl_xpad.c src/overscan.c \
+          src/surfacefrom.c src/surfacedup.c src/blit8.c \
+          src/voice.c $(XPAD)/xpad.c src/stdl_xpad.c src/overscan.c \
           src/hwscroll.c src/tone.c src/cpuspeed.c src/opl.c \
           src/refresh.c src/mouse.c src/stram.c src/wav.c src/ring.c \
           src/palstage.c src/polygon.c src/polypat.c src/raster.c \

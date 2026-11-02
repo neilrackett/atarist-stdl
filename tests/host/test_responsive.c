@@ -245,6 +245,25 @@ static void one_run(int (*use)(void), unsigned seed, run_t *out)
     STDL_HLine(dmask, 2, 33, 18, 140);
     STDL_VLine(dmask, 20, 0, 20, 141);
     STDL_BlitSurface(keyed, NULL, dmask, NULL);
+    {
+        /* holes, as on 4 planes, from every call that SETs a colour */
+        static const STDL_Point tri[3] = { { 2, 10 }, { 16, 12 }, { 6, 20 } };
+        static const STDL_Point pp[3] = { { 30, 2 }, { 31, 3 }, { 32, 4 } };
+        static const STDL_Span sp[2] = { { 1, 3, 12 }, { 25, 19, 8 } };
+        static const uint8_t pc[3] = { STDL_TRANSPARENT, 9, STDL_TRANSPARENT };
+        STDL_Rect r = rect(20, 1, 9, 5);
+
+        STDL_FillRect(dmask, &r, STDL_TRANSPARENT);
+        STDL_PutPixel(dmask, 10, 4, STDL_TRANSPARENT);
+        STDL_HLine(dmask, 0, 36, 7, STDL_TRANSPARENT);
+        STDL_VLine(dmask, 15, 0, 20, STDL_TRANSPARENT);
+        STDL_HSpans(dmask, sp, 2, STDL_TRANSPARENT);
+        STDL_VSpans(dmask, sp, 2, STDL_TRANSPARENT);
+        STDL_Points(dmask, pp, 3, STDL_TRANSPARENT);
+        STDL_PointsC(dmask, pp + 1, pc, 2);
+        STDL_FillPolygon(dmask, tri, 3, STDL_TRANSPARENT, STDL_DRAW_SET);
+        STDL_FillCircle(dmask, 28, 14, 5, STDL_TRANSPARENT);
+    }
 
     STDL_BlitSurface(bg, NULL, scr, NULL);
     for (f = 0; f < FRAMES; f++) {
@@ -409,6 +428,9 @@ static void one_run(int (*use)(void), unsigned seed, run_t *out)
                 STDL_Rect r = rect(5, 2, 10, 6);
                 STDL_FillRect(made, &r, 250);
             }
+            /* a hole, and the key that keeps it */
+            STDL_FillCircle(made, 14, 6, 4, STDL_TRANSPARENT);
+            CHECK(STDL_SetColourKey(made, 1, STDL_TRANSPARENT) == 0, "key");
         }
         if (OP(16)) {
             uint16_t pw[4];
@@ -581,6 +603,16 @@ static void test_tall4(int falcon, int vga)
         const int p = stdl_rs.back;
         const uint8_t *page;
 
+        if (f == 6 && !falcon) {
+            /* the console's text, on every plane and line of page 0
+             * (its Logbase): the next present of it puts it all back */
+            uint32_t k;
+
+            for (k = 0; k < stdl_rs.page_bytes; k++) {
+                stdl_rs.page[0][k] = (uint8_t)rnd();
+            }
+            stdl_resp_con_wrote = 0xFF;
+        }
         for (i = 0; i < 20; i++) {
             STDL_Rect r = rect(rr(-20, 330), rr(-20, 250), rr(0, 90),
                                rr(0, 60));
@@ -623,6 +655,69 @@ static void test_tall4(int falcon, int vga)
         }
     }
     free(copy);
+    stdl_resp_video->shutdown();
+    stdl_resp_screen = NULL;
+}
+
+/*
+ * The console's text on a TT's 8-plane screen: once it has written,
+ * page 0's next present clears its bands and copies every row to the
+ * line under it, where the box drawn would have copied a little.
+ */
+static void test_console8(void)
+{
+    STDL_Surface *scr;
+    const uint8_t *page;
+    uint32_t k;
+    int f, y, line, top, bottom;
+
+    SET_MACHINE(0, 0);
+    g_what = STDL_RESPONSIVE_COLOUR;
+    CHECK(use_lib() == 0, "use");
+    scr = stdl_resp_video->set_mode(320, 200, 8, STDL_DOUBLEBUF);
+    CHECK(scr != NULL, "mode");
+    if (scr == NULL || stdl_rs.falcon) {
+        goto done;
+    }
+    line = stdl_rs.line;
+    top = stdl_rs.top;
+    bottom = top + (stdl_rs.h << stdl_rs.dbl);
+    for (f = 0; f < 2; f++) {
+        STDL_FillRect(scr, NULL, 77);
+        stdl_resp_video->flip();
+    }
+    for (k = 0; k < stdl_rs.page_bytes; k++) {
+        const int l = (int)(k / (uint32_t)line);
+
+        if (l < top || l >= bottom || ((l - top) & 1)) {
+            stdl_rs.page[0][k] = (uint8_t)rnd();
+        }
+    }
+    stdl_resp_con_wrote = 0xFF;
+    for (f = 0; f < 2; f++) {
+        STDL_Rect r = rect(30, 40, 20, 10);
+
+        STDL_FillRect(scr, &r, (uint8_t)(f + 1));
+        stdl_resp_video->flip();
+    }
+    page = stdl_rs.page[0];
+    for (k = 0; k < stdl_rs.page_bytes; k++) {
+        const int l = (int)(k / (uint32_t)line);
+
+        if ((l < top || l >= bottom) && page[k] != 0) {
+            CHECK(0, "band line %d not cleared", l);
+            break;
+        }
+    }
+    for (y = 0; y < stdl_rs.h; y++) {
+        const uint8_t *even = page + (size_t)(top + 2 * y) * line;
+
+        if (memcmp(even, even + line, (size_t)line) != 0) {
+            CHECK(0, "row %d's odd line not the even one's", y);
+            break;
+        }
+    }
+done:
     stdl_resp_video->shutdown();
     stdl_resp_screen = NULL;
 }
@@ -741,6 +836,63 @@ static void test_mixed(void)
     stdl_resp_screen = NULL;
 }
 
+/*
+ * STDL_TRANSPARENT as on 4 planes, in both models: a colour on a
+ * surface without a mask, a hole over colour 0 in one with, and a key
+ * that keeps the mask; and the library's opacity cache told of holes.
+ */
+static void test_transparent(void)
+{
+    int model, x, y;
+
+    for (model = 0; model < 2; model++) {
+        STDL_Surface *scr, *s, *c;
+        STDL_Rect r = rect(4, 2, 20, 5), d = rect(0, 0, 0, 0);
+
+        SET_MACHINE(0, 0);
+        g_what = STDL_RESPONSIVE_COLOUR;
+        (model ? use_lib : use_ref)();
+        scr = stdl_resp_video->set_mode(320, 200, 8, 0);
+        s = STDL_CreateSurface(40, 10);
+        if (scr == NULL || s == NULL) {
+            CHECK(0, "model %d: mode", model);
+            return;
+        }
+        STDL_FillRect(s, NULL, STDL_TRANSPARENT);
+        CHECK(STDL_GetPixel(s, 0, 0) == STDL_TRANSPARENT,
+              "model %d: 16 a colour without a mask", model);
+        CHECK(STDL_CreateMask(s, 0) == 0, "mask");
+        CHECK(!model || STDL_SurfaceIsOpaque(s), "opaque");
+        STDL_FillRect(s, &r, STDL_TRANSPARENT);
+        STDL_PutPixel(s, 30, 8, STDL_TRANSPARENT);
+        CHECK(!model || !STDL_SurfaceIsOpaque(s), "holes not seen");
+        CHECK(STDL_SetColourKey(s, 1, STDL_TRANSPARENT) == 0, "key");
+        c = STDL_DuplicateSurface(s);
+        CHECK(c != NULL && c->mask != NULL, "model %d: copy", model);
+        STDL_FillRect(scr, NULL, 5);
+        STDL_BlitSurface(s, NULL, scr, &d);
+        for (y = 0; y < 10; y++) {
+            for (x = 0; x < 40; x++) {
+                const int in = (x >= 4 && x < 24 && y >= 2 && y < 7)
+                               || (x == 30 && y == 8);
+
+                CHECK(mask_bit(s, x, y) == in
+                      && STDL_GetPixel(s, x, y) == (in ? 0 : 16)
+                      && STDL_GetPixel(scr, x, y) == (in ? 5 : 16),
+                      "model %d (%d,%d): mask %d, %u, shown %u", model, x,
+                      y, mask_bit(s, x, y), STDL_GetPixel(s, x, y),
+                      STDL_GetPixel(scr, x, y));
+                CHECK(c == NULL || mask_bit(c, x, y) == in,
+                      "model %d (%d,%d): the copy's mask", model, x, y);
+            }
+        }
+        STDL_FreeSurface(c);
+        STDL_FreeSurface(s);
+        stdl_resp_video->shutdown();
+        stdl_resp_screen = NULL;
+    }
+}
+
 /* the converter's pixels against what was asked for */
 static void test_reference(void)
 {
@@ -801,11 +953,13 @@ int main(void)
         font12[i] = (uint8_t)(i * 89 + 3);
     }
     test_reference();
+    test_transparent();
 #ifdef __m68k__
     compare(0, 0, 200, 1);
     compare(0, 0, 240, 4);
     test_mixed();
     test_tall4(0, 0);
+    test_console8();
     g_tall = STDL_RESPONSIVE_HEIGHT;
     compare(0, 0, 240, 7);
     test_tall4(0, 0);
@@ -824,6 +978,7 @@ int main(void)
     test_tall4(0, 0);
     test_tall4(1, 1);
     test_tall4(1, 0);
+    test_console8();
     /* the display's own height: the same 240 on these, in overscan on
      * a Falcon's RGB too */
     g_tall = STDL_RESPONSIVE_HEIGHT;

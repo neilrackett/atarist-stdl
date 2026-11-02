@@ -33,6 +33,67 @@ int stdl_host_resp_falcon, stdl_host_resp_vga;
 
 resp_state stdl_rs;
 
+/*
+ * The console on a TT. TOS writes its text to page 0, its Logbase
+ * since the mode set, in TT Low's own layout: eight planes, both lines
+ * of each row, the bands outside the picture too. The present writes
+ * only what the program drew - a tall 16-colour screen compares planes
+ * 0-3 of the even lines, an 8-plane one copies the box drawn to the odd
+ * lines - so text printed after the mode set stayed through the picture
+ * for good. Every character TOS sends to the screen goes through its
+ * xconout vectors (CON: and the raw console), and a hook there sets a
+ * flag on its way to TOS's own routine; the Flip that next shows page 0
+ * puts the page back whole. A Falcon's console writes the program's
+ * own page, as an ST's does.
+ */
+volatile uint8_t stdl_resp_con_wrote;
+
+#ifdef __m68k__
+#define XCONOUT ((volatile uint32_t *)0x57EUL)   /* a BIOS device's */
+uint32_t stdl_resp_con_old[2];
+void stdl_resp_con2(void), stdl_resp_con5(void);
+
+/* the flag, then TOS's routine, the stack as TOS left it */
+__asm__(
+"    .text\n"
+"    .even\n"
+"    .globl _stdl_resp_con2\n"
+"_stdl_resp_con2:\n"
+"    st _stdl_resp_con_wrote\n"
+"    move.l _stdl_resp_con_old,-(%sp)\n"
+"    rts\n"
+"    .even\n"
+"    .globl _stdl_resp_con5\n"
+"_stdl_resp_con5:\n"
+"    st _stdl_resp_con_wrote\n"
+"    move.l _stdl_resp_con_old+4,-(%sp)\n"
+"    rts\n");
+
+static void resp_con_release(void)
+{
+    XCONOUT[2] = stdl_resp_con_old[0];
+    XCONOUT[5] = stdl_resp_con_old[1];
+}
+#endif
+
+/* page 0 after the console wrote it: the bands cleared, and the box
+ * the whole picture, every group of it (stdl_rs.whole) */
+static void resp_whole(resp_box *b)
+{
+    const uint32_t a = stdl_row_off(stdl_rs.top, (uint16_t)stdl_rs.line);
+    const uint32_t z = stdl_row_off(stdl_rs.top + (stdl_rs.h << stdl_rs.dbl),
+                                    (uint16_t)stdl_rs.line);
+
+    stdl_resp_con_wrote = 0;
+    memset(stdl_rs.page[0], 0, a);
+    memset(stdl_rs.page[0] + z, 0, stdl_rs.page_bytes - z);
+    b->x0 = 0;
+    b->y0 = 0;
+    b->x1 = (int16_t)(stdl_rs.w - 1);
+    b->y1 = (int16_t)(stdl_rs.h - 1);
+    stdl_rs.whole = 1;
+}
+
 static int resp_wants(int w, int h, int bpp);
 static void resp_st_mode(int h);
 static void resp_update(int n, const STDL_Rect *rects);
@@ -364,7 +425,16 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
         esc[4] = (char)(32 + ((stdl_rs.top + 7) >> 3));
         (void)Cconws(esc);
     }
+    /* once: a second mode set would chain the hook onto itself */
+    if (!stdl_rs.falcon && stdl_shutdown_console == NULL) {
+        stdl_resp_con_old[0] = XCONOUT[2];
+        stdl_resp_con_old[1] = XCONOUT[5];
+        XCONOUT[2] = (uint32_t)(uintptr_t)stdl_resp_con2;
+        XCONOUT[5] = (uint32_t)(uintptr_t)stdl_resp_con5;
+        stdl_shutdown_console = resp_con_release;
+    }
 #endif
+    stdl_resp_con_wrote = 0;
     stdl_pal_write = resp_pal_word;
     if (m->planes == 8) {
         resp_registers(stdl_rs.colours, 0, 256);
@@ -382,7 +452,11 @@ void resp_flip(void)
     if (stdl_rs.model->present != NULL) {
         const uint32_t t0 = STDL_GetHz38400();
 
+        if (stdl_rs.back == 0 && stdl_resp_con_wrote) {
+            resp_whole(b);
+        }
         stdl_rs.model->present(stdl_rs.back, b);
+        stdl_rs.whole = 0;
         stdl_rs.stats.present_time += STDL_GetHz38400() - t0;
     }
     b->x0 = 1;

@@ -116,29 +116,6 @@ void STDL_FreeSurface(STDL_Surface *s)
     free(s);          /* format and palette share the same block */
 }
 
-STDL_Surface *STDL_DuplicateSurface(const STDL_Surface *s)
-{
-    STDL_Surface *d;
-
-    if (s == NULL) {
-        return NULL;
-    }
-    if (STDL_IS_RESP(s)) {
-        return stdl_resp->dup((STDL_Surface *)s);
-    }
-    d = stdl_surface_create(s->w, s->h);
-    if (d == NULL) {
-        return NULL;
-    }
-    memcpy(d->pixels, s->pixels, (uint32_t)s->stride * s->h);
-    memcpy(d->format->palette->colors, s->format->palette->colors,
-           16 * sizeof(STDL_Colour));
-    if (s->flags & STDL_SRCKEY) {
-        STDL_SetColourKey(d, 1, s->colourkey);
-    }
-    return d;
-}
-
 /* allocate the mask block with the same guard slack as the pixels:
  * the unaligned blit path may read one word past either end */
 static int mask_alloc(STDL_Surface *s)

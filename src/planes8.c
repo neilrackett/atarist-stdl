@@ -17,9 +17,13 @@
  * A mask (a colour key) is a word a group as a planar surface's is,
  * bit set where the destination shows through; drawing keeps it as the
  * planar routines do (fills, lines, pixels, points and blits clear the
- * bits they draw; text and sprites leave it). A sprite group is five
- * longs: the transparent pixels in both halves, then the four plane
- * pairs, clear under them.
+ * bits they draw; text and sprites leave it). STDL_TRANSPARENT keeps
+ * its planar meaning on a masked surface - a SET in it sets the bits
+ * over colour 0, a hole, and a key of it keeps the mask - so a
+ * program's 4-plane composition draws the same on 8 planes, for the
+ * one colour of 256 that a masked surface cannot draw. A sprite group
+ * is five longs: the transparent pixels in both halves, then the four
+ * plane pairs, clear under them.
  */
 
 #include <stdlib.h>
@@ -71,6 +75,13 @@ static __inline__ void p8_mclear(STDL_Surface *s, int y, int g,
         ((uint16_t *)(s->mask + stdl_row_off(y, s->maskstride)))[g]
             &= (uint16_t)~m16;
     }
+}
+
+/* a SET in STDL_TRANSPARENT on a masked surface: a hole, as the planar
+ * fills punch (draw.c) */
+static __inline__ int p8_hole(const STDL_Surface *s, unsigned c, int op)
+{
+    return op == STDL_DRAW_SET && c == STDL_TRANSPARENT && s->mask != NULL;
 }
 
 static unsigned p8_get(const STDL_Surface *s, int x, int y)
@@ -146,6 +157,7 @@ static int p8_mask_alloc(STDL_Surface *s, int fill)
     }
     memset(s->mask, fill, stdl_row_off(s->h, s->maskstride));
     s->flags |= STDL_SRCKEY;
+    s->opaque_state = 0;
     return 0;
 }
 
@@ -159,6 +171,16 @@ static int p8_set_key(STDL_Surface *s, int enable, uint8_t key)
         P8(s)->mblock = NULL;
         s->mask = NULL;
         s->flags &= ~STDL_SRCKEY;
+        return 0;
+    }
+    /* as STDL_SetColourKey: the mask the surface has (holes, PutGroup,
+     * a decoder's), or an opaque one, and no scan */
+    if (key == STDL_TRANSPARENT) {
+        if (s->mask == NULL && p8_mask_alloc(s, 0) < 0) {
+            return -1;
+        }
+        s->colourkey = STDL_TRANSPARENT;
+        s->flags |= STDL_SRCKEY;
         return 0;
     }
     if (p8_mask_alloc(s, 0) < 0) {
@@ -209,13 +231,28 @@ static __inline__ void p8_op(uint32_t *g, uint32_t m, const uint32_t pat[4],
 }
 
 /* the mask's bits under what was drawn cleared, as the planar fills
- * do: pixels drawn are opaque */
-static void p8_mask_row(uint16_t *m, int g0, int g1, unsigned lm,
-                        unsigned rm)
+ * do: pixels drawn are opaque; set for a hole. Inline, and the clear
+ * written as it was before holes, so a blit's constant 0 leaves its
+ * code as it was: a called helper changed the registers of the whole
+ * blit, and a TT's restores took 3% longer */
+static __inline__ void p8_mask_row(uint16_t *m, int g0, int g1,
+                                   unsigned lm, unsigned rm, int hole)
 {
     int g;
 
     m += g0;
+    if (hole) {
+        if (g0 == g1) {
+            *m |= (uint16_t)(lm & rm);
+            return;
+        }
+        *m++ |= (uint16_t)lm;
+        for (g = g1 - g0 - 1; --g >= 0; ) {
+            *m++ = 0xFFFFu;
+        }
+        *m |= (uint16_t)rm;
+        return;
+    }
     if (g0 == g1) {
         *m &= (uint16_t)~(lm & rm);
         return;
@@ -232,6 +269,7 @@ static void p8_rows(STDL_Surface *s, int x1, int x2, int y1, int y2,
                     unsigned c, int op)
 {
     const int g0 = x1 >> 4, g1 = x2 >> 4;
+    const int hole = p8_hole(s, c, op);
     unsigned lm = 0xFFFFu >> (x1 & 15);
     unsigned rm = (0xFFFFu << (15 - (x2 & 15))) & 0xFFFFu;
     uint32_t pat[4], ml, mr;
@@ -244,7 +282,7 @@ static void p8_rows(STDL_Surface *s, int x1, int x2, int y1, int y2,
     }
     ml = p8_m32(lm);
     mr = p8_m32(rm);
-    p8_pat(c, pat);
+    p8_pat(hole ? 0 : c, pat);
     for (y = y1; y <= y2; y++, row += s->stride) {
         uint32_t *d = (uint32_t *)row;
 
@@ -267,7 +305,8 @@ static void p8_rows(STDL_Surface *s, int x1, int x2, int y1, int y2,
         if (s->mask != NULL) {
             p8_mask_row((uint16_t *)(s->mask
                                      + stdl_row_off(y, s->maskstride)),
-                        g0, g1, lm, rm);
+                        g0, g1, lm, rm, hole);
+            s->opaque_state = 0;
         }
     }
     resp_touch(s, x1, y1, x2, y2);
@@ -444,8 +483,17 @@ static void p8_put_pixel(STDL_Surface *d, int x, int y, uint8_t c)
         || y < d->clip.y || y >= d->clip.y + d->clip.h) {
         return;
     }
-    p8_set(d, x, y, c);
-    p8_mclear(d, y, x >> 4, 0x8000u >> (x & 15));
+    if (p8_hole(d, c, STDL_DRAW_SET)) {
+        p8_set(d, x, y, 0);
+        ((uint16_t *)(d->mask + stdl_row_off(y, d->maskstride)))[x >> 4]
+            |= (uint16_t)(0x8000u >> (x & 15));
+    } else {
+        p8_set(d, x, y, c);
+        p8_mclear(d, y, x >> 4, 0x8000u >> (x & 15));
+    }
+    if (d->mask != NULL) {
+        d->opaque_state = 0;
+    }
     resp_touch(d, x, y, x, y);
 }
 
@@ -579,7 +627,7 @@ static void p8_copy_row(const uint8_t *srow, uint8_t *drow,
         p8_merge(d, p8_m32(rm), s);
     }
     if (dmrow != NULL) {
-        p8_mask_row(dmrow, g0, g1, lm, rm);
+        p8_mask_row(dmrow, g0, g1, lm, rm, 0);
     }
 }
 
@@ -758,6 +806,9 @@ static int p8_blit(STDL_Surface *src, const STDL_Rect *srcrect,
                              + stdl_row_off(dy + y, dst->maskstride)) : NULL,
                     sx, dx, w);
     }
+    /* whether or not there is a mask: testing for one kept a value on
+     * the stack through the whole blit */
+    dst->opaque_state = 0;
     resp_touch(dst, dx, dy, dx + w - 1, dy + h - 1);
     return 0;
 }
@@ -1247,10 +1298,11 @@ static void p8_remap(STDL_Surface *s, const uint8_t map[16])
 static void p8_cover(STDL_Surface *d, STDL_Surface *scratch, int g0,
                      int ng, int y0, int h, uint8_t c, int op)
 {
+    const int hole = p8_hole(d, c, op);
     uint32_t pat[4];
     int y, g;
 
-    p8_pat(c, pat);
+    p8_pat(hole ? 0 : c, pat);
     for (y = 0; y < h; y++) {
         uint16_t *sw = (uint16_t *)(scratch->pixels
                                     + stdl_row_off(y, scratch->stride));
@@ -1268,10 +1320,13 @@ static void p8_cover(STDL_Surface *d, STDL_Surface *scratch, int g0,
                 sw[0] = 0;
                 p8_op(dg, p8_m32(m), pat, op);
                 if (mw != NULL) {
-                    mw[g] &= (uint16_t)~m;
+                    mw[g] = (uint16_t)(hole ? mw[g] | m : mw[g] & ~m);
                 }
             }
         }
+    }
+    if (d->mask != NULL) {
+        d->opaque_state = 0;
     }
     resp_touch(d, g0 << 4, y0, ((g0 + ng) << 4) - 1, y0 + h - 1);
 }
@@ -1415,6 +1470,9 @@ static void p8_blit_indexed8(STDL_Surface *d, const uint8_t *src, int pitch,
             }
         }
     }
+    if (d->mask != NULL) {
+        d->opaque_state = 0;
+    }
     resp_touch(d, x, y, x + w - 1, y + h - 1);
 }
 
@@ -1431,11 +1489,19 @@ static STDL_Surface *p8_dup(STDL_Surface *s)
         memcpy(d->pixels + stdl_row_off(y, d->stride),
                s->pixels + stdl_row_off(y, s->stride), bytes);
     }
-    /* as STDL_DuplicateSurface: a keyed surface's mask is made again
-     * from its key, not copied */
-    if ((s->flags & STDL_SRCKEY) && p8_set_key(d, 1, s->colourkey) < 0) {
-        p8_free_surface(d);
-        return NULL;
+    /* as STDL_DuplicateSurface: the mask itself, not one scanned from
+     * the key */
+    if (s->mask != NULL) {
+        if (p8_mask_alloc(d, 0) < 0) {
+            p8_free_surface(d);
+            return NULL;
+        }
+        for (y = 0; y < s->h; y++) {
+            memcpy(d->mask + stdl_row_off(y, d->maskstride),
+                   s->mask + stdl_row_off(y, s->maskstride), d->maskstride);
+        }
+        d->flags = (d->flags & ~STDL_SRCKEY) | (s->flags & STDL_SRCKEY);
+        d->colourkey = s->colourkey;
     }
     return d;
 }
@@ -1464,6 +1530,7 @@ static void p8_put_group(STDL_Surface *s, int x, int y,
     grp[4] = grp[5] = grp[6] = grp[7] = 0;
     if (s->mask != NULL) {
         ((uint16_t *)(s->mask + stdl_row_off(y, s->maskstride)))[g] = mask;
+        s->opaque_state = 0;
     }
     resp_touch(s, g << 4, y, (g << 4) + 15, y);
 }
@@ -1484,6 +1551,7 @@ static void p8_put_group8(STDL_Surface *s, int x, int y,
     }
     if (s->mask != NULL) {
         s->mask[stdl_row_off(y, s->maskstride) + g * 2 + half] = transmask;
+        s->opaque_state = 0;
     }
     resp_touch(s, (x >> 3) << 3, y, ((x >> 3) << 3) + 7, y);
 }

@@ -18,6 +18,7 @@ STDL_Surface stdl_screen;
 void (*stdl_shutdown_audio)(void);
 void (*stdl_shutdown_music)(void);
 void (*stdl_shutdown_vbl)(void);
+void (*stdl_shutdown_console)(void);
 void (*stdl_shutdown_overscan)(void);
 void (*stdl_shutdown_hwscroll)(void);
 void (*stdl_shutdown_rasters)(void);
@@ -370,6 +371,11 @@ static void release_hardware(void)
     if (stdl_shutdown_vbl != NULL) {
         stdl_shutdown_vbl();
         stdl_shutdown_vbl = NULL;
+    }
+    if (stdl_shutdown_console != NULL) {
+        /* TOS's console vectors (responsive.c) */
+        stdl_shutdown_console();
+        stdl_shutdown_console = NULL;
     }
     /* staging's flush went with the VBL slots; writes are immediate
      * again, and staging starts afresh if the program inits again */

@@ -568,14 +568,39 @@ warnings** with the Makefile's `-Wall -Wextra`.
   program asking for the height links none of the border code: TALLHGT
   is 8,698 bytes smaller than TALLCHK stripped, as is the colour's
   pair. TALL wins where a program asks for both.
-- **The 16-colour tall screen's cost on a TT is not measured.** ST Low
+- **The 16-colour tall screen costs a TT 6.6-7.5ms a frame.** ST Low
   costs a TT nothing, but TT Low is 8 planes, so without the colour
   every Flip compares the whole 4-plane page with the display (20
-  groups by 240 rows, two longs each) and copies what changed. A
-  program choosing HEIGHT or TALL for a TT gives up that time for its
-  40 rows; with the colour the screen is 8 planes already, and Flip
-  copies only the box drawn, as at 200 rows. Time it (TALLCHK with a frame clock, or a game's bench)
-  before recommending the 16-colour tall screen for a TT game.
+  groups by 240 rows, two longs each) and copies what changed. One
+  port's bench (Hatari, a TT with no TT-RAM, 600 frames of play): the
+  drawing took 3.8ms a frame, as on ST Low, and the present 6.6 and
+  7.5ms in two builds of the same tall4.c, for 175 groups copied - the
+  compare's 75K of ST-RAM reads are the cost, not the copy, and where
+  the pages fall moves it. The colour at 200 rows presented in 4.1ms,
+  the box drawn (1,837 groups). So on a TT the tall 16-colour screen
+  costs more than the colour; recommend it there only with that cost.
+- **The console tells a TT's Flip when it has written.** TOS writes
+  its text to page 0 (its Logbase since the mode set) in TT Low's own
+  layout: all eight planes, both lines of each row, the bands too. The
+  tall 16-colour screen's compare reads planes 0-3 of the even lines,
+  and the 8-plane screen copies the box drawn to the odd lines, so text
+  printed after the mode set showed through the picture for good (that
+  bench's start-up lines, dark over the play, and its hashes moving
+  with what was printed). Comparing all eight planes on both lines
+  would have tripled the compare's reads, and a clear at the mode set
+  comes before the text. So responsive.c chains a hook onto TOS's
+  xconout vectors (CON: and the raw console, $57E), which every
+  character to the screen goes through: it sets a flag and goes on to
+  TOS's routine, and the Flip that next shows page 0 clears its bands
+  and presents it whole. Nothing a frame where nothing was printed, and
+  once after printing (CONCHK on a TT in Hatari) 13.6ms against 7.7 on
+  the tall 16-colour screen, and 10.4 against 8.8 with the colour,
+  whose box was the whole screen already: its bands. The
+  vectors go back in release_hardware (`stdl_shutdown_console`), and a
+  second mode set does not chain the hook onto itself. A Falcon's
+  console writes the program's own page, as an ST's does, so it has no
+  hook. `tests/hatari/conchk.c` (CONCHK, CONCOL with the colour) prints
+  in the middle of play and times the present.
 - **Bound a group by the surface's width, not its stride.** A Falcon's
   overscan line is 384 pixels with the 320 centred, so the screen's
   stride runs past the picture: STDL_PutGroup on an 8-plane screen,

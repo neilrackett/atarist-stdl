@@ -321,6 +321,7 @@ extern void (*stdl_cursor_hook)(int x, int y);
 extern void (*stdl_shutdown_audio)(void);
 extern void (*stdl_shutdown_music)(void);
 extern void (*stdl_shutdown_vbl)(void);
+extern void (*stdl_shutdown_console)(void);
 extern void (*stdl_shutdown_overscan)(void);
 /* a Falcon's sound crossbar, put back as the program found it (audio.c
  * routes the DMA to the DAC on its first start): registers and the

@@ -28,7 +28,12 @@
  *   and has nothing to do on a Falcon. Colours run 0-255 in every call
  *   that takes one; 4-plane data drawn onto one (a surface or a sprite
  *   made before the screen, an image a loader returns, STDL_PutGroup)
- *   keeps its colours 0-15.
+ *   keeps its colours 0-15. STDL_TRANSPARENT keeps its 4-plane meaning
+ *   on a surface with a mask: a fill, line, pixel or polygon SET in it
+ *   punches a hole over colour 0, and a key of it keeps the mask
+ *   (stdl_surface.h), so a program's composition draws the same on
+ *   both. On a surface with no mask, the screen among them, 16 is a
+ *   colour like any other.
  *
  * STDL_RESPONSIVE_TALL: a 320x240 screen, asked for with a height over
  *   200, on every machine.
@@ -68,7 +73,11 @@
  * The mode set moves the console's cursor below the rows a centred
  * screen leaves above it, so text printed after it lands in the
  * picture, as on an ST; text a program puts there with its own cursor
- * escapes lands where it says.
+ * escapes lands where it says. On a TT the console writes the display,
+ * not the screen alone: the Flip after it has printed shows what the
+ * screen holds and clears what is round it. A tall 16-colour screen
+ * never holds the text, so the text goes; on a 256-colour one it stays
+ * until the program draws over it, as on an ST.
  *
  * STDL_UpdateRects tells an 8-plane screen what a program wrote to its
  * pixels itself, as SDL_UpdateRect would; the library's own calls need

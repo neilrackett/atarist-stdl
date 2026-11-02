@@ -71,15 +71,37 @@ static void t4_screen_free(void)
  * never written, so they stay at the zero the page was cleared to */
 static void t4_present(int p, const resp_box *b)
 {
-    const uint8_t *src = t4_page[p]->pixels;
-    uint8_t *dst = stdl_rs.page[p]
-                 + stdl_row_off(stdl_rs.top, (uint16_t)stdl_rs.line);
     const int line = stdl_rs.line, ng = stdl_rs.w >> 4;
+    const uint8_t *src;
+    uint8_t *dst;
     uint32_t cells = 0;
     int y, g;
 
     (void)b;
+    /* before the page is read: a Falcon has none */
     if (stdl_rs.falcon) {
+        return;
+    }
+    src = t4_page[p]->pixels;
+    dst = stdl_rs.page[p] + stdl_row_off(stdl_rs.top, (uint16_t)line);
+    if (stdl_rs.whole) {
+        /* the console wrote it: every group, all eight planes of both
+         * lines, so its upper planes and its odd lines go too */
+        for (y = stdl_rs.h; --y >= 0; src += t4_page[p]->stride,
+             dst += 2 * line) {
+            const uint32_t *s = (const uint32_t *)src;
+            uint32_t *d = (uint32_t *)dst;
+
+            for (g = ng; --g >= 0; s += 2, d += 4, cells++) {
+                uint32_t *e = (uint32_t *)((uint8_t *)d + line);
+
+                d[0] = e[0] = s[0];
+                d[1] = e[1] = s[1];
+                d[2] = e[2] = 0;
+                d[3] = e[3] = 0;
+            }
+        }
+        stdl_rs.stats.groups += cells;
         return;
     }
     for (y = stdl_rs.h; --y >= 0; src += t4_page[p]->stride,

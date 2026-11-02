@@ -57,6 +57,8 @@ typedef struct {
     uint8_t dbl;                /* a TT: each row on two lines        */
     uint8_t falcon;
     uint8_t back;               /* the page drawn into                */
+    uint8_t whole;              /* this present: the page whole, as the
+                                   console wrote it (responsive.c)    */
     resp_box box[2];            /* drawn on each since it was shown   */
     const STDL_Surface *track;  /* the screen, where present reads the
                                    box; NULL where it never does      */
@@ -67,6 +69,7 @@ typedef struct {
 } resp_state;
 
 extern resp_state stdl_rs;
+extern volatile uint8_t stdl_resp_con_wrote;
 
 /* what drawing on an 8-plane screen changed: the page drawn into owes
  * it; none of it where the present reads no box (a Falcon) */

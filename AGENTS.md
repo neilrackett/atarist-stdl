@@ -115,7 +115,9 @@ warnings** with the Makefile's `-Wall -Wextra`.
   bytes buy, and a view on which machines still have to fit.
 - **Size is a test result too.** `stcmd make` runs a `sizecheck`
   target that fails the build if the pixel-path objects outgrow
-  `PIXEL_MAX` in the Makefile. The archive links whole objects into
+  `PIXEL_MAX` in the Makefile, or the responsive screens' own objects
+  (`responsive.o`, `planes8.o`, `tall4.o`: a program asking for the
+  colour links 21.8K of them) outgrow `RESP_MAX`. The archive links whole objects into
   programs with 512K-1M of RAM to share between code and heap, so
   library text spends the port's memory: a 12K growth in the
   pixel-path objects (four `STDL_PLANE_DISPATCH` instantiations,

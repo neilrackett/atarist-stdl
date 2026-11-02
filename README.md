@@ -4,27 +4,40 @@
 
 # STDL - Atari ST DirectMedia Layer
 
-An easier way to port SDL games to the Atari ST, by [Neil Rackett](https://neilrackett.com/atarist).
+An easier way to create games and port SDL 1.2 content to the Atari ST,
+TT & Falcon, by [Neil Rackett](https://neilrackett.com/atarist).
 
 ## Introduction
 
-STDL is a planar-native library for porting SDL 1.2 games to the Atari ST.
+STDL is a planar-native library for creating high performance games and
+porting SDL 1.2 content to the Atari ST, TT & Falcon.
+
+It enables you to create a single binary that works on any computer in the
+Atari ST family, with progressive enhancement baked into its core:
+
+- Create games that run in ST low res on any ST compatible computer
+- Add 256 colour graphics if you want to enhance it on Atari TT and Falcon
+- Use all 240 lines of a TT or Falcon display, or a 320x240 screen on every
+  machine, with the ST's bottom border opened for it
+
+Each is an option your game asks for by name (`stdl_responsive.h`), and a
+game that asks for none runs exactly as it does on an ST.
 
 ### Why not just use SDL?
 
-SDL 1.2 is great for TT and Falcon, which both support chunky at 256 colours,
-but on a stock ST there's no chunky mode and SDL needs c2p on every frame.
-The framework overhead therefore means you'll maybe get 3-5fps if you're lucky,
-and even then there's no colour support and everything's greyscale.
+If you only want to target TT and/or Falcon, SDL 1.2 is a great option,
+but on a stock ST it's just not a viable option: SDL needs c2p on every frame,
+the framework uses more than half the RAM on a 512KB ST before you've written
+a single line of code and the framework overhead means it's more slideshow
+than game, and even then there's no colour support and everything's greyscale.
 
-STDL is 16 colours, four bitplanes, and no conversion step. 50-60fps is truly
-achievable.
+With STDL, it's in full colour and 50-60fps is truly achievable.
 
 ### What STDL does differently
 
-There is no chunky backbuffer and no c2p anywhere in the pipeline: ST
-interleaved planar is the native format, assets are converted offline, and
-spans, rects and blits are the primary verbs.
+There is no chunky backbuffer and no c2p anywhere in the pipeline: interleaved
+planar is the native format, assets are converted offline, and spans, rects and
+blits are the primary verbs.
 
 For engines that decode byte-per-pixel sprite frames at runtime,
 `STDL_BlitIndexed8` draws chunky frames straight into the planes through a
@@ -200,8 +213,10 @@ An earlier build may have left orphaned `.o` files next to the sources;
 
 ## Status
 
-320x200, 4 planes, 16 colours. The library and the SDL 1.2
-test-suite ports below all run under EmuTOS/TOS on Hatari:
+320x200, 4 planes, 16 colours on every machine; with `stdl_responsive.h`,
+256 colours and 320x240 on a TT or a Falcon, and 320x240 on an ST with its
+bottom border open. The library and the SDL 1.2 test-suite ports below all
+run under EmuTOS/TOS on Hatari:
 
 | Example      | Exercises                                                                        |
 | ------------ | -------------------------------------------------------------------------------- |
@@ -229,6 +244,7 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | BLITCHK.TOS  | BLiTTER vs CPU byte-identical verification at three plane budgets + timing       |
 | VBLCHK.TOS   | 50Hz VBL callbacks, then an abnormal exit - the desktop coming back is the pass  |
 | OVERSCAN.TOS | border overscan: T top (228), B bottom (245), both combine (273), SPACE closes   |
+| RESPDEMO.TOS | one binary, each machine's best screen: 256 colours and 240 rows on a TT or Falcon |
 
 Large fills and blits are BLiTTER-accelerated where the hardware has
 one, unaligned blits included - the BLiTTER shifts them itself (a

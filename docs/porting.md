@@ -173,11 +173,11 @@ time, not at runtime.
 | SDL 1.2 | STDL | Notes |
 |---|---|---|
 | `SDL_Init` / `SDL_Quit` | `STDL_Init` / `STDL_Quit` | enters supervisor mode for the program's lifetime |
-| `SDL_SetVideoMode` | `STDL_SetVideoMode` | w/h/bpp ignored; always 320x200x4 |
+| `SDL_SetVideoMode` | `STDL_SetVideoMode` | w/h/bpp ignored, always 320x200x4, unless the program asked for a responsive option (`stdl_responsive.h`): then bpp 8 is the colour and h over 200 the tall screen |
 | `SDL_BlitSurface` | `STDL_BlitSurface` | full SDL semantics incl. dstrect writeback |
 | `SDL_FillRect` | wrapper | colour is a palette index, not mapped RGB |
 | `SDL_Flip` | `STDL_Flip` | VBL-synced; page flip with `SDL_DOUBLEBUF`, including while an overscan border is open; `STDL_TRIPLEBUF` adds a third page so a frame longer than a VBL is not rounded up to whole VBLs |
-| `SDL_UpdateRect(s)` | no-op | single-buffer rendering is direct to screen RAM |
+| `SDL_UpdateRect(s)` | no-op | single-buffer rendering is direct to screen RAM; on a responsive 8-plane screen it says what the program wrote to the pixels itself |
 | `SDL_MapRGB` | `STDL_MapRGB` | nearest palette index |
 | `SDL_LockSurface` | no-op | surfaces are always addressable |
 | `SDL_MUSTLOCK` | `0` | |
@@ -296,7 +296,11 @@ is switched to 50Hz while a border is open and restored on close.
 It fails cleanly (returns 0) where the hardware has no GLUE borders
 (TT/Falcon), or while rasters are open (`STDL_OpenRasters`; both run
 on Timer B and each refuses the other), so keep one of the other two
-mappings as the fallback and choose at init.
+mappings as the fallback and choose at init. Or ask for the tall
+screen (next section): `STDL_RESPONSIVE_TALL` is 320x240 on every
+machine, an ST's bottom border opened for 240 of its 245 lines and a
+TT's and a Falcon's own 240, and `STDL_RESPONSIVE_HEIGHT` the 240 only
+where the display has them.
 
 Rasters - one or two colour registers changed every few lines down
 the picture - are `STDL_OpenRasters(lines, reg1, reg2)`: fill
@@ -349,6 +353,50 @@ Full-page screen updates should start at the VBL
 (`STDL_WaitVBL`) so the copy stays ahead of the beam - the display
 starts 29 lines earlier with the top border open, and an unsynced
 full-page copy tears intermittently.
+
+## More colours and lines on a TT or a Falcon
+
+An ST game runs on a TT or a Falcon as it is (ST-specific gotchas,
+below). What they add - 256 colours, and 240 lines - a game asks for by
+name with `STDL_UseResponsive` (`stdl_responsive.h`), once, before the
+first `STDL_SetVideoMode`. Nothing changes for a game that does not
+ask, and one binary serves every machine:
+
+```c
+STDL_UseResponsive(STDL_RESPONSIVE_COLOUR | STDL_RESPONSIVE_HEIGHT);
+screen = STDL_SetVideoMode(320, 240, 8, STDL_DOUBLEBUF);
+deep = screen->format->BitsPerPixel == 8;   /* 256 colours, or 16 */
+rows = screen->h;                           /* 240, or 200 */
+```
+
+* **Branch on the screen, not the machine.** `BitsPerPixel` and `h`
+  say what was given: an ST answers 4 and 200, or 240 with
+  `STDL_RESPONSIVE_TALL`, its bottom border open.
+* **Colours.** Every call takes 0-255 on an 8-plane screen. Keep 0-15
+  the ST's palette and put the extra shades above them: text, the HUD
+  and anything drawn from 4-plane data (a surface made before the
+  screen, a loader's image, `STDL_PutGroup`) keep 0-15, so they look
+  the same on both. One port put its ramps of 32 shades at 64-255.
+* **Surfaces** created while an 8-plane screen is up have 8 planes,
+  and blit and sprite onto each other as usual. What they refuse,
+  each setting the error and drawing nothing: a blit or a sprite from
+  8 planes onto 4, the blit flags (UNDER, MARK), patterned polygons,
+  tilesets and the cursor. `STDL_TRANSPARENT` punches holes in a
+  masked one as on 4 planes.
+* **Pixels a program writes itself**: tell an 8-plane screen with
+  `STDL_UpdateRects` (`SDL_UpdateRect`); the tall 16-colour screen
+  needs nothing, as a TT compares its whole page.
+* **What it costs.** The colour's code is about 21K of program: on a
+  512K ST link libcmini (one port kept 112K free with it). A TT copies
+  what changed to its doubled lines at every Flip, 4.1ms a frame for
+  one port with the colour; its tall 16-colour screen compares the
+  whole page instead, 6.6-7.5ms, more than the colour. A Falcon's
+  screen is the display itself, with nothing to copy. A responsive
+  screen there is always double-buffered (`STDL_TRIPLEBUF` is
+  ignored).
+* **Console text** printed after the mode set lands in the picture, as
+  on an ST; on a TT the next Flip shows the screen as the program
+  drew it.
 
 ## Rewrite patterns
 

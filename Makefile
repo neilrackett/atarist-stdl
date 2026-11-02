@@ -62,7 +62,7 @@ EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
            dist/BLITCHK.TOS dist/VBLCHK.TOS dist/OVERSCAN.TOS \
            dist/HWSCROLL.TOS dist/TONEDEMO.TOS dist/OPLDEMO.TOS \
            dist/MUSICVU.TOS dist/POLYDEMO.TOS dist/PATDEMO.TOS \
-           dist/RASTERS.TOS
+           dist/RASTERS.TOS dist/RESPDEMO.TOS
 
 # Pinned, not left to ordering: a rule added above this one would
 # silently become the default goal, and `make` would then build
@@ -125,11 +125,24 @@ PIXEL_OBJS = $(addprefix $(OBJDIR)/src/,draw.o blit.o sprite.o \
              surface.o blitter.o)
 PIXEL_MAX  = 35300
 
-sizecheck: $(PIXEL_OBJS)
+# The responsive screens' own code (stdl_responsive.h), which only a
+# program that asks for an option links: the colour is responsive.o
+# and planes8.o, 21.8K, the tall screen alone responsive.o and tall4.o,
+# 4.7K. A title for a 512K ST pays it in free memory as well as on
+# disk, so it has a budget of its own: 22,452 bytes on 2026-11-02.
+RESP_OBJS  = $(addprefix $(OBJDIR)/src/,responsive.o planes8.o tall4.o)
+RESP_MAX   = 22600
+
+sizecheck: $(PIXEL_OBJS) $(RESP_OBJS)
 	@n=`$(CROSS)size $(PIXEL_OBJS) | awk 'NR>1 {t+=$$1} END {print t}'`; \
 	 echo "pixel-path text $$n bytes (budget $(PIXEL_MAX))"; \
 	 if [ $$n -gt $(PIXEL_MAX) ]; then \
 	   echo "*** over the pixel-path size budget"; exit 1; \
+	 fi
+	@n=`$(CROSS)size $(RESP_OBJS) | awk 'NR>1 {t+=$$1} END {print t}'`; \
+	 echo "responsive text $$n bytes (budget $(RESP_MAX))"; \
+	 if [ $$n -gt $(RESP_MAX) ]; then \
+	   echo "*** over the responsive size budget"; exit 1; \
 	 fi
 
 # Calls into libgcc's arithmetic, per function, against an allowlist.
@@ -254,6 +267,8 @@ dist/POLYDEMO.TOS: examples/polydemo.c $(LIB)
 dist/PATDEMO.TOS: examples/patdemo.c $(LIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
 dist/RASTERS.TOS: examples/rasters.c $(LIB)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
+dist/RESPDEMO.TOS: examples/respdemo.c $(LIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
 dist/OPLDEMO.TOS: examples/opldemo.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@

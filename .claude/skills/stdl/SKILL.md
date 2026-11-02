@@ -1,15 +1,17 @@
 ---
 name: stdl
-description: Port SDL 1.2 games to the Atari ST with STDL, the planar-native SDL subset. Use when porting SDL 1.x code to Atari ST/STE/Mega STE, writing STDL code, converting game assets to ST planar format, or debugging planar rendering. Covers the surface format contract, API costs, SDL-to-STDL rewrite patterns, stdlconv usage and the Hatari test loop.
+description: Write Atari ST games and port SDL 1.2 games with STDL, the planar-native SDL-style library. Use when writing STDL code or porting SDL 1.x code for the Atari ST/STE/Mega STE (with 256 colours and 320x240 on a TT or Falcon where the game asks), converting game assets to ST planar format, or debugging planar rendering. Covers the surface format contract, API costs, SDL-to-STDL rewrite patterns, the responsive screens, stdlconv usage and the Hatari test loop.
 ---
 
-# STDL (Atari ST DirectMedia Layer) - porting SDL 1.2 games to the Atari ST
+# STDL (Atari ST DirectMedia Layer) - writing and porting games for the Atari ST family
 
-STDL is a deliberately incomplete, planar-native subset of SDL 1.2.
+STDL is a planar-native library for writing ST games and porting
+SDL 1.2 ones: its API a deliberately incomplete subset of SDL 1.2's.
 There is no chunky backbuffer and no c2p pass anywhere: assets are
 converted to ST interleaved planar offline, and spans/rects/blits
-are the primary verbs. The screen is always 320x200, 4 planes,
-16 colours.
+are the primary verbs. The screen is 320x200, 4 planes, 16 colours
+on every machine, unless a game asks for more where a machine has
+it (a TT or a Falcon, below).
 
 **What to target.** A plain 8MHz ST with 1MB is the machine a port
 has to run on: 68000, no blitter, no DMA audio, 512K-1M of RAM for
@@ -34,24 +36,48 @@ the answer - if a port only runs on a Mega STE, the rendering needs
 fixing, not the target raising. Measure on `MACHINE=st` before
 believing any frame-rate claim.
 
-**Targeting a TT or Falcon rather than an ST?** Use Atari SDL 1.2 instead
-(runs on plain TOS, no MiNT): those machines have 256 colours,
-and TT line-doubles 320x240 so one binary covers both. Their 256-colour
-modes are eight interleaved planes, so SDL converts its chunky surface
-at every update; and one port measured, in Hatari, that SDL's doubled
-TT mode puts an `SDL_UpdateRects` box that does not start at the top on
-line y rather than 2y (whole-screen `SDL_Flip` is right). STDL's input
-needs no STDL screen there: `STDL_OpenInput` takes the keyboard, mouse,
-joystick and pad under a mode the program set itself. An ST build
-still runs on a TT or a Falcon, as an STE in ST Low: the display rate
-is measured there (music keeps its tempo at their 60Hz), a Falcon plays
-6258Hz sound at 12517 (`STDL_PlaySample` from a copy), its crossbar is
-routed and put back, the desktop's mode and colours come back at exit,
-and borders, hardware scrolling and rasters are refused. STDL exists for
-the ST, where there is no chunky mode at all: SDL degrades to
-greyscale derived from luminance and c2ps every frame, which is
-unusably slow past the basics. A 68030 also has hardware 32-bit multiply
-and divide, so most of the cost notes below do not apply there.
+**On a TT or a Falcon an ST game runs as it is**, as an STE in ST
+Low: the display rate is measured there (music keeps its tempo at
+their 60Hz), a Falcon plays 6258Hz sound at 12517 (`STDL_PlaySample`
+from a copy), its crossbar is routed and put back, the desktop's mode
+and colours come back at exit, and borders, hardware scrolling and
+rasters are refused. A 68030 also has hardware 32-bit multiply and
+divide, so most of the cost notes below do not apply there.
+
+**Making an ST game better on a TT or a Falcon?** Ask for each thing
+by name, once, before the first `STDL_SetVideoMode`
+(`stdl_responsive.h`), and nothing changes for a game that does not:
+- `STDL_RESPONSIVE_COLOUR`, with a bpp of 8: 256 colours on a TT or a
+  Falcon, its surfaces eight planes in the display's own layout; an
+  ST's 16 colours on an ST.
+- `STDL_RESPONSIVE_HEIGHT`, with a height of 240: 240 rows on a TT or
+  a Falcon, an ST's own 200 there; `STDL_RESPONSIVE_TALL` opens an
+  ST's bottom border for 240 rows on every machine.
+
+Then branch on what the screen says - `format->BitsPerPixel` and `h` -
+never on the machine. Keep colours 0-15 the ST's palette, so text and
+the HUD look the same everywhere, and put the extra shades above them.
+What it costs: the colour's code is about 21K of program (on a 512K ST
+link libcmini - one port kept 112K free with it); a TT copies what
+changed to its doubled lines at every Flip (one port: 4.1ms a frame
+with the colour), and its tall 16-colour screen compares the whole
+page instead (6.6-7.5ms, more than the colour). An 8-plane surface
+does not take a blit or sprite onto a 4-plane one, the blit flags,
+patterned polygons, tilesets or the cursor (each sets the error and
+draws nothing); `STDL_TRANSPARENT` keeps its meaning on a masked one.
+
+**A TT- or Falcon-only SDL port?** Use Atari SDL 1.2 (plain TOS, no
+MiNT): those machines have 256 colours, and TT line-doubles 320x240 so
+one binary covers both. Their 256-colour modes are eight interleaved
+planes, so SDL converts its chunky surface at every update; and one
+port measured, in Hatari, that SDL's doubled TT mode puts an
+`SDL_UpdateRects` box that does not start at the top on line y rather
+than 2y (whole-screen `SDL_Flip` is right). STDL's input needs no STDL
+screen there: `STDL_OpenInput` takes the keyboard, mouse, joystick and
+pad under a mode the program set itself. On an ST there is no chunky
+mode at all: SDL degrades to greyscale derived from luminance and c2ps
+every frame, which is unusably slow past the basics - which is why
+STDL exists.
 
 **Changing STDL itself?** A port often wants a primitive the
 library does not have yet, and adding it there beats hand-rolling

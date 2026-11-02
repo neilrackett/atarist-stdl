@@ -69,7 +69,7 @@ test_polypat:   $(SRC)/polypat.c $(SRC)/polygon.c $(SRC)/surfacefrom.c
 test_raster:    $(SRC)/raster.c $(SRC)/vbl.c
 test_spritebatch: $(SRC)/spritebatch.c
 test_responsive: $(SRC)/responsive.c $(SRC)/planes8.c $(SRC)/tall4.c \
-                 $(SRC)/tallst.c p8ref.c \
+                 $(SRC)/tallst.c $(SRC)/hz38400.c p8ref.c \
                  $(SRC)/drawchar.c $(SRC)/blit8.c $(SRC)/polygon.c \
                  $(SRC)/spritebatch.c
 # built with the counters, for stdl_blit_force: every operation the

@@ -97,7 +97,7 @@ static void t4_present(int p, const resp_box *b)
             }
         }
     }
-    stdl_rs.stats.cells += cells;
+    stdl_rs.stats.groups += cells;
 }
 
 /* no ops: its surfaces have 4 planes, and are made and drawn as an

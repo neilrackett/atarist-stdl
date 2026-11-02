@@ -25,7 +25,6 @@
 #ifdef __m68k__
 #include <osbind.h>
 #include <mint/falcon.h>
-#define MFP_TCDR    (*(volatile uint8_t *)0xFFFFFA23UL)
 #else
 /* host tests: the machine the screen is set on, a TT unless these say
  * a Falcon, on VGA or RGB */
@@ -136,34 +135,11 @@ void resp_touch_points(const STDL_Surface *d, const STDL_Point *p, int n)
 }
 
 /* ---------------------------------------------------------------- */
-/* the clock and the bench                                          */
+/* the bench's view of Flip (stdl_bench.h)                          */
 
-uint32_t STDL_RespClock(void)
-{
-#ifdef __m68k__
-    uint32_t t;
-    uint8_t c;
-
-    /* Timer C counts 192 down to 1 a 200Hz tick; read again if the
-     * tick moved on between the two reads */
-    do {
-        t = STDL_HZ200;
-        c = MFP_TCDR;
-    } while (t != STDL_HZ200);
-    return (t << 7) + (t << 6) + (uint32_t)(192 - c);
-#else
-    return (STDL_HZ200 << 7) + (STDL_HZ200 << 6);
-#endif
-}
-
-STDL_RespStats *STDL_RespGetStats(void)
+const STDL_PresentStats *STDL_GetPresentStats(void)
 {
     return &stdl_rs.stats;
-}
-
-void STDL_RespBench(unsigned flags)
-{
-    stdl_rs.bench = flags;
 }
 
 /* ---------------------------------------------------------------- */
@@ -404,23 +380,21 @@ void resp_flip(void)
     resp_box *b = &stdl_rs.box[stdl_rs.back];
 
     if (stdl_rs.model->present != NULL) {
-        const uint32_t t0 = STDL_RespClock();
+        const uint32_t t0 = STDL_GetHz38400();
 
         stdl_rs.model->present(stdl_rs.back, b);
-        stdl_rs.stats.present += STDL_RespClock() - t0;
+        stdl_rs.stats.present_time += STDL_GetHz38400() - t0;
     }
     b->x0 = 1;
     b->x1 = 0;
     stdl_rs.stats.flips++;
-    stdl_rs.stats.page = stdl_rs.page[stdl_rs.back]
-                       + stdl_row_off(stdl_rs.top, (uint16_t)stdl_rs.line);
-    stdl_rs.stats.page_bytes = stdl_row_off(stdl_rs.h << stdl_rs.dbl,
-                                            (uint16_t)stdl_rs.line);
+    stdl_rs.stats.shown = stdl_rs.page[stdl_rs.back]
+                        + stdl_row_off(stdl_rs.top, (uint16_t)stdl_rs.line);
+    stdl_rs.stats.shown_bytes = stdl_row_off(stdl_rs.h << stdl_rs.dbl,
+                                             (uint16_t)stdl_rs.line);
 #ifdef __m68k__
     (void)Setscreen((void *)-1L, stdl_rs.page[stdl_rs.back], -1);
-    if (!(stdl_rs.bench & STDL_RESPB_NOWAIT)) {
-        STDL_WaitVBL();
-    }
+    STDL_WaitVBL();
 #endif
     stdl_rs.back ^= 1;
     stdl_rs.model->screen_page(stdl_rs.back);
@@ -443,5 +417,4 @@ void resp_shutdown(void)
         stdl_rs.page[i] = NULL;
     }
     stdl_rs.page_bytes = 0;
-    stdl_rs.bench = 0;
 }

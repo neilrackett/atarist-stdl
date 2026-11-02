@@ -15,6 +15,7 @@
 
 #include "stdl_internal.h"
 #include <stdl/stdl_responsive.h>
+#include <stdl/stdl_bench.h>
 
 /* rows and pixels inclusive; x0 > x1 is empty */
 typedef struct {
@@ -62,8 +63,7 @@ typedef struct {
     STDL_Colour colours[256];
     STDL_Palette palette;
     STDL_PixelFormat format;
-    unsigned bench;
-    STDL_RespStats stats;
+    STDL_PresentStats stats;
 } resp_state;
 
 extern resp_state stdl_rs;

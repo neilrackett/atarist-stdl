@@ -1095,7 +1095,10 @@ first.
   pacing in ticks. It counts from boot, so take differences - a
   per-phase timer around the frame is how one port found
   that an icon was being re-decoded every frame, 18ms of a 93ms
-  frame nobody would have guessed at.
+  frame nobody would have guessed at. For the parts of a frame
+  shorter than a tick, `STDL_GetHz38400()` is the same clock with
+  the count inside each tick (26us), unless the program reprograms
+  Timer C.
 - Sample music: `STDL_OpenVoices(rate)` is a fixed-function 4-voice
   sample mixer (Paula-style loop/period/volume) driven from the VBL
   with a 50Hz sequencer hook (`STDL_SetVoiceTick`, 50 a second at

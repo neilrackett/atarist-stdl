@@ -549,7 +549,8 @@ warnings** with the Makefile's `-Wall -Wextra`.
   printed named the build. The mode set now moves the console's cursor
   past the margin, into the picture, where the program's drawing covers
   it as an ST's does (a program's own cursor escapes can still put text
-  in the margin); hash the screen's rows anyway (`STDL_RespStats.page`).
+  in the margin); hash the screen's rows anyway (`STDL_PresentStats.shown`,
+  `stdl_bench.h`).
 - **A tall screen in 16 colours needs no hooks** (`STDL_RESPONSIVE_TALL`,
   `src/tall4.c`): an ST opens its bottom border (240 of 245 lines, the
   surface capped by `stdl_ovsc_cap`), a Falcon's 4-bit VIDEL modes are

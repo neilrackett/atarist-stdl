@@ -114,30 +114,6 @@ static __inline__ int STDL_UseResponsive(unsigned what)
         (what & STDL_RESPONSIVE_TALL) ? stdl_resp_tall_st : 0);
 }
 
-/*
- * For measuring the prototype; they go when it is done. STDL_RespClock
- * counts 38,400 a second (the 200Hz clock and the count inside its
- * tick); the stats are in its units. With STDL_RESPB_NOWAIT, Flip asks
- * for the page and does not wait for the VBL, so a frame's time is its
- * own.
- */
-#define STDL_RESPB_NOWAIT 1u
-
-typedef struct {
-    uint32_t flips;
-    uint32_t present;       /* clock units spent presenting          */
-    uint32_t cells;         /* 16-pixel groups copied to the display,
-                             * a row's each                         */
-    const uint8_t *page;    /* the screen's rows on the page the last
-                             * Flip showed (not the margins, where
-                             * the console may have written)       */
-    uint32_t page_bytes;
-} STDL_RespStats;
-
-void STDL_RespBench(unsigned flags);
-STDL_RespStats *STDL_RespGetStats(void);
-uint32_t STDL_RespClock(void);
-
 #ifdef __cplusplus
 }
 #endif

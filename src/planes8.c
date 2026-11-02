@@ -1523,7 +1523,7 @@ static void p8_present(int p, const resp_box *b)
     if (!stdl_rs.dbl || b->x0 > b->x1) {
         return;
     }
-    stdl_rs.stats.cells += stdl_row_off(b->y1 - b->y0 + 1, (uint16_t)ng);
+    stdl_rs.stats.groups += stdl_row_off(b->y1 - b->y0 + 1, (uint16_t)ng);
     row = stdl_rs.page[p] + stdl_row_off(stdl_rs.top + (b->y0 << 1),
                                          (uint16_t)line) + (g0 << 4);
     for (y = b->y0; y <= b->y1; y++, row += 2 * line) {

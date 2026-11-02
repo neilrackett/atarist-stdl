@@ -1507,7 +1507,7 @@ static void test_sprites_wide(void)
  * decoder's (key STDL_TRANSPARENT), a hole punched after keying; and a
  * borrowed source wider than the copy is copied a row at a time.
  */
-static int mask_at(const STDL_Surface *s, int x, int y)
+static int mask_bit(const STDL_Surface *s, int x, int y)
 {
     const uint16_t *m = (const uint16_t *)(s->mask
                                            + (size_t)y * s->maskstride);
@@ -1534,10 +1534,10 @@ static void test_duplicate(void)
           && d->colourkey == s->colourkey, "dup: keyed");
     for (y = 0; d != NULL && y < 5; y++) {
         for (x = 0; x < 37; x++) {
-            CHECK(mask_at(d, x, y) == mask_at(s, x, y)
+            CHECK(mask_bit(d, x, y) == mask_bit(s, x, y)
                   && STDL_GetPixel(d, x, y) == STDL_GetPixel(s, x, y),
-                  "dup (%d,%d): mask %d, want %d", x, y, mask_at(d, x, y),
-                  mask_at(s, x, y));
+                  "dup (%d,%d): mask %d, want %d", x, y, mask_bit(d, x, y),
+                  mask_bit(s, x, y));
         }
     }
     STDL_FreeSurface(d);

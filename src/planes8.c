@@ -78,10 +78,10 @@ static __inline__ void p8_mclear(STDL_Surface *s, int y, int g,
 }
 
 /* a SET in STDL_TRANSPARENT on a masked surface: a hole, as the planar
- * fills punch (draw.c) */
+ * fills punch (draw.c). The colour first: one compare for the rest */
 static __inline__ int p8_hole(const STDL_Surface *s, unsigned c, int op)
 {
-    return op == STDL_DRAW_SET && c == STDL_TRANSPARENT && s->mask != NULL;
+    return c == STDL_TRANSPARENT && op == STDL_DRAW_SET && s->mask != NULL;
 }
 
 static unsigned p8_get(const STDL_Surface *s, int x, int y)
@@ -282,7 +282,12 @@ static void p8_rows(STDL_Surface *s, int x1, int x2, int y1, int y2,
     }
     ml = p8_m32(lm);
     mr = p8_m32(rm);
-    p8_pat(hole ? 0 : c, pat);
+    /* a hole is colour 0: 16 is planes 4-5's pair alone. Choosing the
+     * colour before p8_pat cost every call 16 bytes of set-up */
+    p8_pat(c, pat);
+    if (hole) {
+        pat[2] = 0;
+    }
     for (y = y1; y <= y2; y++, row += s->stride) {
         uint32_t *d = (uint32_t *)row;
 
@@ -483,16 +488,19 @@ static void p8_put_pixel(STDL_Surface *d, int x, int y, uint8_t c)
         || y < d->clip.y || y >= d->clip.y + d->clip.h) {
         return;
     }
-    if (p8_hole(d, c, STDL_DRAW_SET)) {
-        p8_set(d, x, y, 0);
-        ((uint16_t *)(d->mask + stdl_row_off(y, d->maskstride)))[x >> 4]
-            |= (uint16_t)(0x8000u >> (x & 15));
-    } else {
-        p8_set(d, x, y, c);
-        p8_mclear(d, y, x >> 4, 0x8000u >> (x & 15));
-    }
-    if (d->mask != NULL) {
-        d->opaque_state = 0;
+    {
+        const int hole = p8_hole(d, c, STDL_DRAW_SET);
+
+        p8_set(d, x, y, hole ? 0 : c);
+        if (d->mask != NULL) {
+            uint16_t *m = (uint16_t *)(d->mask
+                                       + stdl_row_off(y, d->maskstride))
+                        + (x >> 4);
+            const unsigned bit = 0x8000u >> (x & 15);
+
+            *m = (uint16_t)(hole ? *m | bit : *m & ~bit);
+            d->opaque_state = 0;
+        }
     }
     resp_touch(d, x, y, x, y);
 }
@@ -806,8 +814,9 @@ static int p8_blit(STDL_Surface *src, const STDL_Rect *srcrect,
                              + stdl_row_off(dy + y, dst->maskstride)) : NULL,
                     sx, dx, w);
     }
-    /* whether or not there is a mask: testing for one kept a value on
-     * the stack through the whole blit */
+    /* whether or not there is a mask (SurfaceIsOpaque reads it only
+     * with one): testing for one kept a value on the stack through the
+     * whole blit */
     dst->opaque_state = 0;
     resp_touch(dst, dx, dy, dx + w - 1, dy + h - 1);
     return 0;
@@ -1302,7 +1311,10 @@ static void p8_cover(STDL_Surface *d, STDL_Surface *scratch, int g0,
     uint32_t pat[4];
     int y, g;
 
-    p8_pat(hole ? 0 : c, pat);
+    p8_pat(c, pat);
+    if (hole) {
+        pat[2] = 0;             /* colour 0, as p8_rows */
+    }
     for (y = 0; y < h; y++) {
         uint16_t *sw = (uint16_t *)(scratch->pixels
                                     + stdl_row_off(y, scratch->stride));
@@ -1325,9 +1337,7 @@ static void p8_cover(STDL_Surface *d, STDL_Surface *scratch, int g0,
             }
         }
     }
-    if (d->mask != NULL) {
-        d->opaque_state = 0;
-    }
+    d->opaque_state = 0;
     resp_touch(d, g0 << 4, y0, ((g0 + ng) << 4) - 1, y0 + h - 1);
 }
 
@@ -1470,9 +1480,7 @@ static void p8_blit_indexed8(STDL_Surface *d, const uint8_t *src, int pitch,
             }
         }
     }
-    if (d->mask != NULL) {
-        d->opaque_state = 0;
-    }
+    d->opaque_state = 0;
     resp_touch(d, x, y, x + w - 1, y + h - 1);
 }
 

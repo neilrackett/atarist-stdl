@@ -507,13 +507,12 @@ static void sp_cover(STDL_Surface *d, const STDL_Surface *scratch, int g0,
               : op == STDL_DRAW_XOR ? (v ^ c)
               : op == STDL_DRAW_OR ? (v | c) : (v & ~c);
             /* a SET's hole as PutPixel's; the others draw colours */
-            if (op == STDL_DRAW_SET) {
-                STDL_PutPixel(HALF(d, 0), px, y0 + y, sp_nib(d, v, 0));
-                STDL_PutPixel(HALF(d, 1), px, y0 + y, sp_nib(d, v, 1));
-                continue;
-            }
-            STDL_PutPixel(HALF(d, 0), px, y0 + y, (uint8_t)(v & 15));
-            STDL_PutPixel(HALF(d, 1), px, y0 + y, (uint8_t)(v >> 4));
+            STDL_PutPixel(HALF(d, 0), px, y0 + y,
+                          op == STDL_DRAW_SET ? sp_nib(d, v, 0)
+                                              : (uint8_t)(v & 15));
+            STDL_PutPixel(HALF(d, 1), px, y0 + y,
+                          op == STDL_DRAW_SET ? sp_nib(d, v, 1)
+                                              : (uint8_t)(v >> 4));
         }
     }
     resp_touch(d, g0 << 4, y0, ((g0 + ng) << 4) - 1, y0 + h - 1);

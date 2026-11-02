@@ -77,16 +77,17 @@ static void t4_present(int p, const resp_box *b)
     uint32_t cells = 0;
     int y, g;
 
-    (void)b;
     /* before the page is read: a Falcon has none */
     if (stdl_rs.falcon) {
         return;
     }
     src = t4_page[p]->pixels;
     dst = stdl_rs.page[p] + stdl_row_off(stdl_rs.top, (uint16_t)line);
-    if (stdl_rs.whole) {
-        /* the console wrote it: every group, all eight planes of both
-         * lines, so its upper planes and its odd lines go too */
+    if (b->x0 <= b->x1) {
+        /* the console wrote it (responsive.c's resp_whole: nothing else
+         * gives this screen a box, as it tracks none): every group, all
+         * eight planes of both lines, so its upper planes and its odd
+         * lines go too */
         for (y = stdl_rs.h; --y >= 0; src += t4_page[p]->stride,
              dst += 2 * line) {
             const uint32_t *s = (const uint32_t *)src;

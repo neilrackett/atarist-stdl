@@ -77,7 +77,8 @@ static void resp_con_release(void)
 #endif
 
 /* page 0 after the console wrote it: the bands cleared, and the box
- * the whole picture, every group of it (stdl_rs.whole) */
+ * the whole picture - every group of it, on the tall 16-colour screen,
+ * whose box is otherwise empty (tall4.c) */
 static void resp_whole(resp_box *b)
 {
     const uint32_t a = stdl_row_off(stdl_rs.top, (uint16_t)stdl_rs.line);
@@ -91,7 +92,6 @@ static void resp_whole(resp_box *b)
     b->y0 = 0;
     b->x1 = (int16_t)(stdl_rs.w - 1);
     b->y1 = (int16_t)(stdl_rs.h - 1);
-    stdl_rs.whole = 1;
 }
 
 static int resp_wants(int w, int h, int bpp);
@@ -456,7 +456,6 @@ void resp_flip(void)
             resp_whole(b);
         }
         stdl_rs.model->present(stdl_rs.back, b);
-        stdl_rs.whole = 0;
         stdl_rs.stats.present_time += STDL_GetHz38400() - t0;
     }
     b->x0 = 1;

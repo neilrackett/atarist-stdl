@@ -117,6 +117,21 @@ static int mask_bit(const STDL_Surface *s, int x, int y)
     return (m[x >> 4] >> (15 - (x & 15))) & 1;
 }
 
+/* the first of a TT page's lines from..to-1, a row's first, that the
+ * line under it does not repeat, or -1 */
+static int undoubled(const uint8_t *page, int line, int from, int to)
+{
+    int l;
+
+    for (l = from; l < to; l += 2) {
+        if (memcmp(page + (size_t)l * line, page + (size_t)(l + 1) * line,
+                   (size_t)line) != 0) {
+            return l;
+        }
+    }
+    return -1;
+}
+
 static void snap(const STDL_Surface *s, uint8_t **pix, uint8_t **msk)
 {
     int x, y;
@@ -550,16 +565,9 @@ static void compare(int falcon, int vga, int h, unsigned seed)
 #ifndef __m68k__
     /* a TT's lines come in equal pairs */
     if (!falcon) {
-        const int line = stdl_rs.line;
-        int l;
+        const int l = undoubled(b.pages[FRAMES - 1][0], stdl_rs.line, 0, 480);
 
-        for (l = 0; l < 480; l += 2) {
-            if (memcmp(b.pages[FRAMES - 1][0] + l * line,
-                       b.pages[FRAMES - 1][0] + (l + 1) * line, line)) {
-                CHECK(0, "TT line %d is not doubled", l);
-                break;
-            }
-        }
+        CHECK(l < 0, "TT line %d is not doubled", l);
     }
 #endif
     free_run(&a);
@@ -667,9 +675,8 @@ static void test_tall4(int falcon, int vga)
 static void test_console8(void)
 {
     STDL_Surface *scr;
-    const uint8_t *page;
-    uint32_t k;
-    int f, y, line, top, bottom;
+    uint8_t *page;
+    int f, l, k, line, top, bottom, lines;
 
     SET_MACHINE(0, 0);
     g_what = STDL_RESPONSIVE_COLOUR;
@@ -679,18 +686,21 @@ static void test_console8(void)
     if (scr == NULL || stdl_rs.falcon) {
         goto done;
     }
+    page = stdl_rs.page[0];
     line = stdl_rs.line;
     top = stdl_rs.top;
     bottom = top + (stdl_rs.h << stdl_rs.dbl);
+    lines = (int)(stdl_rs.page_bytes / (uint32_t)line);
     for (f = 0; f < 2; f++) {
         STDL_FillRect(scr, NULL, 77);
         stdl_resp_video->flip();
     }
-    for (k = 0; k < stdl_rs.page_bytes; k++) {
-        const int l = (int)(k / (uint32_t)line);
-
+    /* the bands and the odd lines, as the console writes them */
+    for (l = 0; l < lines; l++) {
         if (l < top || l >= bottom || ((l - top) & 1)) {
-            stdl_rs.page[0][k] = (uint8_t)rnd();
+            for (k = 0; k < line; k++) {
+                page[(size_t)l * line + k] = (uint8_t)rnd();
+            }
         }
     }
     stdl_resp_con_wrote = 0xFF;
@@ -700,23 +710,19 @@ static void test_console8(void)
         STDL_FillRect(scr, &r, (uint8_t)(f + 1));
         stdl_resp_video->flip();
     }
-    page = stdl_rs.page[0];
-    for (k = 0; k < stdl_rs.page_bytes; k++) {
-        const int l = (int)(k / (uint32_t)line);
-
-        if ((l < top || l >= bottom) && page[k] != 0) {
+    for (l = 0; l < lines; l++) {
+        if (l >= top && l < bottom) {
+            continue;
+        }
+        for (k = 0; k < line && page[(size_t)l * line + k] == 0; k++) {
+        }
+        if (k < line) {
             CHECK(0, "band line %d not cleared", l);
             break;
         }
     }
-    for (y = 0; y < stdl_rs.h; y++) {
-        const uint8_t *even = page + (size_t)(top + 2 * y) * line;
-
-        if (memcmp(even, even + line, (size_t)line) != 0) {
-            CHECK(0, "row %d's odd line not the even one's", y);
-            break;
-        }
-    }
+    l = undoubled(page, line, top, bottom);
+    CHECK(l < 0, "line %d's odd line not the even one's", l);
 done:
     stdl_resp_video->shutdown();
     stdl_resp_screen = NULL;

@@ -36,14 +36,14 @@ typedef struct stdl_resp_model {
     void (*screen_free)(void);
     /* what page p's drawing owes display page p, if anything */
     void (*present)(int p, const resp_box *b);
-    /* an ST's own screen, after its mode set (a tall one opens the
-     * bottom border); NULL where there is nothing to do */
-    void (*st_mode)(int h);
 } resp_model;
 
 typedef struct {
     const resp_model *colour;   /* what the program asked for         */
     const resp_model *tall;
+    /* an ST's own screen after its mode set: the bottom border opened
+     * for a tall one (tallst.c), NULL for the display's own height */
+    void (*st_tall)(int h);
     const resp_model *model;    /* the screen's, while it is up       */
     p8_surface screen;
     uint8_t *page[2];           /* the display pages                  */

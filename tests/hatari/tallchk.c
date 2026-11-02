@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * A responsive tall screen (stdl_responsive.h) on whatever machine it
- * runs on: STDL_RESPONSIVE_TALL, and with -DTALLCOL the colour as
- * well. It sets 320x240, draws a test card on both pages - a frame
+ * runs on: STDL_RESPONSIVE_TALL, or with -DTALLHGT the display's own
+ * height (STDL_RESPONSIVE_HEIGHT: 200 rows on an ST), and with
+ * -DTALLCOL the colour as well. It sets 320x240, draws a test card on
+ * both pages - a frame
  * round the very edge, a block in each corner, a band every 40 rows,
  * rows 200-239 striped, and with the colour all 256 in a 16x16 grid -
  * shows each page for a second and a half, and prints what it got:
@@ -19,6 +21,7 @@
  *       -Iinclude -Ilib/xpad/src -o dist/TALLCHK.TOS \
  *       tests/hatari/tallchk.c libstdl.a
  *   ... -DTALLCOL -o dist/TALLCOL.TOS ...
+ *   ... -DTALLHGT -o dist/TALLHGT.TOS ...
  *   MACHINE=ste tests/hatari/run.sh tc dist/TALLCHK.TOS 8 \
  *       "waitfor TC:start;sleep 2;shot;sleep 1.5;shot;waitfor TC:done"
  */
@@ -27,11 +30,16 @@
 #include <string.h>
 #include <stdl/stdl.h>
 
+#ifdef TALLHGT
+#define TALLOPT STDL_RESPONSIVE_HEIGHT
+#else
+#define TALLOPT STDL_RESPONSIVE_TALL
+#endif
 #ifdef TALLCOL
-#define WHAT (STDL_RESPONSIVE_COLOUR | STDL_RESPONSIVE_TALL)
+#define WHAT (STDL_RESPONSIVE_COLOUR | TALLOPT)
 #define BPP  8
 #else
-#define WHAT STDL_RESPONSIVE_TALL
+#define WHAT TALLOPT
 #define BPP  4
 #endif
 

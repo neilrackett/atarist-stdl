@@ -45,9 +45,11 @@ static const stdl_resp_video_t resp_video = {
 };
 
 int stdl_use_responsive(unsigned what, const struct stdl_resp_model *colour,
-                        const struct stdl_resp_model *tall)
+                        const struct stdl_resp_model *tall,
+                        void (*st_tall)(int h))
 {
-    if (what & ~(STDL_RESPONSIVE_COLOUR | STDL_RESPONSIVE_TALL)) {
+    if (what & ~(STDL_RESPONSIVE_COLOUR | STDL_RESPONSIVE_TALL
+                 | STDL_RESPONSIVE_HEIGHT)) {
         STDL_SetError("unknown responsive option");
         return -1;
     }
@@ -57,12 +59,14 @@ int stdl_use_responsive(unsigned what, const struct stdl_resp_model *colour,
     }
     stdl_rs.colour = colour;
     stdl_rs.tall = tall;
+    stdl_rs.st_tall = st_tall;
     stdl_resp_video = (colour != NULL || tall != NULL) ? &resp_video : NULL;
     return 0;
 }
 
 /* only a TT or a Falcon has its own screen for these; an ST's tall
- * screen is its own, with the bottom border open (resp_st_mode) */
+ * screen is its own, with the bottom border open (resp_st_mode), and
+ * the display's own height is its 200 lines */
 static int resp_wants(int w, int h, int bpp)
 {
     (void)w;
@@ -75,8 +79,8 @@ static int resp_wants(int w, int h, int bpp)
 
 static void resp_st_mode(int h)
 {
-    if (stdl_rs.tall != NULL && stdl_rs.tall->st_mode != NULL) {
-        stdl_rs.tall->st_mode(h);
+    if (stdl_rs.st_tall != NULL) {
+        stdl_rs.st_tall(h);
     }
 }
 

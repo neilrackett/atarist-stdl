@@ -782,6 +782,9 @@ int p8ref_use(unsigned what)
     return stdl_use_responsive(what,
                                (what & STDL_RESPONSIVE_COLOUR) ? &sp_model
                                                               : NULL,
+                               (what & (STDL_RESPONSIVE_TALL
+                                        | STDL_RESPONSIVE_HEIGHT))
+                               ? &stdl_resp_tall : NULL,
                                (what & STDL_RESPONSIVE_TALL)
-                               ? &stdl_resp_tall : NULL);
+                               ? stdl_resp_tall_st : NULL);
 }

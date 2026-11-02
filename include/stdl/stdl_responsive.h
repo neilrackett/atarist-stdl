@@ -43,6 +43,14 @@
  *   everywhere: every call works on it, and so do a program's own
  *   writes to its pixels.
  *
+ * STDL_RESPONSIVE_HEIGHT: the display's own height, asked for as the
+ *   tall screen is. A TT and a Falcon give 320x240 as above, on a
+ *   Falcon's RGB or TV in overscan too; an ST, an STE or a Mega STE
+ *   keeps its 200 lines and opens no border, with no error set, so
+ *   every machine shows a whole screen of its own pixels. It links
+ *   none of the border code, 8.7K of a program. Asked for with
+ *   STDL_RESPONSIVE_TALL, the tall screen wins.
+ *
  * A responsive screen on a TT or a Falcon is always double-buffered.
  * Its colours 0-15 start as an ST screen's do, and every palette call
  * reaches the TT's and the Falcon's own registers, staged ones and
@@ -79,6 +87,7 @@ extern "C" {
 /* the things a program can ask for; one call may ask for several */
 #define STDL_RESPONSIVE_COLOUR 0x0001u
 #define STDL_RESPONSIVE_TALL   0x0002u
+#define STDL_RESPONSIVE_HEIGHT 0x0004u
 
 /*
  * 0, or -1 for an option this library does not know, or while a
@@ -89,14 +98,20 @@ extern "C" {
  */
 struct stdl_resp_model;
 extern const struct stdl_resp_model stdl_resp_colour, stdl_resp_tall;
+void stdl_resp_tall_st(int h);
 int stdl_use_responsive(unsigned what, const struct stdl_resp_model *colour,
-                        const struct stdl_resp_model *tall);
+                        const struct stdl_resp_model *tall,
+                        void (*st_tall)(int h));
 
+/* the height and the tall screen are one screen on a TT and a Falcon;
+ * only the tall one opens an ST's border */
 static __inline__ int STDL_UseResponsive(unsigned what)
 {
     return stdl_use_responsive(what,
         (what & STDL_RESPONSIVE_COLOUR) ? &stdl_resp_colour : 0,
-        (what & STDL_RESPONSIVE_TALL) ? &stdl_resp_tall : 0);
+        (what & (STDL_RESPONSIVE_TALL | STDL_RESPONSIVE_HEIGHT))
+            ? &stdl_resp_tall : 0,
+        (what & STDL_RESPONSIVE_TALL) ? stdl_resp_tall_st : 0);
 }
 
 /*

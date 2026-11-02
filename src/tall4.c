@@ -3,12 +3,13 @@
  * Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: LGPL-2.1-or-later
  *
- * A tall screen in 16 colours (STDL_RESPONSIVE_TALL without
+ * A tall screen in 16 colours (STDL_RESPONSIVE_TALL or _HEIGHT without
  * STDL_RESPONSIVE_COLOUR): 320x240, an ordinary 4-plane surface on
  * every machine, so every call and a program's own writes work on it
  * as they do on an ST Low screen.
- *   - An ST, an STE or a Mega STE: its own screen with the bottom
- *     border open (overscan.c), 240 of the 245 lines it gives.
+ *   - An ST, an STE or a Mega STE: its own screen, with the bottom
+ *     border open for a tall one (tallst.c), 240 of the 245 lines it
+ *     gives; the display's own height there is its 200.
  *   - A Falcon: a 4-bit VIDEL mode, the ST's own plane layout, so the
  *     surface is the display page and Flip has nothing to do.
  *   - A TT: TT Low, eight planes and its rows on two lines each, so the
@@ -99,25 +100,10 @@ static void t4_present(int p, const resp_box *b)
     stdl_rs.stats.cells += cells;
 }
 
-/* an ST class machine's own screen: the bottom border open, 240 of its
- * 245 lines; without it (a program already using Timer B for rasters)
- * the screen stays at 200 and the error says why */
-static void t4_st_mode(int h)
-{
-    if (h <= 200) {
-        return;
-    }
-    stdl_ovsc_cap = 240;
-    if (STDL_OpenBottomBorder() == 0) {
-        stdl_ovsc_cap = 0;
-    }
-}
-
 /* no ops: its surfaces have 4 planes, and are made and drawn as an
  * ST's are */
 const resp_model stdl_resp_tall = {
     .planes = 4,
     .screen_init = t4_screen_init, .screen_page = t4_screen_page,
-    .screen_free = t4_screen_free, .present = t4_present,
-    .st_mode = t4_st_mode
+    .screen_free = t4_screen_free, .present = t4_present
 };

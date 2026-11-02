@@ -32,8 +32,11 @@ extern int stdl_host_resp_falcon, stdl_host_resp_vga;
 #endif
 int p8ref_use(unsigned what);
 
-/* the options and the height a run asks for */
+/* the options and the height a run asks for; over 200 rows, g_tall:
+ * the tall screen, or the display's own height, which a TT and a
+ * Falcon show alike */
 static unsigned g_what = STDL_RESPONSIVE_COLOUR;
+static unsigned g_tall = STDL_RESPONSIVE_TALL;
 static int g_h = 200;
 /* which of the later calls a run makes (TEST_OPS, a bitmask, for
  * finding which one two runs part on) */
@@ -476,10 +479,11 @@ static const char *cfg(void)
 {
     static char b[64];
 
-    snprintf(b, sizeof(b), "%s%s, %d rows", stdl_host_resp_falcon ? "Falcon "
-                                                     : "TT",
+    snprintf(b, sizeof(b), "%s%s, %d rows%s", stdl_host_resp_falcon
+                                              ? "Falcon " : "TT",
             stdl_host_resp_falcon ? (stdl_host_resp_vga ? "VGA" : "RGB")
-                                  : "", g_h);
+                                  : "", g_h,
+            g_tall == STDL_RESPONSIVE_HEIGHT ? " (height)" : "");
     return b;
 }
 
@@ -490,7 +494,7 @@ static void compare(int falcon, int vga, int h, unsigned seed)
 
     SET_MACHINE(falcon, vga);
     g_h = h;
-    g_what = STDL_RESPONSIVE_COLOUR | (h > 200 ? STDL_RESPONSIVE_TALL : 0);
+    g_what = STDL_RESPONSIVE_COLOUR | (h > 200 ? g_tall : 0);
     one_run(use_ref, seed, &a);
     one_run(use_lib, seed, &b);
     for (f = 0; f < FRAMES && !bad; f++) {
@@ -554,7 +558,7 @@ static void test_tall4(int falcon, int vga)
 
     SET_MACHINE(falcon, vga);
     g_h = 240;
-    g_what = STDL_RESPONSIVE_TALL;
+    g_what = g_tall;
     CHECK(use_lib() == 0, "use");
     scr = stdl_resp_video->set_mode(320, 240, 4, STDL_DOUBLEBUF);
     CHECK(scr != NULL && scr->planes == 4 && scr->h == 240
@@ -622,6 +626,40 @@ static void test_tall4(int falcon, int vga)
     stdl_resp_video->shutdown();
     stdl_resp_screen = NULL;
 }
+
+#ifndef __m68k__
+extern int stdl_host_bottom_opens;
+
+/*
+ * The display's own height on an ST: its own 200-line screen, with no
+ * border opened and no error; a TT's and a Falcon's 240 are its tall
+ * screen's (compare, test_tall4). Asked for with the tall screen, the
+ * tall screen.
+ */
+static void test_height(void)
+{
+    const uint32_t mch = stdl.mach.mch_cookie;
+    const int opens = stdl_host_bottom_opens;
+
+    g_what = STDL_RESPONSIVE_HEIGHT;
+    CHECK(use_lib() == 0, "height: use");
+    stdl.mach.mch_cookie = 0x00020000UL;            /* a TT */
+    CHECK(stdl_resp_video->wants(320, 240, 4), "height: a TT's 240 lines");
+    CHECK(!stdl_resp_video->wants(320, 200, 4), "height: 200 on a TT");
+    stdl.mach.mch_cookie = 0x00010010UL;            /* a Mega STE */
+    CHECK(!stdl_resp_video->wants(320, 240, 4), "height: an ST's own screen");
+    STDL_SetError("");
+    stdl_resp_video->st_mode(240);
+    CHECK(stdl_host_bottom_opens == opens && stdl_ovsc_cap == 0
+          && STDL_GetError()[0] == '\0', "height: no border on an ST");
+    g_what = STDL_RESPONSIVE_TALL | STDL_RESPONSIVE_HEIGHT;
+    CHECK(use_lib() == 0, "tall and height: use");
+    stdl_resp_video->st_mode(240);
+    CHECK(stdl_host_bottom_opens == opens + 1,
+          "tall and height: the tall screen opens the border");
+    stdl.mach.mch_cookie = mch;
+}
+#endif
 
 /*
  * 4-plane sources on an 8-plane screen: a keyed surface blitted, and
@@ -768,11 +806,14 @@ int main(void)
     compare(0, 0, 240, 4);
     test_mixed();
     test_tall4(0, 0);
+    g_tall = STDL_RESPONSIVE_HEIGHT;
+    compare(0, 0, 240, 7);
+    test_tall4(0, 0);
     STDL_Quit();
     fprintf(stderr, failures ? "RC:%d failure(s)\nRC:done\n"
                              : "RC:ok\nRC:done\n", failures);
     return failures != 0;
-#endif
+#else
     compare(0, 0, 200, 1);              /* TT */
     compare(1, 1, 200, 2);              /* Falcon VGA */
     compare(1, 0, 200, 3);              /* Falcon RGB */
@@ -783,10 +824,18 @@ int main(void)
     test_tall4(0, 0);
     test_tall4(1, 1);
     test_tall4(1, 0);
+    /* the display's own height: the same 240 on these, in overscan on
+     * a Falcon's RGB too */
+    g_tall = STDL_RESPONSIVE_HEIGHT;
+    compare(1, 0, 240, 7);
+    test_tall4(0, 0);
+    test_tall4(1, 0);
+    test_height();
     if (failures) {
         printf("test_responsive: %d failure(s)\n", failures);
         return 1;
     }
     printf("test_responsive: ok\n");
     return 0;
+#endif
 }

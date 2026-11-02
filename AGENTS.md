@@ -558,6 +558,23 @@ warnings** with the Makefile's `-Wall -Wextra`.
   changed to both lines, the upper planes left at zero - so a program's
   own writes reach the screen too. `tests/hatari/tallchk.c` (TALLCHK,
   TALLCOL with the colour) draws a card to the very edge on each.
+- **The display's own height is the tall screen without the ST's
+  border** (`STDL_RESPONSIVE_HEIGHT`): 240 rows on a TT and a Falcon
+  (on RGB in overscan, as the tall screen), an ST's 200 with no border
+  and no error, so each machine shows all of its own pixels. The two
+  options share one model; the border hook is an object of its own
+  (`src/tallst.c`), passed by `STDL_UseResponsive` for TALL alone, so a
+  program asking for the height links none of the border code: TALLHGT
+  is 8,698 bytes smaller than TALLCHK stripped, as is the colour's
+  pair. TALL wins where a program asks for both.
+- **The 16-colour tall screen's cost on a TT is not measured.** ST Low
+  costs a TT nothing, but TT Low is 8 planes, so without the colour
+  every Flip compares the whole 4-plane page with the display (20
+  groups by 240 rows, two longs each) and copies what changed. A
+  program choosing HEIGHT or TALL for a TT gives up that time for its
+  40 rows; with the colour the screen is 8 planes already, and Flip
+  copies only the box drawn, as at 200 rows. Time it (TALLCHK with a frame clock, or a game's bench)
+  before recommending the 16-colour tall screen for a TT game.
 - **Bound a group by the surface's width, not its stride.** A Falcon's
   overscan line is 384 pixels with the 320 centred, so the screen's
   stride runs past the picture: STDL_PutGroup on an 8-plane screen,

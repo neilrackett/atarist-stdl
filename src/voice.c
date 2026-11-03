@@ -616,6 +616,13 @@ static void voice_vbl(void)
     uint32_t off;
     int play_block, guard;
 
+    /* staged colours before the mixing, which can take the beam into
+     * the picture: their own slot may come after this one in TOS's
+     * queue (palstage.c). The hook says staging runs: a release clears
+     * it with the slots, and leaves this pointer */
+    if (stdl_pal_apply_hook != NULL && stdl_pal_vbl != NULL) {
+        stdl_pal_vbl();
+    }
     if (!vc.open || vc.paused) {
         /* paused: the DMA is stopped, so there is no play head to
          * chase and no sequencer time to advance. See

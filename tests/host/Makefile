@@ -75,7 +75,8 @@ RESP_SRCS = $(addprefix $(SRC)/,responsive.c planes8.c planes8ex.c \
             planes8tile.c tall4.c tallst.c hz38400.c asset.c asset8.c drawchar.c \
             blit8.c polygon.c spritebatch.c)
 test_bank8conv: $(RESP_SRCS)
-test_responsive: $(RESP_SRCS) p8ref.c $(SRC)/surfacefrom.c
+test_responsive: $(RESP_SRCS) p8ref.c $(SRC)/surfacefrom.c $(SRC)/palstage.c \
+                 $(SRC)/vbl.c
 # built with the counters, for stdl_blit_force: every operation the
 # BLiTTER could take goes to it, whatever its size
 test_blitter:   XFLAGS = -DSTDL_BLIT_STATS

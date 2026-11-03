@@ -545,6 +545,16 @@ extern int (*stdl_pal_raw_hook)(int index, uint16_t word);
 int  stdl_pal_stage_on(int who);
 void stdl_pal_stage_off(int who);
 
+/* staging's blank-time write (palstage.c's flush) while it runs, for
+ * the voices' VBL to call before it mixes: their slot can come first
+ * in TOS's queue, and the mixing takes the beam into the picture. And
+ * what the flush writes besides the sixteen: an 8-plane screen's
+ * staged colours (responsive.c, which clears it at its shutdown). Both
+ * defined in video.c; a release leaves them, as stdl_pal_apply_hook
+ * says whether staging runs. */
+extern void (*stdl_pal_vbl)(void);
+extern void (*stdl_pal_flush8)(void);
+
 /* brief interrupt masking (supervisor mode) for state shared with
  * interrupt context; no-ops when built for host-side unit tests */
 #ifdef __m68k__

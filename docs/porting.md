@@ -389,7 +389,15 @@ rows = screen->h;                           /* 240, or 200 */
   8-plane block.
 * **Pixels a program writes itself**: tell an 8-plane screen with
   `STDL_UpdateRects` (`SDL_UpdateRect`); the tall 16-colour screen
-  needs nothing, as a TT compares its whole page.
+  needs nothing, as a TT compares its whole page. The layout is the
+  display's (`stdl_responsive.h`): 16 bytes a group, the next page's
+  `pixels` after each Flip; on a TT a stride of two display lines, so
+  a program converting its own picture can write both lines of a row
+  and report nothing, where one box around scattered reports would
+  copy everything between them.
+* **Colours with a picture**: with `STDL_StagePalette(1)`, the colours
+  set just before `STDL_Flip` are shown with its page, triple-buffered
+  too; unstaged, an 8-plane screen's are written when they are set.
 * **What it costs.** The colour's code is about 25K of program: on a
   512K ST link libcmini (one port kept 107K free with it). A TT copies
   what changed to its doubled lines at every Flip, 4.1ms a frame for

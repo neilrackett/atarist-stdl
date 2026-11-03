@@ -1647,6 +1647,161 @@ static void test_tiles(void)
 }
 
 /*
+ * A program's own writes to an 8-plane screen's pixels
+ * (stdl_responsive.h): on a TT a row's second line is half the stride
+ * on, and Flip copies there only what STDL_UpdateRects reported, all of
+ * it for none named; the pixels are the next page's after each Flip.
+ */
+static void test_update8(void)
+{
+    STDL_Surface *scr;
+    STDL_Rect r = rect(64, 50, 16, 1);
+    uint8_t *page, *pix, *row, *other;
+    int f, k, line, top;
+
+    SET_MACHINE(0, 0);
+    g_what = STDL_RESPONSIVE_COLOUR;
+    CHECK(use_lib() == 0, "use");
+    scr = stdl_resp_video->set_mode(320, 200, 8, STDL_DOUBLEBUF);
+    CHECK(scr != NULL, "mode");
+    if (scr == NULL || stdl_rs.falcon) {
+        goto done;
+    }
+    line = stdl_rs.line;
+    top = stdl_rs.top;
+    CHECK(scr->stride == 2 * line, "a TT's stride %d is not two lines",
+          (int)scr->stride);
+    /* unreported, then one rect (a second write left out of it), then
+     * the whole screen */
+    for (f = 0; f < 3; f++) {
+        page = stdl_rs.page[stdl_rs.back];
+        pix = scr->pixels;
+        row = pix + 50 * scr->stride + 64;
+        other = pix + 120 * scr->stride + 192;
+        for (k = 0; k < 16; k++) {
+            row[k] = (uint8_t)(0x11 * (f + 1) + k);
+            other[k] = (uint8_t)(0x23 * (f + 1) + k);
+        }
+        if (f == 1) {
+            stdl_resp_video->update(1, &r);
+        } else if (f == 2) {
+            stdl_resp_video->update(0, NULL);
+        }
+        stdl_resp_video->flip();
+        CHECK(scr->pixels != pix, "the pixels the same page after a Flip");
+        row = page + (size_t)(top + 101) * line + 64;
+        other = page + (size_t)(top + 241) * line + 192;
+        if (f == 0) {
+            CHECK(row[0] == 0 && other[0] == 0, "an unreported write copied");
+        } else if (f == 1) {
+            CHECK(memcmp(row, row - line, 16) == 0,
+                  "a reported write not on its second line");
+            CHECK(other[0] == 0, "a write outside the rect copied");
+        } else {
+            CHECK(undoubled(page, line, top, top + 400) < 0,
+                  "the whole screen not on its second lines");
+        }
+    }
+done:
+    stdl_resp_video->shutdown();
+    stdl_resp_screen = NULL;
+}
+
+#ifndef __m68k__
+extern uint32_t stdl_host_resp_regs[256];
+extern void (**stdl_host_vblqueue)(void);
+
+/* the blank: every VBL callback installed, as the interrupt runs them */
+static void blank(void)
+{
+    int i;
+
+    for (i = 0; i < 8; i++) {
+        if (stdl_host_vblqueue[i] != NULL) {
+            stdl_host_vblqueue[i]();
+        }
+    }
+}
+
+/* a colour as the machine's register holds it */
+static uint32_t reg_word(const STDL_Colour *c)
+{
+    if (stdl_host_resp_falcon) {
+        return ((uint32_t)(c->r & 0xFC) << 24)
+             | ((uint32_t)(c->g & 0xFC) << 16) | (uint32_t)(c->b & 0xFC);
+    }
+    return (uint32_t)(((c->r >> 4) << 8) | (c->g & 0xF0) | (c->b >> 4));
+}
+
+/*
+ * Staged colours on an 8-plane screen (STDL_StagePalette): unstaged, a
+ * change is in the registers at once; staged, not before the blank,
+ * and then every entry as it stands, the ones between two changes too,
+ * and one STDL_SetColour wrote while they waited.
+ */
+static void test_stage8(void)
+{
+    static STDL_Colour all[256], want[256];
+    STDL_Colour a[2], b[2];
+    STDL_Surface *scr;
+    int m, i, bad;
+
+    for (m = 0; m < 2; m++) {
+        SET_MACHINE(m, m);
+        g_what = STDL_RESPONSIVE_COLOUR;
+        CHECK(use_lib() == 0, "use");
+        scr = stdl_resp_video->set_mode(320, 200, 8, STDL_DOUBLEBUF);
+        CHECK(scr != NULL, "mode");
+        if (scr == NULL) {
+            continue;
+        }
+        for (i = 0; i < 256; i++) {
+            all[i].r = (uint8_t)i;
+            all[i].g = (uint8_t)(255 - i);
+            all[i].b = (uint8_t)(i * 7 + 16);
+            all[i].unused = 0;
+        }
+        STDL_SetColours(scr, all, 0, 256);
+        for (bad = 0, i = 0; i < 256; i++) {
+            bad += stdl_host_resp_regs[i] != reg_word(&all[i]);
+        }
+        CHECK(bad == 0, "%s: %d unstaged colours not written",
+              m ? "Falcon" : "TT", bad);
+
+        CHECK(STDL_StagePalette(1) == 0, "staging refused");
+        memcpy(want, all, sizeof(want));
+        for (i = 0; i < 2; i++) {
+            a[i].r = (uint8_t)(0x40 + i); a[i].g = 0x80; a[i].b = 0xC0;
+            b[i].r = 0xF0; b[i].g = (uint8_t)(0x10 + i); b[i].b = 0x30;
+            a[i].unused = b[i].unused = 0;
+            want[5 + i] = a[i];
+            want[200 + i] = b[i];
+        }
+        STDL_SetColours(scr, a, 5, 2);
+        STDL_SetColours(scr, b, 200, 2);
+        STDL_SetColour(10, 0x0777);
+        stdl_hw_to_rgb(0x0777, &want[10]);
+        CHECK(stdl_host_resp_regs[5] == reg_word(&all[5])
+              && stdl_host_resp_regs[200] == reg_word(&all[200]),
+              "%s: staged colours in the registers before the blank",
+              m ? "Falcon" : "TT");
+        CHECK(stdl_host_resp_regs[10] == reg_word(&want[10]),
+              "%s: STDL_SetColour staged", m ? "Falcon" : "TT");
+        blank();
+        for (bad = 0, i = 0; i < 256; i++) {
+            bad += stdl_host_resp_regs[i] != reg_word(&want[i]);
+        }
+        CHECK(bad == 0, "%s: %d colours wrong after the blank",
+              m ? "Falcon" : "TT", bad);
+        STDL_StagePalette(0);
+        stdl_resp_video->shutdown();
+        stdl_resp_screen = NULL;
+    }
+    SET_MACHINE(0, 0);
+}
+#endif
+
+/*
  * STDL_TRIPLEBUF on a responsive screen: three pages drawn in turn, each
  * keeping its own picture (on a TT, its rows on both lines), the
  * surface's flags saying so; and without the memory for a third display
@@ -1795,6 +1950,10 @@ int main(void)
     test_borrowed();
     test_tiles();
     test_triple();
+    test_update8();
+#ifndef __m68k__
+    test_stage8();
+#endif
     test_modesets();
     test_bank8();
 #ifdef __m68k__

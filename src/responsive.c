@@ -29,6 +29,8 @@
 /* host tests: the machine the screen is set on, a TT unless these say
  * a Falcon, on VGA or RGB */
 int stdl_host_resp_falcon, stdl_host_resp_vga;
+/* the TT's or the Falcon's 256 colour registers, as their words */
+uint32_t stdl_host_resp_regs[256];
 #endif
 
 resp_state stdl_rs;
@@ -226,38 +228,131 @@ const STDL_PresentStats *STDL_GetPresentStats(void)
 /* ---------------------------------------------------------------- */
 /* the colours                                                      */
 
-/* colours [first, first + n) of `c` into the TT's or the Falcon's
- * registers */
-static void resp_registers(const STDL_Colour *c, int first, int n)
+/* a colour as its register's word: the Falcon's 6 bits a channel, the
+ * TT's 4 */
+static uint32_t resp_word(const STDL_Colour *c)
+{
+    if (stdl_rs.falcon) {
+        return ((uint32_t)(c->r & 0xFC) << 24) | ((uint32_t)(c->g & 0xFC) << 16)
+             | (uint32_t)(c->b & 0xFC);
+    }
+    return (uint32_t)(((c->r >> 4) << 8) | (c->g & 0xF0) | (c->b >> 4));
+}
+
+/* words [first, first + n) into the TT's or the Falcon's registers */
+static void resp_put(const uint32_t *w, int first, int n)
 {
 #ifdef __m68k__
-    int i;
-
     if (stdl_rs.falcon) {
-        for (i = first; i < first + n; i++, c++) {
-            STDL_FALCONPAL[i] = ((uint32_t)(c->r & 0xFC) << 24)
-                              | ((uint32_t)(c->g & 0xFC) << 16)
-                              | (uint32_t)(c->b & 0xFC);
+        volatile uint32_t *r = STDL_FALCONPAL + first;
+
+        while (--n >= 0) {
+            *r++ = *w++;
         }
     } else {
-        for (i = first; i < first + n; i++, c++) {
-            STDL_TTPAL[i] = (uint16_t)(((c->r >> 4) << 8)
-                                       | (c->g & 0xF0) | (c->b >> 4));
+        volatile uint16_t *r = STDL_TTPAL + first;
+
+        while (--n >= 0) {
+            *r++ = (uint16_t)*w++;
         }
     }
 #else
-    (void)c; (void)first; (void)n;
+    while (--n >= 0) {
+        stdl_host_resp_regs[first++] = *w++;
+    }
 #endif
+}
+
+/* colours [first, first + n) of `c` into the registers, now */
+static void resp_registers(const STDL_Colour *c, int first, int n)
+{
+    int i;
+
+    for (i = 0; i < n; i++) {
+        const uint32_t w = resp_word(c + i);
+
+        resp_put(&w, first + i, 1);
+    }
+}
+
+/*
+ * Staged colours (STDL_StagePalette) on an 8-plane screen: the
+ * registers' words, worked out where a change is made and written in
+ * the next blank by staging's flush (palstage.c), as the sixteen are.
+ * A triple-buffered Flip comes back before its page is shown, and its
+ * wait can span the blank that takes the page before, so it holds the
+ * colours staged before it out of that blank (resp_flip); and a change
+ * staged while a flip's colours still wait waits for them to go, so
+ * each set is shown with the page it came with.
+ */
+static uint32_t *resp_pend;             /* 256, from the first staged */
+static volatile uint16_t resp_lo, resp_hi;  /* the entries waiting    */
+static volatile uint8_t resp_dirty;
+static volatile uint8_t resp_hold;      /* not in this blank          */
+static volatile uint8_t resp_flipset;   /* what waits is a flip's     */
+
+/* in the blank (stdl_pal_flush8) */
+static void resp_flush(void)
+{
+    if (resp_dirty && !resp_hold) {
+        resp_put(resp_pend + resp_lo, resp_lo, resp_hi + 1 - resp_lo);
+        resp_dirty = 0;
+        resp_flipset = 0;
+    }
+}
+
+/* the screen's colours [first, first + n), staged; 0 without the
+ * memory for them, and they go now, as unstaged ones do */
+static int resp_stage(int first, int n)
+{
+    int i, lo, hi;
+
+    if (resp_pend == NULL) {
+        resp_pend = malloc(256 * sizeof(uint32_t));
+        if (resp_pend == NULL) {
+            return 0;
+        }
+    }
+    while (resp_flipset) {
+    }
+    resp_hold = 1;
+    lo = first;
+    hi = first + n - 1;
+    if (resp_dirty) {
+        if (resp_lo < lo) {
+            lo = resp_lo;
+        }
+        if (resp_hi > hi) {
+            hi = resp_hi;
+        }
+    }
+    /* the whole span the blank writes, from the colours as they stand:
+     * the entries between two changes are what the registers hold */
+    for (i = lo; i <= hi; i++) {
+        resp_pend[i] = resp_word(&stdl_rs.colours[i]);
+    }
+    resp_lo = (uint16_t)lo;
+    resp_hi = (uint16_t)hi;
+    resp_dirty = 1;
+    resp_hold = 0;
+    return 1;
 }
 
 /* every word written to the ST's sixteen registers (stdl_pal_write),
  * staged or not, onto the TT's or the Falcon's: their modes read their
  * own. A word is the ST's 4 bits a channel, so an 8-plane screen keeps
- * that entry at 4 bits too */
+ * that entry at 4 bits too, and a staged set waiting keeps it as well */
 static void resp_pal_word(int index, uint16_t word)
 {
+    uint32_t w;
+
     stdl_hw_to_rgb(word, &stdl_rs.colours[index]);
-    resp_registers(&stdl_rs.colours[index], index, 1);
+    w = resp_word(&stdl_rs.colours[index]);
+    resp_put(&w, index, 1);
+    /* outside the span waiting, the next change's conversion covers it */
+    if (resp_pend != NULL) {
+        resp_pend[index] = w;
+    }
 }
 
 int resp_set_colours(STDL_Surface *s, const STDL_Colour *c, int first,
@@ -273,15 +368,21 @@ int resp_set_colours(STDL_Surface *s, const STDL_Colour *c, int first,
     if (n > 256 - first) {
         n = 256 - first;
     }
+    if (n <= 0) {
+        return 1;
+    }
     for (i = 0; i < n; i++) {
         stdl_rs.colours[first + i] = c[i];
     }
-    resp_registers(&stdl_rs.colours[first], first, n);
+    if (stdl_pal_apply_hook == NULL || !resp_stage(first, n)) {
+        resp_registers(&stdl_rs.colours[first], first, n);
+    }
     return 1;
 }
 
 /* STDL_FadeTo on an 8-plane screen: all 256, each step worked out
- * before its blank and written after it, as the sixteen's are */
+ * before its blank and written after it, as the sixteen's are, or in
+ * it, staged */
 static void resp_fade(const STDL_Palette *target, int frames)
 {
     STDL_Colour from[256], step[256];
@@ -302,8 +403,14 @@ static void resp_fade(const STDL_Palette *target, int frames)
                 target->colors[i].b - from[i].b, f), frames));
             step[i].unused = 0;
         }
-        STDL_WaitVBL();
+        /* staged, a step goes in the blank waited for */
+        if (stdl_pal_apply_hook == NULL) {
+            STDL_WaitVBL();
+        }
         resp_set_colours(&stdl_rs.screen.s, step, 0, n);
+        if (stdl_pal_apply_hook != NULL) {
+            STDL_WaitVBL();
+        }
     }
 }
 
@@ -369,7 +476,11 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
     if (stdl_rs.falcon) {
         mode = (int16_t)((m->planes == 8 ? BPS8 : BPS4) | COL40
                          | (vga ? (VGA | VERTFLAG)
-                                : (PAL | (rows > 200 ? OVERSCAN : 0))));
+                                /* the desktop's PAL or NTSC: a set or
+                                 * a monitor made for one may not sync
+                                 * to the other */
+                                : ((stdl.old_vmode & PAL)
+                                   | (rows > 200 ? OVERSCAN : 0))));
     }
 #endif
     stdl_rs.page_bytes = stdl_row_off(lines, (uint16_t)stdl_rs.line);
@@ -473,6 +584,7 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
     stdl_resp_con_wrote = 0;
     stdl_pal_write = resp_pal_word;
     if (m->planes == 8) {
+        stdl_pal_flush8 = resp_flush;
         resp_registers(stdl_rs.colours, 0, 256);
     } else {
         stdl_palette_apply_hw();
@@ -484,7 +596,15 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
 void resp_flip(void)
 {
     resp_box *b = &stdl_rs.box[stdl_rs.back];
+    /* colours staged for this page wait for the blank that shows it,
+     * not one landing in the present (a TT's whole page takes the
+     * best part of a frame) or one taking the page before; a triple
+     * flip's still waiting go in that one, as they should */
+    const int hold = !resp_flipset;
 
+    if (hold) {
+        resp_hold = 1;
+    }
     if (stdl_rs.model->present != NULL) {
         const uint32_t t0 = STDL_GetHz38400();
 
@@ -514,7 +634,15 @@ void resp_flip(void)
     (void)Setscreen((void *)-1L, stdl_rs.page[stdl_rs.back], -1);
     if (stdl_rs.npages == 3) {
         stdl.asked = STDL_FRCLOCK;
-    } else {
+    }
+#endif
+    if (hold) {
+        /* triple-buffered, a change staged next waits for these */
+        resp_flipset = (uint8_t)(stdl_rs.npages == 3 && resp_dirty);
+        resp_hold = 0;
+    }
+#ifdef __m68k__
+    if (stdl_rs.npages != 3) {
         STDL_WaitVBL();
     }
 #endif
@@ -534,6 +662,13 @@ void resp_shutdown(void)
         stdl_rs.model = NULL;
     }
     stdl_pal_write = NULL;
+    /* before the words go, as the blank may be reading them */
+    stdl_pal_flush8 = NULL;
+    free(resp_pend);
+    resp_pend = NULL;
+    resp_dirty = 0;
+    resp_flipset = 0;
+    resp_hold = 0;
     stdl_rs.track = NULL;
     for (i = 0; i < 3; i++) {
         stdl_stram_free(stdl_rs.page_alloc[i]);

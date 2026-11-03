@@ -59,7 +59,11 @@ uint16_t STDL_HWColour(uint8_t r, uint8_t g, uint8_t b);
  * STDL_FadeTo, and the SDL shim's SDL_SetColors and
  * SDL_SetPalette(SDL_PHYSPAL) - is converted when it is made and
  * written to the registers in the next blanking, so no frame shows
- * the old colours above the beam and the new below it. Measured in
+ * the old colours above the beam and the new below it. An 8-plane
+ * screen's 256 are staged too (stdl_responsive.h). Staged just before
+ * STDL_Flip, a change is shown with the page flipped: a
+ * double-buffered Flip waits for that blank, and an 8-plane screen's
+ * triple-buffered one holds the change back for it. Measured in
  * Hatari with a colour switched at mid-screen every frame
  * (tests/hatari/palstg.c): 99 and 100 frames of 100 split unstaged,
  * through STDL_SetColours and the SDL shim; 1 and 2 staged, both at

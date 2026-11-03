@@ -183,3 +183,5 @@ void (*stdl_audio_hook)(void);
 void (*stdl_pal_apply_hook)(void);
 int (*stdl_pal_raw_hook)(int index, uint16_t word);
 void (*stdl_pal_write)(int index, uint16_t word);
+void (*stdl_pal_vbl)(void);
+void (*stdl_pal_flush8)(void);

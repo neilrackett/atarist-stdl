@@ -109,7 +109,20 @@
  *
  * STDL_UpdateRects tells an 8-plane screen what a program wrote to its
  * pixels itself, as SDL_UpdateRect would; the library's own calls need
- * nothing.
+ * nothing. What such a program writes into:
+ *   - the page drawn, which is the next one after each Flip: read
+ *     pixels again then;
+ *   - a row every stride bytes, 16 bytes a group of 16 pixels (planes
+ *     0-7 a word each);
+ *   - on a TT, a stride of two display lines, the row's second line
+ *     stride / 2 on. Flip copies a row to its second line only where
+ *     the library drew or STDL_UpdateRects reported (one box a page,
+ *     around everything reported; none named is the whole screen), so
+ *     a program may write both lines itself and report nothing;
+ *   - on a Falcon, the display itself, nothing to report; on RGB or a
+ *     TV with 240 rows, 384-pixel lines with pixels 32 bytes into one.
+ * Staged (STDL_StagePalette), colours set just before Flip are shown
+ * with its page, triple-buffered too (stdl_palette.h).
  */
 
 #ifndef STDL_RESPONSIVE_H

@@ -705,6 +705,30 @@ warnings** with the Makefile's `-Wall -Wextra`.
   second 95-96 against 120, and the video counter was never in the page
   handed back. RESPCHK now outlasts a 20-minute chain of `waitfor`s on
   a TT: give it 90.
+- **Staged colours on an 8-plane screen go with their page.**
+  `STDL_StagePalette` promised it, and an 8-plane screen wrote them at
+  once, so colours set before Flip showed on the page before for the
+  rest of its frame.
+  - They are converted where they are set and written by staging's
+    flush, which the voices' VBL calls before it mixes, as their slot
+    can come first in TOS's queue.
+  - Flip holds them out of any blank before its page is taken. A TT's
+    present ran through one (the whole page after the console wrote,
+    the best part of a frame), and a triple-buffered flip's wait spans
+    one when frames are quicker than the display.
+  - STG8CHK (`tests/hatari/stg8chk.c`) logs at every blank the page
+    taken and colour 1's register, with four voices mixing. Every blank
+    agreed on a TT and on a Falcon on VGA and RGB (NTSC at 60Hz, PAL at
+    50), double-buffered, triple at 1.5 VBLs and triple at none. The
+    library before wrote every staged colour at once and was wrong in
+    59 of 61 blanks at none, as was Flip without its hold.
+  - On a Falcon the log ran at VFC 16-36 half-lines against a picture
+    from VDB 63-127, so the colours are in before it. A TT's video
+    counter reads 0 in Hatari: its timing is a question for hardware.
+- **A Falcon's RGB mode takes the desktop's PAL or NTSC.** It always
+  asked for PAL. In Hatari TOS 4.04 still gave an NTSC desktop its own
+  mode (0x0003, 60Hz), which is why RGB ran at 60 there, and a PAL one
+  gets 0x0023 at 50.
 - **Bound a group by the surface's width, not its stride.** A Falcon's
   overscan line is 384 pixels with the 320 centred, so the screen's
   stride runs past the picture: STDL_PutGroup on an 8-plane screen,

@@ -32,6 +32,8 @@ const resp_banks *stdl_resp_bank;
 void (*stdl_pal_apply_hook)(void);
 void (*stdl_pal_write)(int index, uint16_t word);
 int (*stdl_pal_raw_hook)(int index, uint16_t word);
+void (*stdl_pal_vbl)(void);
+void (*stdl_pal_flush8)(void);
 
 static STDL_Palette screen_palette;
 static STDL_PixelFormat screen_format;

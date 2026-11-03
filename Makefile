@@ -129,14 +129,15 @@ PIXEL_MAX  = 35300
 # The responsive screens' own code (stdl_responsive.h), which only a
 # program that asks for an option links: the colour is responsive.o,
 # planes8.o, planes8ex.o and planes8tile.o, 25K (1.5K of it the blit
-# flags and borrowed 8-plane surfaces, 1.5K the tiles), a bank's
-# 256-colour art (STDL_RESPONSIVE_BANKS) asset8.o, 2.1K more, and the
-# tall screen alone responsive.o and tall4.o, 5.1K.
+# flags and borrowed 8-plane surfaces, 1.5K the tiles, 0.6K the 256
+# colours staged to the blank), a bank's 256-colour art
+# (STDL_RESPONSIVE_BANKS) asset8.o, 2.1K more, and the tall screen
+# alone responsive.o and tall4.o, 5.1K.
 # A title for a 512K ST pays it in free memory as well as on disk, so
-# it has a budget of its own: 27,996 bytes on 2026-11-03.
+# it has a budget of its own: 28,620 bytes on 2026-11-03.
 RESP_OBJS  = $(addprefix $(OBJDIR)/src/,responsive.o planes8.o \
              planes8ex.o planes8tile.o asset8.o tall4.o)
-RESP_MAX   = 28150
+RESP_MAX   = 28750
 
 sizecheck: $(PIXEL_OBJS) $(RESP_OBJS)
 	@n=`$(CROSS)size $(PIXEL_OBJS) | awk 'NR>1 {t+=$$1} END {print t}'`; \

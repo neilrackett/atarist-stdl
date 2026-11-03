@@ -36,6 +36,7 @@ int p8ref_use(unsigned what);
  * the tall screen, or the display's own height, which a TT and a
  * Falcon show alike */
 static unsigned g_what = STDL_RESPONSIVE_COLOUR;
+static uint32_t g_flags = STDL_DOUBLEBUF;   /* the random run's mode */
 static unsigned g_tall = STDL_RESPONSIVE_TALL;
 static int g_h = 200;
 /* which of the later calls a run makes (TEST_OPS, a bitmask, for
@@ -95,8 +96,9 @@ static uint32_t fnv(const uint8_t *p, uint32_t n)
 }
 
 typedef struct {
-    uint8_t *pages[FRAMES][2];
-    uint32_t hash[FRAMES][2];
+    uint8_t *pages[FRAMES][3];
+    uint32_t hash[FRAMES][3];
+    int npages;
     uint8_t *surf[4];           /* off-screen surfaces, a byte a pixel */
     uint8_t *mask[4];           /* their masks, a byte a pixel       */
     uint32_t page_bytes;
@@ -174,6 +176,7 @@ static void one_run(int (*use)(void), unsigned seed, run_t *out)
 {
     STDL_Surface *scr, *bg, *keyed, *dmask, *glyphs;
     STDL_Sprite *spr[NSPR];
+    STDL_Tileset *ts[4];
     STDL_Point pts[300];
     STDL_Span spans[24];
     uint8_t c0, c1, c2, c3;
@@ -187,8 +190,13 @@ static void one_run(int (*use)(void), unsigned seed, run_t *out)
 
     rng_state = seed;
     CHECK(use() == 0, "use");
-    scr = stdl_resp_video->set_mode(320, g_h, 8, STDL_DOUBLEBUF);
+    scr = stdl_resp_video->set_mode(320, g_h, 8, g_flags);
     CHECK(scr != NULL && scr == stdl_resp_screen, "set_mode");
+    out->npages = stdl_rs.npages;
+    CHECK(scr == NULL
+          || (out->npages == ((g_flags & STDL_TRIPLEBUF) ? 3 : 2)
+              && !(scr->flags & STDL_TRIPLEBUF) == (out->npages == 2)),
+          "%d pages", out->npages);
     CHECK(scr == NULL || scr->h == (g_h > 200 ? 240 : 200), "height");
     if (scr == NULL) {
         return;
@@ -226,6 +234,38 @@ static void one_run(int (*use)(void), unsigned seed, run_t *out)
         CHECK(STDL_SetColourKey(s, 1, key) == 0, "key");
         spr[k] = STDL_SpriteFromSurface(s, fw, (k % 3) ? STDL_PRESHIFT : 0);
         CHECK(spr[k] != NULL && STDL_IS_RESP(spr[k]), "8-plane sprite");
+        STDL_FreeSurface(s);
+    }
+
+    /* tilesets: 8 planes, plain and keyed, and 4 planes, plain and
+     * keyed, which draw in colours 0-15; each sheet with a remainder
+     * past its last whole tile */
+    for (k = 0; k < 4; k++) {
+        static const int tws[4] = { 16, 32, 48, 16 };
+        static const int ths[4] = { 12, 10, 7, 16 };
+        /* keys with bits of their own, which the planes must lose
+         * under the mask */
+        const uint8_t key = k < 2 ? 0xA5 : 3;
+        STDL_Surface *s = k < 2
+            ? STDL_CreateSurface(tws[k] * 3 + 5, ths[k] * 2 + 1)
+            : stdl_surface_create(tws[k] * 2 + 9, ths[k] * 2 + 3);
+        int x, y;
+
+        CHECK(s != NULL, "tile sheet");
+        for (y = 0; y < s->h; y++) {
+            for (x = 0; x < s->w; x++) {
+                const uint8_t c = (uint8_t)(k < 2 ? rnd() : rnd() & 15);
+
+                STDL_PutPixel(s, x, y, (rnd() & 3) == 0 ? key : c);
+            }
+        }
+        if (k & 1) {
+            CHECK(STDL_SetColourKey(s, 1, key) == 0, "tile key");
+        }
+        ts[k] = STDL_TilesetFromSurface(s, tws[k], ths[k]);
+        CHECK(ts[k] != NULL && ts[k]->planes == (k < 2 ? 8 : 4)
+              && ts[k]->masked == (k & 1)
+              && ts[k]->ntiles == (k < 2 ? 6 : 4), "tileset %d", k);
         STDL_FreeSurface(s);
     }
 
@@ -433,6 +473,17 @@ static void one_run(int (*use)(void), unsigned seed, run_t *out)
         }
         k = rr(0, NSPR - 1);
         if (OP(14)) STDL_BlitSprites(spr[k], at, 6, scr);
+        if (OP(18)) {
+            /* tiles at any x, which a group boundary takes, and clipped */
+            for (i = 0; i < 8; i++) {
+                k = rr(0, 3);
+                STDL_BlitTile(ts[k], rr(0, ts[k]->ntiles - 1), scr,
+                              rr(-60, 330), rr(-20, 245));
+            }
+            k = rr(0, 3);
+            STDL_BlitTile(ts[k], rr(0, ts[k]->ntiles - 1), dmask,
+                          rr(-40, 40), rr(-10, 25));
+        }
         if (f == 5) {
             dup = STDL_DuplicateSurface(dmask);
             made = STDL_CreateSurface(29, 13);
@@ -483,7 +534,7 @@ static void one_run(int (*use)(void), unsigned seed, run_t *out)
             STDL_BlitSurface(made, NULL, scr, &e);
         }
         stdl_resp_video->flip();
-        for (i = 0; i < 2; i++) {
+        for (i = 0; i < out->npages; i++) {
             out->hash[f][i] = fnv(stdl_rs.page[i], stdl_rs.page_bytes);
 #ifndef __m68k__
             out->pages[f][i] = malloc(stdl_rs.page_bytes);
@@ -500,6 +551,9 @@ static void one_run(int (*use)(void), unsigned seed, run_t *out)
     for (k = 0; k < NSPR; k++) {
         STDL_FreeSprite(spr[k]);
     }
+    for (k = 0; k < 4; k++) {
+        STDL_FreeTileset(ts[k]);
+    }
     STDL_FreeSurface(dup);
     STDL_FreeSurface(made);
     STDL_FreeSurface(bg);
@@ -515,7 +569,7 @@ static void free_run(run_t *r)
     int f, i;
 
     for (f = 0; f < FRAMES; f++) {
-        for (i = 0; i < 2; i++) {
+        for (i = 0; i < 3; i++) {
             free(r->pages[f][i]);
         }
     }
@@ -530,11 +584,12 @@ static const char *cfg(void)
 {
     static char b[64];
 
-    snprintf(b, sizeof(b), "%s%s, %d rows%s", stdl_host_resp_falcon
-                                              ? "Falcon " : "TT",
+    snprintf(b, sizeof(b), "%s%s, %d rows%s%s", stdl_host_resp_falcon
+                                                ? "Falcon " : "TT",
             stdl_host_resp_falcon ? (stdl_host_resp_vga ? "VGA" : "RGB")
                                   : "", g_h,
-            g_tall == STDL_RESPONSIVE_HEIGHT ? " (height)" : "");
+            g_tall == STDL_RESPONSIVE_HEIGHT ? " (height)" : "",
+            (g_flags & STDL_TRIPLEBUF) ? ", three pages" : "");
     return b;
 }
 
@@ -548,8 +603,9 @@ static void compare(int falcon, int vga, int h, unsigned seed)
     g_what = STDL_RESPONSIVE_COLOUR | (h > 200 ? g_tall : 0);
     one_run(use_ref, seed, &a);
     one_run(use_lib, seed, &b);
+    CHECK(a.npages == b.npages, "%s: the models' pages", cfg());
     for (f = 0; f < FRAMES && !bad; f++) {
-        for (i = 0; i < 2; i++) {
+        for (i = 0; i < a.npages; i++) {
             if (a.hash[f][i] != b.hash[f][i]) {
                 CHECK(0, "%s, seed %u: frame %d page %d differs", cfg(),
                       seed, f, i);
@@ -916,17 +972,18 @@ static void test_transparent(void)
 /*
  * A bank's art for an 8-plane screen (asset8.c, docs/format.md 6.1),
  * written here from one piece of index art: its own 256 colours
- * (surface8, sprite8, palette8), planes 4-7 over the ST's art (their
- * form byte 2), and the ST's alone. On an 8-plane screen the loaders give
+ * (surface8, sprite8, tileset8, palette8), planes 4-7 over the ST's art
+ * (their form byte 2), and the ST's alone. On an 8-plane screen the loaders give
  * each id's 8-plane form, pixel for pixel, and the 4-plane one where
  * the bank has nothing else; with no such screen, the ST's chunks.
  */
 #define BK_W 32                 /* two sprite frames of 16 */
 #define BK_H 6
+#define BK_TH 3                 /* four tiles of 16 x 3 */
 static uint8_t bk_art[BK_H][BK_W];
 static uint8_t bk_buf[8192];
 static uint32_t bk_len;
-static struct { uint16_t type, id; uint32_t off, len; } bk_dir[16];
+static struct { uint16_t type, id; uint32_t off, len; } bk_dir[32];
 static int bk_n;
 
 static void bk8(unsigned v) { bk_buf[bk_len++] = (uint8_t)v; }
@@ -968,33 +1025,63 @@ static void bk_rows(int planes, int shift)
     }
 }
 
-/* the ST's sprite format: a frame of 16, then each row's group as its
- * mask (low nibble the key) and four planes clear under it */
+/* the group at (x, y) of the art's low nibbles: its mask where it has
+ * one (the key's pixels), then four planes clear under it */
+static void bk_group4(int x, int y, int masked, unsigned key)
+{
+    unsigned m = 0, w[4] = { 0, 0, 0, 0 };
+    int p, b;
+
+    for (b = 0; b < 16; b++) {
+        const unsigned v = bk_art[y][x + b] & 15u;
+
+        if (masked && v == key) {
+            m |= 0x8000u >> b;
+            continue;
+        }
+        for (p = 0; p < 4; p++) {
+            if ((v >> p) & 1) {
+                w[p] |= 0x8000u >> b;
+            }
+        }
+    }
+    if (masked) {
+        bk16(m);
+    }
+    bk16(w[0]); bk16(w[1]); bk16(w[2]); bk16(w[3]);
+}
+
+/* the ST's sprite format: a frame of 16, each row's group masked */
 static void bk_sprite4(int id, unsigned key)
 {
-    int f, y, p, b;
+    int f, y;
 
     bk_begin(CHUNK_SPRITE, id);
     bk16(16); bk16(BK_H); bk16(BK_W / 16); bk8(1); bk8(4); bk16(1);
     bk32(5 * BK_H);
     for (f = 0; f < BK_W / 16; f++) {
         for (y = 0; y < BK_H; y++) {
-            unsigned m = 0, w[4] = { 0, 0, 0, 0 };
+            bk_group4(f * 16, y, 1, key);
+        }
+    }
+    bk_end();
+}
 
-            for (b = 0; b < 16; b++) {
-                const unsigned v = bk_art[y][f * 16 + b] & 15u;
+/* the ST's tileset format: tiles of 16 x BK_TH, cut across the art and
+ * then down, masked or not */
+static void bk_tiles4(int id, int masked, unsigned key)
+{
+    int tx, ty, y;
 
-                if (v == key) {
-                    m |= 0x8000u >> b;
-                    continue;
-                }
-                for (p = 0; p < 4; p++) {
-                    if ((v >> p) & 1) {
-                        w[p] |= 0x8000u >> b;
-                    }
-                }
+    bk_begin(CHUNK_TILESET, id);
+    bk16(16); bk16(BK_TH); bk16((BK_W / 16) * (BK_H / BK_TH)); bk16(1);
+    bk8((unsigned)masked); bk8(4);
+    bk32((masked ? 5 : 4) * BK_TH);
+    for (ty = 0; ty < BK_H; ty += BK_TH) {
+        for (tx = 0; tx < BK_W; tx += 16) {
+            for (y = ty; y < ty + BK_TH; y++) {
+                bk_group4(tx, y, masked, key);
             }
-            bk16(m); bk16(w[0]); bk16(w[1]); bk16(w[2]); bk16(w[3]);
         }
     }
     bk_end();
@@ -1009,13 +1096,17 @@ static void bk_surface4(int id, int haskey, unsigned key)
     bk_end();
 }
 
-/* an 8-plane screen's chunk: a surface8, or with a frame width a
- * sprite8; form 2's rows planes 4-7, the others' all eight */
-static void bk_art8(int id, int framew, unsigned form, unsigned key)
+/* an 8-plane screen's chunk: a surface8, a sprite8 (a frame width in
+ * front) or a tileset8 (a tile size); form 2's rows planes 4-7, the
+ * others' all eight */
+static void bk_art8(int type, int id, unsigned form, unsigned key)
 {
-    bk_begin(framew ? CHUNK_SPRITE8 : CHUNK_SURFACE8, id);
-    if (framew) {
-        bk16((unsigned)framew);
+    bk_begin(type, id);
+    if (type != CHUNK_SURFACE8) {
+        bk16(16);
+    }
+    if (type == CHUNK_TILESET8) {
+        bk16(BK_TH);
     }
     bk16(BK_W); bk16(BK_H); bk8(form); bk8(key);
     if (form == 2) {
@@ -1071,9 +1162,36 @@ static void bk_drawn(STDL_Surface *scr, STDL_Sprite *spr, const char *what,
     }
 }
 
+/* the same for a tileset's tiles, which go to a group boundary */
+static void bk_tiles_drawn(STDL_Surface *scr, STDL_Tileset *ts,
+                           const char *what, int (*want)(unsigned v))
+{
+    int t, x, y;
+
+    for (t = 0; t < ts->ntiles; t++) {
+        const int tx = (t & 1) * 16, ty = (t >> 1) * BK_TH;
+
+        STDL_FillRect(scr, NULL, 77);
+        STDL_BlitTile(ts, t, scr, 37, 11);
+        for (y = 0; y < BK_TH; y++) {
+            for (x = 0; x < 16; x++) {
+                const int v = want(bk_art[ty + y][tx + x]);
+                const int got = STDL_GetPixel(scr, 32 + x, 11 + y);
+
+                if (got != (v < 0 ? 77 : v)) {
+                    CHECK(0, "%s tile %d (%d,%d): %d, want %d", what, t,
+                          x, y, got, v < 0 ? 77 : v);
+                    return;
+                }
+            }
+        }
+    }
+}
+
 static int bk_own(unsigned v) { return v == 200 ? -1 : (int)v; }
 static int bk_over(unsigned v) { return (v & 15) == 5 ? -1 : (int)v; }
 static int bk_st(unsigned v) { return (v & 15) == 3 ? -1 : (int)(v & 15); }
+static int bk_all(unsigned v) { return (int)v; }
 
 static void test_bank8(void)
 {
@@ -1082,6 +1200,7 @@ static void test_bank8(void)
     STDL_Palette pal = { 256, cols };
     STDL_Surface *scr, *s[4];
     STDL_Sprite *spr;
+    STDL_Tileset *ts;
     int i, x, y, k, pass;
 
     rng_state = 4242;
@@ -1109,15 +1228,22 @@ static void test_bank8(void)
     }
     bk_end();
     bk_surface4(1, 1, 3);
-    bk_art8(1, 0, 1, 200);              /* its own, keyed on 200 */
+    bk_art8(CHUNK_SURFACE8, 1, 1, 200); /* its own, keyed on 200 */
     bk_surface4(2, 1, 5);
-    bk_art8(2, 0, 2, 0);                /* over the ST's, keyed on 5 */
+    bk_art8(CHUNK_SURFACE8, 2, 2, 0);   /* over the ST's, keyed on 5 */
     bk_surface4(3, 0, 0);
     bk_sprite4(4, 3);
-    bk_art8(4, 16, 1, 200);
+    bk_art8(CHUNK_SPRITE8, 4, 1, 200);
     bk_sprite4(5, 5);
-    bk_art8(5, 16, 2, 0);
+    bk_art8(CHUNK_SPRITE8, 5, 2, 0);
     bk_sprite4(6, 3);
+    bk_tiles4(7, 1, 3);
+    bk_art8(CHUNK_TILESET8, 7, 1, 200);
+    bk_tiles4(8, 1, 5);
+    bk_art8(CHUNK_TILESET8, 8, 2, 0);
+    bk_tiles4(9, 0, 0);                 /* over the ST's, no mask */
+    bk_art8(CHUNK_TILESET8, 9, 2, 0);
+    bk_tiles4(10, 1, 3);
     bk_write(path);
 
     /* the colour alone: the bank's 8-plane art is an option of its own */
@@ -1192,6 +1318,26 @@ static void test_bank8(void)
             STDL_FreeSprite(spr);
         }
     }
+
+    /* tilesets: their own, over the ST's keyed and plain, the ST's */
+    for (i = 7; i <= 10; i++) {
+        static const char *what[4] = {
+            "tileset8", "tiles over the ST's", "plain tiles over the ST's",
+            "the ST's tiles"
+        };
+        static int (*const want[4])(unsigned) = {
+            bk_own, bk_over, bk_all, bk_st
+        };
+
+        ts = STDL_LoadTileset(path, i);
+        CHECK(ts != NULL && ts->planes == (i == 10 ? 4 : 8)
+              && ts->ntiles == 4 && ts->masked == (i != 9),
+              "%s: %d planes", what[i - 7], ts ? ts->planes : 0);
+        if (ts != NULL) {
+            bk_tiles_drawn(scr, ts, what[i - 7], want[i - 7]);
+            STDL_FreeTileset(ts);
+        }
+    }
     stdl_resp_video->shutdown();
     stdl_resp_screen = NULL;
 
@@ -1206,6 +1352,9 @@ static void test_bank8(void)
     spr = STDL_LoadSprite(path, 4, 0);
     CHECK(spr != NULL && spr->planes == 4, "the ST's sprite there");
     STDL_FreeSprite(spr);
+    ts = STDL_LoadTileset(path, 8);
+    CHECK(ts != NULL && ts->planes == 4, "the ST's tiles there");
+    STDL_FreeTileset(ts);
     remove(path);
 }
 
@@ -1396,6 +1545,191 @@ static void test_modesets(void)
 #endif
 }
 
+/*
+ * Tiles alone in a frame: the box Flip doubles on a TT is the tile's
+ * groups and no more; an 8-plane tile's pixels are its sheet's, and a
+ * 4-plane one's its colours 0-15, the upper planes cleared, keyed ones
+ * keeping what is under their transparent pixels; an 8-plane tile onto
+ * 4 planes is refused and draws nothing.
+ */
+static void test_tiles(void)
+{
+    STDL_Surface *scr, *s8, *s4, *d4;
+    STDL_Tileset *t8, *t4, *k4;
+    STDL_Rect r = rect(96, 60, 16, 8);
+    const resp_box *b;
+    int x, y, ok;
+
+    SET_MACHINE(0, 0);
+    g_what = STDL_RESPONSIVE_COLOUR;
+    CHECK(use_lib() == 0, "use");
+    scr = stdl_resp_video->set_mode(320, 200, 8, STDL_DOUBLEBUF);
+    s8 = STDL_CreateSurface(32, 8);
+    s4 = stdl_surface_create(32, 8);
+    d4 = stdl_surface_create(32, 8);
+    if (scr == NULL || s8 == NULL || s4 == NULL || d4 == NULL) {
+        CHECK(0, "tile surfaces");
+        return;
+    }
+    for (y = 0; y < 8; y++) {
+        for (x = 0; x < 32; x++) {
+            STDL_PutPixel(s8, x, y, (uint8_t)(x * 7 + y * 3 + 100));
+            STDL_PutPixel(s4, x, y, (uint8_t)((x + y) & 15));
+        }
+    }
+    t8 = STDL_TilesetFromSurface(s8, 16, 8);
+    t4 = STDL_TilesetFromSurface(s4, 16, 8);
+    CHECK(STDL_SetColourKey(s4, 1, 5) == 0, "key");
+    k4 = STDL_TilesetFromSurface(s4, 16, 8);
+    CHECK(t8 != NULL && t8->planes == 8 && t4 != NULL && t4->planes == 4
+          && k4 != NULL && k4->masked, "the tilesets");
+    if (t8 == NULL || t4 == NULL || k4 == NULL) {
+        return;
+    }
+
+    /* the first frame's box is the one tile's groups */
+    STDL_BlitTile(t8, 1, scr, 37, 50);
+    b = &stdl_rs.box[stdl_rs.back];
+    CHECK(b->x0 == 32 && b->x1 == 47 && b->y0 == 50 && b->y1 == 57,
+          "the tile's box: %d,%d to %d,%d", b->x0, b->y0, b->x1, b->y1);
+    for (ok = 1, y = 0; y < 8; y++) {
+        for (x = 0; x < 16; x++) {
+            ok &= STDL_GetPixel(scr, 32 + x, 50 + y)
+                  == STDL_GetPixel(s8, 16 + x, y);
+        }
+    }
+    CHECK(ok, "an 8-plane tile's pixels");
+    stdl_resp_video->flip();
+#ifndef __m68k__
+    CHECK(undoubled(stdl_rs.page[1], stdl_rs.line, 0, 480) < 0,
+          "the tile doubled on a TT");
+#endif
+
+    /* a 4-plane tile, plain and keyed, over colours with high bits */
+    STDL_FillRect(scr, &r, 0xF0);
+    STDL_BlitTile(t4, 0, scr, 96, 60);
+    for (ok = 1, y = 0; y < 8; y++) {
+        for (x = 0; x < 16; x++) {
+            ok &= STDL_GetPixel(scr, 96 + x, 60 + y) == ((x + y) & 15);
+        }
+    }
+    CHECK(ok, "a 4-plane tile in colours 0-15");
+    STDL_FillRect(scr, &r, 0xF0);
+    STDL_BlitTile(k4, 0, scr, 96, 60);
+    for (ok = 1, y = 0; y < 8; y++) {
+        for (x = 0; x < 16; x++) {
+            const unsigned c = (unsigned)((x + y) & 15);
+
+            ok &= STDL_GetPixel(scr, 96 + x, 60 + y) == (c == 5 ? 0xF0 : c);
+        }
+    }
+    CHECK(ok, "a keyed 4-plane tile");
+
+    /* refused: nothing drawn, the error set */
+    STDL_SetError("");
+    STDL_BlitTile(t8, 0, d4, 0, 0);
+    for (ok = 1, y = 0; y < 8; y++) {
+        for (x = 0; x < 32; x++) {
+            ok &= STDL_GetPixel(d4, x, y) == 0;
+        }
+    }
+    CHECK(ok && strstr(STDL_GetError(), "8-plane tile") != NULL,
+          "an 8-plane tile onto 4 planes refused");
+
+    STDL_FreeTileset(t8);
+    STDL_FreeTileset(t4);
+    STDL_FreeTileset(k4);
+    STDL_FreeSurface(s8);
+    STDL_FreeSurface(s4);
+    STDL_FreeSurface(d4);
+    stdl_resp_video->shutdown();
+    stdl_resp_screen = NULL;
+}
+
+/*
+ * STDL_TRIPLEBUF on a responsive screen: three pages drawn in turn, each
+ * keeping its own picture (on a TT, its rows on both lines), the
+ * surface's flags saying so; and without the memory for a third display
+ * page, two, with the error set, as an ST's screen gives.
+ */
+static void test_triple(void)
+{
+    static const struct {
+        int falcon, vga, h;
+        unsigned what;
+        const char *name;
+    } m[4] = {
+        { 0, 0, 200, STDL_RESPONSIVE_COLOUR, "TT, 256 colours" },
+        { 0, 0, 240, STDL_RESPONSIVE_TALL, "TT, tall in 16" },
+        { 1, 1, 200, STDL_RESPONSIVE_COLOUR, "Falcon VGA, 256 colours" },
+        { 1, 0, 240, STDL_RESPONSIVE_TALL, "Falcon RGB, tall in 16" },
+    };
+    STDL_Surface *scr;
+    int k, f, i;
+
+    for (k = 0; k < 4; k++) {
+        const int bpp = (m[k].what & STDL_RESPONSIVE_COLOUR) ? 8 : 4;
+
+        SET_MACHINE(m[k].falcon, m[k].vga);
+        g_what = m[k].what;
+        CHECK(use_lib() == 0, "use");
+        scr = stdl_resp_video->set_mode(320, m[k].h, bpp, STDL_TRIPLEBUF);
+        CHECK(scr != NULL && (scr->flags & STDL_TRIPLEBUF)
+              && (scr->flags & STDL_DOUBLEBUF) && stdl_rs.npages == 3,
+              "%s: three pages", m[k].name);
+        if (scr == NULL) {
+            continue;
+        }
+        /* a colour into each page, then each found again in turn */
+        for (f = 0; f < 6; f++) {
+            if (f < 3) {
+                STDL_FillRect(scr, NULL, (uint8_t)(5 + f));
+            } else {
+                CHECK(STDL_GetPixel(scr, 100, 100) == 5 + f - 3,
+                      "%s: page %d's own picture: %u, want %d", m[k].name,
+                      stdl_rs.back, STDL_GetPixel(scr, 100, 100), 5 + f - 3);
+            }
+            stdl_resp_video->flip();
+#ifndef __m68k__
+            for (i = 0; !m[k].falcon && i < 3; i++) {
+                CHECK(undoubled(stdl_rs.page[i], stdl_rs.line, 0, 480) < 0,
+                      "%s: page %d doubled", m[k].name, i);
+            }
+#endif
+        }
+        stdl_resp_video->shutdown();
+        stdl_resp_screen = NULL;
+    }
+
+#ifndef __m68k__
+    /* the display's two pages and no third */
+    for (k = 0; k < 2; k++) {
+        SET_MACHINE(0, 0);
+        g_what = m[k].what;
+        CHECK(use_lib() == 0, "use");
+        STDL_SetError("");
+        stdl_host_stram_left = 2;
+        scr = stdl_resp_video->set_mode(320, m[k].h, k ? 4 : 8,
+                                        STDL_TRIPLEBUF);
+        stdl_host_stram_left = -1;
+        CHECK(scr != NULL && !(scr->flags & STDL_TRIPLEBUF)
+              && (scr->flags & STDL_DOUBLEBUF) && stdl_rs.npages == 2
+              && stdl_rs.page[2] == NULL
+              && strstr(STDL_GetError(), "third") != NULL,
+              "%s: two pages without the memory for a third", m[k].name);
+        if (scr != NULL) {
+            STDL_FillRect(scr, NULL, 9);
+            stdl_resp_video->flip();
+            stdl_resp_video->flip();
+            CHECK(STDL_GetPixel(scr, 100, 100) == 9 && stdl_rs.back == 1,
+                  "%s: two pages in turn", m[k].name);
+        }
+        stdl_resp_video->shutdown();
+        stdl_resp_screen = NULL;
+    }
+#endif
+}
+
 /* the converter's pixels against what was asked for */
 static void test_reference(void)
 {
@@ -1459,11 +1793,16 @@ int main(void)
     test_transparent();
     test_blitflags();
     test_borrowed();
+    test_tiles();
+    test_triple();
     test_modesets();
     test_bank8();
 #ifdef __m68k__
     compare(0, 0, 200, 1);
     compare(0, 0, 240, 4);
+    g_flags = STDL_TRIPLEBUF;
+    compare(0, 0, 200, 8);
+    g_flags = STDL_DOUBLEBUF;
     test_mixed();
     test_tall4(0, 0);
     test_console8();
@@ -1478,6 +1817,10 @@ int main(void)
     compare(0, 0, 200, 1);              /* TT */
     compare(1, 1, 200, 2);              /* Falcon VGA */
     compare(1, 0, 200, 3);              /* Falcon RGB */
+    g_flags = STDL_TRIPLEBUF;           /* three pages, every one hashed */
+    compare(0, 0, 200, 8);
+    compare(1, 0, 240, 9);
+    g_flags = STDL_DOUBLEBUF;
     compare(0, 0, 240, 4);              /* tall: TT */
     compare(1, 1, 240, 5);              /* Falcon VGA */
     compare(1, 0, 240, 6);              /* Falcon RGB, overscan */

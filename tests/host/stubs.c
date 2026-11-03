@@ -51,6 +51,7 @@ const stdl_resp_ops_t *stdl_resp;      /* video.c's on target */
 const stdl_resp_video_t *stdl_resp_video;
 STDL_Surface *stdl_resp_screen;
 const resp_banks *stdl_resp_bank;
+int stdl_host_stram_left = -1;          /* ST RAM without end */
 int16_t stdl_ovsc_cap;                  /* overscan.c's on target */
 int stdl_host_bottom_opens;             /* the tries, for a test to count */
 int STDL_OpenBottomBorder(void)

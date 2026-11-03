@@ -116,8 +116,9 @@ warnings** with the Makefile's `-Wall -Wextra`.
 - **Size is a test result too.** `stcmd make` runs a `sizecheck`
   target that fails the build if the pixel-path objects outgrow
   `PIXEL_MAX` in the Makefile, or the responsive screens' own objects
-  (`responsive.o`, `planes8.o`, `planes8ex.o`, `asset8.o`, `tall4.o`: a
-  program asking for the colour links 23.4K of them) outgrow
+  (`responsive.o`, `planes8.o`, `planes8ex.o`, `planes8tile.o`,
+  `asset8.o`, `tall4.o`: a program asking for the colour links 25.2K of
+  them) outgrow
   `RESP_MAX`. The archive links whole objects into
   programs with 512K-1M of RAM to share between code and heap, so
   library text spends the port's memory: a 12K growth in the
@@ -540,10 +541,12 @@ warnings** with the Makefile's `-Wall -Wextra`.
   floor of 0.03%. Putting the tests where the ST already branches off
   (a clipped-out exit) would have needed 8-plane surfaces to show
   misleading public fields - an empty clip, no pixels - and was left.
-  A program that asks for the colour links about 23K more (planes8.o
-  18K, planes8ex.o 1.2K, responsive.o 4.1K, on 2026-11-03): a 512K machine's game wants a build of its
-  own for a TT and a Falcon, as one port's 030 build is, where a 1M
-  one can carry both.
+  A program that asks for the colour links about 25K more (planes8.o
+  18K, responsive.o 4.5K, planes8tile.o 1.5K, planes8ex.o 1.2K, on
+  2026-11-03): with libcmini one port's game keeps 107K free on a 512K
+  ST (106,874 bytes after its art, 108,770 before the tiles and the
+  third page), where with mintlib a 512K machine's game wanted a build
+  of its own for a TT and a Falcon, as one port's 030 build is.
 - **Console text lands in a responsive page's margins.** A TT shows a
   200-row screen centred in 240, and what a program printed after the
   mode set was drawn by TOS into the rows above, which nothing redraws,
@@ -614,7 +617,10 @@ warnings** with the Makefile's `-Wall -Wextra`.
   surfaces and sprites each; it is three (`docs/format.md` 6), a
   surface8's form byte saying which, so one lookup finds either and a
   bank cannot hold two 8-plane versions of an id: asset8.o went from
-  2.6K to 1.7K. That inline is `always_inline`: gcc 4.6 left
+  2.6K to 1.7K, and with tilesets it is 2.1K built for size (`-Os`,
+  2.5K at -O2: it runs once an asset). A sprite's frames and a
+  tileset's tiles over the ST's are one walk (`a8_cells`), cells cut
+  across the art and then down. That inline is `always_inline`: gcc 4.6 left
   a copy out of line in that game, which calls it twice from one large
   function, with `what` a variable there, and so linked every option -
   the ST's border code and this, 11.4K of its bench - since the height
@@ -669,6 +675,36 @@ warnings** with the Makefile's `-Wall -Wextra`.
   stays the 4-plane call it was. Its name says planes because a
   trailing 8 elsewhere in the library means 8 bits (STDL_PutGroup8's
   bytes, STDL_SurfaceFromIndexed8's byte a pixel), on 4 planes.
+- **Tiles on 8 planes are an object of their own** (`planes8tile.c`),
+  reached through the 8-plane table as the sprites are, so planes8.o's
+  code stays as it was (its table three entries longer). An 8-plane
+  tile's group is a surface's four longs, a masked one's with a mask
+  long in front as a sprite's; a 4-plane tile draws onto 8 planes in
+  colours 0-15, a plain one as a masked one with nothing transparent.
+  Built with `-Os`: 1,524 bytes where -O2 made 1,808, the merges the
+  same instructions, the count a subtract and compare where -O2 had a
+  dbf. `tileset.c` hands a tile over where either side has 8 planes,
+  as `sprite.c` does a sprite, which costs an ST's tile two
+  instructions: PRIMCOST's 16x16 tile 380.8us against 383.3-385.7 on a
+  plain ST (0.7%), the masked one inside the bench's noise. Every
+  mutation tried was caught only once a frame drew a tile alone: the
+  random run draws over the whole screen every frame, so its box
+  could not see a tile's box a group short, and a sheet keyed on
+  colour 0 has no bits for the planes to keep under the mask.
+- **A responsive screen's third page** (`STDL_TRIPLEBUF`) is one more
+  of the display's, its box its own; Flip waits as an ST's
+  triple-buffered flip does, for the last request to have been taken,
+  and the tall 16-colour screen gives it a 4-plane copy of its own.
+  Without the memory for the display's page, or for that copy, the
+  screen has two pages, as an ST's. `stdl_host_stram_left` makes the
+  host's ST RAM run out on cue for the test. TRIPRESP
+  (`tests/hatari/tripchk.c` built with `-DTRIPRESP`) times it, its
+  frames 1.5 and 2.4 of the VBLs it measures: 40 of the first took
+  59-60 VBLs against 80 double-buffered on a TT and on a Falcon on VGA
+  and RGB (Hatari, cycle-exact; all three at 60Hz there), 40 of the
+  second 95-96 against 120, and the video counter was never in the page
+  handed back. RESPCHK now outlasts a 20-minute chain of `waitfor`s on
+  a TT: give it 90.
 - **Bound a group by the surface's width, not its stride.** A Falcon's
   overscan line is 384 pixels with the 320 centred, so the screen's
   stride runs past the picture: STDL_PutGroup on an 8-plane screen,

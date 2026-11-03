@@ -1689,6 +1689,9 @@ static const stdl_resp_ops_t p8_ops = {
     .create_mask = p8_create_mask,
     .put_group = p8_put_group,
     .put_group8 = p8_put_group8,
+    .tileset_from = p8_tileset_from,
+    .blit_tile = p8_blit_tile,
+    .free_tileset = p8_free_tileset,
 };
 
 const resp_model stdl_resp_colour = {

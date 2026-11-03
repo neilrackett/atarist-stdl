@@ -411,8 +411,17 @@ void  stdl_stram_free(void *p);
 int   stdl_is_stram(const void *p, uint32_t bytes);
 #else
 #include <stdlib.h>
+/* host tests: blocks still to be had before one fails, or < 0 for no
+ * end (tests/host/stubs.c) */
+extern int stdl_host_stram_left;
 static __inline__ void *stdl_stram_alloc(uint32_t bytes)
 {
+    if (stdl_host_stram_left == 0) {
+        return NULL;
+    }
+    if (stdl_host_stram_left > 0) {
+        stdl_host_stram_left--;
+    }
     return malloc((size_t)bytes);   /* no such distinction on a host */
 }
 static __inline__ void stdl_stram_free(void *p)
@@ -1519,7 +1528,7 @@ extern STDL_Surface *stdl_resp_screen;  /* while a responsive mode is set */
 typedef void (*stdl_poly_fn)(STDL_Surface *d, const STDL_Point *pts, int n,
                              uint8_t c, int op);
 
-/* the bank container's chunk types (docs/format.md): 6-8 are an
+/* the bank container's chunk types (docs/format.md): 6-9 are an
  * 8-plane screen's own, which only asset8.c reads */
 #define CHUNK_PALETTE    1
 #define CHUNK_SURFACE    2
@@ -1530,6 +1539,7 @@ typedef void (*stdl_poly_fn)(STDL_Surface *d, const STDL_Point *pts, int n,
                                    4-plane chunk of the same id      */
 #define CHUNK_SPRITE8    7      /* a frame width, then a surface8     */
 #define CHUNK_PALETTE8   8
+#define CHUNK_TILESET8   9      /* a tile size, then a surface8       */
 
 /* a bank chunk's payload, malloc'd, or NULL (asset.c's reader) */
 typedef uint8_t *(*stdl_chunk_fn)(const char *bank, int type, int id,
@@ -1588,14 +1598,18 @@ typedef struct stdl_resp_ops {
                       const uint16_t planes[4], uint16_t mask);
     void (*put_group8)(STDL_Surface *s, int x, int y,
                        const uint8_t planes[4], uint8_t transmask);
+    STDL_Tileset *(*tileset_from)(const STDL_Surface *s, int tw, int th);
+    void (*blit_tile)(STDL_Tileset *ts, int index, STDL_Surface *d,
+                      int x, int y);
+    void (*free_tileset)(STDL_Tileset *ts);
 } stdl_resp_ops_t;
 
 /*
  * STDL_RESPONSIVE_BANKS (asset8.c): on an 8-plane screen, a bank's
- * 8-plane version of a surface, a sprite or a palette (CHUNK_SURFACE, CHUNK_SPRITE, or
- * CHUNK_PALETTE, whose 256 colours come back as the chunk's payload and
- * its length) at `id`, or NULL where it has none and the 4-plane chunk
- * serves. An option of its own, so a program with the colour and no
+ * 8-plane version of a surface, a sprite, a tileset or a palette
+ * (CHUNK_SURFACE, CHUNK_SPRITE, CHUNK_TILESET or CHUNK_PALETTE, whose
+ * 256 colours come back as the chunk's payload and its length) at `id`,
+ * or NULL where it has none and the 4-plane chunk serves. An option of its own, so a program with the colour and no
  * 256-colour art links none of it. `read` is asset.c's: named in
  * asset8.c, it would link the bank reader into a program with no bank.
  */

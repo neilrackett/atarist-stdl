@@ -49,12 +49,13 @@
  *   writes to its pixels.
  *
  * STDL_RESPONSIVE_BANKS: with the colour, a bank's 256-colour art.
- *   On an 8-plane screen STDL_LoadSurface, STDL_LoadSprite and
- *   STDL_LoadPalette look for the id's 8-plane version first - its own
- *   art and 256 colours, or planes 4-7 over the ST's art of the same id
- *   (docs/format.md section 6.1, stdlconv's depth=) - and give the ST's
- *   chunk, colours 0-15, where the bank has neither. An ST loads only
- *   its own chunks. 1.7K, linked by this option alone.
+ *   On an 8-plane screen STDL_LoadSurface, STDL_LoadSprite,
+ *   STDL_LoadTileset and STDL_LoadPalette look for the id's 8-plane
+ *   version first - its own art and 256 colours, or planes 4-7 over
+ *   the ST's art of the same id (docs/format.md section 6.1, stdlconv's
+ *   depth=) - and give the ST's chunk, colours 0-15, where the bank has
+ *   neither. An ST loads only its own chunks. 2.1K, linked by this
+ *   option alone.
  *
  * STDL_RESPONSIVE_HEIGHT: the display's own height, asked for as the
  *   tall screen is. A TT and a Falcon give 320x240 as above, on a
@@ -64,7 +65,12 @@
  *   none of the border code, 8.7K of a program. Asked for with
  *   STDL_RESPONSIVE_TALL, the tall screen wins.
  *
- * A responsive screen on a TT or a Falcon is always double-buffered.
+ * A responsive screen on a TT or a Falcon is always double-buffered,
+ * and with STDL_TRIPLEBUF it has a third page, as an ST's screen has
+ * (stdl_video.h): another of the display's, 153.6K of ST RAM on a TT
+ * (and 38.4K more for the tall 16-colour screen's own copy), 64-92K on
+ * a Falcon in 256 colours and 38-46K in 16. Without the memory it has
+ * two, its flags say so and the error says why.
  * Its colours 0-15 start as an ST screen's do, and every palette call
  * reaches the TT's and the Falcon's own registers, staged ones and
  * STDL_SetColour too; a word for the ST's registers sets its entry at
@@ -78,10 +84,13 @@
  * flags (STDL_BlitSurfaceEx's UNDER and MARK) work onto an 8-plane
  * surface, from 8 planes or from 4, through a CPU path of their own.
  *
+ * A tileset cut from an 8-plane surface has 8 planes, and a 4-plane
+ * tileset's tiles draw onto one in colours 0-15, as its sprites do.
+ *
  * What an 8-plane surface does not take: a blit from it onto a 4-plane
- * surface, or one of its sprites onto one; patterned polygons;
- * tilesets, from one or onto one; the cursor on a responsive screen.
- * Each sets the error and draws nothing. The first has no right answer
+ * surface, or one of its sprites or tiles onto one; patterned polygons;
+ * the cursor on a responsive screen. Each sets the error and draws
+ * nothing. The first has no right answer
  * - 4 planes hold no colour above 15 - and stays refused; the others
  * are 4-plane formats and kernels not built for 8 planes yet, which a
  * later release can add when a program needs them (docs/limits.md).

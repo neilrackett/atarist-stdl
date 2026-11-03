@@ -92,6 +92,14 @@ specs = [
     "sprite:3:" + d("b.png") + ":depth=8:key=200:framew=16",
     "sprite:4:" + d("a.png") + ":low:key=5:framew=16",
     "sprite:4:" + d("a.png") + ":depth=hi:framew=16",
+    # tiles of 16 x 3: six whole ones, the art's last row past them
+    "tileset:5:" + d("b.png") + ":map=" + d("st16.png") + ":key=200"
+    ":tile=16x3",
+    "tileset:5:" + d("b.png") + ":depth=8:key=200:tile=16x3",
+    "tileset:6:" + d("a.png") + ":low:key=5:tile=16x3",
+    "tileset:6:" + d("a.png") + ":depth=hi:tile=16x3",
+    "tileset:7:" + d("a.png") + ":low:tile=16x3",
+    "tileset:7:" + d("a.png") + ":depth=hi:tile=16x3",
 ]
 subprocess.run([sys.executable, CONV, "bank", d("BANK8.BNK")] + specs,
                check=True, stdout=subprocess.DEVNULL)

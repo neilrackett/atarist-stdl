@@ -175,18 +175,20 @@ Chunk types and payloads:
 | 6 | surface8 | `u16 w, u16 h, u8 form, u8 key`, rows (below) |
 | 7 | sprite8 | `u16 framew`, then a surface8 payload of the frames side by side |
 | 8 | palette8 | as palette, n up to 256 |
+| 9 | tileset8 | `u16 tw, th`, then a surface8 payload of the tiles, across and then down |
 
 `framesize` / `tilesize` are in words and describe one frame of one
 variant / one tile including masks.
 
 ### 6.1 A TT's or a Falcon's 256 colours
 
-Types 6-8 are an 8-plane screen's own (`stdl_responsive.h`), read only
+Types 6-9 are an 8-plane screen's own (`stdl_responsive.h`), read only
 by a program that asks for `STDL_RESPONSIVE_BANKS` with the colour, on
-a TT or a Falcon. Its `STDL_LoadSurface`, `STDL_LoadSprite` and
-`STDL_LoadPalette` look for an id's 8-plane version first and take the
-4-plane chunk of the same id where the bank has none; an ST reads only
-types 1-5, so the others cost it disk space and nothing else. A
+a TT or a Falcon. Its `STDL_LoadSurface`, `STDL_LoadSprite`,
+`STDL_LoadTileset` and `STDL_LoadPalette` look for an id's 8-plane
+version first and take the 4-plane chunk of the same id where the bank
+has none; an ST reads only types 1-5, so the others cost it disk space
+and nothing else. A
 surface8's `form` byte says which of two forms an id's art takes:
 
 * **0, its own; 1, its own keyed on `key`:** 8-plane rows - a group is
@@ -203,7 +205,9 @@ surface8's `form` byte says which of two forms an id's art takes:
   palette8 whose entries 0-15 are the ST's. The ST's art is carried
   once. A sprite's 4-plane chunk must then have one variant, frames of
   a whole number of groups, and `framew` and the frames' count those
-  of the strip.
+  of the strip; a tileset's, tiles of `tw` by `th` cut across the art
+  and then down, as many as it holds, the art no larger than its whole
+  tiles.
 
 One type for both forms, so one lookup finds either, and a bank cannot
 hold two 8-plane versions of an id.

@@ -32,7 +32,8 @@ void STDL_Quit(void);
  * (drawing target: the back buffer when double- or triple-buffered,
  * the live screen otherwise).
  *
- * STDL_TRIPLEBUF adds a third page (32K of ST RAM) and implies
+ * STDL_TRIPLEBUF adds a third page (32K of ST RAM; a responsive
+ * screen's is one of its own, stdl_responsive.h) and implies
  * STDL_DOUBLEBUF. Without the memory the mode is double-buffered,
  * STDL_GetError says why, and the surface's flags carry
  * STDL_DOUBLEBUF alone - test them for STDL_TRIPLEBUF to know. The

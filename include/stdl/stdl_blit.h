@@ -86,8 +86,9 @@ void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
 typedef struct { int16_t x, y; uint16_t frame; } STDL_SpriteAt;
 void STDL_BlitSprites(STDL_Sprite *spr, const STDL_SpriteAt *at,
                       int count, STDL_Surface *dst);
-/* Tiles are 4-plane: onto an 8-plane surface (stdl_responsive.h)
- * this sets the error and draws nothing. */
+/* Onto an 8-plane surface (stdl_responsive.h) a 4-plane tile draws in
+ * colours 0-15; an 8-plane tile onto a 4-plane surface sets the error
+ * and draws nothing. */
 void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,
                    int x, int y);
 

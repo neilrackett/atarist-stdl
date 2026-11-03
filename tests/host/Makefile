@@ -72,7 +72,7 @@ test_spritebatch: $(SRC)/spritebatch.c
 # the responsive screens, and the bank of 8-plane art bank8conv.py
 # makes with stdlconv (Pillow)
 RESP_SRCS = $(addprefix $(SRC)/,responsive.c planes8.c planes8ex.c \
-            tall4.c tallst.c hz38400.c asset.c asset8.c drawchar.c \
+            planes8tile.c tall4.c tallst.c hz38400.c asset.c asset8.c drawchar.c \
             blit8.c polygon.c spritebatch.c)
 test_bank8conv: $(RESP_SRCS)
 test_responsive: $(RESP_SRCS) p8ref.c $(SRC)/surfacefrom.c

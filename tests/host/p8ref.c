@@ -12,8 +12,9 @@
  * routines are, which their own suites check, and shares no code with
  * planes8.c. A colour key's mask is the two halves' masks ANDed (a
  * pixel is the key when both nibbles are), held by both. A sprite is
- * two planar sprites. Flip interleaves the halves' plane words into the
- * display's 16-byte groups: the four low planes, then the four high.
+ * two planar sprites, and a tileset two planar tilesets. Flip
+ * interleaves the halves' plane words into the display's 16-byte
+ * groups: the four low planes, then the four high.
  * It plugs into responsive.c through the same seam (resp_model) as
  * planes8.c.
  */
@@ -32,7 +33,12 @@ typedef struct {
     STDL_Sprite *half[2];
 } ref_sprite;
 
-static STDL_Surface *sp_page[2][2];     /* the screen's, page by page */
+typedef struct {
+    STDL_Tileset s;
+    STDL_Tileset *half[2];
+} ref_tileset;
+
+static STDL_Surface *sp_page[3][2];     /* the screen's, page by page */
 
 /* the halves of a surface; the screen's are the page drawn into */
 /* a half, clipped as the 8-plane surface is (STDL_SetClipRect sets
@@ -48,6 +54,7 @@ static STDL_Surface *ref_half(const STDL_Surface *s, int i)
 
 #define HALF(s, i) ref_half((s), (i))
 #define SHALF(s, i) (((ref_sprite *)(s))->half[i])
+#define THALF(t, i) (((ref_tileset *)(t))->half[i])
 
 /* an 8-plane surface over two halves the caller made */
 static STDL_Surface *sp_wrap(STDL_Surface *lo, STDL_Surface *hi)
@@ -296,6 +303,69 @@ static void sp_free_sprite(STDL_Sprite *spr)
     STDL_FreeSprite(SHALF(spr, 0));
     STDL_FreeSprite(SHALF(spr, 1));
     free(spr);
+}
+
+static STDL_Tileset *sp_tileset_from(const STDL_Surface *s, int tw, int th)
+{
+    ref_tileset *d = calloc(1, sizeof(*d));
+
+    if (d == NULL) {
+        STDL_SetError("out of memory");
+        return NULL;
+    }
+    d->half[0] = STDL_TilesetFromSurface(HALF(s, 0), tw, th);
+    d->half[1] = d->half[0] != NULL
+                 ? STDL_TilesetFromSurface(HALF(s, 1), tw, th) : NULL;
+    if (d->half[1] == NULL) {
+        STDL_FreeTileset(d->half[0]);
+        free(d);
+        return NULL;
+    }
+    d->s = *d->half[0];
+    d->s.planes = 8;
+    d->s.data = NULL;
+    return &d->s;
+}
+
+/* an 8-plane tileset's halves onto the surface's; a 4-plane one's
+ * colours 0-15, so its tile onto the low half and onto the high the
+ * same tile with its planes cleared, its masks kept */
+static void sp_blit_tile(STDL_Tileset *ts, int index, STDL_Surface *d,
+                         int x, int y)
+{
+    STDL_Tileset z;
+    const uint32_t words = ts->tilesize * ts->ntiles;
+    uint32_t i;
+
+    if (!STDL_IS_RESP(d)) {
+        STDL_SetError("an 8-plane tile onto a 4-plane surface");
+        return;
+    }
+    if (STDL_IS_RESP(ts)) {
+        STDL_BlitTile(THALF(ts, 0), index, HALF(d, 0), x, y);
+        STDL_BlitTile(THALF(ts, 1), index, HALF(d, 1), x, y);
+    } else {
+        z = *ts;
+        z.data = calloc(words, 2);
+        if (z.data == NULL) {
+            STDL_SetError("out of memory");
+            return;
+        }
+        for (i = 0; ts->masked && i < words; i += 5) {
+            z.data[i] = ts->data[i];
+        }
+        STDL_BlitTile(ts, index, HALF(d, 0), x, y);
+        STDL_BlitTile(&z, index, HALF(d, 1), x, y);
+        free(z.data);
+    }
+    resp_touch(d, x & ~15, y, (x & ~15) + ts->tw - 1, y + ts->th - 1);
+}
+
+static void sp_free_tileset(STDL_Tileset *ts)
+{
+    STDL_FreeTileset(THALF(ts, 0));
+    STDL_FreeTileset(THALF(ts, 1));
+    free(ts);
 }
 
 static void sp_draw_text(STDL_Surface *d, const STDL_Font *f, int x, int y,
@@ -678,7 +748,7 @@ static int sp_screen_init(void)
 {
     int p, i;
 
-    for (p = 0; p < 2; p++) {
+    for (p = 0; p < stdl_rs.npages; p++) {
         for (i = 0; i < 2; i++) {
             sp_page[p][i] = stdl_surface_create(stdl_rs.w, stdl_rs.h);
             if (sp_page[p][i] == NULL) {
@@ -701,7 +771,7 @@ static void sp_screen_free(void)
 {
     int p, i;
 
-    for (p = 0; p < 2; p++) {
+    for (p = 0; p < 3; p++) {
         for (i = 0; i < 2; i++) {
             STDL_FreeSurface(sp_page[p][i]);
             sp_page[p][i] = NULL;
@@ -791,6 +861,9 @@ static const stdl_resp_ops_t sp_ops = {
     .create_mask = sp_create_mask,
     .put_group = sp_put_group,
     .put_group8 = sp_put_group8,
+    .tileset_from = sp_tileset_from,
+    .blit_tile = sp_blit_tile,
+    .free_tileset = sp_free_tileset,
 };
 
 static const resp_model sp_model = {

@@ -378,9 +378,11 @@ rows = screen->h;                           /* 240, or 200 */
   screen, a loader's image, `STDL_PutGroup`) keep 0-15, so they look
   the same on both. One port put its ramps of 32 shades at 64-255.
 * **Surfaces** created while an 8-plane screen is up have 8 planes,
-  and blit and sprite onto each other as usual. What they refuse,
-  each setting the error and drawing nothing: a blit or a sprite from
-  8 planes onto 4, patterned polygons, tilesets and the cursor.
+  and blit, sprite and tile onto each other as usual; a tileset cut
+  from one has 8 planes, and 4-plane tiles draw onto one in colours
+  0-15. What they refuse, each setting the error and drawing nothing:
+  a blit, a sprite or a tile from 8 planes onto 4, patterned polygons
+  and the cursor.
   `STDL_TRANSPARENT` punches holes in a masked one as on 4 planes; the
   blit flags (UNDER, MARK) keep a priority plane in its mask; and
   `STDL_CreateSurfaceFrom8Planes` lays one over a program's own
@@ -388,18 +390,19 @@ rows = screen->h;                           /* 240, or 200 */
 * **Pixels a program writes itself**: tell an 8-plane screen with
   `STDL_UpdateRects` (`SDL_UpdateRect`); the tall 16-colour screen
   needs nothing, as a TT compares its whole page.
-* **What it costs.** The colour's code is about 23K of program: on a
-  512K ST link libcmini (one port kept 112K free with it). A TT copies
+* **What it costs.** The colour's code is about 25K of program: on a
+  512K ST link libcmini (one port kept 107K free with it). A TT copies
   what changed to its doubled lines at every Flip, 4.1ms a frame for
   one port with the colour; its tall 16-colour screen compares the
   whole page instead, 6.3-7.5ms, more than the colour. A Falcon's
   screen is the display itself, with nothing to copy. A responsive
-  screen there is always double-buffered (`STDL_TRIPLEBUF` is
-  ignored).
+  screen is always double-buffered, and `STDL_TRIPLEBUF` gives it a
+  third page as on an ST, another of the display's: 153.6K of ST RAM
+  on a TT, 64-92K on a Falcon in 256 colours.
 * **Art.** With `STDL_RESPONSIVE_BANKS` as well, a bank holds each
   id's 256-colour version beside the ST's, and the same
-  `STDL_LoadSurface`, `STDL_LoadSprite` and `STDL_LoadPalette` calls
-  give whichever the screen can show: art of its own (`stdlconv bank`'s
+  `STDL_LoadSurface`, `STDL_LoadSprite`, `STDL_LoadTileset` and
+  `STDL_LoadPalette` calls give whichever the screen can show: art of its own (`stdlconv bank`'s
   `depth=8`, and `map=PAL` for the ST's chunk from the same image), or
   planes 4-7 over the ST's art (`depth=hi`, with `low` for the ST's),
   which keeps one set of colour numbers for both machines

@@ -125,7 +125,7 @@ fail:
 
 /* an 8-plane screen's own version of chunk (type, id), where the
  * program asked for it (STDL_RESPONSIVE_BANKS) and the bank has one.
- * One call, out of line, for the three loaders: each its own cost 80
+ * One call, out of line, for the four loaders: each its own cost 80
  * bytes in every program with a bank, inlined into them 46. Its
  * arguments are the hook's, in its order, so it passes them on as they
  * came (the loaders hand it the reader) */
@@ -271,10 +271,15 @@ STDL_Sprite *STDL_LoadSprite(const char *bank, int id, uint32_t flags)
 STDL_Tileset *STDL_LoadTileset(const char *bank, int id)
 {
     uint32_t len;
-    uint8_t *p = load_chunk(bank, CHUNK_TILESET, id, &len);
+    uint8_t *p;
     STDL_Tileset *ts;
     uint32_t datawords;
 
+    ts = deep(bank, CHUNK_TILESET, id, 0, &len, load_chunk);
+    if (ts != NULL) {
+        return ts;
+    }
+    p = load_chunk(bank, CHUNK_TILESET, id, &len);
     if (p == NULL) {
         return NULL;
     }

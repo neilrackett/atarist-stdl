@@ -23,7 +23,7 @@
 
 #include "responsive.h"
 
-static STDL_Surface *t4_page[2];        /* a TT's pages drawn into */
+static STDL_Surface *t4_page[3];        /* a TT's pages drawn into */
 
 static int t4_screen_init(void)
 {
@@ -33,8 +33,12 @@ static int t4_screen_init(void)
     if (stdl_rs.falcon) {
         return 0;
     }
-    for (p = 0; p < 2; p++) {
+    for (p = 0; p < stdl_rs.npages; p++) {
         t4_page[p] = stdl_surface_create(stdl_rs.w, stdl_rs.h);
+        if (t4_page[p] == NULL && p == 2) {
+            resp_third_lost();          /* two pages, as without its own */
+            break;
+        }
         if (t4_page[p] == NULL) {
             return -1;
         }
@@ -60,7 +64,7 @@ static void t4_screen_free(void)
 {
     int p;
 
-    for (p = 0; p < 2; p++) {
+    for (p = 0; p < 3; p++) {
         STDL_FreeSurface(t4_page[p]);
         t4_page[p] = NULL;
     }

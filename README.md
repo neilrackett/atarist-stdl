@@ -4,8 +4,8 @@
 
 # STDL - Atari ST DirectMedia Layer
 
-An easier way to create games and port SDL 1.2 content to the Atari ST,
-TT & Falcon, by [Neil Rackett](https://neilrackett.com/atarist).
+An easier way to create games for the Atari ST, TT & Falcon,
+by [Neil Rackett](https://neilrackett.com/atarist).
 
 ## Introduction
 
@@ -13,25 +13,20 @@ STDL is a planar-native library for creating high performance games and
 porting SDL 1.2 content to the Atari ST, TT & Falcon.
 
 It enables you to create a single binary that works on any computer in the
-Atari ST family, with progressive enhancement baked into its core:
+Atari ST family, with optional progressive enhancement baked into its core:
 
-- Create games that run in ST low res on any ST compatible computer
-- Add 256 colour graphics if you want to enhance it on Atari TT and Falcon
-- Use all 240 lines of a TT or Falcon display, or a 320x240 screen on every
-  machine, with the ST's bottom border opened for it
-
-Each is an option your game asks for by name (`stdl_responsive.h`), and a
-game that asks for none runs exactly as it does on an ST.
+- Create games that run in ST low res on any ST-compatible computer
+- Add 256 colour graphics for enhanced experiences on TT and Falcon
+- Expand to 240 rows on TT and Falcon, or on every machine using ST overscan
 
 ### Why not just use SDL?
 
-If you only want to target TT and/or Falcon, SDL 1.2 is a great option,
-but on a stock ST it's just not a viable option: SDL needs c2p on every frame,
-the framework uses more than half the RAM on a 512KB ST before you've written
-a single line of code and the framework overhead means it's more slideshow
-than game, and even then there's no colour support and everything's greyscale.
+If you only want to target TT and/or Falcon, SDL 1.2 is a good option,
+but on a stock ST it's just not viable: c2p and the framework overhead mean
+it's slow and uses around half the RAM on a 512KB ST, and it only works in
+greyscale.
 
-With STDL, it's in full colour and 50-60fps is truly achievable.
+With STDL, it's in full colour and 50-60fps on a 520 ST is truly achievable.
 
 ### What STDL does differently
 
@@ -181,7 +176,7 @@ mintlib.** The examples link mintlib, the toolchain's default, but a
 game that uses stdio, stdlib, string and the GEMDOS/XBIOS bindings and
 nothing of MiNT's own (processes, signals, sockets) is about 100K
 smaller on libcmini - one port went from 242,624 bytes to 141,551, and
-on a 512K ST from 23K free after loading to 112K. Build STDL against
+on a 512K ST from 23K free after loading to 107K. Build STDL against
 libcmini's headers as well, since `libstdl.a` will not mix with it:
 
 ```

@@ -47,8 +47,8 @@ typedef struct {
     void (*st_tall)(int h);
     const resp_model *model;    /* the screen's, while it is up       */
     p8_surface screen;
-    uint8_t *page[2];           /* the display pages                  */
-    void *page_alloc[2];
+    uint8_t *page[3];           /* the display pages                  */
+    void *page_alloc[3];
     uint32_t page_bytes;
     int16_t w, h;
     int16_t line;               /* bytes a display line               */
@@ -57,7 +57,8 @@ typedef struct {
     uint8_t dbl;                /* a TT: each row on two lines        */
     uint8_t falcon;
     uint8_t back;               /* the page drawn into                */
-    resp_box box[2];            /* drawn on each since it was shown   */
+    uint8_t npages;             /* 2, or 3 with STDL_TRIPLEBUF        */
+    resp_box box[3];            /* drawn on each since it was shown   */
     const STDL_Surface *track;  /* the screen, where present reads the
                                    box; NULL where it never does      */
     STDL_Colour colours[256];
@@ -100,6 +101,7 @@ static __inline__ void resp_touch(const STDL_Surface *d, int x0, int y0,
 
 void resp_touch_points(const STDL_Surface *d, const STDL_Point *p, int n);
 STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags);
+void resp_third_lost(void);
 void resp_flip(void);
 void resp_shutdown(void);
 int  resp_set_colours(STDL_Surface *s, const STDL_Colour *c, int first,
@@ -108,5 +110,10 @@ void p8_init_surface(STDL_Surface *s, int w, int h);
 /* p8_blit with UNDER or MARK onto a masked surface (planes8ex.c) */
 int  p8_blit_ex(const STDL_Surface *src, const STDL_Rect *srcrect,
                 STDL_Surface *dst, STDL_Rect *dstrect, unsigned flags);
+/* tiles on 8 planes (planes8tile.c) */
+STDL_Tileset *p8_tileset_from(const STDL_Surface *s, int tw, int th);
+void p8_blit_tile(STDL_Tileset *ts, int index, STDL_Surface *d, int x,
+                  int y);
+void p8_free_tileset(STDL_Tileset *ts);
 
 #endif /* STDL_RESPONSIVE_INT_H */

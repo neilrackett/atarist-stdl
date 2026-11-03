@@ -310,6 +310,18 @@ static void resp_fade(const STDL_Palette *target, int frames)
 /* ---------------------------------------------------------------- */
 /* the mode                                                         */
 
+/* no memory for a third page, or for the model's own copy of one
+ * (tall4.c): double-buffered, told why, as an ST's screen is
+ * (stdl_video.h) */
+void resp_third_lost(void)
+{
+    STDL_SetError("out of memory for a third responsive screen page");
+    stdl_stram_free(stdl_rs.page_alloc[2]);
+    stdl_rs.page_alloc[2] = NULL;
+    stdl_rs.page[2] = NULL;
+    stdl_rs.npages = 2;
+}
+
 STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
 {
     const int colour = stdl_rs.colour != NULL && bpp >= 8;
@@ -322,7 +334,6 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
 #endif
 
     (void)w;
-    (void)flags;
     if (m == NULL || (!colour && !tall)) {
         STDL_SetError("no responsive screen asked for");
         return NULL;
@@ -362,8 +373,15 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
     }
 #endif
     stdl_rs.page_bytes = stdl_row_off(lines, (uint16_t)stdl_rs.line);
-    for (i = 0; i < 2; i++) {
+    /* always double-buffered: a page is shown while the next is drawn,
+     * and a third asked for lets the next frame start before the VBL */
+    stdl_rs.npages = (flags & STDL_TRIPLEBUF) ? 3 : 2;
+    for (i = 0; i < stdl_rs.npages; i++) {
         stdl_rs.page_alloc[i] = stdl_stram_alloc(stdl_rs.page_bytes + 256);
+        if (stdl_rs.page_alloc[i] == NULL && i == 2) {
+            resp_third_lost();
+            break;
+        }
         if (stdl_rs.page_alloc[i] == NULL) {
             STDL_SetError("out of memory for a responsive screen page");
             resp_shutdown();
@@ -378,7 +396,7 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
     stdl_rs.h = (int16_t)rows;
     stdl_rs.top = (int16_t)((((lines >> stdl_rs.dbl) - rows) >> 1)
                             << stdl_rs.dbl);
-    for (i = 0; i < 2; i++) {
+    for (i = 0; i < 3; i++) {
         stdl_rs.box[i].x0 = 1;
         stdl_rs.box[i].x1 = 0;
     }
@@ -402,8 +420,6 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
     memset(&stdl_rs.screen, 0, sizeof(stdl_rs.screen));
     p8_init_surface(&stdl_rs.screen.s, 320, rows);
     stdl_rs.screen.s.planes = m->planes;
-    stdl_rs.screen.s.flags = STDL_SCREEN | STDL_HWSURFACE | STDL_FULLSCREEN
-                           | STDL_HWPALETTE | STDL_DOUBLEBUF;
     stdl_rs.model = m;
     /* kept after a tall screen, for 8-plane surfaces an earlier
      * screen left */
@@ -415,6 +431,9 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
         resp_shutdown();
         return NULL;
     }
+    stdl_rs.screen.s.flags = STDL_SCREEN | STDL_HWSURFACE | STDL_FULLSCREEN
+                           | STDL_HWPALETTE | STDL_DOUBLEBUF
+                           | (stdl_rs.npages == 3 ? STDL_TRIPLEBUF : 0);
     stdl_rs.back = 1;
     m->screen_page(1);
 
@@ -483,10 +502,25 @@ void resp_flip(void)
     stdl_rs.stats.shown_bytes = stdl_row_off(stdl_rs.h << stdl_rs.dbl,
                                              (uint16_t)stdl_rs.line);
 #ifdef __m68k__
+    /*
+     * Triple-buffered, as an ST's flip (video.c): the wait is for the
+     * last request to have been taken, so the page asked for two flips
+     * ago is off the screen, before this one goes in; the next frame
+     * starts in that page at once, and one longer than a VBL never
+     * waits. Double-buffered, for the VBL that shows this page.
+     */
+    while (stdl_rs.npages == 3 && STDL_FRCLOCK == stdl.asked) {
+    }
     (void)Setscreen((void *)-1L, stdl_rs.page[stdl_rs.back], -1);
-    STDL_WaitVBL();
+    if (stdl_rs.npages == 3) {
+        stdl.asked = STDL_FRCLOCK;
+    } else {
+        STDL_WaitVBL();
+    }
 #endif
-    stdl_rs.back ^= 1;
+    if (++stdl_rs.back == stdl_rs.npages) {
+        stdl_rs.back = 0;
+    }
     stdl_rs.model->screen_page(stdl_rs.back);
 }
 
@@ -501,7 +535,7 @@ void resp_shutdown(void)
     }
     stdl_pal_write = NULL;
     stdl_rs.track = NULL;
-    for (i = 0; i < 2; i++) {
+    for (i = 0; i < 3; i++) {
         stdl_stram_free(stdl_rs.page_alloc[i]);
         stdl_rs.page_alloc[i] = NULL;
         stdl_rs.page[i] = NULL;

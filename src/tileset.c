@@ -27,9 +27,9 @@ STDL_Tileset *STDL_TilesetFromSurface(const STDL_Surface *s, int tw,
         STDL_SetError("tiles must be a multiple of 16 wide");
         return NULL;
     }
+    /* an 8-plane surface's tiles have 8 planes (planes8tile.c) */
     if (STDL_IS_RESP(s)) {
-        STDL_SetError("a tileset from an 8-plane surface");
-        return NULL;
+        return stdl_resp->tileset_from(s, tw, th);
     }
     cols = s->w / tw;
     rows = s->h / th;
@@ -104,6 +104,10 @@ STDL_Tileset *STDL_TilesetFromSurface(const STDL_Surface *s, int tw,
 
 void STDL_FreeTileset(STDL_Tileset *ts)
 {
+    if (ts != NULL && STDL_IS_RESP(ts)) {
+        stdl_resp->free_tileset(ts);
+        return;
+    }
     if (ts != NULL) {
         free(ts->data);
         free(ts);
@@ -269,8 +273,11 @@ void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,
         || index >= ts->ntiles) {
         return;
     }
-    if (STDL_IS_RESP(dst)) {
-        STDL_SetError("a tile onto an 8-plane surface");
+    /* 8 planes either side: the colour's (planes8tile.c), which draws
+     * a 4-plane tile in colours 0-15 and refuses an 8-plane one onto 4
+     * planes, as the sprites do */
+    if ((ts->planes | dst->planes) & 8) {
+        stdl_resp->blit_tile(ts, index, dst, x, y);
         return;
     }
     gx0 = x >> 4;

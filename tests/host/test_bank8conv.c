@@ -140,6 +140,39 @@ static void sprite(const char *what, int id, int planes, STDL_Surface *dst,
     }
 }
 
+/* a tileset's six tiles of 16 x 3, cut across the art and then down,
+ * drawn over colour `bg` on `dst` at an odd x, which goes to 16 */
+static void tiles(const char *what, int id, int planes, int masked,
+                  STDL_Surface *dst, int bg, const uint8_t *px,
+                  const uint8_t *clear)
+{
+    STDL_Tileset *ts = STDL_LoadTileset(BANK, id);
+    int t, x, y;
+
+    CHECK(ts != NULL && ts->planes == planes && ts->ntiles == 6
+          && ts->masked == masked, "%s: %d planes", what,
+          ts ? ts->planes : -1);
+    for (t = 0; ts != NULL && t < 6; t++) {
+        STDL_FillRect(dst, NULL, (uint8_t)bg);
+        STDL_BlitTile(ts, t, dst, 21, 5);
+        for (y = 0; y < 3; y++) {
+            for (x = 0; x < 16; x++) {
+                const int i = ((t / 3) * 3 + y) * W + (t % 3) * 16 + x;
+                const int want = masked && clear[i] ? bg : px[i];
+
+                if (STDL_GetPixel(dst, 16 + x, 5 + y) != want) {
+                    CHECK(0, "%s tile %d (%d,%d): %u, want %d", what, t, x,
+                          y, STDL_GetPixel(dst, 16 + x, 5 + y), want);
+                    t = 6;
+                    y = 3;
+                    break;
+                }
+            }
+        }
+    }
+    STDL_FreeTileset(ts);
+}
+
 static void palette(const char *what, int n, const uint8_t *rgb)
 {
     static STDL_Colour cols[256];
@@ -216,6 +249,10 @@ int main(void)
         surface("art over the ST's", 2, 8, a_px, a_clear);
         sprite("its own sprite", 3, 8, scr, 77, b_px, b_clear);
         sprite("a sprite over the ST's", 4, 8, scr, 77, a_px, a_clear);
+        tiles("its own tiles", 5, 8, 1, scr, 77, b_px, b_clear);
+        tiles("tiles over the ST's", 6, 8, 1, scr, 77, a_px, a_clear);
+        tiles("plain tiles over the ST's", 7, 8, 0, scr, 77, a_px,
+              a_clear);
 #ifndef __m68k__
         stdl_resp_video->shutdown();
         stdl_resp_screen = NULL;
@@ -237,6 +274,9 @@ int main(void)
     dst = STDL_CreateSurface(64, 24);
     sprite("the ST's mapped sprite", 3, 4, dst, 7, bst_px, b_clear);
     sprite("the ST's low sprite", 4, 4, dst, 7, a_low, a_clear);
+    tiles("the ST's mapped tiles", 5, 4, 1, dst, 7, bst_px, b_clear);
+    tiles("the ST's low tiles", 6, 4, 1, dst, 7, a_low, a_clear);
+    tiles("the ST's plain tiles", 7, 4, 0, dst, 7, a_low, a_clear);
     STDL_FreeSurface(dst);
 
 #ifdef __m68k__

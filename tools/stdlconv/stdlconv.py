@@ -51,8 +51,8 @@ Subcommands:
       Pre-shifting happens on the ST at load (STDL_PRESHIFT).
 
       A TT's or a Falcon's 256 colours (STDL_RESPONSIVE_BANKS): a
-      surface, sprite or palette SPEC may take, from art of up to 256
-      colours (docs/format.md section 6):
+      surface, sprite, tileset or palette SPEC may take, from art of up
+      to 256 colours (docs/format.md section 6):
         :depth=8    the 8-plane chunk and palette as they are; the
                     ST's of the same ID from the same art with
                     :map=PAL, every colour on the nearest of PAL's 16
@@ -190,6 +190,7 @@ CHUNK_FONT = 5
 CHUNK_SURFACE8 = 6
 CHUNK_SPRITE8 = 7
 CHUNK_PALETTE8 = 8
+CHUNK_TILESET8 = 9
 # a surface8's form byte: its own art, keyed or not, or planes 4-7 over
 # the 4-plane chunk of the same id
 FORM_OWN, FORM_KEYED, FORM_OVER = 0, 1, 2
@@ -444,14 +445,21 @@ def chunk_sprite(spec):
 
 
 def chunk_tileset(spec):
-    w, h, px, _pal = load_indexed(spec["file"])
+    w, h, px, _pal, key = load_art(spec)
     tw, th = spec["tile"]
     if tw % 16:
         die("tile width must be a multiple of 16")
     cols, rows = w // tw, h // th
+    if spec.get("depth"):
+        if cols < 1 or rows < 1:
+            die("image smaller than one tile")
+        # the art's whole tiles, so that tile for tile it is the ST's
+        cw, ch = cols * tw, rows * th
+        art = [px[y * w + x] for y in range(ch) for x in range(cw)]
+        return CHUNK_TILESET8, (struct.pack(">HH", tw, th)
+                                + surface8(spec, cw, ch, art, key))
     ntiles = cols * rows
     groups = tw // 16
-    key = spec.get("key")
     masked = 1 if key is not None else 0
     words = []
     for t in range(ntiles):
@@ -1625,8 +1633,9 @@ def parse_spec(text):
     if spec.get("depth") == "hi" and spec["type"] == "palette":
         die("a palette over the ST's is its depth=8 palette")
     if spec["deep"] and spec["type"] not in ("surface", "sprite",
-                                             "palette"):
-        die("depth=, low and map= are for surfaces, sprites and palettes")
+                                             "tileset", "palette"):
+        die("depth=, low and map= are for surfaces, sprites, tilesets "
+            "and palettes")
     if spec.get("low") and key is not None and key > 15:
         die("with low, the key is an ST colour, 0-15")
     if spec.get("depth") == "8" and key == 16:

@@ -558,33 +558,60 @@ static void sp_draw_char(STDL_Surface *d, const STDL_Font *f, int x, int y,
     resp_touch(d, x, y, x + f->cw - 1, y + f->ch - 1);
 }
 
-/* a polygon's coverage, a pixel at a time through the halves */
+/* a polygon's coverage, a group at a time on the halves' planes, each
+ * pixel as the 4-plane PutPixel writes it (draw.c): a SET's hole
+ * clears its planes and marks the mask, a colour marks it opaque. A
+ * pixel at a time, through GetPixel and PutPixel, this was most of a
+ * random run's time on the machine: four calls a pixel, and the run's
+ * polygons span the screen */
 static void sp_cover(STDL_Surface *d, const STDL_Surface *scratch, int g0,
                      int ng, int y0, int h, uint8_t c, int op)
 {
-    int x, y;
+    const int hole = op == STDL_DRAW_SET && c == STDL_TRANSPARENT
+                     && HALF(d, 0)->mask != NULL;
+    int y, gi, i, k;
 
     for (y = 0; y < h; y++) {
-        for (x = 0; x < ng * 16; x++) {
-            const uint16_t *sw = (const uint16_t *)(scratch->pixels
-                                  + (size_t)y * scratch->stride);
-            const int px = (g0 << 4) + x;
-            unsigned v;
+        const uint16_t *sw = (const uint16_t *)(scratch->pixels
+                              + (size_t)y * scratch->stride);
 
-            if (!(sw[(x >> 4) * 4] & (0x8000u >> (x & 15)))) {
+        for (gi = 0; gi < ng; gi++) {
+            const uint16_t m = sw[gi * 4];
+
+            if (m == 0) {
                 continue;
             }
-            v = sp_get_pixel(d, px, y0 + y);
-            v = op == STDL_DRAW_SET ? c
-              : op == STDL_DRAW_XOR ? (v ^ c)
-              : op == STDL_DRAW_OR ? (v | c) : (v & ~c);
-            /* a SET's hole as PutPixel's; the others draw colours */
-            STDL_PutPixel(HALF(d, 0), px, y0 + y,
-                          op == STDL_DRAW_SET ? sp_nib(d, v, 0)
-                                              : (uint8_t)(v & 15));
-            STDL_PutPixel(HALF(d, 1), px, y0 + y,
-                          op == STDL_DRAW_SET ? sp_nib(d, v, 1)
-                                              : (uint8_t)(v >> 4));
+            for (i = 0; i < 2; i++) {
+                STDL_Surface *s = HALF(d, i);
+                uint16_t *g = (uint16_t *)(s->pixels
+                              + stdl_row_off(y0 + y, s->stride))
+                              + (g0 + gi) * 4;
+                const unsigned n = i ? c >> 4 : c & 15;
+
+                for (k = 0; k < 4; k++) {
+                    const uint16_t b = ((n >> k) & 1) ? m : 0;
+
+                    if (hole) {
+                        g[k] &= (uint16_t)~m;
+                    } else if (op == STDL_DRAW_SET) {
+                        g[k] = (uint16_t)((g[k] & ~m) | b);
+                    } else if (op == STDL_DRAW_XOR) {
+                        g[k] ^= b;
+                    } else if (op == STDL_DRAW_OR) {
+                        g[k] |= b;
+                    } else {
+                        g[k] &= (uint16_t)~b;
+                    }
+                }
+                if (s->mask != NULL) {
+                    uint16_t *mw = (uint16_t *)(s->mask
+                                   + stdl_row_off(y0 + y, s->maskstride))
+                                   + g0 + gi;
+
+                    *mw = hole ? (uint16_t)(*mw | m) : (uint16_t)(*mw & ~m);
+                    s->opaque_state = 0;
+                }
+            }
         }
     }
     resp_touch(d, g0 << 4, y0, ((g0 + ng) << 4) - 1, y0 + h - 1);

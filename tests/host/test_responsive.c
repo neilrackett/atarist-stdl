@@ -87,10 +87,14 @@ static int rr(int lo, int hi)            /* lo..hi inclusive */
  */
 static uint32_t fnv(const uint8_t *p, uint32_t n)
 {
+    const uint32_t *w = (const uint32_t *)p;
     uint32_t h = 2166136261u;
 
-    while (n-- > 0) {
-        h = (h ^ *p++) * 16777619u;
+    /* h * 33 + each long, a shift and an add on a 68000: FNV's byte
+     * multiply was a __mulsi3 call a byte there, every page of every
+     * frame. Pages are whole longs (153.6K, 64-92K) */
+    for (n >>= 2; n-- > 0; ) {
+        h = (h << 5) + h + *w++;
     }
     return h;
 }
@@ -526,6 +530,20 @@ static void one_run(int (*use)(void), unsigned seed, run_t *out)
             STDL_BlitSurfaceEx(keyed, &sr, dmask, &d, fl[rr(0, 2)]);
             STDL_BlitSurfaceEx(glyphs, NULL, dmask, &e, fl[rr(0, 2)]);
         }
+        if (OP(19)) {
+            /* a polygon onto the masked surface, last, so the end's
+             * snapshot sees it: its colour marks the mask opaque, a
+             * hole marks it and leaves colour 0 */
+            STDL_Point tri[3];
+            int v;
+
+            for (v = 0; v < 3; v++) {
+                tri[v].x = (int16_t)rr(-10, 46);
+                tri[v].y = (int16_t)rr(-5, 25);
+            }
+            c0 = (rnd() % 3) == 0 ? STDL_TRANSPARENT : (uint8_t)rnd();
+            STDL_FillPolygon(dmask, tri, 3, c0, rr(0, 3));
+        }
         if (dup != NULL && OP(15)) {
             STDL_Rect d = rect(rr(-40, 330), rr(-25, 245), 0, 0);
             STDL_Rect e = rect(rr(-40, 330), rr(-25, 245), 0, 0);
@@ -891,15 +909,26 @@ static void test_mixed(void)
                 expect[py][px] = STDL_GetPixel(s4, x, y);
             }
         }
-        for (y = 0; y < 200 && !bad; y++) {
-            for (x = 0; x < 320; x++) {
-                k = STDL_GetPixel(scr, x, y);
-                if (k != expect[y][x]) {
-                    CHECK(0, "%s %d at (%d,%d): (%d,%d) is %d, want %d",
-                          (t & 1) ? "blit" : "sprite", t, dx, dy, x, y, k,
-                          expect[y][x]);
-                    bad = 1;
-                    break;
+        /* the box and a group round it each time, the whole screen
+         * every eighth and at the end: read back a pixel at a time,
+         * the whole of it each time was most of RESPCHK's minutes */
+        {
+            const int whole = (t & 7) == 7 || t == 119;
+            const int x0 = whole ? 0 : (dx - 16 < 0 ? 0 : dx - 16);
+            const int x1 = whole ? 320 : (dx + 53 > 320 ? 320 : dx + 53);
+            const int y0 = whole ? 0 : (dy - 1 < 0 ? 0 : dy - 1);
+            const int y1 = whole ? 200 : (dy + 22 > 200 ? 200 : dy + 22);
+
+            for (y = y0; y < y1 && !bad; y++) {
+                for (x = x0; x < x1; x++) {
+                    k = STDL_GetPixel(scr, x, y);
+                    if (k != expect[y][x]) {
+                        CHECK(0, "%s %d at (%d,%d): (%d,%d) is %d, want %d",
+                              (t & 1) ? "blit" : "sprite", t, dx, dy, x, y,
+                              k, expect[y][x]);
+                        bad = 1;
+                        break;
+                    }
                 }
             }
         }
@@ -1923,6 +1952,28 @@ static void test_reference(void)
  * and run on a TT or a Falcon: the same comparisons on its own screen,
  * at 200 and 240 rows, printing "RC:ok" or the failures, then "RC:done".
  */
+/* each part's time, so a slow one shows: the 200Hz clock on the
+ * machine, which the library's supervisor mode lets it read; on the
+ * host, with TEST_TIMES set */
+#ifdef __m68k__
+#define TIMED(call) do { \
+    const uint32_t t0_ = *(volatile uint32_t *)0x4BAUL; \
+    call; \
+    fprintf(stderr, "RC: %s %lus\n", #call, \
+            (unsigned long)((*(volatile uint32_t *)0x4BAUL - t0_) / 200)); \
+} while (0)
+#else
+#include <time.h>
+#define TIMED(call) do { \
+    const clock_t t0_ = clock(); \
+    call; \
+    if (getenv("TEST_TIMES") != NULL) { \
+        fprintf(stderr, "%s %.3fs\n", #call, \
+                (double)(clock() - t0_) / CLOCKS_PER_SEC); \
+    } \
+} while (0)
+#endif
+
 int main(void)
 {
     unsigned i;
@@ -1944,57 +1995,57 @@ int main(void)
     for (i = 0; i < sizeof(font12); i++) {
         font12[i] = (uint8_t)(i * 89 + 3);
     }
-    test_reference();
-    test_transparent();
-    test_blitflags();
-    test_borrowed();
-    test_tiles();
-    test_triple();
-    test_update8();
+    TIMED(test_reference());
+    TIMED(test_transparent());
+    TIMED(test_blitflags());
+    TIMED(test_borrowed());
+    TIMED(test_tiles());
+    TIMED(test_triple());
+    TIMED(test_update8());
 #ifndef __m68k__
-    test_stage8();
+    TIMED(test_stage8());
 #endif
-    test_modesets();
-    test_bank8();
+    TIMED(test_modesets());
+    TIMED(test_bank8());
 #ifdef __m68k__
-    compare(0, 0, 200, 1);
-    compare(0, 0, 240, 4);
+    TIMED(compare(0, 0, 200, 1));
+    TIMED(compare(0, 0, 240, 4));
     g_flags = STDL_TRIPLEBUF;
-    compare(0, 0, 200, 8);
+    TIMED(compare(0, 0, 200, 8));
     g_flags = STDL_DOUBLEBUF;
-    test_mixed();
-    test_tall4(0, 0);
-    test_console8();
+    TIMED(test_mixed());
+    TIMED(test_tall4(0, 0));
+    TIMED(test_console8());
     g_tall = STDL_RESPONSIVE_HEIGHT;
-    compare(0, 0, 240, 7);
-    test_tall4(0, 0);
+    TIMED(compare(0, 0, 240, 7));
+    TIMED(test_tall4(0, 0));
     STDL_Quit();
     fprintf(stderr, failures ? "RC:%d failure(s)\nRC:done\n"
                              : "RC:ok\nRC:done\n", failures);
     return failures != 0;
 #else
-    compare(0, 0, 200, 1);              /* TT */
-    compare(1, 1, 200, 2);              /* Falcon VGA */
-    compare(1, 0, 200, 3);              /* Falcon RGB */
+    TIMED(compare(0, 0, 200, 1));              /* TT */
+    TIMED(compare(1, 1, 200, 2));              /* Falcon VGA */
+    TIMED(compare(1, 0, 200, 3));              /* Falcon RGB */
     g_flags = STDL_TRIPLEBUF;           /* three pages, every one hashed */
-    compare(0, 0, 200, 8);
-    compare(1, 0, 240, 9);
+    TIMED(compare(0, 0, 200, 8));
+    TIMED(compare(1, 0, 240, 9));
     g_flags = STDL_DOUBLEBUF;
-    compare(0, 0, 240, 4);              /* tall: TT */
-    compare(1, 1, 240, 5);              /* Falcon VGA */
-    compare(1, 0, 240, 6);              /* Falcon RGB, overscan */
-    test_mixed();
-    test_tall4(0, 0);
-    test_tall4(1, 1);
-    test_tall4(1, 0);
-    test_console8();
+    TIMED(compare(0, 0, 240, 4));              /* tall: TT */
+    TIMED(compare(1, 1, 240, 5));              /* Falcon VGA */
+    TIMED(compare(1, 0, 240, 6));              /* Falcon RGB, overscan */
+    TIMED(test_mixed());
+    TIMED(test_tall4(0, 0));
+    TIMED(test_tall4(1, 1));
+    TIMED(test_tall4(1, 0));
+    TIMED(test_console8());
     /* the display's own height: the same 240 on these, in overscan on
      * a Falcon's RGB too */
     g_tall = STDL_RESPONSIVE_HEIGHT;
-    compare(1, 0, 240, 7);
-    test_tall4(0, 0);
-    test_tall4(1, 0);
-    test_height();
+    TIMED(compare(1, 0, 240, 7));
+    TIMED(test_tall4(0, 0));
+    TIMED(test_tall4(1, 0));
+    TIMED(test_height());
     if (failures) {
         printf("test_responsive: %d failure(s)\n", failures);
         return 1;

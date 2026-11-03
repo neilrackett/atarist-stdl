@@ -703,8 +703,7 @@ warnings** with the Makefile's `-Wall -Wextra`.
   59-60 VBLs against 80 double-buffered on a TT and on a Falcon on VGA
   and RGB (Hatari, cycle-exact; all three at 60Hz there), 40 of the
   second 95-96 against 120, and the video counter was never in the page
-  handed back. RESPCHK now outlasts a 20-minute chain of `waitfor`s on
-  a TT: give it 90.
+  handed back.
 - **Staged colours on an 8-plane screen go with their page.**
   `STDL_StagePalette` promised it, and an 8-plane screen wrote them at
   once, so colours set before Flip showed on the page before for the
@@ -736,9 +735,27 @@ warnings** with the Makefile's `-Wall -Wextra`.
 - **The host suite runs on the machine too** (`RESPCHK.TOS`, built from
   `tests/host/test_responsive.c` as its main says): the same calls
   against the reference on the TT's or the Falcon's own screen, page
-  hashes where the host keeps pages. A Hatari run of it takes longer
-  than `run.sh`'s two-minute `waitfor`: chain several, or run.sh stops
-  the emulator (see the SIGTERM note below) before the end.
+  hashes where the host keeps pages. Each part says its time (`RC:`
+  lines; `TEST_TIMES=1` on the host). It took 152s of a TT's time, three
+  minutes in Hatari, and longer than `run.sh`'s two-minute `waitfor`:
+  chain several, or run.sh stops the emulator (see the SIGTERM note
+  below) before the end. It had grown to 90 minutes in Hatari:
+  - the page hash was FNV's, a 32-bit multiply a byte, which on a
+    68000 is a `__mulsi3` call: 153.6K of them a page, every page of
+    every frame. It is h * 33 + each long now, a shift and an add;
+  - the reference drew a polygon's coverage a pixel at a time through
+    GetPixel and PutPixel on both halves, four calls a pixel over
+    polygons the size of the screen. It works a group at a time on the
+    halves' planes now, as the 4-plane PutPixel writes each pixel. A
+    `compare()` went from 211s to 29s;
+  - `test_mixed` read the whole screen back after each of 120 blits. It
+    reads the box and a group round it, the whole screen every eighth
+    and at the end: 25s.
+
+  Each was broken on purpose to see the checks still fail, and two
+  polygon mutations the reference had never caught were (a colour
+  leaving the mask, a hole keeping its colour): the random run now
+  draws a polygon onto its masked surface every frame, last.
 - **Hatari ignores `run.sh`'s SIGTERM on this host** (seen with
   `--machine tt` and `falcon`): `run.sh` then waits out its caller's
   `timeout`, and the emulator outlives it - 61 of them had piled up

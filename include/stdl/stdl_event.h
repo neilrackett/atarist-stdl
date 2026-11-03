@@ -142,9 +142,11 @@ void STDL_PumpEvents(void);
  * Take the keyboard, mouse, joystick and pad without setting a video
  * mode. STDL_SetVideoMode does this itself, so most programs never
  * need it. It is for a program that keeps the screen it was started
- * on (a tool that prints, as examples/checkkeys.c does) or drives the
- * screen some other way, such as a TT or Falcon mode set through the
- * XBIOS, and wants the events all the same.
+ * on - a tool that prints, as examples/checkkeys.c does, in medium
+ * resolution, which a mode would turn to low, or on a mono monitor,
+ * where STDL_SetVideoMode refuses - or drives the screen itself, and
+ * wants the events all the same. A TT's or a Falcon's 256 colours are
+ * the library's own screen (stdl_responsive.h).
  *
  * Runs STDL_Init if nothing has yet. Returns 0, or -1 when STDL_Init
  * fails. Calling it again, or setting a mode afterwards, changes

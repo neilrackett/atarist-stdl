@@ -103,7 +103,9 @@ screen.
 
 `STDL_OpenInput()` takes the keyboard, mouse, joystick and pad without
 setting a video mode, for a program that keeps the screen it started
-on or sets its own - a TT or Falcon mode through the XBIOS, say.
+on - a tool that prints, in medium resolution or on a mono monitor -
+or drives its own. A TT's or a Falcon's 256 colours come with
+`stdl_responsive.h`.
 
 `STDL_PauseVoices()` and `STDL_ResumeVoices()` stop and restart the
 sample mixer's DMA without giving up the volume table its open call

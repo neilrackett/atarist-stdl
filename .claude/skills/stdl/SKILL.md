@@ -1053,12 +1053,14 @@ first.
 - Input without a video mode: `STDL_OpenInput()` takes the keyboard,
   mouse, joystick and pad as `STDL_SetVideoMode` does, and leaves the
   screen alone - for a tool that prints on the screen it was started
-  on, in any resolution (`examples/checkkeys.c`), or a program that
-  sets a mode the library does not, such as a TT's or a Falcon's
-  through the XBIOS. It runs `STDL_Init` if nothing has, a mode set
-  later changes nothing, and the keyboard goes back at `STDL_Quit` and
-  down the terminate path. A screen mode the program set is the
-  program's to put back: the library restores only one it set.
+  on, in any resolution (`examples/checkkeys.c`), a mono monitor's
+  included, which `STDL_SetVideoMode` refuses, or a program that drives
+  the screen itself. A TT's or a Falcon's 256 colours are STDL's own
+  screen (`stdl_responsive.h`). It runs `STDL_Init` if nothing has, a
+  mode set later changes nothing, and the keyboard goes back at
+  `STDL_Quit` and down the terminate path. A screen mode the program
+  set is the program's to put back: the library restores only one it
+  set.
 - Display rate: `STDL_SetRefresh(50 | 60)` switches the sync rate
   and returns the rate that actually took effect, `-1` queries. PAL
   machines boot at 50 and NTSC at 60, and 60Hz buys ten more frames

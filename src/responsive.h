@@ -105,5 +105,8 @@ void resp_shutdown(void);
 int  resp_set_colours(STDL_Surface *s, const STDL_Colour *c, int first,
                       int n);
 void p8_init_surface(STDL_Surface *s, int w, int h);
+/* p8_blit with UNDER or MARK onto a masked surface (planes8ex.c) */
+int  p8_blit_ex(const STDL_Surface *src, const STDL_Rect *srcrect,
+                STDL_Surface *dst, STDL_Rect *dstrect, unsigned flags);
 
 #endif /* STDL_RESPONSIVE_INT_H */

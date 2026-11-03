@@ -28,6 +28,7 @@ uint16_t (*stdl_blit_policy)(uint16_t nlines, uint32_t cpl);
 const stdl_resp_ops_t *stdl_resp;
 const stdl_resp_video_t *stdl_resp_video;
 STDL_Surface *stdl_resp_screen;
+const resp_banks *stdl_resp_bank;
 void (*stdl_pal_apply_hook)(void);
 void (*stdl_pal_write)(int index, uint16_t word);
 int (*stdl_pal_raw_hook)(int index, uint16_t word);
@@ -461,7 +462,6 @@ static void restore_all(void)
     if (stdl_resp_screen != NULL) {
         /* its pages and surfaces; the desktop is back already */
         stdl_resp_video->shutdown();
-        stdl_resp_screen = NULL;
     }
     stdl_stram_free(stdl.page1_alloc);
     stdl.page1_alloc = NULL;
@@ -551,7 +551,7 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
     /* a TT's or a Falcon's own mode, for a program that asked for
      * more than an ST has (stdl_responsive.h); ST Low everywhere else.
      * After the init: the machine is not known before it */
-    resp = stdl_resp_video != NULL && stdl_resp_video->wants(w, h, bpp);
+    resp = stdl_resp_video != NULL && stdl_resp_video->enter(w, h, bpp);
 
     if (!stdl.video_set) {
         stdl.old_sync = -1;     /* nothing to put back yet */

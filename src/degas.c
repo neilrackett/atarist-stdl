@@ -68,7 +68,7 @@ static STDL_Surface *load_degas(const char *file, int trailer,
     }
     s = stdl_surface_create(320, 200);   /* 4 planes, always */
     if (s != NULL) {
-        memcpy(s->pixels, data, 32000);
+        stdl_be_words(s->pixels, data, 32000);
         stdl_planes_normalise(s->pixels, s->stride, s->h);
         for (i = 0; i < 16; i++) {
             stdl_hw_to_rgb(hwpal[i], &s->format->palette->colors[i]);
@@ -114,8 +114,8 @@ static int show_degas(const char *file, int trailer)
         /* a row at a time, for a line wider than 320 pixels (open side
          * borders, a Falcon's 4-bit screen on RGB) */
         for (y = 0; y < 200; y++) {
-            memcpy(screen->pixels + stdl_row_off(y, screen->stride),
-                   data + stdl_row_off(y, 160), 160);
+            stdl_be_words(screen->pixels + stdl_row_off(y, screen->stride),
+                          data + stdl_row_off(y, 160), 160);
         }
         stdl_planes_normalise(screen->pixels, screen->stride, screen->h);
     } else {
@@ -129,7 +129,7 @@ static int show_degas(const char *file, int trailer)
             free(data);
             return -1;
         }
-        memcpy(pic->pixels, data, 32000);
+        stdl_be_words(pic->pixels, data, 32000);
         (void)stdl_resp->blit(pic, NULL, screen, NULL, 0);
         STDL_FreeSurface(pic);
     }

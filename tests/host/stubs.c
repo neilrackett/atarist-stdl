@@ -50,12 +50,17 @@ uint16_t (*stdl_blit_policy)(uint16_t nlines, uint32_t cpl);
 const stdl_resp_ops_t *stdl_resp;      /* video.c's on target */
 const stdl_resp_video_t *stdl_resp_video;
 STDL_Surface *stdl_resp_screen;
+const resp_banks *stdl_resp_bank;
 int16_t stdl_ovsc_cap;                  /* overscan.c's on target */
 int stdl_host_bottom_opens;             /* the tries, for a test to count */
 int STDL_OpenBottomBorder(void)
 {
     stdl_host_bottom_opens++;
     return 0;
+}
+
+void STDL_CloseBottomBorder(void)
+{
 }
 
 /* the YM2149 as a register file, and the console-attributes byte */

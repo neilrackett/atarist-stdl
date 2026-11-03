@@ -380,20 +380,30 @@ rows = screen->h;                           /* 240, or 200 */
 * **Surfaces** created while an 8-plane screen is up have 8 planes,
   and blit and sprite onto each other as usual. What they refuse,
   each setting the error and drawing nothing: a blit or a sprite from
-  8 planes onto 4, the blit flags (UNDER, MARK), patterned polygons,
-  tilesets and the cursor. `STDL_TRANSPARENT` punches holes in a
-  masked one as on 4 planes.
+  8 planes onto 4, patterned polygons, tilesets and the cursor.
+  `STDL_TRANSPARENT` punches holes in a masked one as on 4 planes; the
+  blit flags (UNDER, MARK) keep a priority plane in its mask; and
+  `STDL_CreateSurfaceFrom8Planes` lays one over a program's own
+  8-plane block.
 * **Pixels a program writes itself**: tell an 8-plane screen with
   `STDL_UpdateRects` (`SDL_UpdateRect`); the tall 16-colour screen
   needs nothing, as a TT compares its whole page.
-* **What it costs.** The colour's code is about 21K of program: on a
+* **What it costs.** The colour's code is about 23K of program: on a
   512K ST link libcmini (one port kept 112K free with it). A TT copies
   what changed to its doubled lines at every Flip, 4.1ms a frame for
   one port with the colour; its tall 16-colour screen compares the
-  whole page instead, 6.6-7.5ms, more than the colour. A Falcon's
+  whole page instead, 6.3-7.5ms, more than the colour. A Falcon's
   screen is the display itself, with nothing to copy. A responsive
   screen there is always double-buffered (`STDL_TRIPLEBUF` is
   ignored).
+* **Art.** With `STDL_RESPONSIVE_BANKS` as well, a bank holds each
+  id's 256-colour version beside the ST's, and the same
+  `STDL_LoadSurface`, `STDL_LoadSprite` and `STDL_LoadPalette` calls
+  give whichever the screen can show: art of its own (`stdlconv bank`'s
+  `depth=8`, and `map=PAL` for the ST's chunk from the same image), or
+  planes 4-7 over the ST's art (`depth=hi`, with `low` for the ST's),
+  which keeps one set of colour numbers for both machines
+  (`docs/format.md` section 6.1). An ST reads only its own chunks.
 * **Console text** printed after the mode set lands in the picture, as
   on an ST; on a TT the next Flip shows the screen as the program
   drew it.

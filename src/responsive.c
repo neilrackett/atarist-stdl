@@ -94,22 +94,23 @@ static void resp_whole(resp_box *b)
     b->y1 = (int16_t)(stdl_rs.h - 1);
 }
 
-static int resp_wants(int w, int h, int bpp);
+static int resp_enter(int w, int h, int bpp);
 static void resp_st_mode(int h);
 static void resp_update(int n, const STDL_Rect *rects);
 static void resp_fade(const STDL_Palette *target, int frames);
 
 static const stdl_resp_video_t resp_video = {
-    resp_wants, resp_set_mode, resp_flip, resp_shutdown, resp_st_mode,
+    resp_enter, resp_set_mode, resp_flip, resp_shutdown, resp_st_mode,
     resp_update, resp_fade
 };
 
 int stdl_use_responsive(unsigned what, const struct stdl_resp_model *colour,
                         const struct stdl_resp_model *tall,
-                        void (*st_tall)(int h))
+                        void (*st_tall)(int h),
+                        const struct stdl_resp_banks *banks)
 {
     if (what & ~(STDL_RESPONSIVE_COLOUR | STDL_RESPONSIVE_TALL
-                 | STDL_RESPONSIVE_HEIGHT)) {
+                 | STDL_RESPONSIVE_HEIGHT | STDL_RESPONSIVE_BANKS)) {
         STDL_SetError("unknown responsive option");
         return -1;
     }
@@ -120,23 +121,42 @@ int stdl_use_responsive(unsigned what, const struct stdl_resp_model *colour,
     stdl_rs.colour = colour;
     stdl_rs.tall = tall;
     stdl_rs.st_tall = st_tall;
+    stdl_resp_bank = banks;
     stdl_resp_video = (colour != NULL || tall != NULL) ? &resp_video : NULL;
     return 0;
 }
 
-/* only a TT or a Falcon has its own screen for these; an ST's tall
+/*
+ * First in every mode set (video.c): whether a responsive screen takes
+ * it. Only a TT or a Falcon has its own screen for these; an ST's tall
  * screen is its own, with the bottom border open (resp_st_mode), and
- * the display's own height is its 200 lines */
-static int resp_wants(int w, int h, int bpp)
+ * the display's own height is its 200 lines. A screen of its already up
+ * goes first, whichever way the set goes: kept, a second request got
+ * the first one's screen back, and under an ST mode set its mode stayed
+ * up beneath the ST's pages, surfaces made after it with 8 planes. For
+ * an ST set the display is ST Low again before the set's own work, its
+ * colours to the ST's registers (the shutdown drops the sink).
+ */
+static int resp_enter(int w, int h, int bpp)
 {
+    const int take = stdl.mach.mch_cookie >= 0x00020000UL
+        && ((stdl_rs.colour != NULL && bpp >= 8)
+            || (stdl_rs.tall != NULL && h > 200));
+
     (void)w;
-    if (stdl.mach.mch_cookie < 0x00020000UL) {
-        return 0;
+    if (stdl_resp_screen != NULL) {
+        resp_shutdown();
+#ifdef __m68k__
+        if (!take) {
+            (void)Setscreen(stdl.page[0], stdl.page[0], 0);
+            stdl_vbl_hz = stdl_measure_vbl();
+        }
+#endif
     }
-    return (stdl_rs.colour != NULL && bpp >= 8)
-        || (stdl_rs.tall != NULL && h > 200);
+    return take;
 }
 
+/* after an ST mode set (video.c): what an ST does itself */
 static void resp_st_mode(int h)
 {
     if (stdl_rs.st_tall != NULL) {
@@ -303,9 +323,6 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
 
     (void)w;
     (void)flags;
-    if (stdl_resp_screen != NULL) {
-        return stdl_resp_screen;
-    }
     if (m == NULL || (!colour && !tall)) {
         STDL_SetError("no responsive screen asked for");
         return NULL;
@@ -490,4 +507,5 @@ void resp_shutdown(void)
         stdl_rs.page[i] = NULL;
     }
     stdl_rs.page_bytes = 0;
+    stdl_resp_screen = NULL;
 }

@@ -10,7 +10,9 @@
  *   "STDL" u16 version(1) u16 nchunks
  *   nchunks * dir entry: u16 type, u16 id, u32 offset, u32 length
  *   payloads...
- * Chunk types: 1 palette, 2 surface, 3 sprite, 4 tileset, 5 font.
+ * Chunk types: 1 palette, 2 surface, 3 sprite, 4 tileset, 5 font;
+ * on an 8-plane screen with STDL_RESPONSIVE_BANKS (stdl_responsive.h)
+ * the loaders look first for its own versions, 6-8 (asset8.c).
  */
 
 #include <stdio.h>
@@ -67,12 +69,6 @@ void *stdl_fopen_ci(const char *path, const char *mode)
     return fopen(upper, mode);
 }
 
-#define CHUNK_PALETTE 1
-#define CHUNK_SURFACE 2
-#define CHUNK_SPRITE  3
-#define CHUNK_TILESET 4
-#define CHUNK_FONT    5
-
 /* Find chunk (type, id) in a bank and return its payload, malloc'd.
  * id -1 matches the first chunk of the type. */
 static uint8_t *load_chunk(const char *bank, int type, int id,
@@ -127,13 +123,31 @@ fail:
     return payload;
 }
 
+/* an 8-plane screen's own version of chunk (type, id), where the
+ * program asked for it (STDL_RESPONSIVE_BANKS) and the bank has one.
+ * One call, out of line, for the three loaders: each its own cost 80
+ * bytes in every program with a bank, inlined into them 46. Its
+ * arguments are the hook's, in its order, so it passes them on as they
+ * came (the loaders hand it the reader) */
+static __attribute__((noinline)) void *deep(const char *bank, int type,
+                                            int id, uint32_t flags,
+                                            uint32_t *len,
+                                            stdl_chunk_fn read)
+{
+    return stdl_resp_bank != NULL
+         ? stdl_resp_bank->load(bank, type, id, flags, len, read) : NULL;
+}
+
 int STDL_LoadPalette(const char *bank, int id, STDL_Palette *out)
 {
     uint32_t len;
-    uint8_t *p = load_chunk(bank, CHUNK_PALETTE, id, &len);
+    uint8_t *p = deep(bank, CHUNK_PALETTE, id, 0, &len, load_chunk);
     uint16_t n;
     int i;
 
+    if (p == NULL) {
+        p = load_chunk(bank, CHUNK_PALETTE, id, &len);
+    }
     if (p == NULL) {
         return -1;
     }
@@ -160,11 +174,16 @@ int STDL_LoadPalette(const char *bank, int id, STDL_Palette *out)
 STDL_Surface *STDL_LoadSurface(const char *bank, int id)
 {
     uint32_t len;
-    uint8_t *p = load_chunk(bank, CHUNK_SURFACE, id, &len);
+    uint8_t *p;
     STDL_Surface *s = NULL;
     uint16_t w, h;
     uint32_t datalen;
 
+    s = deep(bank, CHUNK_SURFACE, id, 0, &len, load_chunk);
+    if (s != NULL) {
+        return s;
+    }
+    p = load_chunk(bank, CHUNK_SURFACE, id, &len);
     if (p == NULL) {
         return NULL;
     }
@@ -178,7 +197,7 @@ STDL_Surface *STDL_LoadSurface(const char *bank, int id)
     }
     s = stdl_surface_create(w, h);   /* 4 planes, whatever the screen */
     if (s != NULL) {
-        memcpy(s->pixels, p + 6, datalen);
+        stdl_be_words(s->pixels, p + 6, datalen);
         stdl_planes_normalise(s->pixels, s->stride, s->h);
         if (p[4]) {
             STDL_SetColourKey(s, 1, p[5]);
@@ -193,10 +212,15 @@ STDL_Surface *STDL_LoadSurface(const char *bank, int id)
 STDL_Sprite *STDL_LoadSprite(const char *bank, int id, uint32_t flags)
 {
     uint32_t len;
-    uint8_t *p = load_chunk(bank, CHUNK_SPRITE, id, &len);
+    uint8_t *p;
     STDL_Sprite *spr;
     uint32_t datawords;
 
+    spr = deep(bank, CHUNK_SPRITE, id, flags, &len, load_chunk);
+    if (spr != NULL) {
+        return spr;
+    }
+    p = load_chunk(bank, CHUNK_SPRITE, id, &len);
     if (p == NULL) {
         return NULL;
     }
@@ -227,7 +251,7 @@ STDL_Sprite *STDL_LoadSprite(const char *bank, int id, uint32_t flags)
         free(spr);
         return NULL;
     }
-    memcpy(spr->data, p + 14, datawords * 2);
+    stdl_be_words(spr->data, p + 14, datawords * 2);
     free(p);
 
     /* expand to 16 variants on demand */
@@ -281,7 +305,7 @@ STDL_Tileset *STDL_LoadTileset(const char *bank, int id)
         free(ts);
         return NULL;
     }
-    memcpy(ts->data, p + 14, datawords * 2);
+    stdl_be_words(ts->data, p + 14, datawords * 2);
     free(p);
     return ts;
 }

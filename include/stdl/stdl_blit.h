@@ -32,6 +32,10 @@ extern "C" {
  * width that is a multiple of 16 - is one memcpy on a machine without
  * a BLiTTER: 19.5ms for 320x200 on an 8MHz ST, against 42 row by
  * row. A full-size srcrect is not spotted, so pass NULL.
+ *
+ * A source of 8 planes (stdl_responsive.h) onto a destination of 4
+ * sets the error and draws nothing: 4 planes hold no colour above 15.
+ * A 4-plane source onto 8 planes draws in colours 0-15.
  */
 int STDL_BlitSurface(STDL_Surface *src, const STDL_Rect *srcrect,
                      STDL_Surface *dst, STDL_Rect *dstrect);
@@ -50,7 +54,10 @@ int STDL_BlitSurface(STDL_Surface *src, const STDL_Rect *srcrect,
  * one set of flags. flags == 0 is exactly STDL_BlitSurface, down to
  * the BLiTTER fast paths, save the whole-surface memcpy above (every
  * blit through here would pay to test for it); UNDER and MARK take
- * the CPU route.
+ * the CPU route. Onto an 8-plane surface (stdl_responsive.h), from 8
+ * planes or from 4, they take a CPU path of their own, its rows a
+ * group at a time: slower than the plain 8-plane blit, which keeps its
+ * own code.
  */
 #define STDL_BLIT_UNDER  0x0004u
 #define STDL_BLIT_MARK   0x0008u
@@ -59,6 +66,9 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                        STDL_Surface *dst, STDL_Rect *dstrect,
                        unsigned flags);
 
+/* An 8-plane sprite (stdl_responsive.h) onto a 4-plane surface sets
+ * the error and draws nothing, as STDL_BlitSurface does; a 4-plane one
+ * draws onto 8 planes in colours 0-15. */
 void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
                      int x, int y);
 
@@ -76,6 +86,8 @@ void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
 typedef struct { int16_t x, y; uint16_t frame; } STDL_SpriteAt;
 void STDL_BlitSprites(STDL_Sprite *spr, const STDL_SpriteAt *at,
                       int count, STDL_Surface *dst);
+/* Tiles are 4-plane: onto an 8-plane surface (stdl_responsive.h)
+ * this sets the error and draws nothing. */
 void STDL_BlitTile(STDL_Tileset *ts, int index, STDL_Surface *dst,
                    int x, int y);
 

@@ -48,6 +48,14 @@
  *   everywhere: every call works on it, and so do a program's own
  *   writes to its pixels.
  *
+ * STDL_RESPONSIVE_BANKS: with the colour, a bank's 256-colour art.
+ *   On an 8-plane screen STDL_LoadSurface, STDL_LoadSprite and
+ *   STDL_LoadPalette look for the id's 8-plane version first - its own
+ *   art and 256 colours, or planes 4-7 over the ST's art of the same id
+ *   (docs/format.md section 6.1, stdlconv's depth=) - and give the ST's
+ *   chunk, colours 0-15, where the bank has neither. An ST loads only
+ *   its own chunks. 1.7K, linked by this option alone.
+ *
  * STDL_RESPONSIVE_HEIGHT: the display's own height, asked for as the
  *   tall screen is. A TT and a Falcon give 320x240 as above, on a
  *   Falcon's RGB or TV in overscan too; an ST, an STE or a Mega STE
@@ -62,10 +70,21 @@
  * STDL_SetColour too; a word for the ST's registers sets its entry at
  * the ST's 4 bits a channel.
  *
+ * A surface over a program's own block of 8 planes is
+ * STDL_CreateSurfaceFrom8Planes's (stdl_surface.h): a stride that is a
+ * whole number of 16-byte groups, the caller's mask, if any, its key
+ * and priority plane, the block the caller's to free;
+ * STDL_CreateSurfaceFrom stays 4 planes whatever the screen. The blit
+ * flags (STDL_BlitSurfaceEx's UNDER and MARK) work onto an 8-plane
+ * surface, from 8 planes or from 4, through a CPU path of their own.
+ *
  * What an 8-plane surface does not take: a blit from it onto a 4-plane
- * surface, or one of its sprites onto one; the blit flags (UNDER,
- * MARK); patterned polygons; tilesets, from one or onto one; the
- * cursor on a responsive screen. Each sets the error and draws nothing.
+ * surface, or one of its sprites onto one; patterned polygons;
+ * tilesets, from one or onto one; the cursor on a responsive screen.
+ * Each sets the error and draws nothing. The first has no right answer
+ * - 4 planes hold no colour above 15 - and stays refused; the others
+ * are 4-plane formats and kernels not built for 8 planes yet, which a
+ * later release can add when a program needs them (docs/limits.md).
  * Plane budgets apply to 4-plane surfaces alone. A TT or a Falcon has
  * no borders, rasters or hardware scrolling for any screen
  * (stdl_overscan.h, stdl_raster.h, stdl_hwscroll.h).
@@ -97,6 +116,7 @@ extern "C" {
 #define STDL_RESPONSIVE_COLOUR 0x0001u
 #define STDL_RESPONSIVE_TALL   0x0002u
 #define STDL_RESPONSIVE_HEIGHT 0x0004u
+#define STDL_RESPONSIVE_BANKS 0x0008u
 
 /*
  * 0, or -1 for an option this library does not know, or while a
@@ -106,21 +126,31 @@ extern "C" {
  * each several kilobytes.
  */
 struct stdl_resp_model;
+struct stdl_resp_banks;
 extern const struct stdl_resp_model stdl_resp_colour, stdl_resp_tall;
+extern const struct stdl_resp_banks stdl_resp_banks;
 void stdl_resp_tall_st(int h);
 int stdl_use_responsive(unsigned what, const struct stdl_resp_model *colour,
                         const struct stdl_resp_model *tall,
-                        void (*st_tall)(int h));
+                        void (*st_tall)(int h),
+                        const struct stdl_resp_banks *banks);
 
 /* the height and the tall screen are one screen on a TT and a Falcon;
- * only the tall one opens an ST's border */
-static __inline__ int STDL_UseResponsive(unsigned what)
+ * only the tall one opens an ST's border. Always inline: gcc 4.6 left
+ * one copy of it out of line in a program that called it twice from one
+ * large function, its `what` a variable there, and so linked every
+ * option - the ST's border code, 8.7K, in a program that never asked */
+static __inline__ __attribute__((always_inline))
+int STDL_UseResponsive(unsigned what)
 {
     return stdl_use_responsive(what,
         (what & STDL_RESPONSIVE_COLOUR) ? &stdl_resp_colour : 0,
         (what & (STDL_RESPONSIVE_TALL | STDL_RESPONSIVE_HEIGHT))
             ? &stdl_resp_tall : 0,
-        (what & STDL_RESPONSIVE_TALL) ? stdl_resp_tall_st : 0);
+        (what & STDL_RESPONSIVE_TALL) ? stdl_resp_tall_st : 0,
+        /* the art is the colour's: alone it could never load */
+        (what & STDL_RESPONSIVE_BANKS) && (what & STDL_RESPONSIVE_COLOUR)
+            ? &stdl_resp_banks : 0);
 }
 
 #ifdef __cplusplus

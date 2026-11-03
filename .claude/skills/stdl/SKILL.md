@@ -53,18 +53,26 @@ by name, once, before the first `STDL_SetVideoMode`
 - `STDL_RESPONSIVE_HEIGHT`, with a height of 240: 240 rows on a TT or
   a Falcon, an ST's own 200 there; `STDL_RESPONSIVE_TALL` opens an
   ST's bottom border for 240 rows on every machine.
+- `STDL_RESPONSIVE_BANKS`, with the colour: the bank loaders give an
+  id's 256-colour art on an 8-plane screen and the ST's chunk
+  elsewhere, from one bank - its own art and palette (`stdlconv bank`'s
+  `depth=8`, the ST's chunk of the same id `map=PAL`), or planes 4-7
+  over the ST's art (`depth=hi` and `low`, colours 16 families of 16).
+  1.7K, linked by this option alone (`docs/format.md` section 6.1).
 
 Then branch on what the screen says - `format->BitsPerPixel` and `h` -
 never on the machine. Keep colours 0-15 the ST's palette, so text and
 the HUD look the same everywhere, and put the extra shades above them.
-What it costs: the colour's code is about 21K of program (on a 512K ST
+What it costs: the colour's code is about 23K of program (on a 512K ST
 link libcmini - one port kept 112K free with it); a TT copies what
 changed to its doubled lines at every Flip (one port: 4.1ms a frame
 with the colour), and its tall 16-colour screen compares the whole
-page instead (6.6-7.5ms, more than the colour). An 8-plane surface
-does not take a blit or sprite onto a 4-plane one, the blit flags,
-patterned polygons, tilesets or the cursor (each sets the error and
-draws nothing); `STDL_TRANSPARENT` keeps its meaning on a masked one.
+page instead (6.3-7.5ms, more than the colour). An 8-plane surface
+does not take a blit or sprite onto a 4-plane one, patterned
+polygons, tilesets or the cursor (each sets the error and draws
+nothing); `STDL_TRANSPARENT`, the blit flags (UNDER, MARK) and
+`STDL_CreateSurfaceFrom8Planes` over a program's own 8-plane block
+work as on 4 planes.
 
 **A TT- or Falcon-only SDL port?** Use Atari SDL 1.2 (plain TOS, no
 MiNT): those machines have 256 colours, and TT line-doubles 320x240 so

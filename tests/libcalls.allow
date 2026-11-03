@@ -32,7 +32,6 @@ tileset.o STDL_TilesetFromSurface __mulsi3 4
 # Creating surfaces and masks: once per surface
 surface.o STDL_CreateMask __mulsi3 1
 surface.o stdl_surface_create __mulsi3 1
-surface.o STDL_DuplicateSurface __mulsi3 1
 surface.o STDL_SurfaceIsOpaque __mulsi3 1
 surface.o mask_alloc __mulsi3 1
 

@@ -135,6 +135,47 @@ static STDL_Surface *p8_create(int w, int h)
     return &d->s;
 }
 
+static const stdl_resp_ops_t p8_ops;
+
+/* over a caller's block, 8 planes a group (stdl_surface.h): the header
+ * alone is the library's, freed with it, and a mask, if any, keys it
+ * as STDL_TRANSPARENT does */
+STDL_Surface *STDL_CreateSurfaceFrom8Planes(void *pixels, int w, int h,
+                                            int stride, uint8_t *mask,
+                                            int maskstride)
+{
+    p8_surface *d;
+
+    /* its drawing goes through this file's routines, which the colour's
+     * screen puts in charge */
+    if (stdl_resp != &p8_ops) {
+        STDL_SetError("an 8-plane surface with no 8-plane screen");
+        return NULL;
+    }
+    if (pixels == NULL || w <= 0 || h <= 0 || w > 4096 || h > 4096
+        || stride < (((w + 15) >> 4) << 4) || (stride & 15) != 0
+        || ((uintptr_t)pixels & 1) != 0) {
+        STDL_SetError("bad 8-plane stride or alignment");
+        return NULL;
+    }
+    d = calloc(1, sizeof(*d));
+    if (d == NULL) {
+        STDL_SetError("out of memory");
+        return NULL;
+    }
+    p8_init_surface(&d->s, w, h);
+    d->s.pixels = pixels;
+    d->s.stride = (uint16_t)stride;
+    d->s.flags = STDL_PREALLOC;
+    if (mask != NULL) {
+        d->s.mask = mask;
+        d->s.maskstride = (uint16_t)maskstride;
+        d->s.flags |= STDL_SRCKEY;
+        d->s.colourkey = STDL_TRANSPARENT;
+    }
+    return &d->s;
+}
+
 static void p8_free_surface(STDL_Surface *s)
 {
     free(P8(s)->block);
@@ -739,9 +780,11 @@ static int p8_blit(STDL_Surface *src, const STDL_Rect *srcrect,
         STDL_SetError("blit from an 8-plane to a 4-plane surface");
         return -1;
     }
-    if (flags != 0) {
-        STDL_SetError("blit flags on an 8-plane surface");
-        return -1;
+    /* UNDER and MARK read and set a destination mask: with none they
+     * are nothing, as on 4 planes; with one, a path of their own
+     * (planes8ex.c) */
+    if (flags != 0 && dst->mask != NULL) {
+        return p8_blit_ex(src, srcrect, dst, dstrect, flags);
     }
     if (srcrect != NULL) {
         sx = srcrect->x;

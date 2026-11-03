@@ -12,6 +12,7 @@
 #define STDL_INTERNAL_H
 
 #include <stddef.h>
+#include <string.h>             /* stdl_be_words */
 #include <stdl/stdl.h>
 
 #ifdef __m68k__
@@ -1414,6 +1415,23 @@ static __inline__ uint32_t stdl_rd32(const uint8_t *p)
          | ((uint32_t)p[2] << 8) | p[3];
 }
 
+/* a file's big-endian plane words into memory: one memcpy on the
+ * machine, each word swapped for the host tests, which are
+ * little-endian (no loader's pixels were tested there before) */
+static __inline__ void stdl_be_words(void *dst, const uint8_t *src,
+                                     uint32_t bytes)
+{
+#ifdef __m68k__
+    memcpy(dst, src, bytes);
+#else
+    uint16_t *d = (uint16_t *)dst;
+
+    for (; bytes >= 2; bytes -= 2, src += 2) {
+        *d++ = stdl_rd16(src);
+    }
+#endif
+}
+
 static __inline__ uint16_t stdl_le16(const uint8_t *p)
 {
     return (uint16_t)(p[0] | (p[1] << 8));
@@ -1466,13 +1484,15 @@ void stdl_audio_convert(int8_t *dst, uint32_t dst_frames,
  * or a Falcon shows when a program asked for more than an ST has.
  *
  * stdl_resp_video is NULL until STDL_UseResponsive, so a program that
- * never asks links none of it. video.c asks it whether a mode set is
- * its (wants), hands that set to it, and sends Flip and the shutdown
- * there while its screen is up; an ST's own mode set calls st_mode,
- * for what an ST does itself (the bottom border, for a tall screen).
+ * never asks links none of it. video.c asks it first, in every mode
+ * set, whether the set is its (enter, which takes down a screen of its
+ * already up either way), hands that set to it, and sends Flip and the
+ * shutdown there while its screen is up; an ST's own mode set calls
+ * st_mode, for what an ST does itself (the bottom border, for a tall
+ * screen).
  */
 typedef struct {
-    int  (*wants)(int w, int h, int bpp);
+    int  (*enter)(int w, int h, int bpp);
     STDL_Surface *(*set_mode)(int w, int h, int bpp, uint32_t flags);
     void (*flip)(void);
     void (*shutdown)(void);
@@ -1498,6 +1518,22 @@ extern STDL_Surface *stdl_resp_screen;  /* while a responsive mode is set */
  */
 typedef void (*stdl_poly_fn)(STDL_Surface *d, const STDL_Point *pts, int n,
                              uint8_t c, int op);
+
+/* the bank container's chunk types (docs/format.md): 6-8 are an
+ * 8-plane screen's own, which only asset8.c reads */
+#define CHUNK_PALETTE    1
+#define CHUNK_SURFACE    2
+#define CHUNK_SPRITE     3
+#define CHUNK_TILESET    4
+#define CHUNK_FONT       5
+#define CHUNK_SURFACE8   6      /* its own art, or planes 4-7 over the
+                                   4-plane chunk of the same id      */
+#define CHUNK_SPRITE8    7      /* a frame width, then a surface8     */
+#define CHUNK_PALETTE8   8
+
+/* a bank chunk's payload, malloc'd, or NULL (asset.c's reader) */
+typedef uint8_t *(*stdl_chunk_fn)(const char *bank, int type, int id,
+                                  uint32_t *len);
 
 typedef struct stdl_resp_ops {
     STDL_Surface *(*create)(int w, int h);
@@ -1553,6 +1589,22 @@ typedef struct stdl_resp_ops {
     void (*put_group8)(STDL_Surface *s, int x, int y,
                        const uint8_t planes[4], uint8_t transmask);
 } stdl_resp_ops_t;
+
+/*
+ * STDL_RESPONSIVE_BANKS (asset8.c): on an 8-plane screen, a bank's
+ * 8-plane version of a surface, a sprite or a palette (CHUNK_SURFACE, CHUNK_SPRITE, or
+ * CHUNK_PALETTE, whose 256 colours come back as the chunk's payload and
+ * its length) at `id`, or NULL where it has none and the 4-plane chunk
+ * serves. An option of its own, so a program with the colour and no
+ * 256-colour art links none of it. `read` is asset.c's: named in
+ * asset8.c, it would link the bank reader into a program with no bank.
+ */
+typedef struct stdl_resp_banks {
+    void *(*load)(const char *bank, int type, int id, uint32_t flags,
+                  uint32_t *len, stdl_chunk_fn read);
+} resp_banks;
+
+extern const resp_banks *stdl_resp_bank;   /* video.c, so as not to link */
 
 extern const stdl_resp_ops_t *stdl_resp;
 #define STDL_IS_RESP(s) ((s)->planes & 8)

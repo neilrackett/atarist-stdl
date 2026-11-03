@@ -172,9 +172,47 @@ Chunk types and payloads:
 | 3 | sprite | `u16 w, h, nframes, u8 nvariants, u8 planes, u16 groups, u32 framesize`, data words |
 | 4 | tileset | `u16 tw, th, ntiles, groups, u8 masked, u8 planes, u32 tilesize`, data words |
 | 5 | font | `u16 cw, ch, u8 first, last, u16 bytes_per_row`, glyph bits |
+| 6 | surface8 | `u16 w, u16 h, u8 form, u8 key`, rows (below) |
+| 7 | sprite8 | `u16 framew`, then a surface8 payload of the frames side by side |
+| 8 | palette8 | as palette, n up to 256 |
 
 `framesize` / `tilesize` are in words and describe one frame of one
 variant / one tile including masks.
+
+### 6.1 A TT's or a Falcon's 256 colours
+
+Types 6-8 are an 8-plane screen's own (`stdl_responsive.h`), read only
+by a program that asks for `STDL_RESPONSIVE_BANKS` with the colour, on
+a TT or a Falcon. Its `STDL_LoadSurface`, `STDL_LoadSprite` and
+`STDL_LoadPalette` look for an id's 8-plane version first and take the
+4-plane chunk of the same id where the bank has none; an ST reads only
+types 1-5, so the others cost it disk space and nothing else. A
+surface8's `form` byte says which of two forms an id's art takes:
+
+* **0, its own; 1, its own keyed on `key`:** 8-plane rows - a group is
+  eight words, plane 0 first, 16 bytes - and a palette of up to 256
+  colours, the art drawn for the machine. The key is a colour of 256;
+  it cannot be 16, which an 8-plane surface keeps as
+  `STDL_TRANSPARENT`. The ST's chunk of the id is art of its own, in
+  its own 16 colours.
+* **2, over the ST's:** planes 4-7 only, as a 4-plane image is stored,
+  over the 4-plane chunk of the same id, which gives planes 0-3 and the
+  transparency (a surface's key, a sprite's masks); `key` is unused. A
+  pixel's low nibble is its ST colour and its high nibble a shade of
+  it: 16 families of 16, colour = shade << 4 | ST colour, the palette a
+  palette8 whose entries 0-15 are the ST's. The ST's art is carried
+  once. A sprite's 4-plane chunk must then have one variant, frames of
+  a whole number of groups, and `framew` and the frames' count those
+  of the strip.
+
+One type for both forms, so one lookup finds either, and a bank cannot
+hold two 8-plane versions of an id.
+
+`stdlconv bank` writes either from one piece of art of up to 256
+colours: `depth=8` the chunk of its own and `map=PAL` the ST's (every
+colour put on the nearest of PAL's 16, the key keeping one of its own),
+or `depth=hi` the planes over the ST's and `low` the ST's (the low
+nibbles, and the palette's first 16).
 
 ## 7. Music streams (STM)
 

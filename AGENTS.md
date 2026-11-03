@@ -116,8 +116,9 @@ warnings** with the Makefile's `-Wall -Wextra`.
 - **Size is a test result too.** `stcmd make` runs a `sizecheck`
   target that fails the build if the pixel-path objects outgrow
   `PIXEL_MAX` in the Makefile, or the responsive screens' own objects
-  (`responsive.o`, `planes8.o`, `tall4.o`: a program asking for the
-  colour links 21.8K of them) outgrow `RESP_MAX`. The archive links whole objects into
+  (`responsive.o`, `planes8.o`, `planes8ex.o`, `asset8.o`, `tall4.o`: a
+  program asking for the colour links 23.4K of them) outgrow
+  `RESP_MAX`. The archive links whole objects into
   programs with 512K-1M of RAM to share between code and heap, so
   library text spends the port's memory: a 12K growth in the
   pixel-path objects (four `STDL_PLANE_DISPATCH` instantiations,
@@ -539,8 +540,8 @@ warnings** with the Makefile's `-Wall -Wextra`.
   floor of 0.03%. Putting the tests where the ST already branches off
   (a clipped-out exit) would have needed 8-plane surfaces to show
   misleading public fields - an empty clip, no pixels - and was left.
-  A program that asks for the colour links about 21K more (planes8.o
-  17.3K, responsive.o 3.9K): a 512K machine's game wants a build of its
+  A program that asks for the colour links about 23K more (planes8.o
+  18K, planes8ex.o 1.2K, responsive.o 4.1K, on 2026-11-03): a 512K machine's game wants a build of its
   own for a TT and a Falcon, as one port's 030 build is, where a 1M
   one can carry both.
 - **Console text lands in a responsive page's margins.** A TT shows a
@@ -570,13 +571,13 @@ warnings** with the Makefile's `-Wall -Wextra`.
   program asking for the height links none of the border code: TALLHGT
   is 8,698 bytes smaller than TALLCHK stripped, as is the colour's
   pair. TALL wins where a program asks for both.
-- **The 16-colour tall screen costs a TT 6.6-7.5ms a frame.** ST Low
+- **The 16-colour tall screen costs a TT 6.3-7.5ms a frame.** ST Low
   costs a TT nothing, but TT Low is 8 planes, so without the colour
   every Flip compares the whole 4-plane page with the display (20
   groups by 240 rows, two longs each) and copies what changed. One
   port's bench (Hatari, a TT with no TT-RAM, 600 frames of play): the
-  drawing took 3.8ms a frame, as on ST Low, and the present 6.6 and
-  7.5ms in two builds of the same tall4.c, for 175 groups copied - the
+  drawing took 3.8ms a frame, as on ST Low, and the present 6.3 to
+  7.5ms in builds of the same tall4.c, for 175 groups copied - the
   compare's 75K of ST-RAM reads are the cost, not the copy, and where
   the pages fall moves it. The colour at 200 rows presented in 4.1ms,
   the box drawn (1,837 groups). So on a TT the tall 16-colour screen
@@ -603,6 +604,71 @@ warnings** with the Makefile's `-Wall -Wextra`.
   console writes the program's own page, as an ST's does, so it has no
   hook. `tests/hatari/conchk.c` (CONCHK, CONCOL with the colour) prints
   in the middle of play and times the present.
+- **A bank's 256-colour art is an option of its own**
+  (`STDL_RESPONSIVE_BANKS`, `src/asset8.c`, `docs/format.md` 6.1).
+  Reached through the 8-plane table it was in every program asking for
+  the colour, banks or none (2.3K then; one port's game asks for the
+  colour and loads no bank); as an option the inline
+  `STDL_UseResponsive` links it only where it is named. It was five
+  chunk types, an id's own art and the planes over the ST's for
+  surfaces and sprites each; it is three (`docs/format.md` 6), a
+  surface8's form byte saying which, so one lookup finds either and a
+  bank cannot hold two 8-plane versions of an id: asset8.o went from
+  2.6K to 1.7K. That inline is `always_inline`: gcc 4.6 left
+  a copy out of line in that game, which calls it twice from one large
+  function, with `what` a variable there, and so linked every option -
+  the ST's border code and this, 11.4K of its bench - since the height
+  went in. `asset.c` asks it through one out-of-line call
+  for its three loaders, 116 bytes in every program with a bank (three
+  checks inline cost 244), and hands it the bank reader, as planes8 is
+  handed the polygon rasteriser, so it links no reader. A payload is a
+  malloc of its own and every header an even length, so its plane words
+  are aligned where they lie and are used there; an id's own art goes
+  straight into the surface (`stdl_be_words`, one memcpy on the
+  machine). On the host no loader's plane words had been tested, and
+  they were never swapped for its byte order; `stdl_be_words` swaps
+  them there, the Degas loaders' too.
+  `test_responsive`'s bank test writes its own bank; `test_bank8conv`
+  runs stdlconv on art Pillow makes (skipped without it), and BANKCHK
+  is the same on the machine.
+- **A mode set from a responsive screen to an ST's took nothing down**:
+  a TT or a Falcon stayed in its own mode under the ST's pages, and
+  `stdl_resp_screen` stayed set, so surfaces made after it had 8 planes.
+  `resp_enter`, which video.c calls at the start of every mode set,
+  takes a responsive screen already up down first, and where the new
+  one is an ST's, sets ST Low on its page. BANKCHK found it.
+- **The blit flags on 8 planes keep out of the plain blit's way.**
+  UNDER and MARK (for a layer whose mask is a priority plane, as one
+  port's is) go to `p8_blit_ex`, a CPU path of its own, a group at a
+  time from 4 planes or 8. Inlined, gcc grew `p8_blit` by half and
+  moved every slot of its frame; out of line (`noinline`) `p8_blit`
+  keeps its loops' instructions and frame, a call at its top. Called
+  after `p8_blit`'s own clip instead, it reshaped `p8_blit` again (its
+  frame 4 bytes smaller, its blocks reordered), so it clips for
+  itself. Its rows are inline, the source's group index stepped by one
+  a group and a source group past an edge read from a zero group. At
+  -O2 it was 1.7K, so it is an object of its own built with `-Os`
+  (`planes8ex.c`, 1.2K). gcc 4.6's `optimize("Os")` on the function did
+  as well inside planes8.c, but one such attribute anywhere in a file
+  changes the code of every function in it, wherever it stands and
+  whether or not the declaration carries it: the sprite blit, its
+  source untouched, merged two tails and took a branch more a row.
+  Compare every function's code with the last commit's after touching
+  gcc's options.
+  On a Falcon one port's bench (256 colours, Hatari) moves with code
+  placement more than with any of this: its restores took 6.85 to
+  7.40ms a frame over five builds, 6.85 and 7.13 with `p8_blit` the same
+  and `planes8ex.o` left out or linked in (`-Wl,-u`). The hand-off at
+  `p8_blit`'s top (7.35) and a table entry choosing the path instead
+  (7.40) could not be told apart, so the hand-off stayed; against the
+  last commit the frames are 0.7% slower there, 0.8% on a TT, the same
+  on an STE.
+  `STDL_CreateSurfaceFrom8Planes`, a surface over a program's own
+  8-plane block, is 250 bytes in planes8.o; it is a call of its own so
+  that `STDL_CreateSurfaceFrom`, in every program that borrows a block,
+  stays the 4-plane call it was. Its name says planes because a
+  trailing 8 elsewhere in the library means 8 bits (STDL_PutGroup8's
+  bytes, STDL_SurfaceFromIndexed8's byte a pixel), on 4 planes.
 - **Bound a group by the surface's width, not its stride.** A Falcon's
   overscan line is 384 pixels with the 320 centred, so the screen's
   stride runs past the picture: STDL_PutGroup on an 8-plane screen,

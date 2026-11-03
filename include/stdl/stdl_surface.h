@@ -46,10 +46,26 @@ void          STDL_FreeSurface(STDL_Surface *s);
  * the same slack or keep edge-group operations 16-pixel aligned.
  * A borrowed surface must bring its own mask: STDL_SetColourKey /
  * STDL_CreateMask will not allocate one for it.
+ *
+ * The block is 4 planes whatever the screen, so 4-plane data a program
+ * keeps draws onto 8 planes too, in colours 0-15.
  */
 STDL_Surface *STDL_CreateSurfaceFrom(void *pixels, int w, int h,
                                      int stride, uint8_t *mask,
                                      int maskstride);
+
+/*
+ * The same over a block of 8 planes (stdl_responsive.h's colour): 16
+ * bytes a group, plane 0 first, `stride` a multiple of 16 and at least
+ * ((w+15)>>4)*16, the mask a word a group as above - its key, and a
+ * priority plane for STDL_BlitSurfaceEx's flags. NULL, with the error
+ * set, unless an 8-plane screen is or was up: the surface is drawn by
+ * the colour's own routines. Such a surface can have a mask made for it
+ * (STDL_CreateMask), freed with its header.
+ */
+STDL_Surface *STDL_CreateSurfaceFrom8Planes(void *pixels, int w, int h,
+                                            int stride, uint8_t *mask,
+                                            int maskstride);
 
 /* Build (or drop) the transparency mask from a palette index.
  * Pixels equal to `key` become transparent in masked blits.

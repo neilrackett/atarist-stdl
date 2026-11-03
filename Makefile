@@ -41,8 +41,8 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/hwscroll.c src/tone.c src/cpuspeed.c src/opl.c \
           src/refresh.c src/mouse.c src/stram.c src/wav.c src/ring.c \
           src/palstage.c src/polygon.c src/polypat.c src/raster.c \
-          src/spritebatch.c src/responsive.c src/planes8.c src/tall4.c \
-          src/tallst.c src/hz38400.c
+          src/spritebatch.c src/responsive.c src/planes8.c src/planes8ex.c \
+          src/asset8.c src/tall4.c src/tallst.c src/hz38400.c
 # Objects live under obj/, mirroring each source's own path. Sources
 # now come from two places, this repo and the xpad submodule, and
 # building beside the source would drop .o files inside lib/xpad. The
@@ -126,12 +126,16 @@ PIXEL_OBJS = $(addprefix $(OBJDIR)/src/,draw.o blit.o sprite.o \
 PIXEL_MAX  = 35300
 
 # The responsive screens' own code (stdl_responsive.h), which only a
-# program that asks for an option links: the colour is responsive.o
-# and planes8.o, 21.8K, the tall screen alone responsive.o and tall4.o,
-# 4.7K. A title for a 512K ST pays it in free memory as well as on
-# disk, so it has a budget of its own: 22,452 bytes on 2026-11-02.
-RESP_OBJS  = $(addprefix $(OBJDIR)/src/,responsive.o planes8.o tall4.o)
-RESP_MAX   = 22600
+# program that asks for an option links: the colour is responsive.o,
+# planes8.o and planes8ex.o, 23K (1.5K of it the blit flags and
+# borrowed 8-plane surfaces), a bank's 256-colour art
+# (STDL_RESPONSIVE_BANKS) asset8.o, 1.7K more, and the tall screen
+# alone responsive.o and tall4.o, 4.7K.
+# A title for a 512K ST pays it in free memory as well as on disk, so
+# it has a budget of its own: 25,752 bytes on 2026-11-03.
+RESP_OBJS  = $(addprefix $(OBJDIR)/src/,responsive.o planes8.o \
+             planes8ex.o asset8.o tall4.o)
+RESP_MAX   = 25900
 
 sizecheck: $(PIXEL_OBJS) $(RESP_OBJS)
 	@n=`$(CROSS)size $(PIXEL_OBJS) | awk 'NR>1 {t+=$$1} END {print t}'`; \
@@ -178,6 +182,9 @@ $(LIB): $(LIBOBJS)
 $(OBJDIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+# the 8-plane blit flags, a rare path, for size (planes8ex.c says why)
+$(OBJDIR)/src/planes8ex.o $(OBJDIR)/src/planes8ex.cmini.o: CFLAGS += -Os
 
 # libcmini variant, what a game links unless it needs mintlib (README,
 # "Building"): -nostdlib -lcmini instead of mintlib. libstdl.a compiled

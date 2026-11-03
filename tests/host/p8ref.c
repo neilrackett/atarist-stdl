@@ -233,7 +233,7 @@ static int sp_blit(STDL_Surface *src, const STDL_Rect *sr,
 {
     STDL_Rect a, b;
 
-    if (!STDL_IS_RESP(src) || !STDL_IS_RESP(dst) || flags != 0) {
+    if (!STDL_IS_RESP(src) || !STDL_IS_RESP(dst)) {
         STDL_SetError("blit between an 8-plane and a 4-plane surface");
         return -1;
     }
@@ -245,8 +245,10 @@ static int sp_blit(STDL_Surface *src, const STDL_Rect *sr,
         a.y = 0;
     }
     b = a;
-    if (STDL_BlitSurface(HALF(src, 0), sr, HALF(dst, 0), &a) < 0
-        || STDL_BlitSurface(HALF(src, 1), sr, HALF(dst, 1), &b) < 0) {
+    /* UNDER and MARK on each half alike: their masks stay the same */
+    if (STDL_BlitSurfaceEx(HALF(src, 0), sr, HALF(dst, 0), &a, flags) < 0
+        || STDL_BlitSurfaceEx(HALF(src, 1), sr, HALF(dst, 1), &b,
+                              flags) < 0) {
         return -1;
     }
     if (dr != NULL) {
@@ -807,5 +809,6 @@ int p8ref_use(unsigned what)
                                         | STDL_RESPONSIVE_HEIGHT))
                                ? &stdl_resp_tall : NULL,
                                (what & STDL_RESPONSIVE_TALL)
-                               ? stdl_resp_tall_st : NULL);
+                               ? stdl_resp_tall_st : NULL,
+                               NULL);     /* no bank art on two halves */
 }

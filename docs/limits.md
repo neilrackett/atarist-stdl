@@ -34,6 +34,30 @@ stop trying and redesign instead.
   gives 256 colours there (8-plane surfaces), and a 320x240 screen on
   every machine or only where the display has the lines, each an
   option a program names.
+* An 8-plane surface (`stdl_responsive.h`'s colour) refuses four
+  things, each setting the error and drawing nothing:
+  - **a blit or a sprite from it onto a 4-plane surface**: 4 planes
+    hold no colour above 15, and dropping the upper planes or putting
+    each colour on its nearest would both change the picture. This one
+    stays refused; the other way round, 4-plane data onto 8 planes,
+    draws in colours 0-15.
+  - **patterned polygons**: `STDL_MakePattern`'s patterns are per-plane
+    words for 4 planes, drawn by 68000 walkers of their own; the
+    8-plane polygon fills in one colour.
+  - **tilesets**, from an 8-plane surface or onto one: a tileset is a
+    4-plane format of its own (four words a group and a mask word),
+    drawn by aligned 4-plane loops.
+  - **the cursor**, on any responsive screen: it saves what is under it
+    and draws on the ST's own screen pages, which a responsive screen
+    replaces.
+
+  The last three are not built yet rather than impossible: none was
+  needed by the program the 8-plane path was built against, and every
+  8-plane routine is code each program asking for the colour links, so
+  each waits for a program that needs it. The blit flags
+  (`STDL_BLIT_UNDER`, `STDL_BLIT_MARK`) and surfaces over a program's
+  own 8-plane block (`STDL_CreateSurfaceFrom8Planes`) were added for a
+  port whose layer keeps a priority plane in its mask: 1.5K.
 * Borders, STE hardware scrolling and rasters need an ST, STE or Mega
   STE's video timing and are refused on a TT or a Falcon. A Falcon's
   BLiTTER is not used (the 68030's data cache does not see its

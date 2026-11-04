@@ -330,7 +330,7 @@ BUNDLE = stdl-examples.zip
 bundle:
 	rm -rf $(OBJDIR)/bundle $(BUNDLE)
 	mkdir -p $(OBJDIR)/bundle/STDL
-	cp $(EXAMPLES) examples/assets/* $(OBJDIR)/bundle/STDL/
+	cp $(EXAMPLES) $(SDL2EXAMPLES) examples/assets/* $(OBJDIR)/bundle/STDL/
 	cp examples/LICENSE $(OBJDIR)/bundle/STDL/LICENSE.TXT
 	cd $(OBJDIR)/bundle && zip -qr ../../$(BUNDLE) STDL
 	@echo "$(BUNDLE): `ls $(OBJDIR)/bundle/STDL | wc -l | tr -d ' '` files"
@@ -338,7 +338,7 @@ bundle:
 clean:
 	rm -rf $(OBJDIR)
 	rm -f $(CMINILIB) $(LIB) $(EXAMPLES) $(BUNDLE)
-	rm -f $(SDL2LIB) $(SDL2CMINILIB)
+	rm -f $(SDL2LIB) $(SDL2CMINILIB) $(SDL2EXAMPLES)
 	$(MAKE) -C tests/host clean
 	$(MAKE) -C addons/sdl2/tests clean
 

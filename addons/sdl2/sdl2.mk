@@ -21,7 +21,8 @@ SDL2CMINILIB = libstdl-sdl2-cmini.a
 
 SDL2SRCS      = $(SDL2DIR)/src/init.c $(SDL2DIR)/src/error.c \
                 $(SDL2DIR)/src/hints.c $(SDL2DIR)/src/c2p.c \
-                $(SDL2DIR)/src/c2pany.c
+                $(SDL2DIR)/src/c2pany.c $(SDL2DIR)/src/palette.c \
+                $(SDL2DIR)/src/timer.c $(SDL2DIR)/src/video.c
 SDL2OBJS      = $(patsubst %.c,$(OBJDIR)/%.o,$(SDL2SRCS))
 SDL2CMINIOBJS = $(patsubst %.c,$(OBJDIR)/%.cmini.o,$(SDL2SRCS))
 
@@ -76,11 +77,13 @@ $(SDL2CMINILIB): $(SDL2CMINIOBJS) $(SDL2XCMINIOBJS)
 # object it always takes, and the largest of the X variants (a fixed
 # X's or c2pany.o), of which it takes one at most. On 2026-11-04:
 # 1,032 bytes for the skeleton (SDL_Init, errors, hints), 1,704 for
-# c2p.o (the C twin and X = 0's loops, one line a row and two) and 940
-# for the largest variant (c2pany.o; a fixed X's are 900-924), 3,676
-# in all; the screen's code will set the level this budget really
-# holds.
-SDL2_MAX = 3800
+# c2p.o (the C twin and X = 0's loops, one line a row and two), 940
+# for the largest variant (c2pany.o; a fixed X's are 900-924), and
+# 8,700 for the screen (video.o 8,232: the window, the renderer, its
+# textures and the compositor; palettes and the clock), 12,376 in all.
+# A TT or a Falcon has the room; the budget is there so that growth is
+# a decision, raised with its reason or not at all.
+SDL2_MAX = 12600
 
 # The checks a build of the add-on must pass:
 # - no SDL_ link symbol in either archive (SDL_stdinc.h says why);
@@ -121,7 +124,22 @@ sdl2check: $(SDL2LIB) $(SDL2CMINILIB)
 	   echo "*** libgcc arithmetic in the SDL2 add-on"; exit 1; \
 	 fi
 
-sdl2: $(SDL2LIB) $(SDL2CMINILIB) sdl2check
+# The add-on's example, built here and shipped in the examples' bundle
+# beside the core's, which `all` never builds: compiled for the 68020
+# without FPU instructions and linked against the 68000 libraries, as
+# a program using the add-on is (the toolchain's 68020 ones assume an
+# FPU, and a stock Falcon refuses a program linked with them).
+SDL2EXAMPLES  = dist/SDL2DEMO.TOS
+SDL2_PROGFLAGS = -O2 -fomit-frame-pointer -std=gnu99 $(SDL2_WARN) \
+                 -Iinclude -I$(SDL2DIR)/include/SDL2 -m68020-60 -msoft-float
+
+dist/SDL2DEMO.TOS: examples/sdl2demo.c $(SDL2LIB) $(LIB) | dist
+	@mkdir -p $(OBJDIR)/examples
+	$(CC) $(SDL2_PROGFLAGS) -c -o $(OBJDIR)/examples/sdl2demo.o $<
+	$(CC) -m68000 -o $@ $(OBJDIR)/examples/sdl2demo.o $(SDL2LIB) $(LIB) \
+	    && $(STRIP) $@
+
+sdl2: $(SDL2LIB) $(SDL2CMINILIB) sdl2check $(SDL2EXAMPLES)
 
 -include $(SDL2OBJS:.o=.d) $(SDL2CMINIOBJS:.o=.d) $(SDL2XOBJS:.o=.d) \
          $(SDL2XCMINIOBJS:.o=.d)

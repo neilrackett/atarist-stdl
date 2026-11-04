@@ -141,8 +141,18 @@ void stdl_sdl2_c2p(const uint8_t *src, long sp, uint8_t *dst, long dp,
     }
 }
 #else
-/* the host has the C alone; the variants are there to be named */
+/* the host has the C alone; the variants are there to be named, the
+ * fixed X's among them, as c2px.c is not built there */
 const struct stdl_sdl2_c2pv stdl_sdl2_c2p_plain = { 0, 0 };
+const struct stdl_sdl2_c2pv
+    stdl_sdl2_c2p_x10 = { 0, 0 }, stdl_sdl2_c2p_x20 = { 0, 0 },
+    stdl_sdl2_c2p_x30 = { 0, 0 }, stdl_sdl2_c2p_x40 = { 0, 0 },
+    stdl_sdl2_c2p_x50 = { 0, 0 }, stdl_sdl2_c2p_x60 = { 0, 0 },
+    stdl_sdl2_c2p_x70 = { 0, 0 }, stdl_sdl2_c2p_x80 = { 0, 0 },
+    stdl_sdl2_c2p_x90 = { 0, 0 }, stdl_sdl2_c2p_xa0 = { 0, 0 },
+    stdl_sdl2_c2p_xb0 = { 0, 0 }, stdl_sdl2_c2p_xc0 = { 0, 0 },
+    stdl_sdl2_c2p_xd0 = { 0, 0 }, stdl_sdl2_c2p_xe0 = { 0, 0 },
+    stdl_sdl2_c2p_xf0 = { 0, 0 };
 
 void stdl_sdl2_c2p(const uint8_t *src, long sp, uint8_t *dst, long dp,
                    long groups, long h, int dbl,

@@ -1,0 +1,154 @@
+/*
+ * SDL2DEMO - the SDL2 add-on on a TT or a Falcon (addons/sdl2,
+ * docs/sdl2.md). Public domain (CC0).
+ *
+ * An SDL2 program as it would be written for any SDL2: a window, a
+ * renderer, textures and a palette, with what is Atari-only from
+ * SDL_stdl.h - the palette given to the renderer, as SDL2's textures
+ * have none; the textures SDL_PIXELFORMAT_INDEX8, which the add-on
+ * takes and SDL2 itself does not; and a border index, a colour the
+ * picture never uses, so that the border round a Falcon's RGB picture
+ * is black rather than colour 0 cycling with the background. It shows
+ * a background of 224 shades whose colours cycle every frame, and
+ * eight boxes moving over it, for ten seconds.
+ *
+ * The pattern worth copying is in the frame loop: the screen keeps
+ * what was drawn on it, so a frame copies only what changed - each
+ * box's old place from the background, then the box in its new one -
+ * and the present converts only those groups of 16 pixels. Cycling
+ * the colours changes no pixel at all: it is the palette, staged to
+ * the blank that shows the frame. A program that clears and redraws
+ * the whole screen every frame is right too, and pays for converting
+ * all of it: 40ms a frame on a TT, 69 on a Falcon (Hatari).
+ *
+ * Built by `make sdl2`: compiled -m68020-60 -msoft-float, linked
+ * against the 68000 libraries, whose 68020 ones assume an FPU.
+ */
+
+#include "SDL.h"
+#include "SDL_stdl.h"
+
+#define W      320
+#define H      240
+#define BOXES  8
+#define BOX    24
+#define SHADES 224              /* 0-223; the boxes 224-239, 240- unused */
+
+int main(int argc, char *argv[])
+{
+    static Uint8 bg[W * H], box[BOX * BOX];
+    SDL_Window *win;
+    SDL_Renderer *ren;
+    SDL_Texture *bgtex, *boxtex;
+    SDL_Palette *pal;
+    SDL_Color c[256];
+    SDL_Rect pos[BOXES];
+    int dx[BOXES], dy[BOXES];
+    Uint32 start;
+    int x, y, i, frame = 0;
+    (void)argc;
+    (void)argv;
+
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        /* an ST: SDL_Init says so, built for the 68000 to get here */
+        printf("SDL2DEMO: %s\n", SDL_GetError());
+        return 1;
+    }
+    win = SDL_CreateWindow("SDL2DEMO", SDL_WINDOWPOS_CENTERED,
+                           SDL_WINDOWPOS_CENTERED, W, H, 0);
+    ren = win ? SDL_CreateRenderer(win, -1, SDL_RENDERER_PRESENTVSYNC)
+              : NULL;
+    if (!ren) {
+        printf("SDL2DEMO: %s\n", SDL_GetError());
+        SDL_Quit();
+        return 1;
+    }
+
+    /* before anything is drawn: 0xF0 is never shown, so it is the one
+     * that lands on register 0, the border's */
+    STDL_SDL2_SetBorderIndex(ren, 0xF0);
+
+    /* the background's shades, the boxes' 16, and black for the rest */
+    pal = SDL_AllocPalette(256);
+    for (i = 0; i < 256; i++) {
+        c[i].r = c[i].g = c[i].b = 0;
+        c[i].a = 255;
+    }
+    for (i = 0; i < SHADES; i++) {
+        c[i].r = (Uint8)(i < SHADES / 2 ? i * 2 : 255 - (i - SHADES / 2) * 2);
+        c[i].g = (Uint8)(i * 255 / (SHADES - 1));
+        c[i].b = (Uint8)(255 - i * 255 / (SHADES - 1));
+    }
+    for (i = 0; i < 16; i++) {
+        c[SHADES + i].r = c[SHADES + i].g = (Uint8)(i * 17);
+        c[SHADES + i].b = 255;
+    }
+    SDL_SetPaletteColors(pal, c, 0, 256);
+    STDL_SDL2_SetRenderPalette(ren, pal);
+
+    for (y = 0; y < H; y++) {
+        for (x = 0; x < W; x++) {
+            bg[y * W + x] = (Uint8)((x + y * 2) % SHADES);
+        }
+    }
+    for (y = 0; y < BOX; y++) {
+        for (x = 0; x < BOX; x++) {
+            box[y * BOX + x] = (Uint8)(SHADES + ((x ^ y) & 15));
+        }
+    }
+    bgtex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_INDEX8,
+                              SDL_TEXTUREACCESS_STATIC, W, H);
+    boxtex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_INDEX8,
+                               SDL_TEXTUREACCESS_STATIC, BOX, BOX);
+    SDL_UpdateTexture(bgtex, NULL, bg, W);
+    SDL_UpdateTexture(boxtex, NULL, box, BOX);
+    for (i = 0; i < BOXES; i++) {
+        pos[i].x = 20 + i * 33;
+        pos[i].y = 10 + i * 25;
+        pos[i].w = pos[i].h = BOX;
+        dx[i] = 1 + (i % 3);
+        dy[i] = 2 - (i % 4);
+        if (dy[i] == 0) {
+            dy[i] = 1;
+        }
+    }
+
+    /* the first frame draws everything */
+    SDL_RenderCopy(ren, bgtex, NULL, NULL);
+    start = SDL_GetTicks();
+    while (!SDL_TICKS_PASSED(SDL_GetTicks(), start + 10000)) {
+        for (i = 0; i < BOXES; i++) {
+            /* the background back where the box was, then the box */
+            SDL_RenderCopy(ren, bgtex, &pos[i], &pos[i]);
+            pos[i].x += dx[i];
+            pos[i].y += dy[i];
+            if (pos[i].x < 0 || pos[i].x > W - BOX) {
+                dx[i] = -dx[i];
+                pos[i].x += 2 * dx[i];
+            }
+            if (pos[i].y < 0 || pos[i].y > H - BOX) {
+                dy[i] = -dy[i];
+                pos[i].y += 2 * dy[i];
+            }
+        }
+        for (i = 0; i < BOXES; i++) {
+            SDL_RenderCopy(ren, boxtex, NULL, &pos[i]);
+        }
+        /* the background's shades move on a step: colours alone */
+        for (i = 0; i < SHADES; i++) {
+            c[i] = pal->colors[(i + 1) % SHADES];
+        }
+        SDL_SetPaletteColors(pal, c, 0, SHADES);
+        SDL_RenderPresent(ren);
+        frame++;
+    }
+
+    SDL_DestroyTexture(boxtex);
+    SDL_DestroyTexture(bgtex);
+    SDL_DestroyRenderer(ren);
+    SDL_FreePalette(pal);
+    SDL_DestroyWindow(win);
+    SDL_Quit();
+    (void)frame;
+    return 0;
+}

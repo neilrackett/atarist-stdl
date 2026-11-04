@@ -1133,6 +1133,58 @@ warnings** with the Makefile's `-Wall -Wextra`.
   regression that matters, and "playable on a Mega STE" is not a
   result.
 
+## The SDL2 add-on (`addons/sdl2/`)
+
+An SDL2-shaped library for SDL2 programs on a stock TT or Falcon
+(`docs/sdl2.md`): byte-per-pixel textures converted into the
+responsive screen's eight planes. It is the one chunky part of STDL,
+and the rules below keep it from being anything else's.
+
+- **The core never meets it.**
+  - `all`, `libstdl.a` and `libstdl-cmini.a` do not build, include or
+    name it.
+  - `addons/sdl2/sdl2.mk` gives it its own targets (`make sdl2`) and
+    static pattern rules with its own flags. The core's
+    `$(OBJDIR)/%.o` carries `-Iinclude/compat`, whose SDL 1.2 `SDL.h`
+    would be found ahead of the add-on's.
+  - A change to the add-on leaves every core object's `objdump -dr`
+    as it was. Check by comparing before and after.
+- **It reaches STDL through public headers only.** The host's
+  `fake_stdl.c` can stand in for STDL because of that, so keep it so.
+  If the add-on needs something internal, that is a core change in
+  its own right, with the core's rules.
+- **No `SDL_` link symbols.** Every public name is a macro onto a
+  `stdl_sdl2_` link name, because `src/compat.c` (inside `libstdl.a`)
+  defines `SDL_Delay`, `SDL_FillRect` and the joystick calls with SDL
+  1.2's signatures. Extensions are `STDL_SDL2_*`, in `SDL_stdl.h`.
+- **Built for the 68020 without FPU instructions.** A program links
+  against the 68000 libraries, since the 68020 ones assume an FPU and
+  a stock Falcon refuses them. What `SDL_Init` runs before the machine
+  is known (`init`, `error`, `hints`: `SDL2_CPU000`) is built for the
+  68000, so an ST gets an error and not an illegal instruction.
+- **`make sdl2` checks each build.**
+  - Neither archive has an `SDL_` symbol.
+  - The headers compile as gnu99 and as C++98 under g++ 4.6 with
+    warnings as errors, and fail when they meet the 1.2 shim.
+  - The text stays within `SDL2_MAX`.
+  - There is no libgcc arithmetic.
+  - Each check was broken on purpose once and failed.
+- **The conversion (`c2p*.c`, `c2p_asm.h`).**
+  - The group loop must stay within 240 bytes, which fits the 68030's
+    256-byte instruction cache whatever its alignment. The assembler
+    refuses more.
+  - A fixed border index X has an object of its own (`c2px.c`, built
+    15 times), which `STDL_SDL2_SetBorderIndex` names inline for a
+    constant X. Reading X at run time cost 4.5% of a frame.
+  - `SDL2CHK` (`tests/hatari/sdl2chk.c`) checks every variant against
+    the C twin on the machine and times them.
+- **The compositor has a model, not a mirror, as its test.**
+  `tests/test_render.c` draws a chunky model a pixel at a time and
+  expects each page shown to be it, converted, byte for byte. It has
+  none of the compositor's groups, batches or masks, which is why
+  eight different breakages of those each failed it. `SDL2RCHK` is the
+  same test on the machine.
+
 ## Shipping a change
 
 - **A public API change is not done until the docs and the skill

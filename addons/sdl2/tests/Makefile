@@ -16,7 +16,12 @@ CFLAGS  = -std=gnu99 -O1 -g -fsanitize=address,alignment \
 SRC     = ../src
 HDRS    = $(wildcard ../include/SDL2/*.h) $(SRC)/internal.h
 
-TESTS   = test_basics test_c2p
+TESTS   = test_basics test_c2p test_render
+
+# the renderer on fake_stdl.c's screens: the add-on as a program links
+# it, STDL's calls stood in for
+RENDER  = $(SRC)/init.c $(SRC)/error.c $(SRC)/hints.c $(SRC)/c2p.c \
+          $(SRC)/c2pany.c $(SRC)/palette.c $(SRC)/timer.c $(SRC)/video.c
 
 test_basics: test_basics.c $(SRC)/init.c $(SRC)/error.c $(SRC)/hints.c \
              $(HDRS)
@@ -25,6 +30,10 @@ test_basics: test_basics.c $(SRC)/init.c $(SRC)/error.c $(SRC)/hints.c \
 
 test_c2p: test_c2p.c $(SRC)/c2p.c $(SRC)/c2p.h
 	$(CC) $(CFLAGS) -o $@ test_c2p.c $(SRC)/c2p.c
+
+test_render: test_render.c fake_stdl.c fake_stdl.h $(RENDER) $(HDRS) \
+             $(SRC)/c2p.h
+	$(CC) $(CFLAGS) -o $@ test_render.c fake_stdl.c $(RENDER)
 
 run: $(TESTS)
 	@set -e; for t in $(TESTS); do ./$$t; done; \

@@ -17,7 +17,7 @@ stop trying and redesign instead.
 | Arbitrary palette depth | ST 512-colour / STE 4096-colour, and 256 at a time on a TT or a Falcon with the colour |
 | TrueType / SDL_ttf | bitmap fonts converted offline |
 | Gamma / gamma ramps | `SDL_SetGamma*` return -1 |
-| Chunky pixel access | there is no 8bpp buffer; see docs/porting.md |
+| Chunky pixel access | there is no 8bpp buffer in the core; see docs/porting.md. The optional SDL2 add-on for a TT or a Falcon (docs/sdl2.md) is chunky by design, and apart from the core |
 | General mixing streams as the default | a callback mixing in C is a port's own CPU, and at 6258Hz four channels of it ran an 8MHz STE out of time; use `STDL_PlaySample` for effects, `STDL_Voice` (or the SDL_mixer shim, which plays chunks on it) for anything mixed, and reach for `STDL_OpenAudio` only when a continuous arbitrary stream is genuinely needed |
 | YUV overlays, OpenGL, CD-ROM | see section 8.2 of the design doc |
 

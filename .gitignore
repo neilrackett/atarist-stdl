@@ -12,8 +12,13 @@ dist/
 tests/host/test_*
 !tests/host/test_*.c
 tests/host/*.dSYM/
+addons/sdl2/tests/test_*
+!addons/sdl2/tests/test_*.c
+addons/sdl2/tests/*.dSYM/
 tests/hatari/out/
 libstdl-cmini.a
+libstdl-sdl2.a
+libstdl-sdl2-cmini.a
 .DS_Store
 obj/
 tmp/

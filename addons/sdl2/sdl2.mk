@@ -20,9 +20,17 @@ SDL2LIB      = libstdl-sdl2.a
 SDL2CMINILIB = libstdl-sdl2-cmini.a
 
 SDL2SRCS      = $(SDL2DIR)/src/init.c $(SDL2DIR)/src/error.c \
-                $(SDL2DIR)/src/hints.c
+                $(SDL2DIR)/src/hints.c $(SDL2DIR)/src/c2p.c \
+                $(SDL2DIR)/src/c2pany.c
 SDL2OBJS      = $(patsubst %.c,$(OBJDIR)/%.o,$(SDL2SRCS))
 SDL2CMINIOBJS = $(patsubst %.c,$(OBJDIR)/%.cmini.o,$(SDL2SRCS))
+
+# The conversion's loops for each fixed border index X, one object an
+# X (c2px.c, which says why): a program naming its X as a constant
+# links the one it names.
+SDL2_XS        = 10 20 30 40 50 60 70 80 90 a0 b0 c0 d0 e0 f0
+SDL2XOBJS      = $(foreach x,$(SDL2_XS),$(OBJDIR)/$(SDL2DIR)/src/c2px$(x).o)
+SDL2XCMINIOBJS = $(SDL2XOBJS:.o=.cmini.o)
 
 SDL2_WARN   = -Wall -Wextra -Wno-unused-parameter
 SDL2_INC    = -Iinclude -I$(SDL2DIR)/include/SDL2 -I$(SDL2DIR)/src
@@ -48,16 +56,31 @@ $(SDL2CMINIOBJS): $(OBJDIR)/%.cmini.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(SDL2_CFLAGS) $(SDL2_CPU) -I$(CMINI)/include -c -o $@ $<
 
-$(SDL2LIB): $(SDL2OBJS)
-	$(AR) rcs $@ $(SDL2OBJS)
+$(SDL2XOBJS): $(OBJDIR)/$(SDL2DIR)/src/c2px%.o: $(SDL2DIR)/src/c2px.c
+	@mkdir -p $(dir $@)
+	$(CC) $(SDL2_CFLAGS) $(SDL2_CPU) -DSTDL_SDL2_XS=$* -c -o $@ $<
 
-$(SDL2CMINILIB): $(SDL2CMINIOBJS)
-	$(AR) rcs $@ $(SDL2CMINIOBJS)
+$(SDL2XCMINIOBJS): $(OBJDIR)/$(SDL2DIR)/src/c2px%.cmini.o: \
+                   $(SDL2DIR)/src/c2px.c
+	@mkdir -p $(dir $@)
+	$(CC) $(SDL2_CFLAGS) $(SDL2_CPU) -I$(CMINI)/include \
+	    -DSTDL_SDL2_XS=$* -c -o $@ $<
 
-# The add-on's text, which only a program that links it pays: 1,032
-# bytes on 2026-11-04 for the skeleton (SDL_Init, errors, hints); the
-# screen's code will set the level this budget really holds.
-SDL2_MAX = 1200
+$(SDL2LIB): $(SDL2OBJS) $(SDL2XOBJS)
+	$(AR) rcs $@ $(SDL2OBJS) $(SDL2XOBJS)
+
+$(SDL2CMINILIB): $(SDL2CMINIOBJS) $(SDL2XCMINIOBJS)
+	$(AR) rcs $@ $(SDL2CMINIOBJS) $(SDL2XCMINIOBJS)
+
+# The add-on's text, which only a program that links it pays: every
+# object it always takes, and the largest of the X variants (a fixed
+# X's or c2pany.o), of which it takes one at most. On 2026-11-04:
+# 1,032 bytes for the skeleton (SDL_Init, errors, hints), 1,704 for
+# c2p.o (the C twin and X = 0's loops, one line a row and two) and 940
+# for the largest variant (c2pany.o; a fixed X's are 900-924), 3,676
+# in all; the screen's code will set the level this budget really
+# holds.
+SDL2_MAX = 3800
 
 # The checks a build of the add-on must pass:
 # - no SDL_ link symbol in either archive (SDL_stdinc.h says why);
@@ -83,12 +106,16 @@ sdl2check: $(SDL2LIB) $(SDL2CMINILIB)
 	     $(SDL2DIR)/tests/hdrcheck.c 2>/dev/null; then \
 	   echo "*** the add-on's headers met the 1.2 shim's guard"; exit 1; \
 	 fi
-	@n=`$(CROSS)size $(SDL2OBJS) | awk 'NR>1 {t+=$$1} END {print t}'`; \
+	@n=`$(CROSS)size $(filter-out %/c2pany.o,$(SDL2OBJS)) | \
+	    awk 'NR>1 {t+=$$1} END {print t}'`; \
+	 x=`$(CROSS)size $(SDL2XOBJS) $(OBJDIR)/$(SDL2DIR)/src/c2pany.o | \
+	    awk 'NR>1 && $$1>m {m=$$1} END {print m}'`; \
+	 n=`expr $$n + $$x`; \
 	 echo "SDL2 add-on text $$n bytes (budget $(SDL2_MAX))"; \
 	 if [ $$n -gt $(SDL2_MAX) ]; then \
 	   echo "*** over the SDL2 add-on's size budget"; exit 1; \
 	 fi
-	@calls=`sh tools/libcalls.sh $(SDL2OBJS)` || exit 1; \
+	@calls=`sh tools/libcalls.sh $(SDL2OBJS) $(SDL2XOBJS)` || exit 1; \
 	 if [ -n "$$calls" ]; then \
 	   echo "$$calls"; \
 	   echo "*** libgcc arithmetic in the SDL2 add-on"; exit 1; \
@@ -96,6 +123,7 @@ sdl2check: $(SDL2LIB) $(SDL2CMINILIB)
 
 sdl2: $(SDL2LIB) $(SDL2CMINILIB) sdl2check
 
--include $(SDL2OBJS:.o=.d) $(SDL2CMINIOBJS:.o=.d)
+-include $(SDL2OBJS:.o=.d) $(SDL2CMINIOBJS:.o=.d) $(SDL2XOBJS:.o=.d) \
+         $(SDL2XCMINIOBJS:.o=.d)
 
 .PHONY: sdl2 sdl2check

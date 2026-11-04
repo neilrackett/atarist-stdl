@@ -16,12 +16,15 @@ CFLAGS  = -std=gnu99 -O1 -g -fsanitize=address,alignment \
 SRC     = ../src
 HDRS    = $(wildcard ../include/SDL2/*.h) $(SRC)/internal.h
 
-TESTS   = test_basics
+TESTS   = test_basics test_c2p
 
 test_basics: test_basics.c $(SRC)/init.c $(SRC)/error.c $(SRC)/hints.c \
              $(HDRS)
 	$(CC) $(CFLAGS) -o $@ test_basics.c $(SRC)/init.c $(SRC)/error.c \
 	    $(SRC)/hints.c
+
+test_c2p: test_c2p.c $(SRC)/c2p.c $(SRC)/c2p.h
+	$(CC) $(CFLAGS) -o $@ test_c2p.c $(SRC)/c2p.c
 
 run: $(TESTS)
 	@set -e; for t in $(TESTS); do ./$$t; done; \

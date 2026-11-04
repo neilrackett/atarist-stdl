@@ -60,13 +60,19 @@ struct STDL_Font {
  * frame_w each, any width: s->w / frame_w of them. */
 STDL_Sprite  *STDL_SpriteFromSurface(const STDL_Surface *s,
                                      int frame_w, uint32_t flags);
+/* A tileset from an 8-plane surface (stdl_responsive.h) has 8 planes,
+ * as the surface does. */
 STDL_Tileset *STDL_TilesetFromSurface(const STDL_Surface *s,
                                       int tw, int th);
 void STDL_FreeSprite(STDL_Sprite *spr);
 void STDL_FreeTileset(STDL_Tileset *ts);
 void STDL_FreeFont(STDL_Font *font);
 
-/* Asset container: chunked "STDL" bank file written by stdlconv. */
+/* Asset container: chunked "STDL" bank file written by stdlconv. On
+ * an 8-plane screen asking for STDL_RESPONSIVE_BANKS the surface,
+ * sprite, tileset and palette loaders give an id's 256-colour art where
+ * the bank has it (stdl_responsive.h), the ST's chunk where it does
+ * not. */
 STDL_Sprite  *STDL_LoadSprite(const char *bank, int id, uint32_t flags);
 STDL_Tileset *STDL_LoadTileset(const char *bank, int id);
 STDL_Font    *STDL_LoadFont(const char *bank, int id);

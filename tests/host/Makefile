@@ -34,7 +34,8 @@ SRC     = ../../src
 # (1bpp, byte-per-pixel, colour remap) build surfaces the other
 # suites draw with, not because every program links it - on target
 # it is a separate object precisely so that they don't.
-CORE    = stubs.c blitmodel.c $(SRC)/surface.c $(SRC)/indexed.c \
+CORE    = stubs.c blitmodel.c $(SRC)/surface.c $(SRC)/surfacedup.c \
+          $(SRC)/indexed.c \
           $(SRC)/draw.c $(SRC)/blit.c $(SRC)/sprite.c $(SRC)/tileset.c \
           $(SRC)/text.c $(SRC)/shapes.c $(SRC)/palette.c \
           $(SRC)/planes.c $(SRC)/blitter.c
@@ -43,7 +44,7 @@ TESTS   = test_pixel test_compose test_cursor test_assets test_planes \
           test_footprint test_indexed test_glyph test_vbl test_blit8 \
           test_underleak test_blitter test_dirty \
           test_voice test_ym test_tone test_sfx test_opl test_refresh \
-          test_wav test_mixer test_ring test_math test_palette test_music test_polygon test_polypat test_raster test_spritebatch
+          test_wav test_mixer test_ring test_math test_palette test_music test_polygon test_polypat test_raster test_spritebatch test_responsive test_bank8conv
 
 all: $(TESTS)
 
@@ -68,6 +69,14 @@ test_polygon:   $(SRC)/polygon.c
 test_polypat:   $(SRC)/polypat.c $(SRC)/polygon.c $(SRC)/surfacefrom.c
 test_raster:    $(SRC)/raster.c $(SRC)/vbl.c
 test_spritebatch: $(SRC)/spritebatch.c
+# the responsive screens, and the bank of 8-plane art bank8conv.py
+# makes with stdlconv (Pillow)
+RESP_SRCS = $(addprefix $(SRC)/,responsive.c planes8.c planes8ex.c \
+            planes8tile.c tall4.c tallst.c hz38400.c asset.c asset8.c drawchar.c \
+            blit8.c polygon.c spritebatch.c)
+test_bank8conv: $(RESP_SRCS)
+test_responsive: $(RESP_SRCS) p8ref.c $(SRC)/surfacefrom.c $(SRC)/palstage.c \
+                 $(SRC)/vbl.c
 # built with the counters, for stdl_blit_force: every operation the
 # BLiTTER could take goes to it, whatever its size
 test_blitter:   XFLAGS = -DSTDL_BLIT_STATS
@@ -102,6 +111,7 @@ run: $(TESTS)
 
 clean:
 	rm -f $(TESTS)
+	rm -rf test_bank8conv.dir
 	rm -rf *.dSYM
 
 .PHONY: all run clean

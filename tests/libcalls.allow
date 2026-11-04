@@ -31,14 +31,16 @@ tileset.o STDL_TilesetFromSurface __mulsi3 4
 
 # Creating surfaces and masks: once per surface
 surface.o STDL_CreateMask __mulsi3 1
-surface.o STDL_CreateSurface __mulsi3 1
-surface.o STDL_DuplicateSurface __mulsi3 1
+surface.o stdl_surface_create __mulsi3 1
 surface.o STDL_SurfaceIsOpaque __mulsi3 1
 surface.o mask_alloc __mulsi3 1
 
 # Drawing, once per call rather than per row or pixel
 blit.o blit_whole __mulsi3 1                # beside a whole-surface memcpy
 sprite.o STDL_BlitSprite __mulsi3 1         # frames past 64K only
+planes8.o p8_blit_sprite __mulsi3 2           # frames past 64K only, 8 and 4 planes
+planes8.o p8_sprite_from __divsi3 1           # frames in a strip
+planes8.o p8_sprite_from __mulsi3 1           # the variants' size, once
 shapes.o STDL_FillCircle __mulsi3 1         # span count (6-byte struct)
 polygon.o edge_next __divsi3 2              # once an edge, and only for a
 polygon.o edge_next __mulsi3 2              # step past 16 bits or a clipped top

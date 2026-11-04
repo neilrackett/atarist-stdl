@@ -16,6 +16,8 @@
  *  - iteration counts are scaled for a 68000: 64 fill+flip steps
  *    per channel, 50 update rounds of 4 blits
  *  - alpha tests are skipped automatically (4bpp screen)
+ *  - it also prints the machine STDL found (STDL_GetMachineInfo):
+ *    an ST, STE, Mega STE, TT or Falcon, its CPU, DMA sound, BLiTTER
  */
 
 #include <stdlib.h>
@@ -377,6 +379,18 @@ int main(int argc, char *argv[])
 	if ( info->blit_fill ) {
 		printf(
 "Color fills on hardware surfaces are accelerated\n");
+	}
+	/* STDL port: the machine the library found, which SDL's info
+	 * has no fields for */
+	{
+		const STDL_MachineInfo *m = STDL_GetMachineInfo();
+
+		printf("Machine: %s, 680%02u, %s DMA sound%s\n",
+		       m->is_falcon ? "Falcon" : m->is_tt ? "TT"
+		       : m->is_megaste ? "Mega STE" : m->is_ste ? "STE"
+		       : "ST", (unsigned)m->cpu,
+		       m->has_dma_sound ? "with" : "no",
+		       m->has_blitter ? ", BLiTTER" : "");
 	}
 
 	/* STDL port: the benchmark is the point on real hardware, so

@@ -37,8 +37,9 @@ void STDL_BlitSprites(STDL_Sprite *spr, const STDL_SpriteAt *at,
     h = spr->h;
     /* the direct route covers what STDL_BlitSprite's own aligned
      * four-plane loop covers, on the CPU: with a BLiTTER, only sprites
-     * too short for it (STDL_SPR_MIN_ROWS) */
-    fast = stdl_planes > 2
+     * too short for it (STDL_SPR_MIN_ROWS); 8 planes on either side
+     * (stdl_responsive.h) go a sprite at a time */
+    fast = stdl_planes > 2 && !((spr->planes | dst->planes) & 8)
         && (!stdl_blitter_active()
             || (h < STDL_SPR_MIN_ROWS && !STDL_BLIT_FORCED()));
     stride = dst->stride;

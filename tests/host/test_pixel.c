@@ -1502,6 +1502,65 @@ static void test_sprites_wide(void)
     }
 }
 
+/*
+ * A copy keeps its source's mask, which no pixel value need hold: a
+ * decoder's (key STDL_TRANSPARENT), a hole punched after keying; and a
+ * borrowed source wider than the copy is copied a row at a time.
+ */
+static int mask_bit(const STDL_Surface *s, int x, int y)
+{
+    const uint16_t *m = (const uint16_t *)(s->mask
+                                           + (size_t)y * s->maskstride);
+
+    return (m[x >> 4] >> (15 - (x & 15))) & 1;
+}
+
+static void test_duplicate(void)
+{
+    uint8_t idx[37 * 5];
+    static uint8_t wide[(64 / 16) * 8 * 5 + 16];
+    STDL_Surface *s, *d, *b;
+    STDL_Rect r;
+    int i, x, y;
+
+    for (i = 0; i < (int)sizeof(idx); i++) {
+        idx[i] = (uint8_t)((i % 3) == 0 ? 77 : i & 15);
+    }
+    s = STDL_SurfaceFromIndexed8(idx, 37, 5, 37, 77);
+    r.x = 20; r.y = 1; r.w = 9; r.h = 3;
+    STDL_FillRect(s, &r, STDL_TRANSPARENT);
+    d = STDL_DuplicateSurface(s);
+    CHECK(d != NULL && d->mask != NULL && (d->flags & STDL_SRCKEY)
+          && d->colourkey == s->colourkey, "dup: keyed");
+    for (y = 0; d != NULL && y < 5; y++) {
+        for (x = 0; x < 37; x++) {
+            CHECK(mask_bit(d, x, y) == mask_bit(s, x, y)
+                  && STDL_GetPixel(d, x, y) == STDL_GetPixel(s, x, y),
+                  "dup (%d,%d): mask %d, want %d", x, y, mask_bit(d, x, y),
+                  mask_bit(s, x, y));
+        }
+    }
+    STDL_FreeSurface(d);
+    STDL_FreeSurface(s);
+
+    /* 64 pixels of stride over a 20-pixel surface */
+    for (i = 0; i < (int)sizeof(wide); i++) {
+        wide[i] = (uint8_t)(i * 29 + 3);
+    }
+    b = STDL_CreateSurfaceFrom((void *)(((uintptr_t)wide + 7) & ~(uintptr_t)7),
+                               20, 5, 32, NULL, 0);
+    d = STDL_DuplicateSurface(b);
+    CHECK(d != NULL && d->stride == 16, "dup: borrowed");
+    for (y = 0; d != NULL && y < 5; y++) {
+        for (x = 0; x < 20; x++) {
+            CHECK(STDL_GetPixel(d, x, y) == STDL_GetPixel(b, x, y),
+                  "dup borrowed (%d,%d)", x, y);
+        }
+    }
+    STDL_FreeSurface(d);
+    STDL_FreeSurface(b);
+}
+
 static void test_1bpp(void)
 {
     static const uint8_t bits[] = {
@@ -2072,6 +2131,7 @@ int main(void)
     PIXEL_RUN(test_sprites);
     PIXEL_RUN(test_sprites_wide);
     PIXEL_RUN(test_1bpp);
+    PIXEL_RUN(test_duplicate);
     PIXEL_RUN(test_tiles);
     PIXEL_RUN(test_tiles_wide);
     PIXEL_RUN(test_tiles_budget);

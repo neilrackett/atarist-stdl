@@ -55,6 +55,9 @@ the format contract stays stable when they arrive (see 3.1.1).
 * Low resolution: 320x200, 4 planes, 16 colours, 160 bytes/line. **(v1)**
 * High resolution: 640x400, 1 plane, monochrome, 80 bytes/line (SM124).
 * Medium resolution: 640x200, 2 planes, 4 colours, 160 bytes/line.
+* TT Low or a Falcon's 8-bit mode: 320x200 or 240, 8 planes, 256
+  colours, 320 bytes/line - a responsive program's colour
+  (`stdl_responsive.h`), the same group rule with 8 planes.
 * Pixels are grouped in 16s; a group is `nplanes` consecutive words.
 * Pixel `x` occupies bit `15 - (x & 15)`, MSB first, in each plane word.
 * Group address: `base + y * stride + (x >> 4) * nplanes * 2`.

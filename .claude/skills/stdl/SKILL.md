@@ -1,15 +1,17 @@
 ---
 name: stdl
-description: Port SDL 1.2 games to the Atari ST with STDL, the planar-native SDL subset. Use when porting SDL 1.x code to Atari ST/STE/Mega STE, writing STDL code, converting game assets to ST planar format, or debugging planar rendering. Covers the surface format contract, API costs, SDL-to-STDL rewrite patterns, stdlconv usage and the Hatari test loop.
+description: Write Atari ST games and port SDL 1.2 games with STDL, the planar-native SDL-style library. Use when writing STDL code or porting SDL 1.x code for the Atari ST/STE/Mega STE (with 256 colours and 320x240 on a TT or Falcon where the game asks), converting game assets to ST planar format, or debugging planar rendering. Covers the surface format contract, API costs, SDL-to-STDL rewrite patterns, the responsive screens, stdlconv usage and the Hatari test loop.
 ---
 
-# STDL (Atari ST DirectMedia Layer) - porting SDL 1.2 games to the Atari ST
+# STDL (Atari ST DirectMedia Layer) - writing and porting games for the Atari ST family
 
-STDL is a deliberately incomplete, planar-native subset of SDL 1.2.
+STDL is a planar-native library for writing ST games and porting
+SDL 1.2 ones: its API a deliberately incomplete subset of SDL 1.2's.
 There is no chunky backbuffer and no c2p pass anywhere: assets are
 converted to ST interleaved planar offline, and spans/rects/blits
-are the primary verbs. The screen is always 320x200, 4 planes,
-16 colours.
+are the primary verbs. The screen is 320x200, 4 planes, 16 colours
+on every machine, unless a game asks for more where a machine has
+it (a TT or a Falcon, below).
 
 **What to target.** A plain 8MHz ST with 1MB is the machine a port
 has to run on: 68000, no blitter, no DMA audio, 512K-1M of RAM for
@@ -20,6 +22,12 @@ back cleanly where they are not. `STDL_UseBlitter`, `STDL_HasHwScroll`
 and the STE audio calls all report what the machine has, so the
 fallback is a branch at init, not a second build.
 
+**Link libcmini, not mintlib, unless the game needs mintlib.** That
+is the default for every port: mintlib costs about 100K of the
+512K-1M a port has to live in, and buys nothing a game that only
+uses stdio, stdlib, string and the GEMDOS/XBIOS bindings calls.
+Porting workflow step 2 has the build and the checks.
+
 Requiring an STE is allowed but it is a decision, not a default:
 hardware scrolling needs one, and a port built around it should say
 so to the person who asked for the port before that design is
@@ -28,24 +36,58 @@ the answer - if a port only runs on a Mega STE, the rendering needs
 fixing, not the target raising. Measure on `MACHINE=st` before
 believing any frame-rate claim.
 
-**Targeting a TT or Falcon rather than an ST?** Use Atari SDL 1.2 instead
-(runs on plain TOS, no MiNT): those machines have 256 colours,
-and TT line-doubles 320x240 so one binary covers both. Their 256-colour
-modes are eight interleaved planes, so SDL converts its chunky surface
-at every update; and one port measured, in Hatari, that SDL's doubled
-TT mode puts an `SDL_UpdateRects` box that does not start at the top on
-line y rather than 2y (whole-screen `SDL_Flip` is right). STDL's input
-needs no STDL screen there: `STDL_OpenInput` takes the keyboard, mouse,
-joystick and pad under a mode the program set itself. An ST build
-still runs on a TT or a Falcon, as an STE in ST Low: the display rate
-is measured there (music keeps its tempo at their 60Hz), a Falcon plays
-6258Hz sound at 12517 (`STDL_PlaySample` from a copy), its crossbar is
-routed and put back, the desktop's mode and colours come back at exit,
-and borders, hardware scrolling and rasters are refused. STDL exists for
-the ST, where there is no chunky mode at all: SDL degrades to
-greyscale derived from luminance and c2ps every frame, which is
-unusably slow past the basics. A 68030 also has hardware 32-bit multiply
-and divide, so most of the cost notes below do not apply there.
+**On a TT or a Falcon an ST game runs as it is**, as an STE in ST
+Low: the display rate is measured there (music keeps its tempo at
+their 60Hz), a Falcon plays 6258Hz sound at 12517 (`STDL_PlaySample`
+from a copy), its crossbar is routed and put back, the desktop's mode
+and colours come back at exit, and borders, hardware scrolling and
+rasters are refused. A 68030 also has hardware 32-bit multiply and
+divide, so most of the cost notes below do not apply there.
+
+**Making an ST game better on a TT or a Falcon?** Ask for each thing
+by name, once, before the first `STDL_SetVideoMode`
+(`stdl_responsive.h`), and nothing changes for a game that does not:
+- `STDL_RESPONSIVE_COLOUR`, with a bpp of 8: 256 colours on a TT or a
+  Falcon, its surfaces eight planes in the display's own layout; an
+  ST's 16 colours on an ST.
+- `STDL_RESPONSIVE_HEIGHT`, with a height of 240: 240 rows on a TT or
+  a Falcon, an ST's own 200 there; `STDL_RESPONSIVE_TALL` opens an
+  ST's bottom border for 240 rows on every machine.
+- `STDL_RESPONSIVE_BANKS`, with the colour: the bank loaders give an
+  id's 256-colour art on an 8-plane screen and the ST's chunk
+  elsewhere, from one bank - its own art and palette (`stdlconv bank`'s
+  `depth=8`, the ST's chunk of the same id `map=PAL`), or planes 4-7
+  over the ST's art (`depth=hi` and `low`, colours 16 families of 16),
+  for surfaces, sprites, tilesets and palettes. 2.1K, linked by this
+  option alone (`docs/format.md` section 6.1).
+
+Then branch on what the screen says - `format->BitsPerPixel` and `h` -
+never on the machine. Keep colours 0-15 the ST's palette, so text and
+the HUD look the same everywhere, and put the extra shades above them.
+What it costs: the colour's code is about 25K of program (on a 512K ST
+link libcmini - one port kept 107K free with it); a TT copies what
+changed to its doubled lines at every Flip (one port: 4.1ms a frame
+with the colour), and its tall 16-colour screen compares the whole
+page instead (6.3-7.5ms, more than the colour). An 8-plane surface
+does not take a blit, sprite or tile onto a 4-plane one, patterned
+polygons or the cursor (each sets the error and draws nothing);
+tilesets, `STDL_TRANSPARENT`, the blit flags (UNDER, MARK) and
+`STDL_CreateSurfaceFrom8Planes` over a program's own 8-plane block
+work as on 4 planes, and `STDL_TRIPLEBUF` gives a third page there
+too (153.6K of ST RAM on a TT).
+
+**A TT- or Falcon-only SDL port?** Use Atari SDL 1.2 (plain TOS, no
+MiNT): those machines have 256 colours, and TT line-doubles 320x240 so
+one binary covers both. Their 256-colour modes are eight interleaved
+planes, so SDL converts its chunky surface at every update; and one
+port measured, in Hatari, that SDL's doubled TT mode puts an
+`SDL_UpdateRects` box that does not start at the top on line y rather
+than 2y (whole-screen `SDL_Flip` is right). STDL's input needs no STDL
+screen there: `STDL_OpenInput` takes the keyboard, mouse, joystick and
+pad under a mode the program set itself. On an ST there is no chunky
+mode at all: SDL degrades to greyscale derived from luminance and c2ps
+every frame, which is unusably slow past the basics - which is why
+STDL exists.
 
 **Changing STDL itself?** A port often wants a primitive the
 library does not have yet, and adding it there beats hand-rolling
@@ -240,8 +282,42 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
    costs the least), `-v` naming the instruments taken for drums.
    Log a driver's output to VGM rather than re-scoring it.
 2. Build with `-Iinclude/compat` so `#include "SDL.h"` resolves to
-   the shim; link `libstdl.a`. Compile errors = the porting TODO
-   list.
+   the shim, against libcmini, and link `libstdl-cmini.a`. Compile
+   errors = the porting TODO list.
+
+   **libcmini is the default; mintlib is the exception, for a game
+   that needs something only mintlib has** - MiNT's POSIX extras
+   (processes, signals, sockets), or whatever else the libcmini link
+   reports missing that is not worth rewriting. Start every port on
+   libcmini and move to mintlib (`libstdl.a`) only for a reason you
+   can name; do not reach for mintlib because the toolchain links it
+   by default. What it buys: about 100K of program. One port's game
+   went from 242,624 bytes to 141,551, and on a 512K ST its free
+   memory after loading from 23K to 107K - with the TT colour code of
+   `stdl_responsive.h` linked in as well. Same frames (a seeded run's
+   screen hashes matched on an STE, a TT and a Falcon), same saved
+   files byte for byte, and its loading was faster (the art 1.47s to
+   1.20s, the sound set-up 535ms to 50ms). The STDL objects must be
+   built against libcmini's headers too - `libstdl.a` will not mix
+   with it:
+
+       make libstdl-cmini.a
+       m68k-atari-mint-gcc ... -I$CMINI/include -c game.c
+       m68k-atari-mint-gcc -nostdlib -L$CMINI/lib \
+           -Wl,--traditional-format -o GAME.TOS $CMINI/lib/crt0.o \
+           objs... libstdl-cmini.a -lcmini -lgcc
+
+   (`CMINI` is `/freemint/libcmini` in the toolchain container.)
+   Then:
+   - set the stack in the program, `long _stksize = 32768;`:
+     libcmini's start-up reads that, not the link's `--stack`;
+   - read the link errors: a missing symbol is a mintlib feature the
+     game used, and the call to rewrite or keep mintlib for;
+   - `malloc` comes from `Mxalloc`, so a free-memory probe with
+     `Malloc(-1)` still tells the truth;
+   - prove the fit at `--memsize 0` (below); a port moving from
+     mintlib compares a seeded run's frames and saved files with the
+     mintlib build's before switching for good.
 3. Mechanical rewrites (see `docs/porting.md`):
    - direct pixel writes -> `SDL_FillRect` bands / `STDL_HLine`
      spans / `STDL_PutPixel` only for tiny overlays
@@ -847,8 +923,9 @@ first.
   game's race went from 147 to 135ms a frame on a Mega STE. A frame
   shorter than a VBL gains nothing (it runs at the display's rate,
   every frame shown, as double-buffered). The third page costs 32K
-  of ST RAM; without it the mode stays double-buffered, so test the
-  surface's flags for `STDL_TRIPLEBUF`. `STDL_Dirty` keeps a list for
+  of ST RAM (on a TT's or a Falcon's responsive screen, a page of its
+  own: 153.6K on a TT); without it the mode stays double-buffered, so
+  test the surface's flags for `STDL_TRIPLEBUF`. `STDL_Dirty` keeps a list for
   each of the three pages. With a border open the overscan module's
   own two pages flip as before. `examples/polydemo.c` (T switches).
 - Erasing sprites: `STDL_DirtyInit(background, max)` once, then each
@@ -976,12 +1053,14 @@ first.
 - Input without a video mode: `STDL_OpenInput()` takes the keyboard,
   mouse, joystick and pad as `STDL_SetVideoMode` does, and leaves the
   screen alone - for a tool that prints on the screen it was started
-  on, in any resolution (`examples/checkkeys.c`), or a program that
-  sets a mode the library does not, such as a TT's or a Falcon's
-  through the XBIOS. It runs `STDL_Init` if nothing has, a mode set
-  later changes nothing, and the keyboard goes back at `STDL_Quit` and
-  down the terminate path. A screen mode the program set is the
-  program's to put back: the library restores only one it set.
+  on, in any resolution (`examples/checkkeys.c`), a mono monitor's
+  included, which `STDL_SetVideoMode` refuses, or a program that drives
+  the screen itself. A TT's or a Falcon's 256 colours are STDL's own
+  screen (`stdl_responsive.h`). It runs `STDL_Init` if nothing has, a
+  mode set later changes nothing, and the keyboard goes back at
+  `STDL_Quit` and down the terminate path. A screen mode the program
+  set is the program's to put back: the library restores only one it
+  set.
 - Display rate: `STDL_SetRefresh(50 | 60)` switches the sync rate
   and returns the rate that actually took effect, `-1` queries. PAL
   machines boot at 50 and NTSC at 60, and 60Hz buys ten more frames
@@ -1055,7 +1134,10 @@ first.
   pacing in ticks. It counts from boot, so take differences - a
   per-phase timer around the frame is how one port found
   that an icon was being re-decoded every frame, 18ms of a 93ms
-  frame nobody would have guessed at.
+  frame nobody would have guessed at. For the parts of a frame
+  shorter than a tick, `STDL_GetHz38400()` is the same clock with
+  the count inside each tick (26us), unless the program reprograms
+  Timer C.
 - Sample music: `STDL_OpenVoices(rate)` is a fixed-function 4-voice
   sample mixer (Paula-style loop/period/volume) driven from the VBL
   with a 50Hz sequencer hook (`STDL_SetVoiceTick`, 50 a second at
@@ -1304,6 +1386,10 @@ first.
 - `int * int`, `/` or `%` in anything per pixel, per object or per
   frame: libgcc calls. Use `stdl_math.h` and gate the build with
   `tools/libcalls.sh` (see "Your own arithmetic" above).
+- Linking mintlib (`libstdl.a` and the toolchain's default libc)
+  without a mintlib-only feature the game uses: about 100K of RAM
+  for nothing. Build against libcmini (`libstdl-cmini.a`, porting
+  workflow step 2).
 
 ## Reference
 

@@ -72,7 +72,7 @@ STDL_Surface *STDL_LoadBMP(const char *file)
         goto out;
     }
 
-    s = STDL_CreateSurface((int)w, (int)h);
+    s = stdl_surface_create((int)w, (int)h);   /* 4 planes, always */
     if (s == NULL) {
         goto out;
     }

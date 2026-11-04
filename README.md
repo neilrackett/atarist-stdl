@@ -4,27 +4,35 @@
 
 # STDL - Atari ST DirectMedia Layer
 
-An easier way to port SDL games to the Atari ST, by [Neil Rackett](https://neilrackett.com/atarist).
+An easier way to create games for the Atari ST, TT & Falcon,
+by [Neil Rackett](https://neilrackett.com/atarist).
 
 ## Introduction
 
-STDL is a planar-native library for porting SDL 1.2 games to the Atari ST.
+STDL is a planar-native library for creating high performance games and
+porting SDL 1.2 content to the Atari ST, TT & Falcon.
+
+It enables you to create a single binary that works on any computer in the
+Atari ST family, with optional progressive enhancement baked into its core:
+
+- Create games that run in ST low res on any ST-compatible computer
+- Add 256 colour graphics for enhanced experiences on TT and Falcon
+- Expand to 240 rows on TT and Falcon, or on every machine using ST overscan
 
 ### Why not just use SDL?
 
-SDL 1.2 is great for TT and Falcon, which both support chunky at 256 colours,
-but on a stock ST there's no chunky mode and SDL needs c2p on every frame.
-The framework overhead therefore means you'll maybe get 3-5fps if you're lucky,
-and even then there's no colour support and everything's greyscale.
+If you only want to target TT and/or Falcon, SDL 1.2 is a good option,
+but on a stock ST it's just not viable: c2p and the framework overhead mean
+it's slow and uses around half the RAM on a 512KB ST, and it only works in
+greyscale.
 
-STDL is 16 colours, four bitplanes, and no conversion step. 50-60fps is truly
-achievable.
+With STDL, it's in full colour and 50-60fps on a 520 ST is truly achievable.
 
 ### What STDL does differently
 
-There is no chunky backbuffer and no c2p anywhere in the pipeline: ST
-interleaved planar is the native format, assets are converted offline, and
-spans, rects and blits are the primary verbs.
+There is no chunky backbuffer and no c2p anywhere in the pipeline: interleaved
+planar is the native format, assets are converted offline, and spans, rects and
+blits are the primary verbs.
 
 For engines that decode byte-per-pixel sprite frames at runtime,
 `STDL_BlitIndexed8` draws chunky frames straight into the planes through a
@@ -95,7 +103,9 @@ screen.
 
 `STDL_OpenInput()` takes the keyboard, mouse, joystick and pad without
 setting a video mode, for a program that keeps the screen it started
-on or sets its own - a TT or Falcon mode through the XBIOS, say.
+on - a tool that prints, in medium resolution or on a mono monitor -
+or drives its own. A TT's or a Falcon's 256 colours come with
+`stdl_responsive.h`.
 
 `STDL_PauseVoices()` and `STDL_ResumeVoices()` stop and restart the
 sample mixer's DMA without giving up the volume table its open call
@@ -163,6 +173,26 @@ hatari --machine ste dist/TSPRITE.TOS
 Clone with `--recursive`, or run `git submodule update --init`: Xpad is
 a submodule at `lib/xpad`, and the library does not build without it.
 
+**Link your game against libcmini, not mintlib, unless it needs
+mintlib.** The examples link mintlib, the toolchain's default, but a
+game that uses stdio, stdlib, string and the GEMDOS/XBIOS bindings and
+nothing of MiNT's own (processes, signals, sockets) is about 100K
+smaller on libcmini - one port went from 242,624 bytes to 141,551, and
+on a 512K ST from 23K free after loading to 107K. Build STDL against
+libcmini's headers as well, since `libstdl.a` will not mix with it:
+
+```
+stcmd make libstdl-cmini.a
+m68k-atari-mint-gcc -nostdlib -L$CMINI/lib -Wl,--traditional-format \
+    -o GAME.TOS $CMINI/lib/crt0.o objs... libstdl-cmini.a -lcmini -lgcc
+```
+
+with the game's own sources compiled with `-I$CMINI/include`
+(`/freemint/libcmini` in the toolchain container), and its stack set
+in the program (`long _stksize = 32768;`), which libcmini's start-up
+reads in place of the link's `--stack`. `docs/porting.md` has the
+checks to make when switching.
+
 **If your game's Makefile decides when to rebuild `libstdl.a` by
 globbing STDL's sources, glob both directories.** Not every source is
 under `src/` any more:
@@ -180,8 +210,10 @@ An earlier build may have left orphaned `.o` files next to the sources;
 
 ## Status
 
-320x200, 4 planes, 16 colours. The library and the SDL 1.2
-test-suite ports below all run under EmuTOS/TOS on Hatari:
+320x200, 4 planes, 16 colours on every machine; with `stdl_responsive.h`,
+256 colours and 320x240 on a TT or a Falcon, and 320x240 on an ST with its
+bottom border open. The library and the SDL 1.2 test-suite ports below all
+run under EmuTOS/TOS on Hatari:
 
 | Example      | Exercises                                                                        |
 | ------------ | -------------------------------------------------------------------------------- |
@@ -209,6 +241,7 @@ test-suite ports below all run under EmuTOS/TOS on Hatari:
 | BLITCHK.TOS  | BLiTTER vs CPU byte-identical verification at three plane budgets + timing       |
 | VBLCHK.TOS   | 50Hz VBL callbacks, then an abnormal exit - the desktop coming back is the pass  |
 | OVERSCAN.TOS | border overscan: T top (228), B bottom (245), both combine (273), SPACE closes   |
+| RESPDEMO.TOS | one binary, each machine's best screen: 256 colours and 240 rows on a TT or Falcon |
 
 Large fills and blits are BLiTTER-accelerated where the hardware has
 one, unaligned blits included - the BLiTTER shifts them itself (a

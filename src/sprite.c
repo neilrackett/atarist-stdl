@@ -161,6 +161,10 @@ STDL_Sprite *STDL_SpriteFromSurface(const STDL_Surface *s,
     uint16_t *v0;
     uint32_t framesize;
 
+    if (s != NULL && STDL_IS_RESP(s)) {
+        return stdl_resp->sprite_from(s, frame_w, flags);
+    }
+
     /*
      * A frame starts at f * frame_w in the source, at any column:
      * build_frame shifts each group into place, and the pixels past
@@ -214,6 +218,10 @@ STDL_Sprite *STDL_SpriteFromSurface(const STDL_Surface *s,
 
 void STDL_FreeSprite(STDL_Sprite *spr)
 {
+    if (spr != NULL && STDL_IS_RESP(spr)) {
+        stdl_resp->free_sprite(spr);
+        return;
+    }
     if (spr != NULL) {
         free(spr->data);
         free(spr);
@@ -550,6 +558,10 @@ void STDL_BlitSprite(STDL_Sprite *spr, int frame, STDL_Surface *dst,
 #endif
     if (spr == NULL || dst == NULL || frame < 0
         || frame >= spr->nframes) {
+        return;
+    }
+    if ((spr->planes | dst->planes) & 8) {
+        stdl_resp->blit_sprite(spr, frame, dst, x, y);
         return;
     }
     phase = x & 15;

@@ -36,12 +36,14 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/audio.c src/cursor.c src/music.c src/mixer.c \
           src/sfx.c src/degas.c src/ym.c src/blitter.c \
           src/planes.c src/vbl.c src/indexed.c src/drawchar.c \
-          src/surfacefrom.c src/blit8.c src/voice.c \
-          $(XPAD)/xpad.c src/stdl_xpad.c src/overscan.c \
+          src/surfacefrom.c src/surfacedup.c src/blit8.c \
+          src/voice.c $(XPAD)/xpad.c src/stdl_xpad.c src/overscan.c \
           src/hwscroll.c src/tone.c src/cpuspeed.c src/opl.c \
           src/refresh.c src/mouse.c src/stram.c src/wav.c src/ring.c \
           src/palstage.c src/polygon.c src/polypat.c src/raster.c \
-          src/spritebatch.c
+          src/spritebatch.c src/responsive.c src/planes8.c src/planes8ex.c \
+          src/planes8tile.c src/asset8.c src/tall4.c src/tallst.c \
+          src/hz38400.c
 # Objects live under obj/, mirroring each source's own path. Sources
 # now come from two places, this repo and the xpad submodule, and
 # building beside the source would drop .o files inside lib/xpad. The
@@ -61,7 +63,7 @@ EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
            dist/BLITCHK.TOS dist/VBLCHK.TOS dist/OVERSCAN.TOS \
            dist/HWSCROLL.TOS dist/TONEDEMO.TOS dist/OPLDEMO.TOS \
            dist/MUSICVU.TOS dist/POLYDEMO.TOS dist/PATDEMO.TOS \
-           dist/RASTERS.TOS
+           dist/RASTERS.TOS dist/RESPDEMO.TOS
 
 # Pinned, not left to ordering: a rule added above this one would
 # silently become the default goal, and `make` would then build
@@ -110,15 +112,43 @@ all: $(LIB) sizecheck libcallcheck $(EXAMPLES) assets
 # pre-shifted ones 1.2-1.7x; on a BLiTTER machine PRESHIFT's 16x RAM
 # then buys nothing, which is worth far more than the code to a port
 # that pre-shifted to be fast. A plain ST is unchanged within 1%.
+#
+# Raised 34700 -> 35300 on 2026-11-01: a responsive screen's 8-plane
+# surfaces (stdl_responsive.h). Every pixel call takes them through a
+# test of `planes` at its entry, 604 bytes over these five objects
+# (draw.o 248, surface.o 244, blit.o 68, sprite.o 44), so that a TT
+# or a Falcon draws 256 colours through the same calls. Measured on a
+# plain ST, the tests cost 0.3% of SPRCOST's and PRIMCOST's geometric
+# means (a clipped-out blit 5%, PutPixel and DrawChar 2.9%) against a
+# layout floor of 0.03%, and a program 135-178 bytes; the 8-plane code
+# itself is linked only by a program that asks.
 PIXEL_OBJS = $(addprefix $(OBJDIR)/src/,draw.o blit.o sprite.o \
              surface.o blitter.o)
-PIXEL_MAX  = 34700
+PIXEL_MAX  = 35300
 
-sizecheck: $(PIXEL_OBJS)
+# The responsive screens' own code (stdl_responsive.h), which only a
+# program that asks for an option links: the colour is responsive.o,
+# planes8.o, planes8ex.o and planes8tile.o, 25K (1.5K of it the blit
+# flags and borrowed 8-plane surfaces, 1.5K the tiles, 0.6K the 256
+# colours staged to the blank), a bank's 256-colour art
+# (STDL_RESPONSIVE_BANKS) asset8.o, 2.1K more, and the tall screen
+# alone responsive.o and tall4.o, 5.1K.
+# A title for a 512K ST pays it in free memory as well as on disk, so
+# it has a budget of its own: 28,620 bytes on 2026-11-03.
+RESP_OBJS  = $(addprefix $(OBJDIR)/src/,responsive.o planes8.o \
+             planes8ex.o planes8tile.o asset8.o tall4.o)
+RESP_MAX   = 28750
+
+sizecheck: $(PIXEL_OBJS) $(RESP_OBJS)
 	@n=`$(CROSS)size $(PIXEL_OBJS) | awk 'NR>1 {t+=$$1} END {print t}'`; \
 	 echo "pixel-path text $$n bytes (budget $(PIXEL_MAX))"; \
 	 if [ $$n -gt $(PIXEL_MAX) ]; then \
 	   echo "*** over the pixel-path size budget"; exit 1; \
+	 fi
+	@n=`$(CROSS)size $(RESP_OBJS) | awk 'NR>1 {t+=$$1} END {print t}'`; \
+	 echo "responsive text $$n bytes (budget $(RESP_MAX))"; \
+	 if [ $$n -gt $(RESP_MAX) ]; then \
+	   echo "*** over the responsive size budget"; exit 1; \
 	 fi
 
 # Calls into libgcc's arithmetic, per function, against an allowlist.
@@ -155,14 +185,23 @@ $(OBJDIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# libcmini variant. Games that have to fit a stock 520ST link with
-# -nostdlib -lcmini instead of mintlib; libstdl.a compiled against
-# mintlib headers cannot be mixed with that (different FILE, different
-# startup), so build a parallel archive against the libcmini headers:
+# for size, in every program asking for the colour: the 8-plane blit
+# flags, a rare path (planes8ex.c says why), and the 8-plane tiles,
+# whose loops come out the same but for the count (1,524 bytes, 1,808
+# at -O2); and a bank's 8-plane art, loaded once (2,088 against 2,456)
+SIZE_OBJS = planes8ex planes8tile asset8
+$(foreach o,$(SIZE_OBJS),$(OBJDIR)/src/$(o).o $(OBJDIR)/src/$(o).cmini.o): \
+    CFLAGS += -Os
+
+# libcmini variant, what a game links unless it needs mintlib (README,
+# "Building"): -nostdlib -lcmini instead of mintlib. libstdl.a compiled
+# against mintlib headers cannot be mixed with that (different FILE,
+# different startup), so build a parallel archive against the libcmini
+# headers:
 #
 #   STCMD_NO_TTY=1 stcmd make libstdl-cmini.a
-#   m68k-atari-mint-gcc -nostdlib -L$(CMINI)/lib -o P.TOS \
-#       $(CMINI)/lib/crt0.o objs... libstdl-cmini.a -lcmini -lgcc
+#   m68k-atari-mint-gcc -nostdlib -L$(CMINI)/lib -Wl,--traditional-format \
+#       -o P.TOS $(CMINI)/lib/crt0.o objs... libstdl-cmini.a -lcmini -lgcc
 #
 # STDL only needs stdio/stdlib/string/ctype plus mint/osbind.h, all of
 # which libcmini provides. Note libcmini's stack is fixed by _stksize
@@ -242,6 +281,8 @@ dist/POLYDEMO.TOS: examples/polydemo.c $(LIB)
 dist/PATDEMO.TOS: examples/patdemo.c $(LIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
 dist/RASTERS.TOS: examples/rasters.c $(LIB)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
+dist/RESPDEMO.TOS: examples/respdemo.c $(LIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
 dist/OPLDEMO.TOS: examples/opldemo.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@

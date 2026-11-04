@@ -170,6 +170,10 @@ void STDL_DrawText(STDL_Surface *dst, const STDL_Font *font,
         || font->cw > 16 || font->cw <= 0) {
         return;
     }
+    if (STDL_IS_RESP(dst)) {
+        stdl_resp->draw_text(dst, font, x, y, text, col);
+        return;
+    }
     col &= STDL_COL_MASK;
     pw0 = (col & 1) ? 0xFFFFu : 0;
     pw1 = (col & 2) ? 0xFFFFu : 0;

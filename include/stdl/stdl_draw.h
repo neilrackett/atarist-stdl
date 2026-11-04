@@ -230,7 +230,8 @@ typedef struct { int16_t x, y; } STDL_PointSub;
  * triangle - some 680 an edge - and a row about 390 cycles for one
  * group, 500 for two, plus about 38 a further opaque group. CPU
  * only. Its own object: a program that never calls it does not
- * carry it.
+ * carry it. 4-plane surfaces only: on an 8-plane one
+ * (stdl_responsive.h) it sets the error and draws nothing.
  */
 void STDL_FillPolygonPattern(STDL_Surface *dst, const STDL_PointSub *pts,
                              int n, const STDL_Pattern *pat);

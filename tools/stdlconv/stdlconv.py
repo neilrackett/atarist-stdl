@@ -50,6 +50,19 @@ Subcommands:
       Images must already be <= 16 colours (use bmp16 first).
       Pre-shifting happens on the ST at load (STDL_PRESHIFT).
 
+      A TT's or a Falcon's 256 colours (STDL_RESPONSIVE_BANKS): a
+      surface, sprite, tileset or palette SPEC may take, from art of up
+      to 256 colours (docs/format.md section 6):
+        :depth=8    the 8-plane chunk and palette as they are; the
+                    ST's of the same ID from the same art with
+                    :map=PAL, every colour on the nearest of PAL's 16
+                    (an image), the key keeping a colour of its own
+        :depth=hi   planes 4-7 alone, of art made of 16 families of 16
+                    (index = shade << 4 | ST colour); the ST's chunk of
+                    the same ID is :low, the art's low nibbles and its
+                    palette's first 16, keyed on an ST colour
+      An ST loads only its own chunks.
+
 Everything in a bank is big-endian, matching the 68000.
 """
 
@@ -173,6 +186,14 @@ CHUNK_SURFACE = 2
 CHUNK_SPRITE = 3
 CHUNK_TILESET = 4
 CHUNK_FONT = 5
+# an 8-plane screen's own (stdl_responsive.h, STDL_RESPONSIVE_BANKS)
+CHUNK_SURFACE8 = 6
+CHUNK_SPRITE8 = 7
+CHUNK_PALETTE8 = 8
+CHUNK_TILESET8 = 9
+# a surface8's form byte: its own art, keyed or not, or planes 4-7 over
+# the 4-plane chunk of the same id
+FORM_OWN, FORM_KEYED, FORM_OVER = 0, 1, 2
 
 
 def die(msg):
@@ -200,25 +221,28 @@ def load_indexed(path, max_colors=16):
     return img.width, img.height, px, palette
 
 
-def to_planar(w, h, px):
-    """Convert an index array to ST interleaved planar rows."""
+def to_planar(w, h, px, planes=4, shift=0):
+    """Convert an index array to interleaved planar rows: `planes`
+    words a group (4, the ST's; 8, a TT's or a Falcon's 256 colours),
+    plane p from bit shift + p of each index (shift 4: planes 4-7)."""
     groups = (w + 15) // 16
-    out = bytearray(groups * 8 * h)
+    gbytes = planes * 2
+    out = bytearray(groups * gbytes * h)
     for y in range(h):
-        base = y * groups * 8
+        base = y * groups * gbytes
         for g in range(groups):
-            words = [0, 0, 0, 0]
+            words = [0] * planes
             for b in range(16):
                 x = g * 16 + b
                 if x >= w:
                     continue
-                v = px[y * w + x]
+                v = px[y * w + x] >> shift
                 bit = 0x8000 >> b
-                for p in range(4):
+                for p in range(planes):
                     if v & (1 << p):
                         words[p] |= bit
-            for p in range(4):
-                struct.pack_into(">H", out, base + g * 8 + p * 2,
+            for p in range(planes):
+                struct.pack_into(">H", out, base + g * gbytes + p * 2,
                                  words[p])
     return bytes(out)
 
@@ -328,33 +352,84 @@ def pack_words(words):
     return struct.pack(">%dH" % len(words), *words)
 
 
-def chunk_surface(spec):
-    w, h, px, _pal = load_indexed(spec["file"])
+# ------------------------------------------------------------------
+# 256-colour art for a TT or a Falcon (docs/format.md section 6.1;
+# the options in the usage above)
+
+
+def nearest(c, pal, skip=None):
+    """The index of pal's colour nearest c, never `skip`."""
+    best, bi = None, 0
+    for i, t in enumerate(pal):
+        if i == skip:
+            continue
+        d = sum((a - b) * (a - b) for a, b in zip(c, t))
+        if best is None or d < best:
+            best, bi = d, i
+    return bi
+
+
+def load_art(spec):
+    """The spec's image as (w, h, px, palette, key): up to 16 colours,
+    or 256 for depth=, low and map=, the last two made the ST's."""
+    w, h, px, pal = load_indexed(spec["file"],
+                                 256 if spec["deep"] else 16)
     key = spec.get("key")
+    if spec.get("low"):
+        return w, h, [v & 15 for v in px], pal[:16], key
+    if "map" in spec:
+        target = load_indexed(spec["map"])[3]
+        # the key's colour keeps an ST colour of its own: another
+        # landing on it would turn transparent there
+        tkey = None if key is None else nearest(pal[key], target)
+        lut = [tkey if i == key else nearest(c, target, tkey)
+               for i, c in enumerate(pal)]
+        return w, h, [lut[v] for v in px], target, tkey
+    return w, h, px, pal, key
+
+
+def surface8(spec, w, h, px, key):
+    """A surface8 payload: its own 8-plane rows (depth=8), keyed or
+    not, or planes 4-7 over the ST's chunk (depth=hi)."""
+    if spec["depth"] == "hi":
+        return struct.pack(">HHBB", w, h, FORM_OVER, 0) \
+            + to_planar(w, h, px, 4, 4)
+    form = FORM_OWN if key is None else FORM_KEYED
+    return struct.pack(">HHBB", w, h, form, key or 0) \
+        + to_planar(w, h, px, 8)
+
+
+def chunk_surface(spec):
+    w, h, px, _pal, key = load_art(spec)
+    if spec.get("depth"):
+        return CHUNK_SURFACE8, surface8(spec, w, h, px, key)
     payload = struct.pack(">HHBB", w, h, 1 if key is not None else 0,
                           key or 0)
-    return payload + to_planar(w, h, px)
+    return CHUNK_SURFACE, payload + to_planar(w, h, px)
 
 
 def chunk_palette(spec):
-    _w, _h, _px, pal = load_indexed(spec["file"])
+    _w, _h, _px, pal, _key = load_art(spec)
     payload = struct.pack(">H", len(pal))
     for r, g, b in pal:
         payload += struct.pack(">BBBB", r, g, b, 0)
-    return payload
+    return (CHUNK_PALETTE8 if spec.get("depth") == "8"
+            else CHUNK_PALETTE), payload
 
 
 def chunk_sprite(spec):
-    w, h, px, _pal = load_indexed(spec["file"])
+    w, h, px, _pal, key = load_art(spec)
     fw = spec["framew"]
     if fw % 16:
         die("sprite frame width must be a multiple of 16")
     if w % fw:
         die("image width %d is not a multiple of frame width %d"
             % (w, fw))
+    if spec.get("depth"):
+        return CHUNK_SPRITE8, (struct.pack(">H", fw)
+                               + surface8(spec, w, h, px, key))
     nframes = w // fw
     groups = fw // 16
-    key = spec.get("key")
     words = []
     for f in range(nframes):
         for y in range(h):
@@ -366,18 +441,25 @@ def chunk_sprite(spec):
     framesize = groups * 5 * h
     payload = struct.pack(">HHHBBHI", fw, h, nframes, 1, 4, groups,
                           framesize)
-    return payload + pack_words(words)
+    return CHUNK_SPRITE, payload + pack_words(words)
 
 
 def chunk_tileset(spec):
-    w, h, px, _pal = load_indexed(spec["file"])
+    w, h, px, _pal, key = load_art(spec)
     tw, th = spec["tile"]
     if tw % 16:
         die("tile width must be a multiple of 16")
     cols, rows = w // tw, h // th
+    if spec.get("depth"):
+        if cols < 1 or rows < 1:
+            die("image smaller than one tile")
+        # the art's whole tiles, so that tile for tile it is the ST's
+        cw, ch = cols * tw, rows * th
+        art = [px[y * w + x] for y in range(ch) for x in range(cw)]
+        return CHUNK_TILESET8, (struct.pack(">HH", tw, th)
+                                + surface8(spec, cw, ch, art, key))
     ntiles = cols * rows
     groups = tw // 16
-    key = spec.get("key")
     masked = 1 if key is not None else 0
     words = []
     for t in range(ntiles):
@@ -392,7 +474,7 @@ def chunk_tileset(spec):
     tilesize = groups * (5 if masked else 4) * th
     payload = struct.pack(">HHHHBBI", tw, th, ntiles, groups, masked,
                           4, tilesize)
-    return payload + pack_words(words)
+    return CHUNK_TILESET, payload + pack_words(words)
 
 
 def chunk_font(spec):
@@ -413,7 +495,8 @@ def chunk_font(spec):
                 if px[y * w + gl * cw + x] != 0:
                     row[x // 8] |= 0x80 >> (x % 8)
             bits += row
-    return struct.pack(">HHBBH", cw, ch, first, last, bpr) + bytes(bits)
+    return CHUNK_FONT, (struct.pack(">HHBBH", cw, ch, first, last, bpr)
+                        + bytes(bits))
 
 
 # ------------------------------------------------------------------
@@ -1529,19 +1612,46 @@ def parse_spec(text):
             elif k in ("tile", "cell"):
                 a, b = v.split("x")
                 spec[k] = (int(a), int(b))
+            elif k == "depth" and v in ("8", "hi"):
+                spec[k] = v
+            elif k == "map":
+                spec[k] = v
             else:
                 die("unknown option " + opt)
+        elif opt == "low":
+            spec["low"] = True
         else:
             die("unknown option " + opt)
+    # art of up to 256 colours: the 8-plane chunk, or the ST's made
+    # from it
+    spec["deep"] = bool(spec.get("depth") or spec.get("low")
+                        or "map" in spec)
+    key = spec.get("key")
+    if spec.get("depth") and (spec.get("low") or "map" in spec):
+        die("depth= is the 8-plane chunk; low and map= the ST's: "
+            "give them on separate specs")
+    if spec.get("depth") == "hi" and spec["type"] == "palette":
+        die("a palette over the ST's is its depth=8 palette")
+    if spec["deep"] and spec["type"] not in ("surface", "sprite",
+                                             "tileset", "palette"):
+        die("depth=, low and map= are for surfaces, sprites, tilesets "
+            "and palettes")
+    if spec.get("low") and key is not None and key > 15:
+        die("with low, the key is an ST colour, 0-15")
+    if spec.get("depth") == "8" and key == 16:
+        die("an 8-plane key cannot be 16: it is STDL_TRANSPARENT there")
+    if spec.get("depth") == "hi" and key is not None:
+        die("with depth=hi the key is the ST chunk's (low:key=N)")
     return spec
 
 
+# each builder returns (chunk type, payload): depth= picks the type
 BUILDERS = {
-    "surface": (CHUNK_SURFACE, chunk_surface),
-    "palette": (CHUNK_PALETTE, chunk_palette),
-    "sprite": (CHUNK_SPRITE, chunk_sprite),
-    "tileset": (CHUNK_TILESET, chunk_tileset),
-    "font": (CHUNK_FONT, chunk_font),
+    "surface": chunk_surface,
+    "palette": chunk_palette,
+    "sprite": chunk_sprite,
+    "tileset": chunk_tileset,
+    "font": chunk_font,
 }
 
 
@@ -1551,8 +1661,8 @@ def cmd_bank(args):
         spec = parse_spec(text)
         if spec["type"] not in BUILDERS:
             die("unknown chunk type " + spec["type"])
-        ctype, builder = BUILDERS[spec["type"]]
-        chunks.append((ctype, spec["id"], builder(spec)))
+        ctype, payload = BUILDERS[spec["type"]](spec)
+        chunks.append((ctype, spec["id"], payload))
     dirsize = 8 + 12 * len(chunks)
     off = dirsize
     with open(args.output, "wb") as f:

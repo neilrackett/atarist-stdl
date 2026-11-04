@@ -17,9 +17,18 @@
  *       tests/hatari/tripchk.c libstdl.a
  *   TOS=$PWD/tmp/tos/etos256uk.img MACHINE=st EXTRA="--memsize 4" \
  *       tests/hatari/run.sh tc dist/TRIPCHK.TOS 8 "waitfor TC:done"
+ *
+ * Built with -DTRIPRESP (TRIPRESP.TOS) it asks for a TT's or a
+ * Falcon's 256 colours (stdl_responsive.h) and the same of their
+ * screen, its frames 1.5 and 2.25 of the VBLs it measures (a Falcon's
+ * VGA runs at 60Hz), and the page drawn its rows at the screen's
+ * stride.
  */
 #include <stdio.h>
 #include <stdl/stdl.h>
+#ifdef TRIPRESP
+#include <stdl/stdl_responsive.h>
+#endif
 
 #define FRCLOCK (*(volatile uint32_t *)0x466UL)
 #define HZ200   (*(volatile uint32_t *)0x4BAUL)
@@ -54,7 +63,7 @@ static int run(STDL_Surface *s, int ticks, uint32_t *vbls)
             const uint32_t c = vcounter(), p = (uint32_t)s->pixels;
             uint32_t h;
 
-            if (c >= p && c < p + 32000UL) {
+            if (c >= p && c < p + (uint32_t)s->h * s->stride) {
                 bad++;
             }
             if (t < ticks) {
@@ -71,21 +80,44 @@ static int run(STDL_Surface *s, int ticks, uint32_t *vbls)
 
 int main(int argc, char *argv[])
 {
-    static const int ticks[3] = { 0, 6, 9 };
+    static int ticks[3] = { 0, 6, 9 };
     STDL_Surface *s;
     uint8_t *seen[6];
     uint32_t tv[3], dv[3];
-    int i, k, bad = 0, fail = 0, distinct;
+    int i, k, bad = 0, fail = 0, distinct, bpp = 4;
 
     (void)argc;
     (void)argv;
-    s = STDL_SetVideoMode(320, 200, 4, STDL_TRIPLEBUF);
+#ifdef TRIPRESP
+    STDL_UseResponsive(STDL_RESPONSIVE_COLOUR);
+    bpp = 8;
+#endif
+    s = STDL_SetVideoMode(320, 200, bpp, STDL_TRIPLEBUF);
     if (s == NULL) {
         printf("TC: video: %s\nTC:done FAIL\n", STDL_GetError());
         return 1;
     }
-    printf("TC: flags triple %d double %d\n",
-           (s->flags & STDL_TRIPLEBUF) != 0, (s->flags & STDL_DOUBLEBUF) != 0);
+    printf("TC: flags triple %d double %d, %d bits\n",
+           (s->flags & STDL_TRIPLEBUF) != 0, (s->flags & STDL_DOUBLEBUF) != 0,
+           s->format->BitsPerPixel);
+#ifdef TRIPRESP
+    {
+        /* the display's rate: its VBLs in a second of the 200Hz clock */
+        uint32_t h = HZ200, v;
+
+        while (HZ200 == h) {
+        }
+        h = HZ200;
+        v = FRCLOCK;
+        while (HZ200 - h < 200) {
+        }
+        v = FRCLOCK - v;
+        ticks[1] = (int)((300 + v / 2) / v);
+        ticks[2] = (int)((450 + v / 2) / v);
+        printf("TC: %lu VBLs a second, frames of %d and %d ticks\n",
+               (unsigned long)v, ticks[1], ticks[2]);
+    }
+#endif
     if (!(s->flags & STDL_TRIPLEBUF) || !(s->flags & STDL_DOUBLEBUF)) {
         fail = 1;
     }
@@ -105,7 +137,7 @@ int main(int argc, char *argv[])
     for (k = 0; k < 3; k++) {
         bad += run(s, ticks[k], &tv[k]);
     }
-    s = STDL_SetVideoMode(320, 200, 4, STDL_DOUBLEBUF);
+    s = STDL_SetVideoMode(320, 200, bpp, STDL_DOUBLEBUF);
     printf("TC: double again: flags triple %d\n",
            (s->flags & STDL_TRIPLEBUF) != 0);
     fail |= (s->flags & STDL_TRIPLEBUF) != 0;

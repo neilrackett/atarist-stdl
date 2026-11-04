@@ -8,13 +8,13 @@ stop trying and redesign instead.
 
 | Omitted | Reason |
 |---|---|
-| Arbitrary bpp surfaces | v1 is 4bpp low res only; 1bpp and 2bpp deferred |
+| Arbitrary bpp surfaces | 4 planes, and 8 on a TT or a Falcon when a program asks for the colour (`stdl_responsive.h`); 1bpp and 2bpp deferred |
 | Per-pixel alpha / blending | no sane planar implementation; `SDL_SetAlpha` returns -1 |
 | Blit-time colour remap | too expensive in planar; remap the surface once instead (below) |
 | Runtime scaling / rotation | pre-render or redesign |
 | `SDL_LockSurface` semantics | surfaces are always directly addressable |
 | Threads, timers-as-threads | cooperative single-thread model; timer callbacks fire inside `SDL_Delay` |
-| Arbitrary palette depth | ST 512-colour / STE 4096-colour only |
+| Arbitrary palette depth | ST 512-colour / STE 4096-colour, and 256 at a time on a TT or a Falcon with the colour |
 | TrueType / SDL_ttf | bitmap fonts converted offline |
 | Gamma / gamma ramps | `SDL_SetGamma*` return -1 |
 | Chunky pixel access | there is no 8bpp buffer; see docs/porting.md |
@@ -23,12 +23,40 @@ stop trying and redesign instead.
 
 ## Practical limits of v1
 
-* `STDL_SetVideoMode` always yields the 320x200x4 screen; requested
+* `STDL_SetVideoMode` yields the 320x200x4 screen; requested
   width/height/bpp are accepted for source compatibility and
-  ignored. On a monochrome monitor it fails (mono emulation is a
+  ignored, unless a program has asked for a responsive option
+  (`stdl_responsive.h`), when a bpp of 8 asks for the colour and a
+  height over 200 for the tall screen. On a monochrome monitor it fails (mono emulation is a
   post-v1 feature, see the design overview section 3.4). On a TT or
   a Falcon that screen is ST Low, the TT's line-doubled by its
-  monitor; their own 256-colour modes are not STDL's.
+  monitor, unless the program asks for more: `stdl_responsive.h`
+  gives 256 colours there (8-plane surfaces), and a 320x240 screen on
+  every machine or only where the display has the lines, each an
+  option a program names.
+* An 8-plane surface (`stdl_responsive.h`'s colour) refuses three
+  things, each setting the error and drawing nothing:
+  - **a blit, a sprite or a tile from it onto a 4-plane surface**: 4
+    planes hold no colour above 15, and dropping the upper planes or
+    putting each colour on its nearest would both change the picture.
+    This one stays refused; the other way round, 4-plane data onto 8
+    planes, draws in colours 0-15.
+  - **patterned polygons**: `STDL_MakePattern`'s patterns are per-plane
+    words for 4 planes, drawn by 68000 walkers of their own; the
+    8-plane polygon fills in one colour.
+  - **the cursor**, on any responsive screen: it saves what is under it
+    and draws on the ST's own screen pages, which a responsive screen
+    replaces.
+
+  The last two are not built yet rather than impossible: neither was
+  needed by the program the 8-plane path was built against, and every
+  8-plane routine is code each program asking for the colour links, so
+  each waits for a program that needs it. The blit flags
+  (`STDL_BLIT_UNDER`, `STDL_BLIT_MARK`) and surfaces over a program's
+  own 8-plane block (`STDL_CreateSurfaceFrom8Planes`) were added for a
+  port whose layer keeps a priority plane in its mask: 1.5K. 8-plane
+  tilesets followed, 1.5K, so that a bank's 256-colour art covers
+  every kind of picture a bank holds.
 * Borders, STE hardware scrolling and rasters need an ST, STE or Mega
   STE's video timing and are refused on a TT or a Falcon. A Falcon's
   BLiTTER is not used (the 68030's data cache does not see its

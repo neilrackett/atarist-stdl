@@ -55,6 +55,9 @@ static int stage_raw(int index, uint16_t word)
     return 1;
 }
 
+/* in the blank: from the slot, and first in the voices' VBL (voice.c)
+ * while staging runs, so whichever comes first in the queue writes and
+ * the other finds nothing; an 8-plane screen's 256 after the sixteen */
 static void flush(void)
 {
     const uint16_t m = dirty;
@@ -65,8 +68,14 @@ static void flush(void)
         for (i = 0; i < 16; i++) {
             if (m & (1u << i)) {
                 STDL_HWPAL[i] = pending[i];
+                if (stdl_pal_write != NULL) {
+                    stdl_pal_write(i, pending[i]);
+                }
             }
         }
+    }
+    if (stdl_pal_flush8 != NULL) {
+        stdl_pal_flush8();
     }
 }
 
@@ -89,6 +98,7 @@ int stdl_pal_stage_on(int who)
         dirty = 0;
         stdl_pal_apply_hook = stage;
         stdl_pal_raw_hook = stage_raw;
+        stdl_pal_vbl = flush;
     }
     users |= (uint8_t)who;
     return 0;
@@ -99,6 +109,7 @@ void stdl_pal_stage_off(int who)
     users &= (uint8_t)~who;
     if (users == 0 && stdl_pal_apply_hook == stage) {
         STDL_RemoveVBL(flush);
+        stdl_pal_vbl = NULL;
         stdl_pal_apply_hook = NULL;
         stdl_pal_raw_hook = NULL;
         flush();                /* a change still waiting goes now */

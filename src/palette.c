@@ -28,6 +28,9 @@ void STDL_SetColour(int index, uint16_t stColour)
 {
     if (index >= 0 && index < 16) {
         STDL_HWPAL[index] = stColour;
+        if (stdl_pal_write != NULL) {
+            stdl_pal_write(index, stColour);
+        }
     }
 }
 
@@ -42,9 +45,9 @@ void stdl_palette_apply_hw(void)
         return;
     }
     for (i = 0; i < 16; i++) {
-        STDL_HWPAL[i] = STDL_HWColour(stdl.colours[i].r,
-                                      stdl.colours[i].g,
-                                      stdl.colours[i].b);
+        STDL_SetColour(i, STDL_HWColour(stdl.colours[i].r,
+                                        stdl.colours[i].g,
+                                        stdl.colours[i].b));
     }
 }
 
@@ -56,6 +59,9 @@ int STDL_SetColours(STDL_Surface *s, const STDL_Colour *cols,
 
     if (s == NULL || s->format == NULL || s->format->palette == NULL) {
         return 0;
+    }
+    if (STDL_IS_RESP(s)) {
+        return stdl_resp->set_colours(s, cols, first, n);
     }
     dst = s->format->palette->colors;
     count = s->format->palette->ncolors;
@@ -70,9 +76,10 @@ int STDL_SetColours(STDL_Surface *s, const STDL_Colour *cols,
 
 void STDL_SetPalette(STDL_Surface *s, const STDL_Palette *pal)
 {
+    /* as many as the surface's palette holds: STDL_SetColours stops
+     * there (16, or an 8-plane screen's 256) */
     if (pal != NULL) {
-        STDL_SetColours(s, pal->colors, 0,
-                        pal->ncolors > 16 ? 16 : pal->ncolors);
+        STDL_SetColours(s, pal->colors, 0, pal->ncolors);
     }
 }
 
@@ -89,9 +96,11 @@ uint8_t STDL_MapRGB(const STDL_PixelFormat *fmt,
         cols = fmt->palette->colors;
         n = fmt->palette->ncolors;
     }
-    /* only the first 2^budget entries can appear on screen, so never
-     * hand back an index the drawing paths would truncate */
-    if (n > (1 << stdl_planes)) {
+    /* only the first 2^budget entries can appear on a 4-plane screen,
+     * so never hand back an index the drawing paths would truncate; an
+     * 8-plane one's format holds all of its 256 */
+    if (n > (1 << stdl_planes)
+        && (fmt == NULL || fmt->BitsPerPixel != 8)) {
         n = 1 << stdl_planes;
     }
     for (i = 0; i < n; i++) {
@@ -132,6 +141,10 @@ void STDL_FadeTo(const STDL_Palette *target, int frames)
     int f, i, n;
 
     if (target == NULL || frames <= 0) {
+        return;
+    }
+    if (STDL_RESP_DEEP()) {
+        stdl_resp_video->fade(target, frames);     /* all 256 */
         return;
     }
     if (frames > 32767) {

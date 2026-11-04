@@ -535,8 +535,14 @@ C_TRAP(stdl_trap_xor4, row_xor4)
  * the column fetch (the two positions' whole parts) and the step at
  * the row's end differ.
  */
-typedef char surface_layout[offsetof(STDL_Surface, stride) == 8
-                           && offsetof(STDL_Surface, clip) == 16 ? 1 : -1];
+/* the offsets the 68000 reads (planes for the 8-plane test at the
+ * entry); __builtin_offsetof because libcmini's offsetof is not a
+ * constant expression here */
+typedef char surface_layout[__builtin_offsetof(STDL_Surface, stride) == 8
+                           && __builtin_offsetof(STDL_Surface, planes) == 10
+                           && __builtin_offsetof(STDL_Surface, clip) == 16
+                           && __builtin_offsetof(STDL_Surface, mask) == 24
+                           ? 1 : -1];
 void stdl_poly_c(STDL_Surface *dst, const STDL_Point *pts, int n,
                  uint8_t col, int op);
 void stdl_prows_set2(void);
@@ -797,15 +803,17 @@ PROWS_ASM(stdl_prows_xor4, TX_EDGE,
 __asm__(
     "\t.text\n\t.even\n\t.globl " T_SYM(STDL_FillPolygon) "\n"
     T_SYM(STDL_FillPolygon) ":\n\t"
-    /* what the C must see to: no surface, no pixels, a mask, no
-     * vertices, too few or too many, OR and CLEAR; scratch registers
-     * only */
+    /* what the C must see to: no surface, no pixels, a mask, 8 planes
+     * (planes & 8, stdl_responsive.h), no vertices, too few or too many,
+     * OR and CLEAR; scratch registers only */
     "move.l 4(%sp),%d0\n\t"
     "beq.s  97f\n\t"
     "move.l %d0,%a0\n\t"
     "tst.l  (%a0)\n\t"
     "beq.s  97f\n\t"
     "tst.l  24(%a0)\n\t"
+    "bne.s  97f\n\t"
+    "btst   #3,10(%a0)\n\t"
     "bne.s  97f\n\t"
     "tst.l  8(%sp)\n\t"
     "beq.s  97f\n\t"
@@ -1397,6 +1405,10 @@ void STDL_FillPolygon(STDL_Surface *dst, const STDL_Point *pts, int n,
     Trap t;
 
     if (dst == NULL || pts == NULL || n < 3 || dst->pixels == NULL) {
+        return;
+    }
+    if (STDL_IS_RESP(dst)) {
+        stdl_resp->fill_polygon(dst, pts, n, col, op, STDL_FillPolygon);
         return;
     }
     /* as STDL_FillRect: STDL_TRANSPARENT punches a hole in a masked

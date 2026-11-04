@@ -47,6 +47,22 @@ void  (*stdl_shutdown_overscan)(void);
 /* also video.c's: the overscan module's BLiTTER placement policy,
  * NULL while no border is open (test_blitter installs its own) */
 uint16_t (*stdl_blit_policy)(uint16_t nlines, uint32_t cpl);
+const stdl_resp_ops_t *stdl_resp;      /* video.c's on target */
+const stdl_resp_video_t *stdl_resp_video;
+STDL_Surface *stdl_resp_screen;
+const resp_banks *stdl_resp_bank;
+int stdl_host_stram_left = -1;          /* ST RAM without end */
+int16_t stdl_ovsc_cap;                  /* overscan.c's on target */
+int stdl_host_bottom_opens;             /* the tries, for a test to count */
+int STDL_OpenBottomBorder(void)
+{
+    stdl_host_bottom_opens++;
+    return 0;
+}
+
+void STDL_CloseBottomBorder(void)
+{
+}
 
 /* the YM2149 as a register file, and the console-attributes byte */
 volatile uint8_t stdl_host_mfp[0x30];
@@ -166,3 +182,6 @@ void (*stdl_audio_hook)(void);
 /* defined in video.c on target, which the host tests do not link */
 void (*stdl_pal_apply_hook)(void);
 int (*stdl_pal_raw_hook)(int index, uint16_t word);
+void (*stdl_pal_write)(int index, uint16_t word);
+void (*stdl_pal_vbl)(void);
+void (*stdl_pal_flush8)(void);

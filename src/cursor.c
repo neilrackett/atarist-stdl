@@ -188,6 +188,12 @@ void STDL_SetCursor(STDL_Cursor *cursor)
 {
     int x, y;
 
+    /* it draws on the ST's own screen, which a responsive one
+     * (stdl_responsive.h) replaces */
+    if (cursor != NULL && stdl_resp_screen != NULL) {
+        STDL_SetError("the cursor on a responsive screen");
+        return;
+    }
     cursor_undraw();
     current = cursor;
     stdl_cursor_hook = (cursor != NULL) ? cursor_motion : NULL;

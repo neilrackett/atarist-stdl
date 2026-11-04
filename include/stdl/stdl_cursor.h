@@ -34,6 +34,9 @@ typedef struct STDL_Cursor STDL_Cursor;
 STDL_Cursor *STDL_CreateCursor(const uint8_t *data,
                                const uint8_t *mask,
                                int w, int h, int hot_x, int hot_y);
+/* The cursor draws on the ST's own screen pages: while a responsive
+ * screen (stdl_responsive.h) replaces them, it sets the error and shows
+ * nothing. */
 void         STDL_SetCursor(STDL_Cursor *cursor);
 STDL_Cursor *STDL_GetCursor(void);
 void         STDL_FreeCursor(STDL_Cursor *cursor);

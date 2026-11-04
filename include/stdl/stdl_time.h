@@ -3,7 +3,8 @@
  * Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: LGPL-2.1-or-later
  *
- * Timing built on the 200Hz system timer (5ms resolution).
+ * Timing built on the 200Hz system timer (5ms resolution), and the
+ * count inside its tick (26us).
  */
 
 #ifndef STDL_TIME_H
@@ -29,6 +30,13 @@ void     STDL_FrameLimit(int fps);   /* VBL-aligned pacing            */
  * comfortable-looking frame rate for a game running at a fifth of
  * it. STDL_GetTicks is the one that returns milliseconds. */
 uint32_t STDL_GetHz200(void);
+
+/* The same clock with the count inside each tick: 38,400 a second,
+ * 26us a count, for timing the parts of one frame (a TT's whole frame
+ * can be two ticks). Counts from boot as GetHz200 does, and wraps in
+ * 31 hours; take differences. Read from TOS's Timer C, so a program
+ * that reprograms Timer C cannot use it. */
+uint32_t STDL_GetHz38400(void);
 
 #ifdef __cplusplus
 }

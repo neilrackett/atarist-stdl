@@ -15,27 +15,16 @@
  * rectangle it copies, and the slack keeps that inside the block. */
 #define GUARD 8
 
-/*
- * Hide a pointer's provenance from the optimiser.
- *
- * gcc knows malloc returns memory aligned to MALLOC_ABI_ALIGNMENT,
- * which is 4 on m68k-atari-mint, so it can prove block + GUARD is
- * long aligned, fold the adjustment below to a constant zero and
- * drop the arithmetic entirely. mintlib's malloc does not honour
- * that at run time - it hands back word-aligned blocks, which is
- * the one case the adjustment exists for. So the compiler assumes
- * away precisely the situation being guarded against, and the
- * result compiles to `clrb` with no and-with-3 anywhere in the
- * function. Verified by disassembly, not by reading the source,
- * because the source looks right either way.
- */
-static uint8_t *launder(uint8_t *p)
+/* an 8-plane screen's surfaces have 8 planes (stdl_internal.h) */
+STDL_Surface *STDL_CreateSurface(int w, int h)
 {
-    __asm__("" : "+g"(p));
-    return p;
+    if (STDL_RESP_DEEP()) {
+        return stdl_resp->create(w, h);
+    }
+    return stdl_surface_create(w, h);
 }
 
-STDL_Surface *STDL_CreateSurface(int w, int h)
+STDL_Surface *stdl_surface_create(int w, int h)
 {
     STDL_Surface *s;
     int groups;
@@ -79,7 +68,7 @@ STDL_Surface *STDL_CreateSurface(int w, int h)
      * Guarantee it here rather than hope: STDL_CreateSurfaceFrom
      * still cannot, so the check stays there.
      */
-    block = launder(malloc(size + 2 * GUARD + 3));
+    block = stdl_launder(malloc(size + 2 * GUARD + 3));
     if (block == NULL) {
         free(s);
         STDL_SetError("out of memory");
@@ -111,6 +100,10 @@ void STDL_FreeSurface(STDL_Surface *s)
     if (s == NULL || (s->flags & STDL_SCREEN)) {
         return;
     }
+    if (STDL_IS_RESP(s)) {
+        stdl_resp->free_surface(s);
+        return;
+    }
     /* borrowed blocks (STDL_CreateSurfaceFrom) stay the caller's */
     if (!(s->flags & STDL_PREALLOC)) {
         if (s->pixels != NULL) {
@@ -121,26 +114,6 @@ void STDL_FreeSurface(STDL_Surface *s)
         }
     }
     free(s);          /* format and palette share the same block */
-}
-
-STDL_Surface *STDL_DuplicateSurface(const STDL_Surface *s)
-{
-    STDL_Surface *d;
-
-    if (s == NULL) {
-        return NULL;
-    }
-    d = STDL_CreateSurface(s->w, s->h);
-    if (d == NULL) {
-        return NULL;
-    }
-    memcpy(d->pixels, s->pixels, (uint32_t)s->stride * s->h);
-    memcpy(d->format->palette->colors, s->format->palette->colors,
-           16 * sizeof(STDL_Colour));
-    if (s->flags & STDL_SRCKEY) {
-        STDL_SetColourKey(d, 1, s->colourkey);
-    }
-    return d;
 }
 
 /* allocate the mask block with the same guard slack as the pixels:
@@ -176,6 +149,9 @@ int STDL_SetColourKey(STDL_Surface *s, int enable, uint8_t key)
 
     if (s == NULL || (s->flags & STDL_SCREEN)) {
         return -1;
+    }
+    if (STDL_IS_RESP(s)) {
+        return stdl_resp->set_key(s, enable, key);
     }
     if (!enable) {
         if (s->mask != NULL && !(s->flags & STDL_PREALLOC)) {
@@ -242,6 +218,9 @@ int STDL_CreateMask(STDL_Surface *s, int transparent)
     if (s == NULL || (s->flags & STDL_SCREEN)) {
         return -1;
     }
+    if (STDL_IS_RESP(s)) {
+        return stdl_resp->create_mask(s, transparent);
+    }
     if (mask_alloc(s) < 0) {
         return -1;
     }
@@ -283,6 +262,10 @@ void STDL_PutGroup(STDL_Surface *s, int x, int y,
     if (s == NULL || planes == NULL || y < 0 || y >= s->h) {
         return;
     }
+    if (STDL_IS_RESP(s)) {
+        stdl_resp->put_group(s, x, y, planes, mask);
+        return;
+    }
     g = x >> 4;
     if (g < 0 || g >= s->stride / 8) {
         return;
@@ -313,6 +296,10 @@ void STDL_PutGroup8(STDL_Surface *s, int x, int y,
     int g, half;
 
     if (s == NULL || planes == NULL || y < 0 || y >= s->h || x < 0) {
+        return;
+    }
+    if (STDL_IS_RESP(s)) {
+        stdl_resp->put_group8(s, x, y, planes, transmask);
         return;
     }
     g = x >> 4;

@@ -207,6 +207,15 @@ change them only after a present or a copy from elsewhere. A program
 that draws into its own buffer and copies the boxes it changed pays
 for no copy of its own.
 
+A copy itself costs a Falcon about 1,060 cycles in Hatari, 141
+instructions most of whose time goes on fetching them from ST-RAM,
+when both rectangles are given, are the same size and lie inside the
+texture and the logical size; anything else is clipped first. So
+fewer, taller boxes are cheaper than many short ones: one port that
+sent each eight-row band's changed blocks as a box of its own made 16
+copies a frame, and sending bands that need the same blocks as one box
+took that to 9.5 and the copies from 1.09ms a frame to 0.70.
+
 ## The conversion and its cost
 
 The conversion is ten merges a group with the assembler's writes

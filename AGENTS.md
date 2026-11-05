@@ -1183,6 +1183,12 @@ and the rules below keep it from being anything else's.
   key maps; `test_events` checks a sample, and that every STDL symbol
   with a scancode has one key's. Joystick and controller state comes
   from STDL's public events and `STDL_JoyInputHeld`, nothing deeper.
+- **Audio keeps SDL2's contract on STDL's ring.** The ring asks for
+  what a half of it needs; the program's callback gets exactly the
+  obtained size, through a buffer, and is never called before the
+  first unpause (the ring primes itself at open by calling its own).
+  `test_audio`'s stand-in asks as `ring.c` does, so keep the two
+  alike; `SDL2AUD` checks the sizes and the rate on the machine.
 - **The compositor has a model, not a mirror, as its test.**
   `tests/test_render.c` draws a chunky model a pixel at a time and
   expects each page shown to be it, converted, byte for byte. It has

@@ -245,3 +245,102 @@ int STDL_PadRumble(uint8_t low, uint8_t high, uint16_t ms)
     fake_rumbles++;
     return 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* the ring device                                                     */
+
+int fake_audio_open, fake_audio_paused, fake_audio_falcon;
+STDL_AudioSpec fake_audio_spec;
+Uint8 fake_audio_out[1 << 20] = { 0 };
+Uint32 fake_audio_outlen;
+static int dma_rate;
+static uint32_t rate_err;
+static Uint8 scratch[1 << 16];
+
+/* a half ring's worth of the callback, as ring.c's fill_frames asks:
+ * 2,048 DMA frames' worth of source frames, carrying the remainder */
+static void pull(Uint8 *dst)
+{
+    const int fb = fake_audio_spec.channels *
+                   ((fake_audio_spec.format & 0xFF) / 8);
+    const uint32_t want = 2048u * (uint32_t)fake_audio_spec.freq + rate_err;
+    const int frames = (int)(want / (uint32_t)dma_rate);
+    rate_err = want % (uint32_t)dma_rate;
+    memset(dst, fake_audio_spec.silence, (size_t)frames * fb);
+    if (fake_audio_spec.callback) {
+        fake_audio_spec.callback(fake_audio_spec.userdata, dst, frames * fb);
+    }
+    if (dst != scratch) {
+        return;
+    }
+    if (fake_audio_outlen + (uint32_t)(frames * fb) <= sizeof(fake_audio_out)) {
+        memcpy(fake_audio_out + fake_audio_outlen, dst, (size_t)frames * fb);
+        fake_audio_outlen += (uint32_t)(frames * fb);
+    }
+}
+
+int STDL_OpenAudio(STDL_AudioSpec *desired, STDL_AudioSpec *obtained)
+{
+    static const int rates[4] = { 6258, 12517, 25033, 50066 };
+    static Uint8 ring[1 << 16];
+    int i, best = fake_audio_falcon ? 1 : 0;
+    if (fake_audio_open) {
+        return -1;
+    }
+    if (desired->channels < 1 || desired->channels > 2 ||
+        (desired->format != STDL_AUDIO_U8 && desired->format != STDL_AUDIO_S8 &&
+         desired->format != STDL_AUDIO_S16LSB &&
+         desired->format != STDL_AUDIO_S16MSB)) {
+        return -1;
+    }
+    for (i = best; i < 4; i++) {
+        if (abs(rates[i] - desired->freq) < abs(rates[best] - desired->freq)) {
+            best = i;
+        }
+    }
+    dma_rate = rates[best];
+    rate_err = 0;
+    fake_audio_spec = *desired;
+    if (!fake_audio_spec.samples) {
+        fake_audio_spec.samples = 1024;
+    }
+    fake_audio_spec.silence = desired->format == STDL_AUDIO_U8 ? 0x80 : 0;
+    *desired = fake_audio_spec;
+    if (obtained) {
+        *obtained = fake_audio_spec;
+        obtained->freq = dma_rate;
+        obtained->format = STDL_AUDIO_S8;
+        obtained->silence = 0;
+    }
+    /* ring.c primes both halves through the callback */
+    pull(ring);
+    pull(ring);
+    fake_audio_open = 1;
+    fake_audio_paused = 1;
+    return 0;
+}
+
+void STDL_CloseAudio(void)
+{
+    fake_audio_open = 0;
+}
+
+void STDL_PauseAudio(int pause_on)
+{
+    if (fake_audio_open) {
+        fake_audio_paused = pause_on != 0;
+    }
+}
+
+STDL_audiostatus STDL_GetAudioStatus(void)
+{
+    return !fake_audio_open ? STDL_AUDIO_STOPPED
+           : fake_audio_paused ? STDL_AUDIO_PAUSED : STDL_AUDIO_PLAYING;
+}
+
+void fake_audio_refill(void)
+{
+    if (fake_audio_open && !fake_audio_paused) {
+        pull(scratch);
+    }
+}

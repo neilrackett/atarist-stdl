@@ -25,7 +25,9 @@ SDL2SRCS      = $(SDL2DIR)/src/init.c $(SDL2DIR)/src/error.c \
                 $(SDL2DIR)/src/timer.c $(SDL2DIR)/src/video.c \
                 $(SDL2DIR)/src/events.c $(SDL2DIR)/src/keymap.c \
                 $(SDL2DIR)/src/joystick.c $(SDL2DIR)/src/surface.c \
-                $(SDL2DIR)/src/rwops.c $(SDL2DIR)/src/log.c
+                $(SDL2DIR)/src/rwops.c $(SDL2DIR)/src/log.c \
+                $(SDL2DIR)/src/audio.c $(SDL2DIR)/src/audiomix.c \
+                $(SDL2DIR)/src/wav.c
 SDL2OBJS      = $(patsubst %.c,$(OBJDIR)/%.o,$(SDL2SRCS))
 SDL2CMINIOBJS = $(patsubst %.c,$(OBJDIR)/%.cmini.o,$(SDL2SRCS))
 
@@ -87,10 +89,12 @@ $(SDL2CMINILIB): $(SDL2CMINIOBJS) $(SDL2XCMINIOBJS)
 # the platform). Then the input, 4,424 (events.o 2,208 with the
 # queue, joystick.o 1,672 with the controller, keymap.o 544 with its
 # table), which a program that pumps events takes whole; surfaces
-# 2,484, streams 2,132 and the log 752, each taken only if called:
-# 22,408 in all. A TT or a Falcon has the room; the budget is there so
-# that growth is a decision, raised with its reason or not at all.
-SDL2_MAX = 22800
+# 2,484, streams 2,132 and the log 752, each taken only if called.
+# Then audio, 4,236: the device and its queue 2,572 (audio.o), mixing
+# 540 and WAV files 1,124, the last two only if called. 26,644 in all.
+# A TT or a Falcon has the room; the budget is there so that growth is
+# a decision, raised with its reason or not at all.
+SDL2_MAX = 27000
 
 # The checks a build of the add-on must pass:
 # - no SDL_ link symbol in either archive (SDL_stdinc.h says why);

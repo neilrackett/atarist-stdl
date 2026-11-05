@@ -55,7 +55,7 @@ add-on, and the pattern to copy.
 
 ## What it maps
 
-So far, everything but audio, which comes next:
+The calls it has:
 
 | Area | Calls |
 |---|---|
@@ -73,6 +73,7 @@ So far, everything but audio, which comes next:
 | Surfaces | `SDL_CreateRGBSurface`, `SDL_CreateRGBSurfaceWithFormat`, `SDL_CreateRGBSurfaceFrom`, `SDL_FreeSurface`, `SDL_SetSurfacePalette`, `SDL_LockSurface`, `SDL_UnlockSurface`, `SDL_SetColorKey`, `SDL_GetColorKey`, `SDL_SetClipRect`, `SDL_GetClipRect`, `SDL_FillRect`, `SDL_BlitSurface` (`SDL_UpperBlit`) |
 | Streams | `SDL_RWFromFile`, `SDL_RWFromFP`, `SDL_RWFromMem`, `SDL_RWFromConstMem`, `SDL_AllocRW`, `SDL_FreeRW`, `SDL_RWsize`, `SDL_RWseek`, `SDL_RWtell`, `SDL_RWread`, `SDL_RWwrite`, `SDL_RWclose`, `SDL_ReadU8`, `SDL_ReadLE16`/`BE16`/`LE32`/`BE32`, `SDL_WriteU8`, `SDL_WriteLE16`/`BE16`/`LE32`/`BE32` |
 | Log | `SDL_Log`, `SDL_LogVerbose`, `SDL_LogDebug`, `SDL_LogInfo`, `SDL_LogWarn`, `SDL_LogError`, `SDL_LogCritical`, `SDL_LogMessage`, `SDL_LogMessageV`, `SDL_LogSetPriority`, `SDL_LogSetAllPriority` |
+| Audio | `SDL_OpenAudio`, `SDL_OpenAudioDevice`, `SDL_PauseAudio`, `SDL_PauseAudioDevice`, `SDL_GetAudioStatus`, `SDL_GetAudioDeviceStatus`, `SDL_LockAudio`, `SDL_LockAudioDevice`, `SDL_UnlockAudio`, `SDL_UnlockAudioDevice`, `SDL_CloseAudio`, `SDL_CloseAudioDevice`, `SDL_QueueAudio`, `SDL_GetQueuedAudioSize`, `SDL_ClearQueuedAudio`, `SDL_MixAudio`, `SDL_MixAudioFormat`, `SDL_LoadWAV`, `SDL_LoadWAV_RW`, `SDL_FreeWAV`, `SDL_GetNumAudioDevices`, `SDL_GetAudioDeviceName`, `SDL_GetNumAudioDrivers`, `SDL_GetAudioDriver`, `SDL_GetCurrentAudioDriver` |
 | Clock, platform | `SDL_GetTicks`, `SDL_GetTicks64`, `SDL_Delay`, `SDL_GetPerformanceCounter`, `SDL_GetPerformanceFrequency` (38,400), `SDL_GetPlatform` ("Atari") |
 
 Every name is a macro onto a `stdl_sdl2_` link name, so the archive
@@ -143,6 +144,31 @@ All of these come from the machine:
 - **The log goes to a file or nowhere,** never to the console. On a TT
   a console write makes the next flip copy the whole page, and the
   text stays in the picture.
+- **Audio is one output device on STDL's ring** (`stdl_audio.h`): the
+  DMA sound at the nearest of its rates (6258, 12517, 25033 or
+  50066Hz; a Falcon has no 6258), resampled from the program's and
+  converted to signed 8 bits. The callback still gets SDL2's
+  contract: exactly the obtained size each call, in the format and at
+  the rate it asked for, never before the first unpause. Its bytes go
+  through a buffer of that size on their way to the ring, which asks
+  for about 2,048 frames at a time.
+  - **It runs where STDL refills the ring:** inside `SDL_PollEvent`,
+    `SDL_PumpEvents`, the waits and `SDL_Delay`, not on a thread. So a
+    program pumps at least every 150ms while audio plays, and a refill
+    while `SDL_LockAudio` is held plays silence.
+  - **Formats:** `AUDIO_U8`, `AUDIO_S8`, `AUDIO_S16LSB` and
+    `AUDIO_S16MSB`, mono or stereo. Float and 32 bits are refused
+    without `SDL_AUDIO_ALLOW_FORMAT_CHANGE`, which gives
+    `AUDIO_S16SYS`: converting a float a sample with no FPU costs more
+    than the sound is worth. SDL2's converters (`SDL_AudioCVT`,
+    `SDL_AudioStream`) are not here.
+  - **The cheap spec is the ring's own:** signed 8 bits at a DMA rate,
+    which it plays with no conversion. `SDL_AUDIO_ALLOW_FREQUENCY_CHANGE`
+    gives the DMA rate nearest the one asked for. Anything else is
+    converted at every refill: STDL's `stdl_audio.h` gives the costs.
+  - **WAV files** are uncompressed PCM, 8 or 16 bits; `stdlconv wav`
+    converts the rest offline. Mixing and WAV reading are objects of
+    their own, linked only if called.
 
 ## How a frame is drawn
 
@@ -257,6 +283,16 @@ the present's conversion and flip times for a bench.
     random rectangles, clipped every way, keyed or not, onto another
     surface and onto themselves; a texture made from a surface against
     the page it shows on; streams in memory and in a file; the log.
+  - `test_audio`: the callback on a stand-in for STDL's ring that asks
+    for what the ring asks. Exactly the obtained size every call,
+    never before the unpause, and its bytes reaching the ring in order
+    through pauses and locks. Then the spec's negotiation, the queue,
+    SDL2's mixing arithmetic against a reference, and WAV files.
+- **`SDL2AUD` (`tests/hatari/sdl2aud.c`):** the audio on the machine's
+  DMA sound. For a 16-bit stereo spec at 22050, signed 8 bits at a DMA
+  rate and 6258Hz, every callback the obtained size, and the rate the
+  callback is drained at within 3% of the one asked for; then the
+  queue.
 - **`SDL2CHK` (`tests/hatari/sdl2chk.c`):** every variant of the
   conversion's assembler against its C on the machine, and their
   times.

@@ -16,7 +16,8 @@ CFLAGS  = -std=gnu99 -O1 -g -fsanitize=address,alignment \
 SRC     = ../src
 HDRS    = $(wildcard ../include/SDL2/*.h) $(SRC)/internal.h
 
-TESTS   = test_basics test_c2p test_render test_events test_surface
+TESTS   = test_basics test_c2p test_render test_events test_surface \
+          test_audio
 
 # the renderer on fake_stdl.c's screens: the add-on as a program links
 # it, STDL's calls stood in for
@@ -25,7 +26,8 @@ RENDER  = $(SRC)/init.c $(SRC)/error.c $(SRC)/hints.c $(SRC)/c2p.c \
 
 # and the rest of the add-on, on fake_stdl.c's input
 REST    = $(SRC)/events.c $(SRC)/keymap.c $(SRC)/joystick.c \
-          $(SRC)/surface.c $(SRC)/rwops.c $(SRC)/log.c
+          $(SRC)/surface.c $(SRC)/rwops.c $(SRC)/log.c $(SRC)/audio.c \
+          $(SRC)/audiomix.c $(SRC)/wav.c
 
 test_basics: test_basics.c $(SRC)/init.c $(SRC)/error.c $(SRC)/hints.c \
              $(HDRS)
@@ -42,6 +44,9 @@ test_render: test_render.c fake_stdl.c fake_stdl.h $(RENDER) $(HDRS) \
 test_events: test_events.c fake_stdl.c fake_stdl.h $(RENDER) $(REST) $(HDRS)
 	$(CC) $(CFLAGS) -o $@ test_events.c fake_stdl.c $(RENDER) $(REST)
 
+test_audio: test_audio.c fake_stdl.c fake_stdl.h $(RENDER) $(REST) $(HDRS)
+	$(CC) $(CFLAGS) -o $@ test_audio.c fake_stdl.c $(RENDER) $(REST)
+
 test_surface: test_surface.c fake_stdl.c fake_stdl.h $(RENDER) $(REST) \
               $(HDRS)
 	$(CC) $(CFLAGS) -o $@ test_surface.c fake_stdl.c $(RENDER) $(REST)
@@ -51,7 +56,7 @@ run: $(TESTS)
 	  echo "ALL SDL2 ADD-ON HOST TESTS PASSED"
 
 clean:
-	rm -f $(TESTS) test_rw.tmp test_log.tmp
+	rm -f $(TESTS) test_rw.tmp test_log.tmp test_wav.tmp
 	rm -rf *.dSYM
 
 .PHONY: run clean

@@ -33,4 +33,7 @@ int stdl_sdl2_push(SDL_Event *e);
 void stdl_sdl2_joy_event(const STDL_Event *se);
 void stdl_sdl2_controller_poll(void);
 
+/* audio.c: the open device's format, or 0 */
+SDL_AudioFormat stdl_sdl2_audio_format(void);
+
 #endif /* STDL_SDL2_INTERNAL_H */

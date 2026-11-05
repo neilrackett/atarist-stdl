@@ -11,8 +11,9 @@
  * is black rather than colour 0 cycling with the background. It shows
  * a background of 224 shades whose colours cycle every frame, eight
  * boxes moving over it, and a ninth, made in a surface, that the arrow
- * keys, a pad's d-pad or the mouse move. Esc, a click or the pad's
- * Start ends it, or thirty seconds.
+ * keys, a pad's d-pad or the mouse move, with a tone while it moves
+ * whose pitch follows its height. Esc, a click or the pad's Start ends
+ * it, or thirty seconds.
  *
  * The pattern worth copying is in the frame loop: the screen keeps
  * what was drawn on it, so a frame copies only what changed - each
@@ -22,6 +23,11 @@
  * the blank that shows the frame. A program that clears and redraws
  * the whole screen every frame is right too, and pays for converting
  * all of it: 40ms a frame on a TT, 69 on a Falcon (Hatari).
+ *
+ * The tone is signed 8-bit mono at 12517Hz, a DMA rate: the ring's
+ * own format, which it plays with no conversion. Its callback runs
+ * inside SDL_PollEvent, the waits and SDL_Delay, not on a thread of
+ * its own, so the frame loop must pump: this one polls every frame.
  *
  * Built by `make sdl2`: compiled -m68020-60 -msoft-float, linked
  * against the 68000 libraries, whose 68020 ones assume an FPU.
@@ -35,6 +41,20 @@
 #define BOXES  8
 #define BOX    24
 #define SHADES 224              /* 0-223; the boxes 224-239, 240- unused */
+#define RATE   12517            /* a DMA rate */
+
+/* the tone's phase step a sample, 16.16 of a cycle; 0 is silence */
+static Uint32 tone_step, tone_phase;
+
+static void tone(void *userdata, Uint8 *stream, int len)
+{
+    int i;
+    (void)userdata;
+    for (i = 0; i < len; i++) {
+        tone_phase += tone_step;
+        stream[i] = (Uint8)(!tone_step ? 0 : (tone_phase & 0x8000) ? 24 : -24);
+    }
+}
 
 int main(int argc, char *argv[])
 {
@@ -44,6 +64,8 @@ int main(int argc, char *argv[])
     SDL_Texture *bgtex, *boxtex, *metex;
     SDL_Surface *mine, *pattern;
     SDL_GameController *pad;
+    SDL_AudioSpec want;
+    SDL_AudioDeviceID audio;
     SDL_Palette *pal;
     SDL_Color c[256];
     SDL_Rect pos[BOXES], me, inner;
@@ -51,11 +73,12 @@ int main(int argc, char *argv[])
     const Uint8 *keys = SDL_GetKeyboardState(NULL);
     int dx[BOXES], dy[BOXES];
     Uint32 start;
-    int x, y, i, quit = 0;
+    int x, y, i, ox, oy, quit = 0;
     (void)argc;
     (void)argv;
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) < 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER |
+                 SDL_INIT_AUDIO) < 0) {
         /* an ST: SDL_Init says so, built for the 68000 to get here */
         printf("SDL2DEMO: %s\n", SDL_GetError());
         return 1;
@@ -125,6 +148,18 @@ int main(int argc, char *argv[])
     me.y = (H - BOX) / 2;
     me.w = me.h = BOX;
     pad = SDL_GameControllerOpen(0);
+
+    /* the tone; the demo goes on silent without it */
+    SDL_zero(want);
+    want.freq = RATE;
+    want.format = AUDIO_S8;
+    want.channels = 1;
+    want.samples = 256;
+    want.callback = tone;
+    audio = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
+    if (audio) {
+        SDL_PauseAudioDevice(audio, 0);
+    }
     for (i = 0; i < BOXES; i++) {
         pos[i].x = 20 + i * 33;
         pos[i].y = 10 + i * 25;
@@ -142,6 +177,8 @@ int main(int argc, char *argv[])
     while (!quit && !SDL_TICKS_PASSED(SDL_GetTicks(), start + 30000)) {
         /* where the ninth box was, before anything moves it */
         SDL_RenderCopy(ren, bgtex, &me, &me);
+        ox = me.x;
+        oy = me.y;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT || e.type == SDL_MOUSEBUTTONDOWN ||
                 (e.type == SDL_KEYDOWN &&
@@ -169,6 +206,13 @@ int main(int argc, char *argv[])
         }
         me.x = me.x < 0 ? 0 : me.x > W - BOX ? W - BOX : me.x;
         me.y = me.y < 0 ? 0 : me.y > H - BOX ? H - BOX : me.y;
+        /* 880Hz at the top to 220 at the bottom, while it moves; the
+         * lock keeps the callback from seeing it half changed */
+        SDL_LockAudioDevice(audio);
+        tone_step = (me.x != ox || me.y != oy)
+                    ? (Uint32)(880 - me.y * 660 / (H - BOX)) * 65536 / RATE
+                    : 0;
+        SDL_UnlockAudioDevice(audio);
         for (i = 0; i < BOXES; i++) {
             /* the background back where the box was, then the box */
             SDL_RenderCopy(ren, bgtex, &pos[i], &pos[i]);
@@ -195,6 +239,9 @@ int main(int argc, char *argv[])
         SDL_RenderPresent(ren);
     }
 
+    if (audio) {
+        SDL_CloseAudioDevice(audio);
+    }
     if (pad) {
         SDL_GameControllerClose(pad);
     }

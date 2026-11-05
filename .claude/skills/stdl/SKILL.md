@@ -80,8 +80,9 @@ too (153.6K of ST RAM on a TT).
 (`addons/sdl2/`, `docs/sdl2.md`): SDL2's window, renderer and INDEX8
 textures on the 256-colour responsive screen, converting only the groups of
 16 pixels each frame changed, with SDL2's events, keyboard, mouse, joystick
-and game controller, 8-bit surfaces, streams and log. It is the one chunky
-part of STDL, kept apart
+and game controller, 8-bit surfaces, streams, log and audio (a callback of
+SDL2's sizes on STDL's ring, run at the pump). It is the one chunky part of
+STDL, kept apart
 from the core: `make sdl2` builds it, and a program links it only by naming
 its include path and archive. Compile for the 68020 with `-msoft-float` and
 link with `-m68000`; textures are `SDL_PIXELFORMAT_INDEX8` with the renderer's

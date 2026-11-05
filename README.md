@@ -255,7 +255,7 @@ run under EmuTOS/TOS on Hatari:
 | VBLCHK.TOS   | 50Hz VBL callbacks, then an abnormal exit - the desktop coming back is the pass  |
 | OVERSCAN.TOS | border overscan: T top (228), B bottom (245), both combine (273), SPACE closes   |
 | RESPDEMO.TOS | one binary, each machine's best screen: 256 colours and 240 rows on a TT or Falcon |
-| SDL2DEMO.TOS | the SDL2 add-on on a TT or a Falcon: INDEX8 textures, palette cycling, copying what changed, a box made in a surface and moved by the keys, a pad or the mouse |
+| SDL2DEMO.TOS | the SDL2 add-on on a TT or a Falcon: INDEX8 textures, palette cycling, copying what changed, a box made in a surface and moved by the keys, a pad or the mouse, with a tone |
 
 Large fills and blits are BLiTTER-accelerated where the hardware has
 one, unaligned blits included - the BLiTTER shifts them itself (a

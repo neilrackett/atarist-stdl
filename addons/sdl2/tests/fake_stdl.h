@@ -32,4 +32,12 @@ extern int fake_rumble_low, fake_rumble_high, fake_rumble_ms, fake_rumbles;
 void fake_event(const STDL_Event *e);
 void fake_key(int down, unsigned sym, unsigned mod, unsigned unicode);
 
+/* the ring device: what was asked for, and a refill of a half ring
+ * (2,048 DMA frames) as ring.c makes it, its bytes kept in order */
+extern int fake_audio_open, fake_audio_paused, fake_audio_falcon;
+extern STDL_AudioSpec fake_audio_spec;
+extern Uint8 fake_audio_out[1 << 20];
+extern Uint32 fake_audio_outlen;
+void fake_audio_refill(void);
+
 #endif /* STDL_SDL2_FAKE_STDL_H */

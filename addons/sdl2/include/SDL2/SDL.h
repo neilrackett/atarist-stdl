@@ -28,6 +28,7 @@
 #include "SDL_render.h"
 #include "SDL_mouse.h"
 #include "SDL_timer.h"
+#include "SDL_audio.h"
 #include "SDL_events.h"
 #include "SDL_keyboard.h"
 #include "SDL_joystick.h"

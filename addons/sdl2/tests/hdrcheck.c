@@ -127,3 +127,37 @@ int stdl_sdl2_hdrcheck_rest(void)
     SDL_LogSetPriority(SDL_LOG_CATEGORY_VIDEO, SDL_LOG_PRIORITY_DEBUG);
     return n + x + y + (int)(t / SDL_GetPerformanceFrequency());
 }
+
+/* audio */
+static void hdrcheck_cb(void *userdata, Uint8 *stream, int len)
+{
+    SDL_memset(stream, 0, (size_t)len);
+    (void)userdata;
+}
+
+int stdl_sdl2_hdrcheck_audio(void)
+{
+    SDL_AudioSpec want, got, wav;
+    SDL_AudioDeviceID id;
+    Uint8 *buf = NULL, mix[8] = { 0 };
+    Uint32 len = 0;
+    SDL_zero(want);
+    want.freq = 22050;
+    want.format = AUDIO_S16SYS;
+    want.channels = 2;
+    want.samples = 1024;
+    want.callback = hdrcheck_cb;
+    id = SDL_OpenAudioDevice(NULL, 0, &want, &got,
+                             SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+    SDL_PauseAudioDevice(id, 0);
+    SDL_LockAudioDevice(id);
+    SDL_UnlockAudioDevice(id);
+    if (SDL_LoadWAV("BOOM.WAV", &wav, &buf, &len)) {
+        SDL_MixAudioFormat(mix, buf, wav.format, sizeof(mix),
+                           SDL_MIX_MAXVOLUME / 2);
+        SDL_FreeWAV(buf);
+    }
+    SDL_CloseAudioDevice(id);
+    return (int)SDL_GetAudioDeviceStatus(id) + SDL_GetNumAudioDevices(0) +
+           (int)SDL_AUDIO_BITSIZE(got.format) + (int)len;
+}

@@ -8,7 +8,9 @@ For *porting games with* STDL, read
 instead - it is plain markdown usable by any agent or human (the
 format contract, API costs, rewrite patterns, tooling and test
 loop). Claude Code additionally auto-discovers it as the `/stdl`
-skill.
+skill. Porting an SDL2 program to a TT or a Falcon with the SDL2
+add-on has its own, [`.claude/skills/stdl-sdl2/SKILL.md`](.claude/skills/stdl-sdl2/SKILL.md)
+(`/stdl-sdl2`).
 
 ## Build
 
@@ -1195,6 +1197,9 @@ and the rules below keep it from being anything else's.
   none of the compositor's groups, batches or masks, which is why
   eight different breakages of those each failed it. `SDL2RCHK` is the
   same test on the machine.
+- **A change a porter would meet goes into `docs/sdl2.md` and the
+  `stdl-sdl2` skill** (`.claude/skills/stdl-sdl2/SKILL.md`) in the same
+  change, as the core's API changes go into the `stdl` skill.
 
 ## Shipping a change
 

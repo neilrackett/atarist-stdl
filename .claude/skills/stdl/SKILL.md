@@ -77,17 +77,11 @@ work as on 4 planes, and `STDL_TRIPLEBUF` gives a third page there
 too (153.6K of ST RAM on a TT).
 
 **A TT- or Falcon-only SDL2 port?** Use STDL's SDL2 add-on
-(`addons/sdl2/`, `docs/sdl2.md`): SDL2's window, renderer and INDEX8
-textures on the 256-colour responsive screen, converting only the groups of
-16 pixels each frame changed, with SDL2's events, keyboard, mouse, joystick
-and game controller, 8-bit surfaces, streams, log and audio (a callback of
-SDL2's sizes on STDL's ring, run at the pump). It is the one chunky part of
-STDL, kept apart
-from the core: `make sdl2` builds it, and a program links it only by naming
-its include path and archive. Compile for the 68020 with `-msoft-float` and
-link with `-m68000`; textures are `SDL_PIXELFORMAT_INDEX8` with the renderer's
-palette, nothing scales, and the screen keeps what was drawn, so copy what
-changed.
+(`addons/sdl2/`, `docs/sdl2.md`), and the `stdl-sdl2` skill
+(`.claude/skills/stdl-sdl2/SKILL.md`), which covers it: SDL2's window,
+renderer and INDEX8 textures on the 256-colour responsive screen, with
+its input, surfaces, streams, log and audio. It is the one chunky part
+of STDL, kept apart from the core.
 
 **A TT- or Falcon-only SDL 1.2 port?** Use Atari SDL 1.2 (plain TOS, no
 MiNT): those machines have 256 colours, and TT line-doubles 320x240 so
@@ -1381,7 +1375,8 @@ first.
 - Introducing a chunky buffer + conversion pass: that is c2p and
   breaks the design. Redesign around spans/tiles/sprites. (The SDL2
   add-on, for SDL2 programs on a TT or a Falcon only, is the one
-  place that is the design, and it stays out of the core.)
+  place that is the design, and it stays out of the core: the
+  `stdl-sdl2` skill.)
 - `STDL_PutPixel` (or `screen->pixels[...]` arithmetic) inside a
   frame loop.
 - Assuming `screen->pitch == screen->w` or byte-per-pixel access.

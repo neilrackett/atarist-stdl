@@ -9,8 +9,10 @@
  * takes and SDL2 itself does not; and a border index, a colour the
  * picture never uses, so that the border round a Falcon's RGB picture
  * is black rather than colour 0 cycling with the background. It shows
- * a background of 224 shades whose colours cycle every frame, and
- * eight boxes moving over it, for ten seconds.
+ * a background of 224 shades whose colours cycle every frame, eight
+ * boxes moving over it, and a ninth, made in a surface, that the arrow
+ * keys, a pad's d-pad or the mouse move. Esc, a click or the pad's
+ * Start ends it, or thirty seconds.
  *
  * The pattern worth copying is in the frame loop: the screen keeps
  * what was drawn on it, so a frame copies only what changed - each
@@ -39,17 +41,21 @@ int main(int argc, char *argv[])
     static Uint8 bg[W * H], box[BOX * BOX];
     SDL_Window *win;
     SDL_Renderer *ren;
-    SDL_Texture *bgtex, *boxtex;
+    SDL_Texture *bgtex, *boxtex, *metex;
+    SDL_Surface *mine, *pattern;
+    SDL_GameController *pad;
     SDL_Palette *pal;
     SDL_Color c[256];
-    SDL_Rect pos[BOXES];
+    SDL_Rect pos[BOXES], me, inner;
+    SDL_Event e;
+    const Uint8 *keys = SDL_GetKeyboardState(NULL);
     int dx[BOXES], dy[BOXES];
     Uint32 start;
-    int x, y, i, frame = 0;
+    int x, y, i, quit = 0;
     (void)argc;
     (void)argv;
 
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) < 0) {
         /* an ST: SDL_Init says so, built for the 68000 to get here */
         printf("SDL2DEMO: %s\n", SDL_GetError());
         return 1;
@@ -102,6 +108,23 @@ int main(int argc, char *argv[])
                                SDL_TEXTUREACCESS_STATIC, BOX, BOX);
     SDL_UpdateTexture(bgtex, NULL, bg, W);
     SDL_UpdateTexture(boxtex, NULL, box, BOX);
+
+    /* the ninth box, drawn in a surface: the boxes' brightest colour
+     * round a piece of their pattern, blitted from a surface over the
+     * pattern's own pixels */
+    mine = SDL_CreateRGBSurface(0, BOX, BOX, 8, 0, 0, 0, 0);
+    pattern = SDL_CreateRGBSurfaceFrom(box, BOX, BOX, 8, BOX, 0, 0, 0, 0);
+    SDL_FillRect(mine, NULL, SHADES + 15);
+    inner.x = inner.y = 4;
+    inner.w = inner.h = BOX - 8;
+    SDL_BlitSurface(pattern, &inner, mine, &inner);
+    metex = SDL_CreateTextureFromSurface(ren, mine);
+    SDL_FreeSurface(pattern);
+    SDL_FreeSurface(mine);
+    me.x = (W - BOX) / 2;
+    me.y = (H - BOX) / 2;
+    me.w = me.h = BOX;
+    pad = SDL_GameControllerOpen(0);
     for (i = 0; i < BOXES; i++) {
         pos[i].x = 20 + i * 33;
         pos[i].y = 10 + i * 25;
@@ -116,7 +139,36 @@ int main(int argc, char *argv[])
     /* the first frame draws everything */
     SDL_RenderCopy(ren, bgtex, NULL, NULL);
     start = SDL_GetTicks();
-    while (!SDL_TICKS_PASSED(SDL_GetTicks(), start + 10000)) {
+    while (!quit && !SDL_TICKS_PASSED(SDL_GetTicks(), start + 30000)) {
+        /* where the ninth box was, before anything moves it */
+        SDL_RenderCopy(ren, bgtex, &me, &me);
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_QUIT || e.type == SDL_MOUSEBUTTONDOWN ||
+                (e.type == SDL_KEYDOWN &&
+                 e.key.keysym.sym == SDLK_ESCAPE) ||
+                (e.type == SDL_CONTROLLERBUTTONDOWN &&
+                 e.cbutton.button == SDL_CONTROLLER_BUTTON_START)) {
+                quit = 1;
+            } else if (e.type == SDL_MOUSEMOTION) {
+                me.x = e.motion.x - BOX / 2;
+                me.y = e.motion.y - BOX / 2;
+            }
+        }
+        /* held keys and buttons, read as they stand */
+        me.x += 3 * (keys[SDL_SCANCODE_RIGHT] - keys[SDL_SCANCODE_LEFT]);
+        me.y += 3 * (keys[SDL_SCANCODE_DOWN] - keys[SDL_SCANCODE_UP]);
+        if (pad) {
+            me.x += 3 * (SDL_GameControllerGetButton(
+                             pad, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) -
+                         SDL_GameControllerGetButton(
+                             pad, SDL_CONTROLLER_BUTTON_DPAD_LEFT));
+            me.y += 3 * (SDL_GameControllerGetButton(
+                             pad, SDL_CONTROLLER_BUTTON_DPAD_DOWN) -
+                         SDL_GameControllerGetButton(
+                             pad, SDL_CONTROLLER_BUTTON_DPAD_UP));
+        }
+        me.x = me.x < 0 ? 0 : me.x > W - BOX ? W - BOX : me.x;
+        me.y = me.y < 0 ? 0 : me.y > H - BOX ? H - BOX : me.y;
         for (i = 0; i < BOXES; i++) {
             /* the background back where the box was, then the box */
             SDL_RenderCopy(ren, bgtex, &pos[i], &pos[i]);
@@ -134,21 +186,24 @@ int main(int argc, char *argv[])
         for (i = 0; i < BOXES; i++) {
             SDL_RenderCopy(ren, boxtex, NULL, &pos[i]);
         }
+        SDL_RenderCopy(ren, metex, NULL, &me);
         /* the background's shades move on a step: colours alone */
         for (i = 0; i < SHADES; i++) {
             c[i] = pal->colors[(i + 1) % SHADES];
         }
         SDL_SetPaletteColors(pal, c, 0, SHADES);
         SDL_RenderPresent(ren);
-        frame++;
     }
 
+    if (pad) {
+        SDL_GameControllerClose(pad);
+    }
+    SDL_DestroyTexture(metex);
     SDL_DestroyTexture(boxtex);
     SDL_DestroyTexture(bgtex);
     SDL_DestroyRenderer(ren);
     SDL_FreePalette(pal);
     SDL_DestroyWindow(win);
     SDL_Quit();
-    (void)frame;
     return 0;
 }

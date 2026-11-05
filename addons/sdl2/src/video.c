@@ -201,6 +201,20 @@ void SDL_GetWindowSize(SDL_Window *window, int *w, int *h)
     }
 }
 
+void stdl_sdl2_screen_origin(int *x, int *y)
+{
+    const SDL_Window *w = the_window;
+    if (w && w->renderer) {
+        *x = w->renderer->xoff;
+        *y = w->renderer->yoff;
+    } else if (w) {
+        *x = ((SCREEN_W - w->w) / 2) & ~15;
+        *y = (SCREEN_H - w->h) / 2;
+    } else {
+        *x = *y = 0;
+    }
+}
+
 void SDL_SetWindowTitle(SDL_Window *window, const char *title)
 {
     (void)window;

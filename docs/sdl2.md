@@ -55,7 +55,7 @@ add-on, and the pattern to copy.
 
 ## What it maps
 
-So far, the video calls; events and audio come next:
+So far, everything but audio, which comes next:
 
 | Area | Calls |
 |---|---|
@@ -63,9 +63,17 @@ So far, the video calls; events and audio come next:
 | Errors, hints | `SDL_SetError`, `SDL_GetError`, `SDL_ClearError`, `SDL_SetHint`, `SDL_SetHintWithPriority`, `SDL_GetHint`, `SDL_GetHintBoolean`, `SDL_ClearHints` |
 | Window | `SDL_CreateWindow` (at most 320x240), `SDL_DestroyWindow`, `SDL_GetWindowSize`, `SDL_SetWindowTitle` (nothing to do) |
 | Renderer | `SDL_CreateRenderer`, `SDL_DestroyRenderer`, `SDL_RenderSetLogicalSize`, `SDL_RenderGetLogicalSize`, `SDL_SetRenderDrawColor`, `SDL_RenderClear`, `SDL_RenderCopy`, `SDL_RenderPresent` |
-| Textures | `SDL_CreateTexture`, `SDL_DestroyTexture`, `SDL_UpdateTexture`, `SDL_LockTexture`, `SDL_UnlockTexture`, `SDL_QueryTexture` |
+| Textures | `SDL_CreateTexture`, `SDL_CreateTextureFromSurface`, `SDL_DestroyTexture`, `SDL_UpdateTexture`, `SDL_LockTexture`, `SDL_UnlockTexture`, `SDL_QueryTexture` |
 | Palettes | `SDL_AllocPalette`, `SDL_SetPaletteColors`, `SDL_FreePalette` |
-| Clock, cursor | `SDL_GetTicks`, `SDL_Delay`, `SDL_ShowCursor` (there is no cursor) |
+| Events | `SDL_PollEvent`, `SDL_PumpEvents`, `SDL_WaitEvent`, `SDL_WaitEventTimeout`, `SDL_PushEvent`, `SDL_FlushEvent`, `SDL_FlushEvents`, `SDL_EventState`, `SDL_GetEventState`, `SDL_RegisterEvents` |
+| Keyboard | `SDL_GetKeyboardState`, `SDL_GetModState`, `SDL_StartTextInput`, `SDL_StopTextInput`, `SDL_IsTextInputActive`, `SDL_GetScancodeFromKey`, `SDL_GetKeyFromScancode` |
+| Mouse | `SDL_GetMouseState`, `SDL_ShowCursor` (there is no cursor) |
+| Joystick | `SDL_NumJoysticks`, `SDL_JoystickNameForIndex`, `SDL_JoystickOpen`, `SDL_JoystickClose`, `SDL_JoystickName`, `SDL_JoystickInstanceID`, `SDL_JoystickNumAxes`, `SDL_JoystickNumButtons`, `SDL_JoystickNumHats`, `SDL_JoystickGetAxis`, `SDL_JoystickGetButton`, `SDL_JoystickGetHat`, `SDL_JoystickRumble`, `SDL_JoystickEventState` |
+| Game controller | `SDL_IsGameController`, `SDL_GameControllerOpen`, `SDL_GameControllerClose`, `SDL_GameControllerName`, `SDL_GameControllerNameForIndex`, `SDL_GameControllerGetAttached`, `SDL_GameControllerGetJoystick`, `SDL_GameControllerGetButton`, `SDL_GameControllerGetAxis`, `SDL_GameControllerRumble`, `SDL_GameControllerEventState` |
+| Surfaces | `SDL_CreateRGBSurface`, `SDL_CreateRGBSurfaceWithFormat`, `SDL_CreateRGBSurfaceFrom`, `SDL_FreeSurface`, `SDL_SetSurfacePalette`, `SDL_LockSurface`, `SDL_UnlockSurface`, `SDL_SetColorKey`, `SDL_GetColorKey`, `SDL_SetClipRect`, `SDL_GetClipRect`, `SDL_FillRect`, `SDL_BlitSurface` (`SDL_UpperBlit`) |
+| Streams | `SDL_RWFromFile`, `SDL_RWFromFP`, `SDL_RWFromMem`, `SDL_RWFromConstMem`, `SDL_AllocRW`, `SDL_FreeRW`, `SDL_RWsize`, `SDL_RWseek`, `SDL_RWtell`, `SDL_RWread`, `SDL_RWwrite`, `SDL_RWclose`, `SDL_ReadU8`, `SDL_ReadLE16`/`BE16`/`LE32`/`BE32`, `SDL_WriteU8`, `SDL_WriteLE16`/`BE16`/`LE32`/`BE32` |
+| Log | `SDL_Log`, `SDL_LogVerbose`, `SDL_LogDebug`, `SDL_LogInfo`, `SDL_LogWarn`, `SDL_LogError`, `SDL_LogCritical`, `SDL_LogMessage`, `SDL_LogMessageV`, `SDL_LogSetPriority`, `SDL_LogSetAllPriority` |
+| Clock, platform | `SDL_GetTicks`, `SDL_GetTicks64`, `SDL_Delay`, `SDL_GetPerformanceCounter`, `SDL_GetPerformanceFrequency` (38,400), `SDL_GetPlatform` ("Atari") |
 
 Every name is a macro onto a `stdl_sdl2_` link name, so the archive
 defines no `SDL_` symbol. That keeps it clear of the 1.2 shim's
@@ -105,6 +113,36 @@ All of these come from the machine:
 - **A present with nothing drawn does not flip.** It stages any colour
   change, and with `SDL_RENDERER_PRESENTVSYNC` it waits for the
   display.
+- **Pump at least every 150ms.** The pump (`SDL_PollEvent`,
+  `SDL_PumpEvents`, the waits) is where STDL serves its timers and
+  audio and ends a pad's rumble, as an SDL2 program pumps once a frame
+  anyway. The first pump turns on STDL's key repeat (SDL2's keys
+  repeat, with `repeat` set) and its character translation, and sends
+  `SDL_JOYDEVICEADDED` (and `SDL_CONTROLLERDEVICEADDED` with
+  `SDL_INIT_GAMECONTROLLER`), as SDL2 does for a device there at
+  start-up. A program that reads STDL's events itself and never pumps
+  here keeps STDL as it set it.
+- **Keys:** SDL2's scancodes and key codes, from STDL's symbols. An
+  Atari keyboard's keys sit where SDL2 puts them on a USB board; Help,
+  Undo and the keypad's brackets have SDL2 scancodes of their own.
+  `SDL_TEXTINPUT` carries the ASCII character a key types; there is
+  no `SDL_TEXTEDITING`. `KMOD_` values are SDL2's, which are STDL's.
+- **The mouse** is in the logical size's coordinates, measured from
+  its top left. There is no relative mode, wheel or cursor.
+- **One joystick, 0:** an ST joystick (2 axes, 1 button) or an Xpad
+  pad (6 axes, 13 buttons, a hat), always a game controller too, and
+  never plugged in or out. Its state is kept whether it is open or
+  not, as SDL2 keeps it; events are sent once it is open. A game
+  controller's buttons are read from STDL's held inputs once a pump,
+  so its d-pad is the pad's hat or the joystick's directions. Rumble
+  takes the top 8 bits of each motor and at most 65,535ms.
+- **Surfaces are 8-bit,** `SDL_PIXELFORMAT_INDEX8`, with a palette of
+  256; a blit copies bytes, keyed or not, and blits onto itself where
+  unkeyed. `SDL_CreateTextureFromSurface` copies the indices: the
+  surface's palette is not the screen's, the renderer's is.
+- **The log goes to a file or nowhere,** never to the console. On a TT
+  a console write makes the next flip copy the whole page, and the
+  text stays in the picture.
 
 ## How a frame is drawn
 
@@ -187,6 +225,7 @@ A program includes `SDL_stdl.h` itself:
 | Call or hint | What it is for |
 |---|---|
 | `STDL_SDL2_HINT_PAGES` | `"2"` or `"3"` (the default) pages. Three let a frame be drawn while the display still waits for the last; a third costs 153.6K of ST-RAM on a TT and 77-92K on a Falcon, and without the room STDL gives two |
+| `STDL_SDL2_HINT_LOGFILE` | the file `SDL_Log` and the rest write to, a line a message, flushed after each. Without it they write nothing. SDL2's priorities: the application's from INFO, assertions' from WARN, tests' from VERBOSE, the rest CRITICAL only |
 | `STDL_SDL2_HINT_CHECK` | `"1"`: the screen check. The renderer keeps a chunky model of the screen, drawn as each copy and clear is made, and compares it, converted, with every page before it flips. It costs 230K and a page's conversion a flip, and is for testing; `STDL_SDL2_GetCheck` reads it |
 | `STDL_SDL2_SetRenderPalette` | the renderer's palette, staged at each present when its version has moved on |
 | `STDL_SDL2_SetRenderDrawIndex` | the clear colour as an index |
@@ -211,6 +250,13 @@ the present's conversion and flip times for a bench.
     for byte. It runs on a stand-in for STDL's screen, as a TT, a
     Falcon on VGA and on RGB, with two pages and three, and with
     border indices 0, 0x70 and 0x30.
+  - `test_events`: STDL's events, queued in the stand-in, read back as
+    SDL2's: keys (every symbol's scancode one key's), text, the mouse
+    from the logical size, the joystick and controller, the queue.
+  - `test_surface`: blits against a pixel-by-pixel reference over
+    random rectangles, clipped every way, keyed or not, onto another
+    surface and onto themselves; a texture made from a surface against
+    the page it shows on; streams in memory and in a file; the log.
 - **`SDL2CHK` (`tests/hatari/sdl2chk.c`):** every variant of the
   conversion's assembler against its C on the machine, and their
   times.

@@ -22,7 +22,10 @@ SDL2CMINILIB = libstdl-sdl2-cmini.a
 SDL2SRCS      = $(SDL2DIR)/src/init.c $(SDL2DIR)/src/error.c \
                 $(SDL2DIR)/src/hints.c $(SDL2DIR)/src/c2p.c \
                 $(SDL2DIR)/src/c2pany.c $(SDL2DIR)/src/palette.c \
-                $(SDL2DIR)/src/timer.c $(SDL2DIR)/src/video.c
+                $(SDL2DIR)/src/timer.c $(SDL2DIR)/src/video.c \
+                $(SDL2DIR)/src/events.c $(SDL2DIR)/src/keymap.c \
+                $(SDL2DIR)/src/joystick.c $(SDL2DIR)/src/surface.c \
+                $(SDL2DIR)/src/rwops.c $(SDL2DIR)/src/log.c
 SDL2OBJS      = $(patsubst %.c,$(OBJDIR)/%.o,$(SDL2SRCS))
 SDL2CMINIOBJS = $(patsubst %.c,$(OBJDIR)/%.cmini.o,$(SDL2SRCS))
 
@@ -73,17 +76,21 @@ $(SDL2LIB): $(SDL2OBJS) $(SDL2XOBJS)
 $(SDL2CMINILIB): $(SDL2CMINIOBJS) $(SDL2XCMINIOBJS)
 	$(AR) rcs $@ $(SDL2CMINIOBJS) $(SDL2XCMINIOBJS)
 
-# The add-on's text, which only a program that links it pays: every
-# object it always takes, and the largest of the X variants (a fixed
-# X's or c2pany.o), of which it takes one at most. On 2026-11-04:
-# 1,032 bytes for the skeleton (SDL_Init, errors, hints), 1,704 for
-# c2p.o (the C twin and X = 0's loops, one line a row and two), 940
-# for the largest variant (c2pany.o; a fixed X's are 900-924), and
-# 8,700 for the screen (video.o 8,232: the window, the renderer, its
-# textures and the compositor; palettes and the clock), 12,376 in all.
-# A TT or a Falcon has the room; the budget is there so that growth is
-# a decision, raised with its reason or not at all.
-SDL2_MAX = 12600
+# The add-on's text, which only a program that links it pays, and
+# only the objects it calls: every object, and the largest of the X
+# variants (a fixed X's or c2pany.o), of which it takes one at most.
+# On 2026-11-04: 1,032 bytes for the skeleton (SDL_Init, errors,
+# hints), 1,704 for c2p.o (the C twin and X = 0's loops, one line a
+# row and two), 940 for the largest variant (c2pany.o; a fixed X's are
+# 900-924), 8,940 for the screen (video.o 8,332: the window, the
+# renderer, its textures and the compositor; palettes, the clock and
+# the platform). Then the input, 4,424 (events.o 2,208 with the
+# queue, joystick.o 1,672 with the controller, keymap.o 544 with its
+# table), which a program that pumps events takes whole; surfaces
+# 2,484, streams 2,132 and the log 752, each taken only if called:
+# 22,408 in all. A TT or a Falcon has the room; the budget is there so
+# that growth is a decision, raised with its reason or not at all.
+SDL2_MAX = 22800
 
 # The checks a build of the add-on must pass:
 # - no SDL_ link symbol in either archive (SDL_stdinc.h says why);

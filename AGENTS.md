@@ -1178,6 +1178,11 @@ and the rules below keep it from being anything else's.
     constant X. Reading X at run time cost 4.5% of a frame.
   - `SDL2CHK` (`tests/hatari/sdl2chk.c`) checks every variant against
     the C twin on the machine and times them.
+- **Input keeps SDL2's numbers.** Scancodes, key codes, `KMOD_` bits
+  and event types are SDL2's own values, which programs keep in saved
+  key maps; `test_events` checks a sample, and that every STDL symbol
+  with a scancode has one key's. Joystick and controller state comes
+  from STDL's public events and `STDL_JoyInputHeld`, nothing deeper.
 - **The compositor has a model, not a mirror, as its test.**
   `tests/test_render.c` draws a chunky model a pixel at a time and
   expects each page shown to be it, converted, byte for byte. It has

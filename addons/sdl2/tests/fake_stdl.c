@@ -7,9 +7,10 @@
  * responsive 256-colour screen in a TT's layout (a row on two lines,
  * 640 bytes), a Falcon's on VGA (320) or on RGB (384, the picture 32
  * bytes in), with two or three pages that STDL_Flip moves through as
- * STDL does, and registers that STDL_SetColours writes. The add-on
- * reaches STDL through these public calls alone, so what it draws can
- * be checked here byte for byte.
+ * STDL does, and registers that STDL_SetColours writes; and STDL's
+ * input, events queued by the test and the state it sets. The add-on
+ * reaches STDL through these public calls alone, so what it draws and
+ * what it reports can be checked here.
  */
 
 #include <stdl/stdl.h>
@@ -147,4 +148,100 @@ uint32_t STDL_GetTicks(void)
 void STDL_Delay(uint32_t ms)
 {
     clock_ticks += ms * 38;
+}
+
+/* ------------------------------------------------------------------ */
+/* input                                                               */
+
+uint16_t fake_mod;
+int fake_mouse_x, fake_mouse_y;
+uint8_t fake_mouse_buttons;
+int fake_repeat_delay = -1, fake_repeat_interval = -1, fake_unicode = -1;
+int fake_pad;
+uint32_t fake_held;
+int fake_rumble_low, fake_rumble_high, fake_rumble_ms, fake_rumbles;
+
+static STDL_Event events[64];
+static int nevents, evhead;
+
+void fake_event(const STDL_Event *e)
+{
+    if (nevents < 64) {
+        events[nevents++] = *e;
+    }
+}
+
+void fake_key(int down, unsigned sym, unsigned mod, unsigned unicode)
+{
+    STDL_Event e;
+    memset(&e, 0, sizeof(e));
+    e.type = down ? STDL_KEYDOWN : STDL_KEYUP;
+    e.key.type = e.type;
+    e.key.state = down ? STDL_PRESSED : STDL_RELEASED;
+    e.key.keysym.sym = (uint16_t)sym;
+    e.key.keysym.mod = (uint16_t)mod;
+    e.key.keysym.unicode = (uint16_t)unicode;
+    fake_event(&e);
+}
+
+int STDL_PollEvent(STDL_Event *e)
+{
+    if (evhead == nevents) {
+        evhead = nevents = 0;
+        return 0;
+    }
+    *e = events[evhead++];
+    return 1;
+}
+
+uint16_t STDL_GetModState(void)
+{
+    return fake_mod;
+}
+
+uint8_t STDL_GetMouseState(int *x, int *y)
+{
+    if (x) {
+        *x = fake_mouse_x;
+    }
+    if (y) {
+        *y = fake_mouse_y;
+    }
+    return fake_mouse_buttons;
+}
+
+int STDL_EnableKeyRepeat(int delay, int interval)
+{
+    fake_repeat_delay = delay;
+    fake_repeat_interval = interval;
+    return 0;
+}
+
+int STDL_EnableUNICODE(int enable)
+{
+    const int was = fake_unicode;
+    fake_unicode = enable;
+    return was;
+}
+
+int STDL_HavePad(void)
+{
+    return fake_pad;
+}
+
+int STDL_JoyInputHeld(int input)
+{
+    return (fake_held >> input) & 1;
+}
+
+int STDL_PadRumble(uint8_t low, uint8_t high, uint16_t ms)
+{
+    if (!fake_pad) {
+        return -1;
+    }
+    fake_rumble_low = low;
+    fake_rumble_high = high;
+    fake_rumble_ms = ms;
+    fake_rumbles++;
+    return 0;
 }

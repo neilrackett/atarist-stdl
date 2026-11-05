@@ -33,6 +33,7 @@
 #include "SDL_rect.h"
 #include "SDL_pixels.h"
 #include "SDL_video.h"
+#include "SDL_surface.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -70,6 +71,7 @@ typedef enum {
 #define SDL_LockTexture           stdl_sdl2_LockTexture
 #define SDL_UnlockTexture         stdl_sdl2_UnlockTexture
 #define SDL_QueryTexture          stdl_sdl2_QueryTexture
+#define SDL_CreateTextureFromSurface stdl_sdl2_CreateTextureFromSurface
 
 /* one renderer a window; index and flags are taken as SDL2's */
 extern SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, int index,
@@ -103,6 +105,10 @@ extern int SDL_LockTexture(SDL_Texture *texture, const SDL_Rect *rect,
 extern void SDL_UnlockTexture(SDL_Texture *texture);
 extern int SDL_QueryTexture(SDL_Texture *texture, Uint32 *format, int *access,
                             int *w, int *h);
+/* a static INDEX8 texture holding a copy of the surface's pixels; its
+ * palette is the program's to give the renderer */
+extern SDL_Texture *SDL_CreateTextureFromSurface(SDL_Renderer *renderer,
+                                                 SDL_Surface *surface);
 
 #ifdef __cplusplus
 }

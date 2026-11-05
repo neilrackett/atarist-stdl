@@ -60,3 +60,70 @@ int stdl_sdl2_hdrcheck(void)
     return SDL_GetHintBoolean(SDL_HINT_RENDER_VSYNC, SDL_FALSE)
            + (int)SDL_WasInit(0) + (int)SDL_GetTicks() + (int)bytes;
 }
+
+/* the input, surfaces, streams, log and clock */
+int stdl_sdl2_hdrcheck_rest(void)
+{
+    SDL_Event e;
+    SDL_Joystick *j;
+    SDL_GameController *c;
+    SDL_Surface *s;
+    SDL_RWops *rw;
+    SDL_Rect r;
+    Uint32 key = 0;
+    int n = 0, x = 0, y = 0;
+    const Uint8 *keys = SDL_GetKeyboardState(&n);
+    Uint64 t = SDL_GetPerformanceCounter() + SDL_GetTicks64();
+    static Uint8 mem[16];
+
+    SDL_StartTextInput();
+    while (SDL_PollEvent(&e)) {
+        if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE &&
+            (e.key.keysym.mod & KMOD_CTRL) && !e.key.repeat) {
+            n++;
+        }
+        if (e.type == SDL_CONTROLLERBUTTONDOWN &&
+            e.cbutton.button == SDL_CONTROLLER_BUTTON_START) {
+            n++;
+        }
+    }
+    SDL_PumpEvents();
+    SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+    SDL_EventState(SDL_MOUSEMOTION, SDL_IGNORE);
+    e.type = SDL_RegisterEvents(1);
+    SDL_PushEvent(&e);
+    SDL_WaitEventTimeout(&e, 1);
+    n += SDL_GetMouseState(&x, &y) & SDL_BUTTON_LMASK;
+    n += SDL_GetModState() + keys[SDL_SCANCODE_SPACE] +
+         (int)SDL_GetKeyFromScancode(SDL_GetScancodeFromKey(SDLK_UP));
+    j = SDL_JoystickOpen(0);
+    n += SDL_JoystickGetAxis(j, 0) + SDL_JoystickGetHat(j, 0) +
+         SDL_JoystickNumButtons(j) + (SDL_JoystickName(j) != NULL);
+    c = SDL_GameControllerOpen(0);
+    n += SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_A) +
+         SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_LEFTX);
+    SDL_GameControllerRumble(c, 0xFFFF, 0, 100);
+    SDL_GameControllerClose(c);
+    SDL_JoystickClose(j);
+
+    s = SDL_CreateRGBSurface(SDL_SWSURFACE, 16, 16, 8, 0, 0, 0, 0);
+    SDL_SetColorKey(s, SDL_TRUE, 0);
+    SDL_GetColorKey(s, &key);
+    r.x = r.y = 0;
+    r.w = r.h = 8;
+    SDL_SetClipRect(s, &r);
+    SDL_FillRect(s, NULL, 3);
+    SDL_BlitSurface(s, NULL, s, &r);
+    SDL_FreeSurface(s);
+
+    rw = SDL_RWFromMem(mem, (int)sizeof(mem));
+    SDL_WriteBE32(rw, 1);
+    SDL_RWseek(rw, 0, RW_SEEK_SET);
+    n += (int)SDL_ReadBE32(rw) + (int)SDL_RWtell(rw) + (int)SDL_RWsize(rw);
+    SDL_RWclose(rw);
+
+    SDL_Log("%d %s", n, SDL_GetPlatform());
+    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "%u", (unsigned)key);
+    SDL_LogSetPriority(SDL_LOG_CATEGORY_VIDEO, SDL_LOG_PRIORITY_DEBUG);
+    return n + x + y + (int)(t / SDL_GetPerformanceFrequency());
+}

@@ -34,6 +34,11 @@ extern "C" {
  * flip, for testing; STDL_SDL2_GetCheck reads the result. */
 #define STDL_SDL2_HINT_CHECK "STDL_SDL2_CHECK"
 
+/* a file name: where SDL_Log writes, a line a message, from the first
+ * message on. Unset, the log goes nowhere; never to the console (see
+ * SDL_log.h). */
+#define STDL_SDL2_HINT_LOGFILE "STDL_SDL2_LOGFILE"
+
 /* The renderer's palette: the screen has one, of 256 registers. The
  * renderer reads it at each present and stages it when it has changed
  * (its version), so SDL_SetPaletteColors on it is how a program

@@ -16,4 +16,21 @@
 /* SDL_INIT_ bits granted, for SDL_WasInit */
 extern Uint32 stdl_sdl2_inited;
 
+/* keymap.c: STDL's key symbols as SDL2's */
+SDL_Scancode stdl_sdl2_scancode(unsigned sym);
+SDL_Keycode stdl_sdl2_keycode(unsigned sym);
+
+/* video.c: the screen position of the logical size's top left, which
+ * the mouse is reported from */
+void stdl_sdl2_screen_origin(int *x, int *y);
+
+/* events.c: an event for the queue; 1, 0 ignored, -1 full */
+int stdl_sdl2_push(SDL_Event *e);
+
+/* joystick.c: an STDL joystick event, the state it carries kept and
+ * passed on to an open joystick and controller; the controller's
+ * buttons, read and their changes sent, once a pump */
+void stdl_sdl2_joy_event(const STDL_Event *se);
+void stdl_sdl2_controller_poll(void);
+
 #endif /* STDL_SDL2_INTERNAL_H */

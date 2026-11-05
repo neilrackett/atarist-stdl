@@ -28,6 +28,14 @@
 #include "SDL_render.h"
 #include "SDL_mouse.h"
 #include "SDL_timer.h"
+#include "SDL_events.h"
+#include "SDL_keyboard.h"
+#include "SDL_joystick.h"
+#include "SDL_gamecontroller.h"
+#include "SDL_rwops.h"
+#include "SDL_surface.h"
+#include "SDL_log.h"
+#include "SDL_platform.h"
 
 #ifdef __cplusplus
 extern "C" {

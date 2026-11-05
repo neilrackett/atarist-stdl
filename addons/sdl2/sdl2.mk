@@ -84,17 +84,22 @@ $(SDL2CMINILIB): $(SDL2CMINIOBJS) $(SDL2XCMINIOBJS)
 # On 2026-11-04: 1,032 bytes for the skeleton (SDL_Init, errors,
 # hints), 1,704 for c2p.o (the C twin and X = 0's loops, one line a
 # row and two), 940 for the largest variant (c2pany.o; a fixed X's are
-# 900-924), 8,940 for the screen (video.o 8,332: the window, the
+# 900-924), 9,444 for the screen (video.o 8,836: the window, the
 # renderer, its textures and the compositor; palettes, the clock and
 # the platform). Then the input, 4,424 (events.o 2,208 with the
 # queue, joystick.o 1,672 with the controller, keymap.o 544 with its
 # table), which a program that pumps events takes whole; surfaces
 # 2,484, streams 2,132 and the log 752, each taken only if called.
 # Then audio, 4,236: the device and its queue 2,572 (audio.o), mixing
-# 540 and WAV files 1,124, the last two only if called. 26,644 in all.
+# 540 and WAV files 1,124, the last two only if called. 27,148 in all,
+# 504 of it (2026-11-05) a copy's short path, with the clipping and
+# the partial groups in functions of their own, and the catch-up's
+# copy a loop for each layout: a copy inside the texture and the
+# screen went from 269 instructions to 141, 2,033 of a Falcon's cycles
+# to 1,061.
 # A TT or a Falcon has the room; the budget is there so that growth is
 # a decision, raised with its reason or not at all.
-SDL2_MAX = 27000
+SDL2_MAX = 27300
 
 # The checks a build of the add-on must pass:
 # - no SDL_ link symbol in either archive (SDL_stdinc.h says why);

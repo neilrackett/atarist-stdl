@@ -88,6 +88,7 @@ struct SDL_Renderer {
     SDL_Texture *bt;            /* the batch: its texture */
     long bdx, bdy;              /* screen = texture + (bdx, bdy) */
     int by0, by1;
+    int bparts;                 /* any partial groups in it */
     Uint32 bwhole[SCREEN_H];
     Uint32 bpart[SCREEN_H];
     Uint16 bpix[SCREEN_H][GROUPS];
@@ -331,6 +332,7 @@ static void drop_batch(SDL_Renderer *r)
     }
     r->by0 = SCREEN_H;
     r->by1 = -1;
+    r->bparts = 0;
     r->bt = NULL;
 }
 
@@ -541,13 +543,32 @@ static void part(SDL_Renderer *r, int y, int g, Uint16 m)
     }
 }
 
-/* screen pixels sx..sx+w-1 of rows sy..sy+h-1 */
-static void batch_add(SDL_Renderer *r, int sx, int sy, int w, int h)
+/* a box's partial groups, row by row */
+static void batch_parts(SDL_Renderer *r, int sy, int h, int lg, Uint16 lm,
+                        int rg, Uint16 rm)
+{
+    int y;
+    for (y = sy; y < sy + h; y++) {
+        if (lg >= 0) {
+            part(r, y, lg, lm);
+        }
+        if (rg >= 0) {
+            part(r, y, rg, rm);
+        }
+    }
+    r->bparts = 1;
+}
+
+/* a box that starts or ends inside a group: its whole groups and its
+ * partial ones. Kept out of batch_add, as a program that copies whole
+ * groups never has any. */
+static __attribute__((noinline)) void batch_any(SDL_Renderer *r, int sx,
+                                                int sy, int w, int h)
 {
     const int x1 = sx + w;
     const int g0 = sx >> 4, g1 = (x1 - 1) >> 4;
     Uint32 whole = 0;
-    int lg = -1, rg = -1, y;
+    int lg = -1, rg = -1;
     Uint16 lm = 0, rm = 0;
     if (g0 == g1) {
         const Uint16 m = pixmask(sx & 15, (x1 - 1) & 15);
@@ -573,14 +594,35 @@ static void batch_add(SDL_Renderer *r, int sx, int sy, int w, int h)
             whole = (Uint32)(((1UL << (lgw + 1)) - 1) & ~((1UL << fg) - 1));
         }
     }
-    for (y = sy; y < sy + h; y++) {
-        r->bwhole[y] |= whole;
-        if (lg >= 0) {
-            part(r, y, lg, lm);
+    if (whole) {
+        Uint32 *wr = &r->bwhole[sy];
+        int n;
+        for (n = h; n > 0; n--) {
+            *wr++ |= whole;
         }
-        if (rg >= 0) {
-            part(r, y, rg, rm);
+    }
+    /* the box's whole groups are never its partial ones, so the order
+     * of the two makes no difference */
+    if (lg >= 0 || rg >= 0) {
+        batch_parts(r, sy, h, lg, lm, rg, rm);
+    }
+}
+
+/* screen pixels sx..sx+w-1 of rows sy..sy+h-1: of whole groups, an OR
+ * a row. A program pushes many small boxes (one port's play, 14 a
+ * frame), and a Falcon fetches every instruction of them from ST-RAM. */
+static void batch_add(SDL_Renderer *r, int sx, int sy, int w, int h)
+{
+    if (((sx | w) & 15) == 0) {
+        const Uint32 whole = (Uint32)(((1UL << ((sx + w) >> 4)) - 1) &
+                                      ~((1UL << (sx >> 4)) - 1));
+        Uint32 *wr = &r->bwhole[sy];
+        int n;
+        for (n = h; n > 0; n--) {
+            *wr++ |= whole;
         }
+    } else {
+        batch_any(r, sx, sy, w, h);
     }
     if (sy < r->by0) {
         r->by0 = sy;
@@ -659,7 +701,7 @@ static void flush(SDL_Renderer *r)
     }
     back = back_page(r);
     /* the partial groups first, the whole ones' bits not among them */
-    for (y = r->by0; y <= r->by1; y++) {
+    for (y = r->by0; r->bparts && y <= r->by1; y++) {
         Uint32 pm = r->bpart[y];
         if (!pm) {
             continue;
@@ -677,6 +719,7 @@ static void flush(SDL_Renderer *r)
         memset(r->bpix[y], 0, sizeof(r->bpix[y]));
         r->bpart[y] = 0;
     }
+    r->bparts = 0;
     /* then runs of rows with the same whole groups, one call a run */
     for (y = r->by0; y <= r->by1; ) {
         const Uint32 m = r->bwhole[y];
@@ -737,16 +780,27 @@ int SDL_RenderClear(SDL_Renderer *renderer)
     return 0;
 }
 
-int SDL_RenderCopy(SDL_Renderer *renderer, SDL_Texture *texture,
-                   const SDL_Rect *srcrect, const SDL_Rect *dstrect)
+/* the check's model: the box as the screen should have it */
+static __attribute__((noinline)) void model_copy(SDL_Renderer *r,
+                                                 const SDL_Texture *t,
+                                                 int tx, int ty, int sx,
+                                                 int sy, int w, int h)
 {
-    SDL_Renderer *r = renderer;
-    SDL_Rect s, d;
-    long dx, dy;
-    int sx, sy;
-    if (!r || !texture || texture->r != r) {
-        return SDL_SetError("RenderCopy: no such texture for this renderer");
+    int row;
+    for (row = 0; row < h; row++) {
+        memcpy(r->model + (sy + row) * SCREEN_W + sx,
+               t->pixels + (ty + row) * t->pitch + tx, (size_t)w);
     }
+}
+
+/* A copy not given both rectangles, or not inside the texture and the
+ * logical size: clipped, then copied as one that is. */
+static __attribute__((noinline)) int copy_clipped(SDL_Renderer *r,
+                                                  SDL_Texture *texture,
+                                                  const SDL_Rect *srcrect,
+                                                  const SDL_Rect *dstrect)
+{
+    SDL_Rect s, d;
     if (srcrect) {
         s = *srcrect;
     } else {
@@ -807,24 +861,53 @@ int SDL_RenderCopy(SDL_Renderer *renderer, SDL_Texture *texture,
     if (d.w <= 0 || d.h <= 0) {
         return 0;
     }
-    sx = d.x + r->xoff;
-    sy = d.y + r->yoff;
-    dx = sx - s.x;
-    dy = sy - s.y;
+    return SDL_RenderCopy(r, texture, &s, &d);
+}
+
+/* A box already inside the texture and the logical size, as a program
+ * that tracks its own changes sends them, costs a few compares and the
+ * batch's OR a row; anything else is clipped first (copy_clipped). The
+ * compares are unsigned: (unsigned)(w - 1) < W is 1 <= w <= W, and then
+ * (unsigned)x <= W - w is 0 <= x <= W - w. */
+int SDL_RenderCopy(SDL_Renderer *renderer, SDL_Texture *texture,
+                   const SDL_Rect *srcrect, const SDL_Rect *dstrect)
+{
+    SDL_Renderer *r = renderer;
+    const SDL_Rect *s = srcrect, *d = dstrect;
+    long dx, dy;
+    int sx, sy, w, h;
+    if (!r || !texture || texture->r != r) {
+        return SDL_SetError("RenderCopy: no such texture for this renderer");
+    }
+    if (!s || !d) {
+        return copy_clipped(r, texture, srcrect, dstrect);
+    }
+    w = s->w;
+    h = s->h;
+    if (d->w != w || d->h != h ||
+        (unsigned)(w - 1) >= (unsigned)texture->w ||
+        (unsigned)s->x > (unsigned)(texture->w - w) ||
+        (unsigned)(h - 1) >= (unsigned)texture->h ||
+        (unsigned)s->y > (unsigned)(texture->h - h) ||
+        (unsigned)(w - 1) >= (unsigned)r->lw ||
+        (unsigned)d->x > (unsigned)(r->lw - w) ||
+        (unsigned)(h - 1) >= (unsigned)r->lh ||
+        (unsigned)d->y > (unsigned)(r->lh - h)) {
+        return copy_clipped(r, texture, srcrect, dstrect);
+    }
+    sx = d->x + r->xoff;
+    sy = d->y + r->yoff;
+    dx = sx - s->x;
+    dy = sy - s->y;
     if (r->bt && (r->bt != texture || r->bdx != dx || r->bdy != dy)) {
         flush(r);
     }
     r->bt = texture;
     r->bdx = dx;
     r->bdy = dy;
-    batch_add(r, sx, sy, d.w, d.h);
+    batch_add(r, sx, sy, w, h);
     if (r->model) {
-        int row;
-        for (row = 0; row < d.h; row++) {
-            memcpy(r->model + (sy + row) * SCREEN_W + sx,
-                   texture->pixels + (s.y + row) * texture->pitch + s.x,
-                   (size_t)d.w);
-        }
+        model_copy(r, texture, s->x, s->y, sx, sy, w, h);
     }
     r->frame = r->drawn = 1;
     return 0;
@@ -832,16 +915,23 @@ int SDL_RenderCopy(SDL_Renderer *renderer, SDL_Texture *texture,
 
 /* the groups the page owes and this frame did not draw, from the page
  * last shown, which holds the screen as it stands; a TT's row read
- * from its first line and written to both */
+ * from its first line and written to both. The state is in locals and
+ * each layout has a loop of its own: the copy is a Falcon's biggest
+ * after the conversion, and its stores through d would otherwise have
+ * the renderer's fields read again for every long. */
 static void catch_up(SDL_Renderer *r, Uint8 *back)
 {
-    const long odd = r->dp >> 2;
+    const Uint8 *shown = r->shown;
+    const Uint32 *owed = r->owed[r->cur], *now = r->now;
+    const long stride = r->stride, odd = r->dp >> 2;
+    const int dbl = r->dbl;
+    long off = 0;
     int y;
-    if (!r->shown || r->shown == back) {
+    if (!shown || shown == back) {
         return;
     }
-    for (y = 0; y < SCREEN_H; y++) {
-        Uint32 m = r->owed[r->cur][y] & ~r->now[y];
+    for (y = 0; y < SCREEN_H; y++, off += stride) {
+        Uint32 m = owed[y] & ~now[y];
         int g = 0;
         while (m) {
             const Uint32 *s;
@@ -856,14 +946,18 @@ static void catch_up(SDL_Renderer *r, Uint8 *back)
                 m >>= 1;
                 ge++;
             }
-            s = (const Uint32 *)(const void *)(r->shown + y * r->stride +
-                                               g * 16);
-            d = (Uint32 *)(void *)(back + y * r->stride + g * 16);
-            for (n = (ge - g) * 4; n > 0; n--, s++, d++) {
-                *d = *s;
-                if (r->dbl) {
+            s = (const Uint32 *)(const void *)(shown + off + g * 16);
+            d = (Uint32 *)(void *)(back + off + g * 16);
+            n = (ge - g) * 4;
+            if (dbl) {
+                do {
                     d[odd] = *s;
-                }
+                    *d++ = *s++;
+                } while (--n > 0);
+            } else {
+                do {
+                    *d++ = *s++;
+                } while (--n > 0);
             }
             g = ge;
         }
@@ -915,11 +1009,13 @@ void SDL_RenderPresent(SDL_Renderer *renderer)
     back = back_page(r);
     catch_up(r, back);
     for (q = 0; q < r->npages; q++) {
+        Uint32 *o = r->owed[q];
+        const Uint32 *n = r->now;
         if (q == r->cur) {
             continue;
         }
-        for (y = 0; y < SCREEN_H; y++) {
-            r->owed[q][y] |= r->now[y];
+        for (y = SCREEN_H; y > 0; y--) {
+            *o++ |= *n++;
         }
     }
     memset(r->owed[r->cur], 0, sizeof(r->owed[r->cur]));

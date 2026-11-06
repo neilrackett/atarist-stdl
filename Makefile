@@ -63,7 +63,7 @@ EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
            dist/BLITCHK.TOS dist/VBLCHK.TOS dist/OVERSCAN.TOS \
            dist/HWSCROLL.TOS dist/TONEDEMO.TOS dist/OPLDEMO.TOS \
            dist/MUSICVU.TOS dist/POLYDEMO.TOS dist/PATDEMO.TOS \
-           dist/RASTERS.TOS dist/RESPDEMO.TOS
+           dist/RASTERS.TOS dist/RESPDEMO.TOS dist/OVHOST.TOS
 
 # Pinned, not left to ordering: a rule added above this one would
 # silently become the default goal, and `make` would then build
@@ -72,7 +72,7 @@ EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
 # notice - a port lost a cycle to exactly this.
 .DEFAULT_GOAL := all
 
-all: $(LIB) sizecheck libcallcheck $(EXAMPLES) assets
+all: $(LIB) sizecheck libcallcheck ovhostcheck $(EXAMPLES) assets
 
 # Size budget for the pixel-path objects.
 #
@@ -167,6 +167,32 @@ sizecheck: $(PIXEL_OBJS) $(RESP_OBJS)
 # port's own objects.
 libcallcheck: $(LIBOBJS)
 	@sh tools/libcalls.sh -a tests/libcalls.allow $(LIBOBJS)
+
+# Border overscan for a program that runs the machine itself
+# (stdl_overscan.h): one object, compiled from src/overscan_host.c
+# alone and linked instead of this archive, by programs that link no
+# C library either. Built here as such a program builds it, with
+# -Iinclude and nothing else, and the build fails if it needs anything
+# but libgcc's arithmetic. One port compiled overscan.c beside its
+# own copies of the library's internals before this file existed, and
+# a hook overscan.c gained broke its build with nothing here to say
+# so; a new hook now fails this check instead, and goes into
+# overscan_host.c.
+OVHOST_OBJ   = $(OBJDIR)/src/overscan_host.o
+OVHOST_ALLOW = ___divsi3 ___mulsi3 ___udivsi3
+
+$(OVHOST_OBJ): src/overscan_host.c
+	@mkdir -p $(dir $@)
+	$(CC) -O2 -fomit-frame-pointer -std=gnu99 -Wall -Wextra \
+	    -Wno-unused-parameter -MMD -MP -Iinclude -c -o $@ $<
+
+ovhostcheck: $(OVHOST_OBJ)
+	@u=`$(CROSS)nm -u $(OVHOST_OBJ) | awk '{print $$NF}' \
+	    | grep -v -x $(addprefix -e ,$(OVHOST_ALLOW))`; \
+	 if [ -n "$$u" ]; then \
+	   echo "*** overscan_host.o needs more than libgcc:" $$u; exit 1; \
+	 fi; \
+	 echo "overscan_host.o needs libgcc only"
 
 # runtime assets the examples load (tracked in examples/assets/,
 # regenerable via tools/mkdemo.py and tools/stdlconv/stdlconv.py)
@@ -267,6 +293,9 @@ dist/BLITCHK.TOS: examples/blitchk.c $(STATSOBJS) $(LIB)
 	    $(STATSOBJS) $(LIB) && $(STRIP) $@
 dist/OVERSCAN.TOS: examples/overscan.c $(LIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
+# no libstdl.a: the host object is all of STDL this program has
+dist/OVHOST.TOS: examples/ovhost.c $(OVHOST_OBJ)
+	$(CC) $(CFLAGS) -o $@ $< $(OVHOST_OBJ) && $(STRIP) $@
 dist/VBLCHK.TOS: examples/vblchk.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
 dist/HWSCROLL.TOS: examples/hwscroll.c $(LIB)
@@ -291,7 +320,8 @@ dist/CHUNKY.TOS: examples/chunky.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
 
 # The generated header dependencies, if any objects exist yet.
--include $(LIBOBJS:.o=.d) $(CMINIOBJS:.o=.d) $(STATSOBJS:.o=.d)
+-include $(LIBOBJS:.o=.d) $(CMINIOBJS:.o=.d) $(STATSOBJS:.o=.d) \
+         $(OVHOST_OBJ:.o=.d)
 
 # host-side unit tests: native clang + ASan, no cross toolchain
 # needed (run on the host, not through stcmd)
@@ -338,4 +368,4 @@ clean:
 run-%:
 	hatari --machine ste --memsize 4 --fast-boot on dist/$*.TOS
 
-.PHONY: sizecheck libcallcheck all clean assets test cmini bundle ci
+.PHONY: sizecheck libcallcheck ovhostcheck all clean assets test cmini bundle ci

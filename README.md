@@ -77,6 +77,10 @@ the border's timing window, or is split around it, so a blit never
 holds the CPU off the border and throughput stays within 14-28% of
 the no-border figure; palette writes are staged to the vertical
 blanking so they can never flash mid-frame. See `examples/overscan.c`.
+A program that runs the machine itself, without the rest of STDL or a C
+library, can still have the borders: it compiles `src/overscan_host.c`
+on its own and tells the borders about its own page flips
+(`stdl_overscan.h`, `examples/ovhost.c`).
 
 `STDL_OpenRasters` changes one or two colour registers every few lines
 down the picture from tables filled a frame ahead - copper bars, skies, a
@@ -241,6 +245,7 @@ run under EmuTOS/TOS on Hatari:
 | BLITCHK.TOS  | BLiTTER vs CPU byte-identical verification at three plane budgets + timing       |
 | VBLCHK.TOS   | 50Hz VBL callbacks, then an abnormal exit - the desktop coming back is the pass  |
 | OVERSCAN.TOS | border overscan: T top (228), B bottom (245), both combine (273), SPACE closes   |
+| OVHOST.TOS   | both borders in a program that owns the machine: its own VBL, three pages, no libstdl.a |
 | RESPDEMO.TOS | one binary, each machine's best screen: 256 colours and 240 rows on a TT or Falcon |
 
 Large fills and blits are BLiTTER-accelerated where the hardware has

@@ -142,6 +142,19 @@
 #define MODE_TOP 1
 #define MODE_BOT 2
 
+/* The two things overscan_host.c, the build for a program that runs
+ * the machine itself, does its own way: it links no C library, so a
+ * page is cleared without memset, and its program sets a Mega STE's
+ * speed in the register rather than through STDL_UseMegaSteSpeedup,
+ * so the calibration is keyed on what the register says. Here they
+ * are what they always were, and this object is unchanged by them. */
+#ifndef OVSC_CLEAR
+#define OVSC_CLEAR(p)     memset((p), 0, MAX_FETCH_BYTES)
+#endif
+#ifndef OVSC_SPEED_KEY
+#define OVSC_SPEED_KEY()  stdl_megaste_mode
+#endif
+
 /* Bottom flick placement, in cycles from the start of frame line
  * 262 as the GLUE counts them (512 per 50Hz line). The line's
  * fetch runs 56..376; the GLUE samples the sync rate for its
@@ -2013,7 +2026,7 @@ static int ovsc_open(int which)
                           & ~(uintptr_t)255);
         buf_base = buf;
     }
-    memset(buf, 0, MAX_FETCH_BYTES);
+    OVSC_CLEAR(buf);
     /*
      * A second page when the caller asked for STDL_DOUBLEBUF. The
      * display keeps fetching `buf` while the game draws into
@@ -2041,11 +2054,11 @@ static int ovsc_open(int which)
         page2 = (uint8_t *)(((uintptr_t)buf2_alloc + 255)
                             & ~(uintptr_t)255);
         draw = page2;
-        memset(draw, 0, MAX_FETCH_BYTES);
+        OVSC_CLEAR(draw);
     } else if (page2 != NULL) {
         /* re-open: keep the pages, take whichever is not live */
         draw = (buf == page2) ? buf_base : page2;
-        memset(draw, 0, MAX_FETCH_BYTES);
+        OVSC_CLEAR(draw);
     } else {
         draw = buf;
     }
@@ -2064,7 +2077,7 @@ static int ovsc_open(int which)
         (void)stdl_pal_stage_on(STDL_PAL_STAGE_BORDER);
     }
     if ((which & MODE_BOT)
-        && (c16 == 0 || cal_mode != stdl_megaste_mode)) {
+        && (c16 == 0 || cal_mode != OVSC_SPEED_KEY())) {
         /*
          * Once per process used to be enough, on the grounds that
          * the CPU speed does not change under a running program.
@@ -2096,7 +2109,7 @@ static int ovsc_open(int which)
         }
         stdl_ovsc_measured = (uint8_t)(live ? ovsc_measure() : 0);
         ovsc_table(c16);
-        cal_mode = stdl_megaste_mode;
+        cal_mode = OVSC_SPEED_KEY();
     }
     ovsc_program(m);
     ovsc_surface();
@@ -2115,7 +2128,7 @@ static int ovsc_close(int which)
         return stdl_screen.h;
     }
     if (m) {
-        memset(buf, 0, MAX_FETCH_BYTES);
+        OVSC_CLEAR(buf);
         ovsc_program(m);
         ovsc_surface();
         return stdl_screen.h;

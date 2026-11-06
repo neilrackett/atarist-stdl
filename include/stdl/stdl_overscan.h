@@ -9,6 +9,8 @@
 #ifndef STDL_OVERSCAN_H
 #define STDL_OVERSCAN_H
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -125,10 +127,15 @@ void STDL_CloseTopBorder(void);
 int  STDL_OpenBottomBorder(void);
 void STDL_CloseBottomBorder(void);
 
-/* Frames whose border flip was skipped since the border was
- * opened - a long interrupts-off stretch or bus stall pushed the
+/* Frames whose border flip was skipped since the borders were last
+ * programmed - a long interrupts-off stretch or bus stall pushed the
  * timer past its window, and that frame showed a normal border
- * instead of glitching mid-frame. Steady increments mean something
+ * instead of glitching mid-frame. Every open starts the count again
+ * from 0, and so does a close that leaves the other border open,
+ * which re-programs it; the last close leaves it as it was. So read
+ * it before closing: one port read it after closing its two borders
+ * one at a time and reported the partial close's fresh 0, which on
+ * hardware proved nothing. Steady increments mean something
  * in the program stalls the CPU every frame. STDL's own BLiTTER
  * operations are not that something: while a border is open each
  * one is placed from the beam's position (the video counter in the
@@ -151,6 +158,121 @@ uint32_t STDL_OverscanMisses(void);
 #define STDL_OVERSCAN_TOP_H       228
 #define STDL_OVERSCAN_BOTTOM_H    245
 #define STDL_OVERSCAN_BOTH_H      273
+
+/*
+ * A program that runs the machine itself.
+ *
+ * The calls above, for a program that does not use the rest of the
+ * library: one that takes over the interrupts and the screen itself,
+ * flips its own pages, sets its own colours, and links no C library
+ * either. It compiles one file, src/overscan_host.c, with
+ * -Iinclude, and links that object in place of libstdl.a, never
+ * beside it. The object needs nothing but libgcc's arithmetic
+ * (__mulsi3, __divsi3, __udivsi3), and STDL's build checks that it
+ * stays so.
+ *
+ * The program gives the borders one page and keeps its other pages
+ * itself. Before the first open it calls STDL_OverscanHostInit,
+ * then opens and closes the borders with the calls above, which
+ * behave as they are documented there with these differences:
+ *   - opening the first border clears host->page and shows it
+ *     (XBIOS Setscreen). Opening the second, and closing one of two,
+ *     clear the page on screen and re-program the borders on it: the
+ *     page STDL_OverscanPageShown last named, or host->page when it
+ *     has named none since the first border opened;
+ *   - the last close shows host->screen (Setscreen) and leaves the
+ *     colours alone: nothing is staged, the program's VBL sets them;
+ *   - nothing is allocated, and STDL_Flip does not exist: the
+ *     program flips its pages itself, telling the borders as below;
+ *   - a Mega STE's speed is read from $FFFF8E21 at each open of the
+ *     bottom border, which is calibrated again when it has changed,
+ *     so set it before opening and leave it while a border is open.
+ *
+ * What the program must provide: supervisor mode; its interrupts
+ * running at IPL 3 or below across an open or a close; a VBL that
+ * adds 1 to _frclock ($466) every frame, as TOS's handler does (the
+ * open and close wait for the blank by watching it); and $70 already
+ * holding its own VBL handler, which the open chains a prefix in
+ * front of and the last close puts back. While a border is open
+ * Timer A and Timer B are STDL's, and Timer C's vector carries a
+ * prefix (see STDL_OpenTopBorder); 50Hz is forced and the sync rate
+ * read at the first open is put back at the last close. The MFP's
+ * enable and mask bits for Timers A and B (IERA/IMRA 0x21) are taken
+ * at the open and put back as they were at the close; nothing else
+ * of the MFP's is touched.
+ *
+ * vlink warns that the object makes .text writable: the border ISRs
+ * keep the variables they read in their timing windows beside their
+ * code, as they do in the library build.
+ */
+
+/* One overscan page: 274 rows of 160 bytes, rows 1-273 shown with
+ * both borders open (rows 1-228 with the top alone, 0-244 with the
+ * bottom alone). With the top border open, row 0 is fetched too, a
+ * word out of step, on the line above the picture: keep it colour 0,
+ * as the open leaves it, or what is drawn there shows as a smear
+ * (seen in Hatari, as colours 7 and 8 where a white bar crossed it). */
+#define STDL_OVERSCAN_PAGE_BYTES  (274 * 160)
+
+/* For callers in assembly: page at 0, screen at 4, mch at 8 and
+ * blitter, a byte, at 12, 14 bytes in all at gcc's m68k alignment of
+ * 2. overscan_host.c does not compile if that changes. */
+typedef struct STDL_OverscanHost {
+    void     *page;     /* the page the first open shows: ST RAM,
+                         * 256-byte aligned, STDL_OVERSCAN_PAGE_BYTES;
+                         * every page the program flips to is the
+                         * same size, aligned the same way */
+    void     *screen;   /* shown again when the last border closes:
+                         * the screen TOS had (Logbase)            */
+    uint32_t  mch;      /* the _MCH cookie, 0 without one; a TT or a
+                         * Falcon ($20000 and up) is refused by the
+                         * open, which sets the error              */
+    uint8_t   blitter;  /* nonzero when the program runs the BLiTTER
+                         * with a border open: the ISRs pause it
+                         * across each flick. Its hog-mode blits must
+                         * still keep away from the lines given at
+                         * STDL_OverscanMisses                      */
+} STDL_OverscanHost;
+
+/* Take the machine description; call it with no border open. Waits
+ * for _frclock to move, at most about two seconds. Returns 0, or -1
+ * with STDL_GetError() set: a border is open, the page is missing or
+ * not 256-byte aligned, or _frclock is not counting. */
+int  STDL_OverscanHostInit(const STDL_OverscanHost *host);
+
+/*
+ * The program's page flips, two calls a flip, both from its VBL:
+ *   STDL_OverscanPageNext(page) in the VBL that writes the page to
+ *     the video base ($FF8201/$FF8203), which the Shifter takes up
+ *     at the next frame;
+ *   STDL_OverscanPageShown() in the VBL after, the first frame that
+ *     page is on screen.
+ * The top ISR checks the video counter against the page on screen
+ * and the one coming, and the bottom ISR polls for the counter at
+ * the page's frame line 262, so a flip they were not told about
+ * shows a normal border and counts in STDL_OverscanMisses().
+ *
+ * Both only store a few bytes (no multiply or divide), in an order
+ * that is safe against the border ISRs, and follow the C calling
+ * convention (d0-d1/a0-a1 not preserved). In a VBL that does both,
+ * PageShown goes first. Both do nothing with no border open; call
+ * them only while a border stays open, never from a VBL that can
+ * interrupt an open or a close: let a flip in progress finish before
+ * either, and start the next after.
+ */
+void STDL_OverscanPageNext(const void *page);
+void STDL_OverscanPageShown(void);
+
+/* Puts back what an open border borrowed - the $70 and $114 vectors
+ * as they were at the open, Timers A and B, their MFP bits, the sync
+ * rate - waits a bounded time for the blank and reseeds the Shifter,
+ * and nothing more: no XBIOS, no GEMDOS, no colours, no screen. For
+ * an exception or terminate handler, which shows its own screen
+ * afterwards. Does nothing with no border open. */
+void STDL_OverscanRelease(void);
+
+/* the error the last failed call set; the host object defines it */
+const char *STDL_GetError(void);
 
 #ifdef __cplusplus
 }

@@ -1265,7 +1265,10 @@ first.
   the ISR skips the sync flip entirely when it wakes up late, so a
   miss can never glitch mid-frame; `STDL_OverscanMisses()` counts
   them - steady increments mean something stalls the CPU every
-  frame. The classic culprit is a hog-mode BLiTTER blit (one port's
+  frame. Read it before closing: every open restarts it, and so
+  does closing one border of two (the other is re-programmed), so
+  one port's exit report, read after closing its borders one at a
+  time, said 0 whatever had happened. The classic culprit is a hog-mode BLiTTER blit (one port's
   cutscenes missed 191 frames of one sequence exactly this way).
   STDL's own blits cannot do it: while a border is open every
   BLiTTER operation is placed from the beam's position - the video
@@ -1342,6 +1345,26 @@ first.
   races the beam and loses intermittently (measured: constant
   ghosting in one port's cutscenes until synced).
   See `examples/overscan.c`.
+- Borders without the library: a program that owns the machine
+  (its own VBL and interrupts, its own page flips and colours, maybe
+  no C library) compiles `src/overscan_host.c` alone with
+  `-Iinclude` and links it instead of `libstdl.a`, never with it. Do
+  not compile overscan.c with copies of STDL's internals instead: one
+  port did, and a release that gave overscan.c a new hook broke it
+  silently; the host object needs only libgcc's arithmetic and STDL's
+  build checks that it stays so. `STDL_OverscanHostInit(&host)` (page,
+  screen to put back, `_MCH`, BLiTTER yes/no), the usual
+  `STDL_Open*Border`/`Close*Border`, and two calls from the program's
+  VBL for each of its own flips: `STDL_OverscanPageNext(page)` with
+  the write to the video base, `STDL_OverscanPageShown()` a VBL later
+  (both first in a VBL that does both). Call them only while a border
+  stays open, never across an open or a close. The VBL must count
+  `_frclock` ($466); row 0 of each page stays colour 0, since the top
+  border's lead line shows it a word out of step.
+  `STDL_OverscanRelease()` is the exception handler's: vectors,
+  timers and sync rate, nothing else. `examples/ovhost.c` (three
+  pages at 50Hz, both borders): 0 misses in 300 frames on ST, STE and
+  Mega STE in Hatari, about 400 with either flip call left out.
 - Unaligned blits carry the port: a sprite that lands on arbitrary
   x goes through the shift chain, and its four-plane merge is
   hand-written 68000 in blit.c (`blit_merge4`, C twin under the

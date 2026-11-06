@@ -348,7 +348,8 @@ open, 18% with the top, 28% with both (it was 2.1x slower in
 shared mode); 64x32 blits pay 35-47% for the per-operation
 decision. The border is then lost in about one frame in 1600
 beyond the frame in which it opens; `STDL_OverscanMisses()` says
-whether anything else stalls the CPU. Palette writes land in the
+whether anything else stalls the CPU. Read it before closing: every
+open restarts the count, and so does closing one border of two. Palette writes land in the
 blanking via a VBL callback. The ISRs themselves cost under 1% of
 an 8MHz frame each. A program driving the BLiTTER on its own must
 use non-hog mode or keep its hog blits short and clear of frame
@@ -357,6 +358,33 @@ Full-page screen updates should start at the VBL
 (`STDL_WaitVBL`) so the copy stays ahead of the beam - the display
 starts 29 lines earlier with the top border open, and an unsynced
 full-page copy tears intermittently.
+
+A program that runs the machine itself - its own interrupts, its own
+page flips and colours, no C library - can have the borders without
+the rest of the library: it compiles `src/overscan_host.c` alone with
+`-Iinclude` and links that object instead of `libstdl.a` (never
+both). It needs only libgcc's arithmetic, and STDL's build fails if
+that ever changes, so a release that gives overscan.c a new hook
+cannot break such a program's build. `STDL_OverscanHostInit()` takes
+the page the borders open on (ST RAM, 256-byte aligned,
+`STDL_OVERSCAN_PAGE_BYTES`), the screen to put back, the `_MCH`
+cookie and whether the program blits with a border open; then the
+usual open and close calls. The program flips its own pages and says
+so from its VBL, twice a flip: `STDL_OverscanPageNext(page)` in the VBL
+that writes the page to the video base, `STDL_OverscanPageShown()` in
+the VBL after - the border interrupts compare the video counter with
+the page on screen and the one coming, so a flip they were not told
+about costs a frame's border and counts as a miss. Its VBL must count
+`_frclock` ($466), as TOS's does; a Mega STE's speed is read from the
+register at each open. `STDL_OverscanRelease()` puts the vectors,
+timers and sync rate back touching nothing else, for an exception
+handler. Keep row 0 of every page at colour 0: with the top border
+open it is fetched, a word out of step, on the line above the
+picture. `examples/ovhost.c` takes the machine that way and flips
+three pages at 50Hz with both borders open: no misses over 300 frames
+in Hatari on an ST, an STE and a Mega STE, and about 400 when either
+call is left out. The object is 8.1K of code against the library
+build's 7.4K.
 
 ## More colours and lines on a TT or a Falcon
 

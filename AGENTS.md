@@ -1327,6 +1327,20 @@ and the rules below keep it from being anything else's.
   and its own Timer C prefix of the same kind. The two never run
   together: `stdl_timerb_owner`. Services (audio refill, compat
   timers, cursor) run from the pump and the native delays.
+- **overscan.c builds two ways.** In the library, and inside
+  `src/overscan_host.c`, which includes it and defines what it uses
+  of the rest of STDL, for a program that runs the machine itself and
+  links neither the library nor a C library (`stdl_overscan.h`, "A
+  program that runs the machine itself"). A call overscan.c gains into
+  the rest of the library fails the build's `ovhostcheck`: define it
+  there as such a program needs it, which is usually doing nothing,
+  since the page, the colours and the flips are the program's. The
+  two macros at overscan.c's top (`OVSC_CLEAR`, `OVSC_SPEED_KEY`) are
+  where the builds differ; the library's object is byte-identical to
+  what it was before them, and should stay so. `examples/ovhost.c` is
+  the on-target check: it prints the misses over 300 flipped frames,
+  0 on an ST, an STE and a Mega STE in Hatari, about 400 with either
+  page call left out.
 
 ## 68000 / gcc 4.6.4 performance notes
 

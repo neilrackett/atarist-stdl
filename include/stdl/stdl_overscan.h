@@ -54,7 +54,7 @@ extern "C" {
  * cause was the cache - every BLiTTER operation empties it - leaving
  * the border interrupt's timing-critical path partly cold; the
  * interrupt now warms all of it. No workaround is needed. See
- * docs/porting.md for the things measured to disturb an open
+ * docs/overscan.md for the things measured to disturb an open
  * border.
  *
  * Uses MFP Timer A (vector, IERA/IMRA bit 5) and Timer B's counter

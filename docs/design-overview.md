@@ -1,5 +1,12 @@
 # STDL — Planar Display Library for Atari ST
 
+> **This is the original design sketch**, written before the first
+> port and kept for the reasoning behind the design. Much has changed
+> since - the layout, the modules, and most of the open questions at
+> the end are settled. For the current contract see
+> [format.md](format.md); for using the library, [porting.md](porting.md)
+> and the [README](../README.md).
+
 A deliberately incomplete, planar-native subset of SDL 1.2, intended to make
 SDL 1.x game ports to the Atari ST / STE / Mega STE mostly mechanical.
 

@@ -34,7 +34,7 @@ add-on's headers stop the build if they meet it.
   toolchain's 68020 libraries, which assume an FPU, and a stock Falcon
   refuses it: "This program requires a 68881".
 - **libcmini works too:** link `libstdl-sdl2-cmini.a` and
-  `libstdl-cmini.a`, as README's "Building" describes for STDL.
+  `libstdl-cmini.a`, as [building.md](building.md) describes for STDL.
 - **Build with `-Werror=implicit-function-declaration`.** An SDL2 call
   the headers do not declare is a compile error by design. gcc 4.6
   only warns about an undeclared call and leaves it to the link, and

@@ -1428,6 +1428,9 @@ first.
 
 - `docs/format.md` - byte-level surface/sprite/bank contract
 - `docs/porting.md` - SDL->STDL mapping table, rewrite patterns
+- `docs/building.md` - building, libcmini or mintlib, link lines
+- `docs/overscan.md` - ST borders and rasters, and what disturbs a border
+- `docs/responsive.md` - 256 colours and 240 rows on a TT or a Falcon
 - `docs/limits.md` - non-goals; do not work around them, redesign
 - `examples/` - ported SDL 1.2 test programs; `testsprite.c` is the
   reference for the masked-blit + dirty-rect flow, `testpalette.c`

@@ -219,8 +219,8 @@ SIZE_OBJS = planes8ex planes8tile asset8
 $(foreach o,$(SIZE_OBJS),$(OBJDIR)/src/$(o).o $(OBJDIR)/src/$(o).cmini.o): \
     CFLAGS += -Os
 
-# libcmini variant, what a game links unless it needs mintlib (README,
-# "Building"): -nostdlib -lcmini instead of mintlib. libstdl.a compiled
+# libcmini variant, what a game links unless it needs mintlib
+# (docs/building.md): -nostdlib -lcmini instead of mintlib. libstdl.a compiled
 # against mintlib headers cannot be mixed with that (different FILE,
 # different startup), so build a parallel archive against the libcmini
 # headers:

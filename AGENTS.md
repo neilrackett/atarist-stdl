@@ -12,6 +12,11 @@ skill. Porting an SDL2 program to a TT or a Falcon with the SDL2
 add-on has its own, [`.claude/skills/stdl-sdl2/SKILL.md`](.claude/skills/stdl-sdl2/SKILL.md)
 (`/stdl-sdl2`).
 
+New to the code? [`docs/internals.md`](docs/internals.md) is the map:
+what a program links, how optional modules reach the core, the run from
+`STDL_Init` to exit, and which interrupts the library owns. The notes
+below are the lessons; that is where they sit.
+
 ## Build
 
 ```
@@ -1207,10 +1212,13 @@ and the rules below keep it from being anything else's.
   say so.** Adding, changing or deprecating anything in
   `include/stdl/` means updating, in the same change:
   `docs/format.md` if it touches the byte-level contract or the
-  mask rules, `docs/porting.md` if a port would meet it,
+  mask rules, `docs/porting.md` if a port would meet it (or
+  `docs/overscan.md` for the borders and rasters,
+  `docs/responsive.md` for a TT's or a Falcon's screen,
+  `docs/building.md` for the build and link),
   `.claude/skills/stdl/SKILL.md` (the cost table, the API list, and
   any pattern worth teaching), and `README.md` if it belongs in the
-  headline list. A header comment alone does not count - nobody
+  headline feature list. A header comment alone does not count - nobody
   porting a game reads the headers first. Check it the cheap way
   before committing: grep the new symbol across `docs/ README.md
   .claude/` and see it come back.
@@ -1222,7 +1230,7 @@ and the rules below keep it from being anything else's.
   that already runs (a new blit flag joins the one drawing
   sprites); add a new one when it does not fit, remembering the
   Makefile rule and the `EXAMPLES` list, or it never gets built or
-  shipped. Keep them small and CC0, show the intended usage rather
+  shipped, and its row in `examples/README.md`, or nobody finds it. Keep them small and CC0, show the intended usage rather
   than every parameter, and say in a comment why the pattern is the
   right one - `examples/chunky.c` is the shape to copy.
 - **State the honest measured number, not the hoped-for one.** If a

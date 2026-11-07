@@ -76,7 +76,14 @@ tilesets, `STDL_TRANSPARENT`, the blit flags (UNDER, MARK) and
 work as on 4 planes, and `STDL_TRIPLEBUF` gives a third page there
 too (153.6K of ST RAM on a TT).
 
-**A TT- or Falcon-only SDL port?** Use Atari SDL 1.2 (plain TOS, no
+**A TT- or Falcon-only SDL2 port?** Use STDL's SDL2 add-on
+(`addons/sdl2/`, `docs/sdl2.md`), and the `stdl-sdl2` skill
+(`.claude/skills/stdl-sdl2/SKILL.md`), which covers it: SDL2's window,
+renderer and INDEX8 textures on the 256-colour responsive screen, with
+its input, surfaces, streams, log and audio. It is the one chunky part
+of STDL, kept apart from the core.
+
+**A TT- or Falcon-only SDL 1.2 port?** Use Atari SDL 1.2 (plain TOS, no
 MiNT): those machines have 256 colours, and TT line-doubles 320x240 so
 one binary covers both. Their 256-colour modes are eight interleaved
 planes, so SDL converts its chunky surface at every update; and one
@@ -1389,7 +1396,10 @@ first.
 ## Anti-patterns (reject these in review)
 
 - Introducing a chunky buffer + conversion pass: that is c2p and
-  breaks the design. Redesign around spans/tiles/sprites.
+  breaks the design. Redesign around spans/tiles/sprites. (The SDL2
+  add-on, for SDL2 programs on a TT or a Falcon only, is the one
+  place that is the design, and it stays out of the core: the
+  `stdl-sdl2` skill.)
 - `STDL_PutPixel` (or `screen->pixels[...]` arithmetic) inside a
   frame loop.
 - Assuming `screen->pitch == screen->w` or byte-per-pixel access.

@@ -66,9 +66,12 @@ jobs:
 
       - name: Replace the assets on the latest release
         # --clobber, because the release is rolling: the same asset
-        # names every time, so a download link never changes.
+        # names every time, so a download link never changes. The SDL2
+        # add-on's archives ship beside the core's, as files of their
+        # own: a program links them only by naming them.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload latest libstdl.a libstdl-cmini.a \
+            libstdl-sdl2.a libstdl-sdl2-cmini.a \
             stdl-examples.zip --clobber

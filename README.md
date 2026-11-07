@@ -26,13 +26,21 @@ but on a stock ST it's just not viable: c2p and the framework overhead mean
 it's slow and uses around half the RAM on a 512KB ST, and it only works in
 greyscale.
 
+Porting an SDL2 program to a stock TT or Falcon? STDL's optional SDL2 add-on
+(`addons/sdl2/`, [docs/sdl2.md](docs/sdl2.md)) draws 256-colour textures on
+STDL's responsive screen and converts only what changed each frame. It is the
+one place STDL is chunky, it is never part of the core library, and a program
+gets it only by asking for it.
+
 With STDL, it's in full colour and 50-60fps on a 520 ST is truly achievable.
 
 ### What STDL does differently
 
-There is no chunky backbuffer and no c2p anywhere in the pipeline: interleaved
-planar is the native format, assets are converted offline, and spans, rects and
-blits are the primary verbs.
+There is no chunky backbuffer and no c2p anywhere in the core library's
+pipeline: interleaved planar is the native format, assets are converted
+offline, and spans, rects and blits are the primary verbs. The SDL2 add-on,
+for SDL2 programs on a TT or a Falcon, is the one exception, and it lives
+apart (`addons/sdl2/`).
 
 For engines that decode byte-per-pixel sprite frames at runtime,
 `STDL_BlitIndexed8` draws chunky frames straight into the planes through a
@@ -146,6 +154,7 @@ emulated; see [docs/limits.md](docs/limits.md).
 | ----------------- | ----------------------------------------------------------------------------------- |
 | `include/stdl/`   | public headers, one per module                                                      |
 | `include/compat/` | SDL.h and SDL_mixer.h - the SDL 1.2 compatibility shims                             |
+| `addons/sdl2/`    | the optional SDL2 add-on for a TT or a Falcon (docs/sdl2.md), built by `make sdl2`   |
 | `src/`            | video, surface, surfacefrom, draw, shapes, blit, blit8, blitter, planes, palette,   |
 |                   | event, cursor, time, dirty, vbl, sprite, tileset, text, drawchar, indexed, asset,   |
 |                   | bmp, degas, audio, voice, music, sfx, tone, opl, ym, compat, mixer, palstage,       |
@@ -154,8 +163,8 @@ emulated; see [docs/limits.md](docs/limits.md).
 |                   | WAV (incl. MS ADPCM) to STE DMA rates, MIDI and YM2151 (VGM) to YM music, C-arrays  |
 | `tools/libcalls.sh` | per-function libgcc arithmetic calls (multiply, divide, 64-bit, float) in object files, with an allowlist gate |
 | `examples/`       | ported SDL 1.2 test programs + original STDL demos and their assets (public domain) |
-| `docs/`           | format.md (the contract), porting.md, limits.md, design-overview.md                 |
-| `.claude/skills/` | the `stdl` porting skill (auto-discovered by Claude Code in this repo)              |
+| `docs/`           | format.md (the contract), porting.md, limits.md, design-overview.md, sdl2.md        |
+| `.claude/skills/` | the `stdl` porting skill, and `stdl-sdl2` for the SDL2 add-on (auto-discovered by Claude Code in this repo) |
 | `dist/`           | build output: .TOS binaries + copied assets (untracked; doubles as a GEMDOS drive)  |
 
 ## Building
@@ -176,6 +185,10 @@ hatari --machine ste dist/TSPRITE.TOS
 
 Clone with `--recursive`, or run `git submodule update --init`: Xpad is
 a submodule at `lib/xpad`, and the library does not build without it.
+
+The SDL2 add-on builds apart, and only when asked: `stcmd make sdl2` makes
+`libstdl-sdl2.a` (and `-cmini.a`) and `dist/SDL2DEMO.TOS`.
+[docs/sdl2.md](docs/sdl2.md) says how a program links it.
 
 **Link your game against libcmini, not mintlib, unless it needs
 mintlib.** The examples link mintlib, the toolchain's default, but a
@@ -247,6 +260,7 @@ run under EmuTOS/TOS on Hatari:
 | OVERSCAN.TOS | border overscan: T top (228), B bottom (245), both combine (273), SPACE closes   |
 | OVHOST.TOS   | both borders in a program that owns the machine: its own VBL, three pages, no libstdl.a |
 | RESPDEMO.TOS | one binary, each machine's best screen: 256 colours and 240 rows on a TT or Falcon |
+| SDL2DEMO.TOS | the SDL2 add-on on a TT or a Falcon: INDEX8 textures, palette cycling, copying what changed, a box made in a surface and moved by the keys, a pad or the mouse, with a tone |
 
 Large fills and blits are BLiTTER-accelerated where the hardware has
 one, unaligned blits included - the BLiTTER shifts them itself (a
@@ -316,7 +330,9 @@ where they used to take all of it by the third.
 The repo ships a porting guide written for AI agents
 ([.claude/skills/stdl/SKILL.md](.claude/skills/stdl/SKILL.md)): the surface
 format contract, API costs, SDL-to-STDL rewrite patterns, stdlconv usage and
-the Hatari test loop. It is plain markdown, so it works with any agent:
+the Hatari test loop. An SDL2 program for a TT or a Falcon has its own,
+[.claude/skills/stdl-sdl2/SKILL.md](.claude/skills/stdl-sdl2/SKILL.md), for
+the SDL2 add-on. They are plain markdown, so they work with any agent:
 
 - **Claude Code** discovers it automatically in this repo (`/stdl`); when
   porting a game in its own repository, symlink it in or install user-wide:
@@ -324,6 +340,7 @@ the Hatari test loop. It is plain markdown, so it works with any agent:
   ```
   mkdir -p path/to/game/.claude/skills
   ln -s /path/to/atarist-stdl/.claude/skills/stdl path/to/game/.claude/skills/stdl
+  ln -s /path/to/atarist-stdl/.claude/skills/stdl-sdl2 path/to/game/.claude/skills/stdl-sdl2
   ```
 
 - **Other agents** (Codex, Cursor, Gemini CLI, ...): reference the file from

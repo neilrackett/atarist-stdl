@@ -323,6 +323,10 @@ dist/CHUNKY.TOS: examples/chunky.c $(LIB)
 -include $(LIBOBJS:.o=.d) $(CMINIOBJS:.o=.d) $(STATSOBJS:.o=.d) \
          $(OVHOST_OBJ:.o=.d)
 
+# The SDL2 add-on's targets (`make sdl2`), which nothing above builds:
+# the core neither includes nor links it.
+include addons/sdl2/sdl2.mk
+
 # host-side unit tests: native clang + ASan, no cross toolchain
 # needed (run on the host, not through stcmd)
 test:
@@ -338,8 +342,10 @@ STCMD ?= STCMD_NO_TTY=1 stcmd
 
 ci:
 	$(MAKE) -C tests/host run CC=clang
+	$(MAKE) -C addons/sdl2/tests run CC=clang
 	$(STCMD) make
 	$(STCMD) make cmini
+	$(STCMD) make sdl2
 	$(MAKE) bundle
 
 # The example binaries and the assets they load, in one zip for the
@@ -354,7 +360,7 @@ BUNDLE = stdl-examples.zip
 bundle:
 	rm -rf $(OBJDIR)/bundle $(BUNDLE)
 	mkdir -p $(OBJDIR)/bundle/STDL
-	cp $(EXAMPLES) examples/assets/* $(OBJDIR)/bundle/STDL/
+	cp $(EXAMPLES) $(SDL2EXAMPLES) examples/assets/* $(OBJDIR)/bundle/STDL/
 	cp examples/LICENSE $(OBJDIR)/bundle/STDL/LICENSE.TXT
 	cd $(OBJDIR)/bundle && zip -qr ../../$(BUNDLE) STDL
 	@echo "$(BUNDLE): `ls $(OBJDIR)/bundle/STDL | wc -l | tr -d ' '` files"
@@ -362,7 +368,9 @@ bundle:
 clean:
 	rm -rf $(OBJDIR)
 	rm -f $(CMINILIB) $(LIB) $(EXAMPLES) $(BUNDLE)
+	rm -f $(SDL2LIB) $(SDL2CMINILIB) $(SDL2EXAMPLES)
 	$(MAKE) -C tests/host clean
+	$(MAKE) -C addons/sdl2/tests clean
 
 # Run an example in Hatari (host-side): make run-TSPRITE
 run-%:

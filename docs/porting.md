@@ -5,6 +5,10 @@ surface so ported source stays recognisable. Anything not mapped is
 a **compile error by design**: the porter finds the gaps at build
 time, not at runtime.
 
+Porting an SDL2 program to a TT or a Falcon only? That is the SDL2
+add-on's job, not this shim's: [sdl2.md](sdl2.md). Its headers are
+separate, and must never meet this one's.
+
 ## Workflow
 
 1. Convert assets with `stdlconv`; verify visually in Hatari.

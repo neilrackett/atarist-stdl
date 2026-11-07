@@ -26,6 +26,7 @@
 
 #include "SDL.h"
 #include "SDL_audio.h"
+#include "hold.h"
 
 struct {
 	SDL_AudioSpec spec;
@@ -74,6 +75,8 @@ int main(int argc, char *argv[])
 	char name[32];
 	const char *file;
 	Uint32 start;
+
+    hold_on_exit(NULL);
 
 	/* Load the SDL library */
 	if ( SDL_Init(SDL_INIT_AUDIO) < 0 ) {

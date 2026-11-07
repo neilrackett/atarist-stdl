@@ -149,58 +149,91 @@ char *SDL_VideoDriverName(char *namebuf, int maxlen)
 }
 
 /* ---------------------------------------------------------------- */
-/* joystick: the physical joystick port (port 1) as stick 0.
- * State comes from the IKBD packets the event module already
- * parses; this is a pure veneer. */
+/* joystick: STDL's joysticks as SDL's, by the same numbers. Stick 0 is
+ * the physical joystick port (port 1) with pad 0, its state from the
+ * IKBD packets the event module already parses; this is a pure veneer.
+ * Sticks 1-5 are there only where the program asked for them
+ * (STDL_SetNumJoysticks), and are read from the state the pump keeps
+ * for them, stdl_joyn, so a port that never asks links none of that
+ * code. */
 
-static int joystick_open;
+static int joystick_open[STDL_MAX_JOYSTICKS];
+
+/* a handle's stick: anything not one of ours is stick 0, which every
+ * handle was when there was one */
+static int joy_index(SDL_Joystick *joystick)
+{
+    const int *p = (const int *)joystick;
+
+    if (p > joystick_open && p < joystick_open + STDL_MAX_JOYSTICKS) {
+        return (int)(p - joystick_open);
+    }
+    return 0;
+}
+
+/* a stick's pad record: joystick 0's, or joysticks.c's, which is
+ * there for every stick a handle can name */
+static const stdl_pad_t *pad_of(int index)
+{
+    return index ? &stdl_joyn->pads[index] : &stdl_pad0;
+}
 
 int SDL_NumJoysticks(void)
 {
-    return 1;
+    return STDL_NumJoysticks();
 }
 
 const char *SDL_JoystickName(int index)
 {
-    return (index == 0) ? "Atari ST joystick port 1" : NULL;
+    static const char *const ports[2] = {
+        "Atari ST joystick port 1", "Atari ST joystick port 0"
+    };
+    static const char *const pads[4] = {
+        "Xpad pad 0", "Xpad pad 1", "Xpad pad 2", "Xpad pad 3"
+    };
+
+    if (index < 0 || index >= STDL_NumJoysticks()) {
+        return NULL;
+    }
+    /* sticks 2-5 are pads alone, pad 2 and 3 merged or 0 to 3 apart
+     * (STDL_UseJoystickMerge): the slot from its record */
+    return index < 2 ? ports[index] : pads[pad_of(index)->slot & 3];
 }
 
 SDL_Joystick *SDL_JoystickOpen(int index)
 {
-    if (index != 0) {
+    if (index < 0 || index >= STDL_NumJoysticks()) {
         STDL_SetError("no such joystick");
         return NULL;
     }
-    joystick_open = 1;
-    return (SDL_Joystick *)&joystick_open;
+    joystick_open[index] = 1;
+    return (SDL_Joystick *)&joystick_open[index];
 }
 
 void SDL_JoystickClose(SDL_Joystick *joystick)
 {
-    (void)joystick;
-    joystick_open = 0;
+    joystick_open[joy_index(joystick)] = 0;
 }
 
 int SDL_JoystickIndex(SDL_Joystick *joystick)
 {
-    (void)joystick;
-    return 0;
+    return joy_index(joystick);
 }
 
 int SDL_JoystickOpened(int index)
 {
-    return (index == 0) ? joystick_open : 0;
+    return (index >= 0 && index < STDL_MAX_JOYSTICKS)
+        ? joystick_open[index] : 0;
 }
 
 int SDL_JoystickNumAxes(SDL_Joystick *joystick)
 {
-    (void)joystick;
     /* Two for a plain stick, six when a pad is there: both sticks and
      * the two triggers. Reported only when a provider is present, so a
      * port sees the geometry it would have seen before unless the
      * hardware is actually richer, which is how desktop SDL behaves
-     * when a pad is plugged in. */
-    return stdl_xpad_present() ? STDL_XPAD_AXES : 2;
+     * when a pad is plugged in. Each stick asks its own slot. */
+    return STDL_HasPad(joy_index(joystick)) ? STDL_XPAD_AXES : 2;
 }
 
 int SDL_JoystickNumBalls(SDL_Joystick *joystick)
@@ -211,57 +244,35 @@ int SDL_JoystickNumBalls(SDL_Joystick *joystick)
 
 int SDL_JoystickNumHats(SDL_Joystick *joystick)
 {
-    (void)joystick;
     /* A d-pad is a hat. An ST joystick is not: its directions are the
      * axes, and reporting a hat as well would double every press. */
-    return stdl_xpad_present() ? 1 : 0;
+    return STDL_HasPad(joy_index(joystick)) ? 1 : 0;
 }
 
 int SDL_JoystickNumButtons(SDL_Joystick *joystick)
 {
-    (void)joystick;
-    return stdl_xpad_present() ? STDL_XPAD_BUTTONS : 1;
+    return STDL_HasPad(joy_index(joystick)) ? STDL_XPAD_BUTTONS : 1;
 }
 
+/* the core's readers, as the events carry them */
 Sint16 SDL_JoystickGetAxis(SDL_Joystick *joystick, int axis)
 {
-    (void)joystick;
-
-    /* Axes 2 to 5 exist only on a pad. */
-    if (axis >= 2) {
-        return stdl_xpad_present() ? stdl_xpad_axis(axis) : 0;
-    }
-
-    /*
-     * Axes 0 and 1 have two possible sources. The same helper the event
-     * path uses decides between them, so a poll and an event can never
-     * disagree about the same stick.
-     */
-    return stdl_xpad_axis_merged(axis, stdl_joy_ikbd());
+    return STDL_GetJoystickAxis(joy_index(joystick), axis);
 }
 
 Uint8 SDL_JoystickGetButton(SDL_Joystick *joystick, int button)
 {
-    (void)joystick;
-
-    /* Button 0 is fire from either source: STDL_GetJoyState() is
-     * already the merged byte, so a stick and a pad both reach it. */
-    if (button == 0 && (STDL_GetJoyState() & 0x80)) {
-        return SDL_PRESSED;
-    }
-    if (button > 0 && stdl_xpad_present() && stdl_xpad_button(button)) {
-        return SDL_PRESSED;
-    }
-    return SDL_RELEASED;
+    /* Button 0 is fire from either source, the port or the pad; the
+     * rest are the pad's, STDL's inputs from fire on. */
+    return (button >= 0 && button < STDL_XPAD_BUTTONS
+            && STDL_JoystickInputHeld(joy_index(joystick),
+                                      STDL_JOYSTICK_FIRE + button))
+        ? SDL_PRESSED : SDL_RELEASED;
 }
 
 Uint8 SDL_JoystickGetHat(SDL_Joystick *joystick, int hat)
 {
-    (void)joystick;
-    if (hat != 0 || !stdl_xpad_present()) {
-        return 0;
-    }
-    return stdl_xpad_hat();
+    return hat == 0 ? STDL_GetJoystickHat(joy_index(joystick)) : 0;
 }
 
 void SDL_JoystickUpdate(void)

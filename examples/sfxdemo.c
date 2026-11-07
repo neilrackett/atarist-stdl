@@ -19,7 +19,7 @@
  *  - per-step noise (`noises`): a gunshot, a noise crack over a
  *    tone thump on one voice, and an explosion whose noise sinks
  *    as it fades
- *  - STDL_JoyKeyEmulation: the joystick quits like a key would
+ *  - STDL_JoystickKeyEmulation: the joystick quits like a key would
  *
  * Timeline (console prints each step):
  *   0s  splash + music     6s  zap effect (auto voice)
@@ -32,6 +32,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdl/stdl.h>
+#include "hold.h"
 
 /* descending zap: 2000Hz -> 250Hz over half a second */
 static uint16_t zap_periods[25];
@@ -99,6 +100,8 @@ int main(int argc, char *argv[])
     STDL_Music *music;
     int i;
 
+    hold_on_exit(NULL);
+
     if (STDL_Init(STDL_INIT_VIDEO | STDL_INIT_AUDIO) < 0) {
         fprintf(stderr, "init failed: %s\n", STDL_GetError());
         return 1;
@@ -110,7 +113,7 @@ int main(int argc, char *argv[])
     if (STDL_ShowDegas("SPLASH.PI1") < 0) {
         printf("(no splash: %s)\n", STDL_GetError());
     }
-    STDL_JoyKeyEmulation(1);    /* stick = arrows + Alt = keys */
+    STDL_JoystickKeyEmulation(1);    /* stick = arrows + Alt = keys */
 
     for (i = 0; i < 25; i++) {
         zap_periods[i] = STDL_YM_PERIOD(2000 - i * 70);

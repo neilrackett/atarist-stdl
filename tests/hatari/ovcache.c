@@ -73,6 +73,7 @@
 #include <stdarg.h>
 #include <osbind.h>
 #include <stdl/stdl.h>
+#include "../../examples/hold.h"
 
 #ifndef FRAMES
 #define FRAMES 150
@@ -217,6 +218,8 @@ int main(void)
     static const char modes[] = { 'b', 'c' };
     const STDL_MachineInfo *mi;
     int si, m, c, p;
+
+    hold_on_exit("OVCACHE");
 
     if (STDL_Init(STDL_INIT_VIDEO) < 0) {
         return 1;

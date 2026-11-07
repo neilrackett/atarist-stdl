@@ -13,6 +13,35 @@ Subcommands:
       colours to the ST's 3-bit grid; --keycolor keeps that exact
       colour at index 15, excluded from quantisation.
 
+  bmp8 IN [IN...] [-o DIR] [--colors N] [--tt] [--key RRGGBB[=N]]
+       [--zero RRGGBB] [--border X] [--dither] [--pal FILE]
+      Images Pillow can read to uncompressed 8-bit BMPs, DIR/STEM.BMP,
+      for the SDL2 add-on's SDL_LoadBMP on a TT or a Falcon. They all
+      share ONE palette of up to N colours (256), quantised together,
+      since the screen has one: the art's own colours when they fit,
+      else a median cut over every image at once. Art already indexed
+      through one palette keeps its indices, unless an option below
+      needs entries of its own. Every BMP carries the whole palette.
+        --tt        snap the palette to a TT's 4 bits a channel (n * 17,
+                    rounded, which its registers show as written). A
+                    Falcon keeps 6 bits and shows each of those 16
+                    levels within 2.4 of 255. Without --tt a TT shows a
+                    channel's top 4 bits, up to 15 of 255 darker than
+                    the file says, and a Falcon its top 6.
+        --key       pixels of exactly this colour, and transparent ones,
+                    as index N (default N-1), which no other colour
+                    takes: the colour key for SDL_SetColorKey
+        --zero      index 0 this colour, otherwise one like the rest.
+                    Register 0 is also the border round a TT's or a
+                    Falcon's picture, so 000000 makes it black
+        --border    index X (a multiple of 16) left unused and black,
+                    for art whose colour 0 is not black: the add-on's
+                    STDL_SDL2_SetBorderIndex(renderer, X)
+        --dither    Floyd-Steinberg onto the palette (default none)
+        --pal       the palette alone too, 4 bytes an entry (r, g, b,
+                    255), to read into SDL_Color[] for
+                    SDL_SetPaletteColors
+
   pi1 IN OUT
       Convert an image to a Degas PI1 (320x200, 16 colours) for
       STDL_LoadDegas / STDL_ShowDegas.
@@ -69,12 +98,13 @@ Everything in a bank is big-endian, matching the 68000.
 import argparse
 import gzip
 import math
+import os
 import struct
 import sys
 from collections import Counter
 
 try:
-    # only the image subcommands (bmp16, pi1, bank) need Pillow;
+    # only the image subcommands (bmp16, bmp8, pi1, bank) need Pillow;
     # wav, midi, opm and embed run on the standard library alone
     from PIL import Image
 except ImportError:
@@ -257,8 +287,7 @@ def cmd_bmp16(args):
     img = Image.open(args.input).convert("RGB")
     keyrgb = None
     if args.keycolor:
-        keyrgb = tuple(int(args.keycolor[i : i + 2], 16)
-                       for i in (0, 2, 4))
+        keyrgb = parse_rgb(args.keycolor)
 
     if keyrgb is None:
         q = img.quantize(colors=args.colors)
@@ -298,6 +327,20 @@ def cmd_bmp16(args):
     print("wrote %s (%dx%d)" % (args.output, img.width, img.height))
 
 
+def write_bmp(path, w, h, bits, data, palette, important):
+    """An uncompressed BMP, bottom-up, BITMAPINFOHEADER: `data` its
+    rows already packed and padded, `palette` (r, g, b) entries, whose
+    length is the file's colour count."""
+    off = 14 + 40 + 4 * len(palette)
+    with open(path, "wb") as f:
+        f.write(b"BM" + struct.pack("<IHHI", off + len(data), 0, 0, off))
+        f.write(struct.pack("<IiiHHIIiiII", 40, w, h, 1, bits, 0, len(data),
+                            2835, 2835, len(palette), important))
+        for r, g, b in palette:
+            f.write(bytes((b, g, r, 0)))
+        f.write(data)
+
+
 def write_bmp4(path, img):
     """Write a P-mode image (<=16 colours) as an uncompressed 4bpp BMP."""
     w, h = img.width, img.height
@@ -317,17 +360,223 @@ def write_bmp4(path, img):
             else:
                 row[x // 2] |= v
         data += row
-    off = 14 + 40 + 16 * 4
-    size = off + len(data)
-    with open(path, "wb") as f:
-        f.write(b"BM")
-        f.write(struct.pack("<IHHI", size, 0, 0, off))
-        f.write(struct.pack("<IiiHHIIiiII", 40, w, h, 1, 4, 0,
-                            len(data), 2835, 2835, 16, 16))
-        for i in range(16):
-            r, g, b = pal[i * 3 : i * 3 + 3]
-            f.write(struct.pack("<BBBB", b, g, r, 0))
-        f.write(data)
+    write_bmp(path, w, h, 4, data,
+              [tuple(pal[i * 3 : i * 3 + 3]) for i in range(16)], 16)
+
+
+# ------------------------------------------------------------------
+# 8-bit BMPs for the SDL2 add-on (addons/sdl2, SDL_LoadBMP): a TT's or
+# a Falcon's one palette of 256, shared by every image converted
+# together
+
+
+def parse_rgb(text):
+    """RRGGBB (or #RRGGBB) as an (r, g, b) tuple."""
+    t = text.lstrip("#")
+    try:
+        if len(t) == 6:
+            return tuple(int(t[i : i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        pass
+    die("not a colour (RRGGBB): " + text)
+
+
+def snap_tt(c):
+    """An 8-bit channel on a TT's 4-bit grid, rounded: n * 17, whose
+    top 4 bits (all a TT's register keeps) are n, so the TT shows it
+    as written. A Falcon keeps 6 bits and shows n * 17 within 2.4."""
+    return (c * 15 + 127) // 255 * 17
+
+
+def write_bmp8(path, w, h, px, palette):
+    """An uncompressed 8-bit BMP of `px`, one index a pixel."""
+    pad = bytes(((w + 3) & ~3) - w)
+    data = bytearray()
+    for y in range(h - 1, -1, -1):
+        data += bytes(px[y * w : (y + 1) * w]) + pad
+    write_bmp(path, w, h, 8, data, palette, 0)
+
+
+def bmp8_name(outdir, path):
+    """DIR/STEM.BMP, upper case as TOS keeps names; a stem past 8
+    characters is said, since TOS cuts it."""
+    stem = os.path.splitext(os.path.basename(path))[0].upper()
+    if len(stem) > 8 or not stem:
+        print("stdlconv: %s.BMP is not an 8.3 name; TOS will cut it"
+              % stem, file=sys.stderr)
+    return os.path.join(outdir, stem + ".BMP")
+
+
+def cmd_bmp8(args):
+    need_pillow()
+    ncol = args.colors
+    if not 2 <= ncol <= 256:
+        die("--colors is 2-256")
+    snap = ((lambda c: tuple(snap_tt(v) for v in c)) if args.tt
+            else (lambda c: tuple(c)))
+    names = [bmp8_name(args.out_dir, p) for p in args.input]
+    if len(set(names)) < len(names):
+        die("two inputs would both be written as one STEM.BMP")
+    os.makedirs(args.out_dir, exist_ok=True)
+    imgs = [Image.open(p) for p in args.input]
+
+    # entries no quantiser chooses: index 0's colour, the key's (which
+    # nothing else maps to) and the border index (unused, black)
+    fixed = {}
+    keyidx = keyrgb = border = None
+
+    def reserve(i, c, what):
+        if not 0 <= i < ncol:
+            die("%s index %d is outside the %d colours" % (what, i, ncol))
+        if i in fixed:
+            die("%s index %d is taken" % (what, i))
+        fixed[i] = c
+
+    if args.zero:
+        reserve(0, snap(parse_rgb(args.zero)), "--zero's")
+    if args.key:
+        rgb, _, idx = args.key.partition("=")
+        keyrgb = parse_rgb(rgb)
+        keyidx = int(idx, 0) if idx else ncol - 1
+        reserve(keyidx, snap(keyrgb), "--key's")
+    if args.border is not None:
+        border = int(args.border, 0)
+        if border % 16 or not 16 <= border <= 0xF0:
+            die("--border is a multiple of 16, 0x10-0xF0 (the add-on's "
+                "border index)")
+        reserve(border, (0, 0, 0), "--border's")
+
+    # art already indexed through one palette keeps its indices: a
+    # program may count on them (a key, a range it cycles)
+    pals = {bytes(i.getpalette() or b"") for i in imgs}
+    if (all(i.mode == "P" for i in imgs) and len(pals) == 1
+            and not fixed and ncol == 256):
+        flat = imgs[0].getpalette()
+        palette = [snap(flat[i : i + 3]) for i in range(0, len(flat), 3)]
+        outs = []
+        for path, im in zip(args.input, imgs):
+            px = list(im.getdata())
+            if max(px) >= len(palette):
+                die(path + " uses an index past its palette")
+            note = None
+            if isinstance(im.info.get("transparency"), int):
+                note = ("  its transparent index, %d, is the colour key to"
+                        " give SDL_SetColorKey" % im.info["transparency"])
+            outs.append((im.width, im.height, px, note))
+        summary = ("kept the art's own indices and palette (%d entries%s)"
+                   % (len(palette), ", snapped to a TT's" if args.tt else ""))
+        bmp8_write(args, names, outs, palette, summary)
+        return
+
+    # every pixel as a colour, or None for the key's: its exact colour,
+    # or a transparent pixel when a key is given
+    arts = []
+    for path, im in zip(args.input, imgs):
+        alpha = im.mode in ("RGBA", "LA", "PA") or "transparency" in im.info
+        rgba = list(im.convert("RGBA").getdata())
+        if alpha and keyrgb is None and any(p[3] < 128 for p in rgba):
+            print("stdlconv: %s has transparent pixels; give --key to keep"
+                  " them so" % path, file=sys.stderr)
+        px = [None if keyrgb is not None and (p[3] < 128 or p[:3] == keyrgb)
+              else snap(p[:3]) for p in rgba]
+        arts.append((path, im.width, im.height, px))
+
+    # the rest of the palette: the art's own colours when they fit,
+    # else a median cut over every image at once (so they share it)
+    slots = [i for i in range(ncol) if i not in fixed]
+    taken = set(c for i, c in fixed.items() if i != keyidx and i != border)
+    counts = Counter(c for _p, _w, _h, px in arts for c in px
+                     if c is not None and c not in taken)
+    if len(counts) <= len(slots):
+        chosen = sorted(counts, key=lambda c: (-counts[c], c))
+        how = "the art's %d colours, exact" % len(counts)
+    else:
+        every = [c for c in counts.elements()]
+        sheet = Image.new("RGB", (len(every), 1))
+        sheet.putdata(every)
+        # k-means after the median cut halved its error on a picture of
+        # 74,931 colours (a mean square of 645 to 300, 0.1s to 0.5)
+        q = sheet.quantize(colors=len(slots), method=Image.Quantize.MEDIANCUT,
+                           kmeans=1, dither=Image.Dither.NONE)
+        flat = q.getpalette()
+        used = sorted(q.getcolors(len(slots)), reverse=True)
+        chosen = []
+        for _n, i in used:
+            c = snap(flat[i * 3 : i * 3 + 3])
+            if c not in chosen and c not in taken:
+                chosen.append(c)
+        how = "%d colours quantised from %d" % (len(chosen), len(counts))
+    palette = dict(fixed)
+    palette.update(zip(slots, chosen))
+    size = max(palette) + 1
+    palette = [palette.get(i, (0, 0, 0)) for i in range(size)]
+
+    # each pixel on its nearest entry, never the key's or the border's,
+    # the lowest of equals
+    given = set(fixed) | set(slots[: len(chosen)])
+    cand = [(i, palette[i]) for i in sorted(given)
+            if i != keyidx and i != border]
+    near = {}
+    for i, c in reversed(cand):
+        near[c] = i
+    # Pillow maps onto those entries alone (the rest padded with the
+    # first), for the colours not in the palette and for dithering.
+    # Its nearest is to 6 bits a channel, so a colour that is in the
+    # palette is looked up instead. On a picture of 74,931 colours the
+    # exact nearest in Python took 14.8s and this 0.2, its error 1.2%
+    # more (a mean square of 622 against 615)
+    sub = Image.new("P", (1, 1))
+    flat = [v for _i, c in cand for v in c]
+    if cand:
+        sub.putpalette(flat + flat[:3] * (256 - len(cand)))
+
+    def onto(colours, dither):
+        im = Image.new("RGB", (len(colours), 1))
+        im.putdata(colours)
+        return [cand[g if g < len(cand) else 0][0]
+                for g in im.quantize(palette=sub, dither=dither).getdata()]
+
+    outs = []
+    for path, w, h, px in arts:
+        if not cand:
+            out = [keyidx] * len(px)
+        elif args.dither:
+            got = onto([c if c is not None else cand[0][1] for c in px],
+                       Image.Dither.FLOYDSTEINBERG)
+            out = [keyidx if c is None else g for c, g in zip(px, got)]
+        else:
+            new = list(set(c for c in px if c is not None and c not in near))
+            if new:
+                near.update(zip(new, onto(new, Image.Dither.NONE)))
+            out = [keyidx if c is None else near[c] for c in px]
+        outs.append((w, h, out, None))
+    notes = []
+    if keyidx is not None:
+        notes.append("key at %d" % keyidx)
+    if border is not None:
+        notes.append("border index 0x%02X" % border)
+    if args.tt:
+        notes.append("snapped to a TT's 4 bits a channel")
+    bmp8_write(args, names, outs, palette,
+               "palette: %d entries, %s%s"
+               % (size, how, "".join("; " + n for n in notes)))
+
+
+def bmp8_write(args, names, outs, palette, summary):
+    """The files: each image, what was done, and with --pal the
+    palette alone, 4 bytes an entry in SDL_Color's order (r, g, b,
+    255), to read into an SDL_Color array."""
+    for name, (w, h, px, note) in zip(names, outs):
+        write_bmp8(name, w, h, px, palette)
+        print("wrote %s (%dx%d)" % (name, w, h))
+        if note:
+            print(note)
+    print(summary)
+    if args.pal:
+        with open(args.pal, "wb") as f:
+            for r, g, b in palette:
+                f.write(bytes((r, g, b, 255)))
+        print("wrote %s (%d entries)" % (args.pal, len(palette)))
 
 
 def pack_group(px, w, y, x0, key):
@@ -1688,6 +1937,31 @@ def main():
     p.add_argument("--keycolor", metavar="RRGGBB",
                    help="preserve this exact colour as index 15")
     p.set_defaults(func=cmd_bmp16)
+
+    p = sub.add_parser("bmp8", help="quantise images together to 8-bit "
+                                    "BMPs sharing one palette (SDL2 "
+                                    "add-on, SDL_LoadBMP)")
+    p.add_argument("input", nargs="+")
+    p.add_argument("-o", "--out-dir", default=".",
+                   help="where IN's STEM.BMP goes (default .)")
+    p.add_argument("--colors", type=int, default=256,
+                   help="palette entries at most, 2-256 (default 256)")
+    p.add_argument("--tt", action="store_true",
+                   help="snap the palette to a TT's 4 bits a channel")
+    p.add_argument("--key", metavar="RRGGBB[=N]",
+                   help="this exact colour, and transparent pixels, as "
+                        "index N alone (default the last)")
+    p.add_argument("--zero", metavar="RRGGBB",
+                   help="index 0, the border's register, this colour")
+    p.add_argument("--border", metavar="X",
+                   help="leave index X (0x10-0xF0) unused and black, for "
+                        "STDL_SDL2_SetBorderIndex")
+    p.add_argument("--dither", action="store_true",
+                   help="Floyd-Steinberg (default none: flat areas stay "
+                        "flat)")
+    p.add_argument("--pal", metavar="FILE",
+                   help="also write the palette alone, r g b 255 an entry")
+    p.set_defaults(func=cmd_bmp8)
 
     p = sub.add_parser("bank", help="build an STDL asset bank")
     p.add_argument("output")

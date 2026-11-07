@@ -107,9 +107,40 @@ void resp_shutdown(void);
 int  resp_set_colours(STDL_Surface *s, const STDL_Colour *c, int first,
                       int n);
 void p8_init_surface(STDL_Surface *s, int w, int h);
+/*
+ * What the 8-plane objects share (planes8.c, planes8ex.c, planes8row.c).
+ * A group is four longs, each two planes' words, so a 16-bit mask
+ * merges a plane pair in both halves of a long at once.
+ */
+/* a word of a plane `sh` pixels into the pair of words (a, b) */
+#define P8_WIN(a, b, sh) \
+    (((((uint32_t)(a) << 16) | (b)) >> (16 - (sh))) & 0xFFFFu)
+
+/* a source group past either end of a row (planes8ex.c) */
+extern const uint16_t p8_zero[8];
+
+static __inline__ uint32_t p8_m32(unsigned m16)
+{
+    return (uint32_t)m16 | ((uint32_t)m16 << 16);
+}
+
+/* the colour in pat into group g where m (both halves) is set */
+static __inline__ void p8_merge(uint32_t *g, uint32_t m,
+                                const uint32_t pat[4])
+{
+    g[0] ^= (g[0] ^ pat[0]) & m;
+    g[1] ^= (g[1] ^ pat[1]) & m;
+    g[2] ^= (g[2] ^ pat[2]) & m;
+    g[3] ^= (g[3] ^ pat[3]) & m;
+}
+
 /* p8_blit with UNDER or MARK onto a masked surface (planes8ex.c) */
 int  p8_blit_ex(const STDL_Surface *src, const STDL_Rect *srcrect,
                 STDL_Surface *dst, STDL_Rect *dstrect, unsigned flags);
+/* an unkeyed 8-plane blit of 64 pixels and more, a block at a time
+ * where it can be (planes8row.c): 0, or -1 having done nothing */
+int  p8_blit_rows(const STDL_Surface *src, STDL_Surface *dst, int sx,
+                  int sy, int dx, int dy, int w, int h);
 /* tiles on 8 planes (planes8tile.c) */
 STDL_Tileset *p8_tileset_from(const STDL_Surface *s, int tw, int th);
 void p8_blit_tile(STDL_Tileset *ts, int index, STDL_Surface *d, int x,

@@ -42,6 +42,7 @@
 #include <osbind.h>
 #include <mint/falcon.h>
 #include <stdl/stdl.h>
+#include "../../examples/hold.h"
 
 static int8_t tri[64];
 
@@ -79,6 +80,8 @@ int main(void)
     char voices[80], ring[80], s6258[80], s12517[80];
     int8_t *buf;
     int i, rc;
+
+    hold_on_exit("FALCCHK");
 
     if (STDL_Init(STDL_INIT_VIDEO | STDL_INIT_AUDIO) < 0) {
         return 1;

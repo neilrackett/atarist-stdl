@@ -26,6 +26,7 @@
 #include <string.h>
 
 #include "SDL.h"
+#include "hold.h"
 
 static SDL_Surface *dest = NULL;
 static SDL_Surface *src = NULL;
@@ -283,7 +284,10 @@ static void test_blit_speed(void)
 
 int main(int argc, char **argv)
 {
-    int initialized = setup_test(argc, argv);
+    int initialized;
+
+    hold_on_exit(NULL);
+    initialized = setup_test(argc, argv);
     if (initialized)
     {
         test_blit_speed();

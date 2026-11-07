@@ -9,13 +9,19 @@
  * from the key events, as SDL2 keeps it.
  *
  * The first pump turns STDL's key repeat on (SDL2's keys repeat, with
- * a flag saying so) and its character translation (for SDL_TEXTINPUT),
- * and says the joystick is there (SDL_JOYDEVICEADDED, and
- * SDL_CONTROLLERDEVICEADDED with SDL_INIT_GAMECONTROLLER), as SDL2 does
- * for a device present at start-up: a program waiting for that event
- * to open its controller would otherwise never open it. Not SDL_Init:
- * a program that reads STDL's events itself and never pumps here keeps
- * STDL as it set it.
+ * a flag saying so) and its character translation (for SDL_TEXTINPUT).
+ * Not SDL_Init: a program that reads STDL's events itself and never
+ * pumps here keeps STDL as it set it.
+ *
+ * The joysticks come and go as STDL says, as SDL2 says a device
+ * plugged in: the first pump asks STDL for its device events
+ * (STDL_UseJoystickDeviceEvents), which says ADDED for each joystick
+ * there is then - the one a program has, or as many as it asked for
+ * (STDL_SetNumJoysticks) - and from then each one STDL adds, drops or
+ * re-maps (STDL_UseJoystickMerge), straight after its releases;
+ * joystick.c makes each SDL_JOYDEVICEADDED or REMOVED, and the
+ * controller's with SDL_INIT_GAMECONTROLLER. A program waiting for the
+ * event to open its controller would otherwise never open it.
  */
 
 #include "internal.h"
@@ -115,29 +121,20 @@ static void mouse_event(const STDL_Event *se)
 
 static void first_pump(void)
 {
-    SDL_Event e;
     started = 1;
     STDL_EnableKeyRepeat(STDL_DEFAULT_REPEAT_DELAY,
                          STDL_DEFAULT_REPEAT_INTERVAL);
     STDL_EnableUNICODE(1);
-    if (stdl_sdl2_inited & SDL_INIT_JOYSTICK) {
-        memset(&e, 0, sizeof(e));
-        e.type = SDL_JOYDEVICEADDED;
-        stdl_sdl2_push(&e);
-    }
-    if (stdl_sdl2_inited & SDL_INIT_GAMECONTROLLER) {
-        memset(&e, 0, sizeof(e));
-        e.type = SDL_CONTROLLERDEVICEADDED;
-        stdl_sdl2_push(&e);
-    }
+    /* the ADDED of every joystick there is, then each change */
+    STDL_UseJoystickDeviceEvents(1);
 }
 
-void SDL_PumpEvents(void)
+/* The add-on's half of a pump, once STDL's has run: STDL's events
+ * taken - its STDL_PollEvent pumps no more in the same VBL - and
+ * turned into SDL2's, then the controllers' buttons. */
+static void take(void)
 {
     STDL_Event se;
-    if (!started) {
-        first_pump();
-    }
     while (STDL_PollEvent(&se)) {
         switch (se.type) {
         case STDL_KEYDOWN:
@@ -153,6 +150,8 @@ void SDL_PumpEvents(void)
         case STDL_JOYHATMOTION:
         case STDL_JOYBUTTONDOWN:
         case STDL_JOYBUTTONUP:
+        case STDL_JOYDEVICEADDED:
+        case STDL_JOYDEVICEREMOVED:
             stdl_sdl2_joy_event(&se);
             break;
         case STDL_QUIT: {
@@ -169,9 +168,28 @@ void SDL_PumpEvents(void)
     stdl_sdl2_controller_poll();
 }
 
+/* Always a pump, STDL's and the add-on's, as SDL2's own is. */
+void SDL_PumpEvents(void)
+{
+    if (!started) {
+        first_pump();
+    }
+    STDL_PumpEvents();
+    take();
+}
+
+/* A pump once a VBL, on STDL_PollEvent's beat (STDL_PumpEventsIfDue),
+ * and otherwise the queue alone: a drain of k events pumped about
+ * 2k + 1 times, each drain of STDL's queue pumping again for every
+ * event - 33-35 pumps and 18-19ms of a Falcon's frame for 16 keys
+ * with four pads apart (SDL2PUMP), 1 and 3.5ms now. */
 int SDL_PollEvent(SDL_Event *event)
 {
-    SDL_PumpEvents();
+    if (!started) {
+        SDL_PumpEvents();
+    } else if (STDL_PumpEventsIfDue()) {
+        take();
+    }
     if (!qcount) {
         return 0;
     }
@@ -183,10 +201,13 @@ int SDL_PollEvent(SDL_Event *event)
     return 1;
 }
 
+/* a wait pumps every time it looks, as STDL_WaitEvent does; its
+ * SDL_PollEvent then only takes */
 int SDL_WaitEventTimeout(SDL_Event *event, int timeout)
 {
     const Uint32 end = SDL_GetTicks() + (Uint32)timeout;
     for (;;) {
+        SDL_PumpEvents();
         if (SDL_PollEvent(event)) {
             return 1;
         }

@@ -126,7 +126,7 @@ typedef struct STDL_Surface {
 extern unsigned long stdl_blit_calls;    /* entries              */
 extern unsigned long stdl_blit_blitter;  /* rows via the BLiTTER */
 extern unsigned long stdl_blit_inline;   /* rows copied inline   */
-extern unsigned long stdl_blit_memcpy;   /* rows via memcpy      */
+extern unsigned long stdl_blit_memcpy;   /* long rows (movem)    */
 extern unsigned long stdl_blit_merge;    /* same-phase rows that
                                           * merge group by group
                                           * (masked, edges, flags) */

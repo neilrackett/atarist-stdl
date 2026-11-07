@@ -20,6 +20,7 @@
 #include <stdint.h>
 
 #include "SDL.h"
+#include "hold.h"
 
 #define DEFAULT_RESOLUTION	1
 
@@ -42,6 +43,8 @@ int main(int argc, char *argv[])
 {
 	int desired;
 	SDL_TimerID t1, t2, t3;
+
+    hold_on_exit(NULL);
 
 	if ( SDL_Init(SDL_INIT_TIMER) < 0 ) {
 		fprintf(stderr, "Couldn't initialize SDL: %s\n", SDL_GetError());

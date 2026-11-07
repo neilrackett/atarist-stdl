@@ -3,11 +3,16 @@
  * Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: LGPL-2.1-or-later
  *
- * The SDL2 add-on's joystick: STDL's joystick 0, the joystick port
- * and, where a pad's provider is present (Xpad), the pad - 6 axes (the
- * left stick, the right, the triggers), 13 buttons (0 is fire, the
- * pad's lower face button) and a hat; a joystick alone is 2 axes and a
- * button. Events come for it once it is opened, as in SDL2.
+ * The SDL2 add-on's joysticks: STDL's, by the same numbers. One unless
+ * the program asks STDL for more (STDL_SetNumJoysticks, up to six):
+ * 0 is the joystick port and 1 the mouse port, each with the pad of its
+ * number merged in, and 2 and 3 pads 2 and 3; or, with the pads apart
+ * (STDL_UseJoystickMerge(0)), 2 to 5 pads 0 to 3. With an Xpad pad
+ * behind it a joystick has 6 axes (the left stick, the right, the
+ * triggers), 13 buttons (0 is fire, the pad's lower face button) and a
+ * hat; a joystick alone has 2 axes and a button.
+ * Each one's instance ID is its index. Events come for one once it is
+ * opened, as in SDL2.
  */
 
 #ifndef STDL_SDL2_JOYSTICK_H

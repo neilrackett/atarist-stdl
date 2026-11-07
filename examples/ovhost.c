@@ -35,6 +35,8 @@
 #include <stdio.h>
 #include <mint/osbind.h>
 #include <stdl/stdl_overscan.h>
+#define HOLD_NO_STDL
+#include "hold.h"
 
 #define PAGES   3
 #define ROWS    274                     /* row 0 hidden, 1-273 shown */
@@ -144,6 +146,8 @@ int main(void)
     const char *error = NULL;
     long mem, ssp;
     int lines = 0, i, n, at = 0, next = 1;
+
+    hold_on_exit(NULL);
 
     /* the pages in ST RAM, which is all the Shifter can see */
     mem = Sversion() >= 0x1900 ? Mxalloc(PAGES * PAGE + 256L, 0)

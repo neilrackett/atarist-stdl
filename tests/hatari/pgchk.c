@@ -38,11 +38,14 @@
 #endif
 #define main pgchk_suite
 #include "../host/test_polygon.c"
+#include "../../examples/hold.h"
 #undef main
 
 int main(void)
 {
     int r;
+
+    hold_on_exit("PGCHK");
 
     if (STDL_Init(0) < 0) {
         return 1;

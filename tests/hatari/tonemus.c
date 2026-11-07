@@ -35,6 +35,7 @@
  */
 #include <stdio.h>
 #include "stdl/stdl.h"
+#include "../../examples/hold.h"
 
 static void step(const char *what, int ms)
 {
@@ -46,6 +47,8 @@ static void step(const char *what, int ms)
 int main(void)
 {
     STDL_Music *mus;
+
+    hold_on_exit("TONEMUS");
 
     if (STDL_Init(STDL_INIT_VIDEO | STDL_INIT_AUDIO) < 0) {
         printf("init failed: %s\r\n", STDL_GetError());

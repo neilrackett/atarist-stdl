@@ -31,6 +31,11 @@ enum {
     STDL_JOYBUTTONDOWN,
     STDL_JOYBUTTONUP,
     STDL_QUIT,
+    /* a joystick come or gone, or standing for other sources: only to
+     * a program that asks (STDL_UseJoystickDeviceEvents), in SDL 1.2's
+     * reserved numbers, as SDL 1.2 has no such event */
+    STDL_JOYDEVICEADDED = 14,
+    STDL_JOYDEVICEREMOVED = 15,
     STDL_USEREVENT = 24,   /* .. STDL_NUMEVENTS: the game's own */
     STDL_NUMEVENTS = 32
 };
@@ -96,14 +101,27 @@ typedef struct {
     void   *data2;
 } STDL_UserEvent;
 
-/* hats and balls don't exist on ST joysticks; present so ported
- * event switches compile */
+/* An Xpad pad's d-pad is its hat (STDL_HAT_* bits); an ST joystick's
+ * directions are its axes, so it has none. Balls exist on neither:
+ * present so ported event switches compile. */
 typedef struct {
     uint8_t type;
     uint8_t which;
     uint8_t hat;
     uint8_t value;
 } STDL_JoyHatEvent;
+
+#define STDL_HAT_CENTERED 0x00
+#define STDL_HAT_UP       0x01
+#define STDL_HAT_RIGHT    0x02
+#define STDL_HAT_DOWN     0x04
+#define STDL_HAT_LEFT     0x08
+
+/* STDL_JOYDEVICEADDED or STDL_JOYDEVICEREMOVED, and the joystick */
+typedef struct {
+    uint8_t type;
+    uint8_t which;
+} STDL_JoyDeviceEvent;
 
 typedef struct {
     uint8_t type;
@@ -128,15 +146,43 @@ typedef union {
     STDL_JoyButtonEvent   jbutton;
     STDL_JoyHatEvent      jhat;
     STDL_JoyBallEvent     jball;
+    STDL_JoyDeviceEvent   jdevice;
     STDL_QuitEvent        quit;
     STDL_ResizeEvent      resize;
     STDL_UserEvent        user;
 } STDL_Event;
 
+/*
+ * The pump (STDL_PumpEvents) is where everything the program has not
+ * asked for happens: the IKBD's keys, mouse and joystick packets
+ * become events, the pads are read, key repeat runs, the DMA ring is
+ * refilled and the SDL 1.2 shim's timers fire.
+ *
+ * STDL_PollEvent pumps once a VBL: when the VBL count (_frclock) has
+ * moved since the last pump, or there has been none, and otherwise
+ * only takes from the queue, serving the timers and the audio at most
+ * once a 200Hz tick, as STDL_Delay does. So a drain loop,
+ * while (STDL_PollEvent(&e)), pumps once a frame however many events
+ * it takes, and a program that takes one event a frame, or only
+ * looks (STDL_PollEvent(NULL)), still has the IKBD read and the audio
+ * refilled every VBL, well inside the 150ms the audio needs. An event
+ * comes at most a VBL later than a pump on every call would have
+ * given it, and no later for a program that polls once a frame. A
+ * VBL that does not count (a program's own VBL handler leaving
+ * _frclock alone, or the VBL masked) gets a pump every 25ms at most
+ * from the 200Hz clock instead.
+ *
+ * STDL_PumpEvents always pumps, and STDL_WaitEvent pumps every time
+ * it looks (every 5ms). STDL_PumpEventsIfDue is STDL_PollEvent's own
+ * step: the pump if one is due, returning 1, or the timers and audio,
+ * returning 0. It is for a layer with a queue of its own over STDL's
+ * (the SDL2 add-on), so that its pump keeps the same beat.
+ */
 int  STDL_PollEvent(STDL_Event *e);
 int  STDL_WaitEvent(STDL_Event *e);
 int  STDL_PushEvent(const STDL_Event *e);
 void STDL_PumpEvents(void);
+int  STDL_PumpEventsIfDue(void);
 
 /*
  * Take the keyboard, mouse, joystick and pad without setting a video
@@ -212,20 +258,138 @@ uint8_t STDL_GetMouseState(int *x, int *y);
  * releases the keyboard, including down the terminate path, so a
  * program that disables it and then crashes still hands the desktop
  * a working pointer.
+ *
+ * With two joysticks or more (STDL_SetNumJoysticks) the mouse port is
+ * joystick 1 and the mouse is off whatever this says: it records the
+ * setting, which applies when the program goes back to one. Before
+ * the library has the keyboard (STDL_SetVideoMode or STDL_OpenInput)
+ * it records it too, and the IKBD is told when the library takes it:
+ * only then is the mouse sure to be given back.
  */
 int STDL_EnableMouse(int enable);
 void    STDL_WarpMouse(uint16_t x, uint16_t y);
 
-/* Joystick 1 (the physical joystick port), reported as events too.
- * State byte: bit 0 up, 1 down, 2 left, 3 right, 7 fire. */
-uint8_t STDL_GetJoyState(void);
+/*
+ * The joystick calls take the joystick's number, `which`, first: 0 is
+ * the joystick port (the IKBD's joystick 1) - with an Xpad provider's
+ * pad 0 merged into it, unless the program keeps them apart
+ * (STDL_UseJoystickMerge) - and the only joystick a program has until
+ * it asks for more (STDL_SetNumJoysticks, below). A joystick there is
+ * not reads 0, and its rumble returns -1. (The number, and the names
+ * that say Joystick, came in v1.23.0: the stdl skill's "Moving to a
+ * newer STDL".)
+ *
+ * Joystick `which`'s state byte, reported as events too with the same
+ * `which`: bit 0 up, 1 down, 2 left, 3 right, 7 fire.
+ */
+uint8_t STDL_GetJoystickState(int which);
 
-/* When enabled, joystick changes also synthesise keyboard events
+/*
+ * More than one joystick, for two players or more. A program reads one
+ * until it asks for more:
+ *
+ *   1  (the default) joystick 0 and the mouse, as always.
+ *   2  two joysticks: the mouse goes off and the mouse port becomes
+ *      joystick 1 (the IKBD's $12 and $14), the second stick plugged
+ *      in where the mouse was. On an ST the mouse port is a mouse or a
+ *      joystick, so any number from 2 turns the mouse off.
+ *   3 to 6  as 2, with an Xpad provider's pads as the joysticks after,
+ *      where the provider has the slots: up to 4 merged, up to 6
+ *      apart, as the next comment says.
+ *
+ * Joystick i has fixed sources, so a player keeps their number when
+ * another's pad comes or goes:
+ *
+ *        merged (the default)       apart
+ *   0    the joystick port, pad 0   the joystick port
+ *   1    the mouse port, pad 1      the mouse port
+ *   2    pad 2                      pad 0
+ *   3    pad 3                      pad 1
+ *   4    -                          pad 2
+ *   5    -                          pad 3
+ *
+ * Merged, a stick in a port and the pad of the same number are one
+ * joystick, as joystick 0's always were: either works, and one cannot
+ * release what the other holds, so where pads are present the first
+ * two pads are the two joysticks with the ports still live beside
+ * them. A pad slot with no pad in it is a joystick at rest, as a port
+ * with no stick in it is.
+ *
+ * Returns how many joysticks there are now (STDL_NumJoysticks): n, or
+ * fewer where a provider has fewer pad slots (3 to 6 asked for with
+ * none gives 2), and 4 at most merged. -1, and no change, for n
+ * outside 1 to STDL_MAX_JOYSTICKS. Callable before or after
+ * STDL_Init, as STDL_EnableMouse is: the IKBD is told when the library
+ * takes the keyboard, or at once if it has it.
+ *
+ * While there are two or more, the mouse is off whatever
+ * STDL_EnableMouse says (it records what it is asked, for when the
+ * program goes back to 1), STDL_GetMouseState keeps the last position
+ * and buttons, and the software cursor stops. Going back to 1 gives
+ * the mouse back; so do STDL_Quit and every exit, a crash included,
+ * as for STDL_EnableMouse. A joystick dropped by asking for fewer
+ * sends the releases of whatever it held first, and then, where the
+ * program asked for device events (STDL_UseJoystickDeviceEvents), its
+ * STDL_JOYDEVICEREMOVED; one added says STDL_JOYDEVICEADDED.
+ *
+ * Joystick key emulation (STDL_JoystickKeyEmulation and the bindings)
+ * is joystick 0's alone: the others send joystick events and are
+ * polled, and never make keys.
+ *
+ * Its own object: a program that never calls it links none of it,
+ * whichever joystick it passes the calls here.
+ */
+#define STDL_MAX_JOYSTICKS 6
+int STDL_SetNumJoysticks(int n);
+int STDL_NumJoysticks(void);
+
+/*
+ * Whether each port and the Xpad pad of its number are one joystick:
+ * 1 merges them (the default), 0 keeps them apart, the pads becoming
+ * joysticks of their own after the two ports (the table above), and
+ * -1 asks. Returns the previous setting, as STDL_UseBlitter does.
+ *
+ * Apart is for more players than the ports and two merged pads give
+ * (six with four pads), or for a port and a pad that should be two
+ * players' each. With one joystick it leaves joystick 0 the port
+ * alone. It changes nothing about the mouse: the number of joysticks
+ * does that.
+ *
+ * Callable at any time. The joysticks re-map at once: one whose
+ * sources change hands sends the releases of what it held, as one
+ * dropped does, and its new pad starts at rest. The number of
+ * joysticks follows (6 asked for merged is 4, and 6 again apart).
+ *
+ * An object of its own, a few dozen bytes.
+ */
+int STDL_UseJoystickMerge(int on);
+
+/*
+ * Device events: STDL_JOYDEVICEREMOVED and STDL_JOYDEVICEADDED, with
+ * the joystick in `which`, as joysticks come and go
+ * (STDL_SetNumJoysticks) or stand for other sources - every one whose
+ * pad slot changes at an STDL_UseJoystickMerge, joystick 0 always -
+ * each straight after the releases it sends, so a program sees what a
+ * joystick let go of before it goes. A change and its undoing between
+ * two pumps (2 to 1 to 2, the merge set twice) are each said.
+ *
+ * Off until a program asks, as one written before them would not know
+ * them, and the SDL 1.2 shim never asks (SDL 1.2 has no such event).
+ * 1 turns them on and says ADDED for every joystick there is now, as
+ * SDL2 does at start-up; 0 turns them off; -1 asks. Returns the
+ * previous setting. They take room in the queue as any event does.
+ *
+ * An object of its own; the SDL2 add-on asks for them at its first
+ * pump, for its SDL_JOYDEVICEADDED and REMOVED.
+ */
+int STDL_UseJoystickDeviceEvents(int on);
+
+/* When enabled, joystick 0's changes also synthesise keyboard events
  * (tagged STDL_KMOD_JOYSTICK, with STDL_GetKeyState updated) so
  * keyboard-driven games work with the stick unmodified. Joystick
  * events are still delivered. The default mapping is the arrows
- * with left Alt as fire. */
-void STDL_JoyKeyEmulation(int enable);
+ * with left Alt as fire. The other joysticks never make keys. */
+void STDL_JoystickKeyEmulation(int enable);
 
 /*
  * Inputs that can be bound to a key. The four directions and fire are
@@ -233,60 +397,88 @@ void STDL_JoyKeyEmulation(int enable);
  * controller is present, and stay unbound and silent otherwise, so a
  * game may bind them unconditionally.
  *
- * STDL_JOYKEY_FIRE and STDL_JOYKEY_SOUTH are the same input: the fire
+ * STDL_JOYSTICK_INPUTS is how many inputs there are, not joysticks
+ * (STDL_NumJoysticks says that).
+ *
+ * STDL_JOYSTICK_FIRE and STDL_JOYSTICK_SOUTH are the same input: the fire
  * button and a pad's lower face button are one thing.
  */
-#define STDL_JOYKEY_UP      0
-#define STDL_JOYKEY_DOWN    1
-#define STDL_JOYKEY_LEFT    2
-#define STDL_JOYKEY_RIGHT   3
-#define STDL_JOYKEY_FIRE    4
-#define STDL_JOYKEY_SOUTH   4
-#define STDL_JOYKEY_EAST    5
-#define STDL_JOYKEY_WEST    6
-#define STDL_JOYKEY_NORTH   7
-#define STDL_JOYKEY_TL      8   /* left shoulder                     */
-#define STDL_JOYKEY_TR      9   /* right shoulder                    */
-#define STDL_JOYKEY_TL2     10  /* left trigger, past halfway        */
-#define STDL_JOYKEY_TR2     11  /* right trigger, past halfway       */
-#define STDL_JOYKEY_SELECT  12
-#define STDL_JOYKEY_START   13
-#define STDL_JOYKEY_MODE    14  /* the Xbox/Home/PS button           */
-#define STDL_JOYKEY_THUMBL  15
-#define STDL_JOYKEY_THUMBR  16
-#define STDL_JOYKEY_COUNT   17
+#define STDL_JOYSTICK_UP      0
+#define STDL_JOYSTICK_DOWN    1
+#define STDL_JOYSTICK_LEFT    2
+#define STDL_JOYSTICK_RIGHT   3
+#define STDL_JOYSTICK_FIRE    4
+#define STDL_JOYSTICK_SOUTH   4
+#define STDL_JOYSTICK_EAST    5
+#define STDL_JOYSTICK_WEST    6
+#define STDL_JOYSTICK_NORTH   7
+#define STDL_JOYSTICK_TL      8   /* left shoulder                     */
+#define STDL_JOYSTICK_TR      9   /* right shoulder                    */
+#define STDL_JOYSTICK_TL2     10  /* left trigger, past halfway        */
+#define STDL_JOYSTICK_TR2     11  /* right trigger, past halfway       */
+#define STDL_JOYSTICK_SELECT  12
+#define STDL_JOYSTICK_START   13
+#define STDL_JOYSTICK_MODE    14  /* the Xbox/Home/PS button           */
+#define STDL_JOYSTICK_THUMBL  15
+#define STDL_JOYSTICK_THUMBR  16
+#define STDL_JOYSTICK_INPUTS   17
 
 /*
- * Whether a controller richer than an ST joystick is present, i.e.
- * whether the inputs above beyond STDL_JOYKEY_FIRE can ever be held.
+ * Whether joystick `which` has a controller richer than an ST
+ * joystick behind it - an Xpad pad slot, pad `which` - i.e. whether
+ * the inputs above beyond STDL_JOYSTICK_FIRE can ever be held on it.
  */
-int STDL_HavePad(void);
+int STDL_HasPad(int which);
 
 /*
- * Rumble the pad for `ms` milliseconds. `low` drives the low-frequency
- * (heavy) motor and `high` the high-frequency (light) one, 0 to 255
- * each; which of those a pad actually has is up to the pad. A new call
- * replaces whatever is running, and 0, 0 stops it.
+ * Joystick `which`'s axes as its events carry them (STDL_JOYAXISMOTION's
+ * axis), -32768 to 32767: X and Y the port's directions and the pad's
+ * left stick, whichever is pushed further; then the pad's right stick
+ * and its triggers, a trigger at rest -32768. A joystick that is not
+ * there, an axis out of range, and the pad's axes without a pad read
+ * 0. And its hat, the pad's d-pad (STDL_HAT_*), 0 without a pad.
+ *
+ * Their own object: a program that reads its sticks through
+ * STDL_GetJoystickState and the events links none of it.
+ */
+#define STDL_JOYSTICK_AXIS_X   0
+#define STDL_JOYSTICK_AXIS_Y   1
+#define STDL_JOYSTICK_AXIS_RX  2   /* right stick                      */
+#define STDL_JOYSTICK_AXIS_RY  3
+#define STDL_JOYSTICK_AXIS_LT  4   /* left trigger                     */
+#define STDL_JOYSTICK_AXIS_RT  5   /* right trigger                    */
+#define STDL_JOYSTICK_AXES     6
+int16_t STDL_GetJoystickAxis(int which, int axis);
+uint8_t STDL_GetJoystickHat(int which);
+
+/*
+ * Rumble joystick `which`'s pad for `ms` milliseconds. `low` drives
+ * the low-frequency (heavy) motor and `high` the high-frequency
+ * (light) one, 0 to 255 each; which of those a pad actually has is up
+ * to the pad. Each pad's rumble is its own: a new call replaces
+ * whatever that pad is running, and 0, 0 stops it.
  *
  * Returns 0 when the pad's provider honours rumble and -1 otherwise -
- * no pad, or one without motors - so a game can call it
- * unconditionally. The pulse is ended by the event pump once `ms` has
- * passed, so a program that stops pumping keeps it running until it
- * pumps again; STDL_Quit and the terminate path end it too.
+ * no pad, one without motors, or no such joystick - so a game can
+ * call it unconditionally. The pulse is ended by the event pump once
+ * `ms` has passed, so a program that stops pumping keeps it running
+ * until it pumps again; STDL_Quit and the terminate path end every
+ * pad's too.
  */
-int STDL_PadRumble(uint8_t low, uint8_t high, uint16_t ms);
+int STDL_PadRumble(int which, uint8_t low, uint8_t high, uint16_t ms);
 
 /*
- * Whether an input is held right now. Takes the same STDL_JOYKEY_*
- * identifiers, which do double duty: bind them to keys for a game that
- * reads the keyboard, or poll them for a game that has its own notion
- * of buttons and wants them directly.
+ * Whether an input of joystick `which` is held right now. Takes the
+ * same STDL_JOYSTICK_* identifiers, which do double duty: bind them to
+ * keys for a game that reads the keyboard (joystick 0's), or poll them
+ * for a game that has its own notion of buttons and wants them
+ * directly.
  *
- * The four directions and fire come from the joystick or the pad,
- * whichever is driving. The rest exist only on a pad and read 0
+ * The four directions and fire come from the joystick's port or its
+ * pad, whichever is driving. The rest exist only on a pad and read 0
  * without one, so a game can poll them unconditionally.
  */
-int STDL_JoyInputHeld(int input);
+int STDL_JoystickInputHeld(int which, int input);
 
 /*
  * Bind one input to a key, or to 0 to unbind it. Returns non-zero when
@@ -297,7 +489,7 @@ int STDL_JoyInputHeld(int input);
  * the game already reads. Safe to call while emulation is enabled; a
  * held input is released on its old key first, so nothing sticks.
  */
-int STDL_JoyKeyBind(int input, uint16_t sym);
+int STDL_JoystickKeyBind(int input, uint16_t sym);
 
 /*
  * Change which keys the joystick emulates. Each argument is an
@@ -310,7 +502,7 @@ int STDL_JoyKeyBind(int input, uint16_t sym);
  * Shorthand for binding the five an ST joystick has; the pad-only
  * inputs above are left alone, so the two can be mixed.
  */
-int STDL_JoyKeyMapping(uint16_t up, uint16_t down, uint16_t left,
+int STDL_JoystickKeyMapping(uint16_t up, uint16_t down, uint16_t left,
                        uint16_t right, uint16_t fire);
 
 #ifdef __cplusplus

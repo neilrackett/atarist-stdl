@@ -26,6 +26,7 @@
 #define NOTICE(X)	printf("%s", X);
 
 #include "SDL.h"
+#include "hold.h"
 
 /* Call this instead of exit(), so we can clean up SDL: atexit() is evil. */
 static void quit(int rc)
@@ -231,6 +232,8 @@ int main(int argc, char *argv[])
 #ifdef BENCHMARK_SDL
 	Uint32 then, now;
 #endif
+
+	hold_on_exit(NULL);
 	/* Set default options and check command-line */
 	speedy = 0;
 	flip = 0;

@@ -25,6 +25,7 @@
  */
 #include <stdio.h>
 #include <stdl/stdl.h>
+#include "../../examples/hold.h"
 
 #define FRAMES 100
 #define VC_HI  (*(volatile uint8_t *)0xFFFF8205UL)
@@ -47,6 +48,8 @@ int main(void)
 {
     STDL_Surface *world;
     int pass;
+
+    hold_on_exit("HWLATCH");
 
     STDL_Init(STDL_INIT_VIDEO);
     STDL_SetVideoMode(320, 200, 4, 0);

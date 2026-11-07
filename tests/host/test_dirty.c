@@ -361,11 +361,66 @@ static void test_direct_whole(int whole)
     STDL_FreeSurface(b);
 }
 
+/* STDL_DirtyBackground: the background changes and every page follows
+ * as it comes round - three pages in turn, changes before the first
+ * restore (pages not yet seen), one rectangle, several, more than the
+ * lists hold, and the whole background */
+static void test_background(void)
+{
+    STDL_Surface *bg = STDL_CreateSurface(W, H);
+    STDL_Surface *pg[3];
+    int frame, k;
+
+    randomise(bg);
+    for (k = 0; k < 3; k++) {
+        pg[k] = STDL_CreateSurface(W, H);
+        STDL_BlitSurface(bg, NULL, pg[k], NULL);
+    }
+    CHECK(STDL_DirtyInit(bg, MAXR) == 0, "init");
+
+    for (frame = 0; frame < 300; frame++) {
+        STDL_Surface *p = pg[frame % 3];
+        const int kind = frame % 23;
+
+        /* the game's update: change the background, and say so */
+        if (frame == 0 || kind == 7) {
+            int n = frame == 0 ? 2 : MAXR + 2;  /* past the lists' room */
+            while (n-- > 0) {
+                STDL_Rect r = random_rect(), said = r;
+                STDL_FillRect(bg, &r, (uint8_t)(rnd() & 15));
+                STDL_DirtyBackground(&said);
+            }
+        } else if (kind == 13) {
+            randomise(bg);                      /* a new level */
+            STDL_DirtyBackground(NULL);
+        } else if (rnd() % 3 == 0) {
+            STDL_Rect r = random_rect(), said = r;
+            STDL_FillRect(bg, &r, (uint8_t)(rnd() & 15));
+            STDL_DirtyBackground(&said);
+        }
+
+        /* the frame: restore, check, draw, flip */
+        STDL_DirtyRestore(p);
+        CHECK(same(p, bg), "page %d not the background at frame %d",
+              frame % 3, frame);
+        if (!same(p, bg)) {
+            break;
+        }
+        draw_pushed(p, (int)(rnd() % 5));
+    }
+    STDL_DirtyQuit();
+    STDL_FreeSurface(bg);
+    for (k = 0; k < 3; k++) {
+        STDL_FreeSurface(pg[k]);
+    }
+}
+
 int main(void)
 {
     test_one_page();
     test_two_pages();
     test_three_pages();
+    test_background();
     test_direct();
 #ifndef __m68k__
     /* and with a BLiTTER present (the host's model), which every

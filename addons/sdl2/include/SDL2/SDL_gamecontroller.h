@@ -3,10 +3,11 @@
  * Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: LGPL-2.1-or-later
  *
- * The SDL2 add-on's game controller: joystick 0 as SDL2's controller
- * layout, which a pad has as it is and a joystick has in part - its
- * directions are the d-pad and its fire is A. The buttons are read
- * from STDL_JoyInputHeld; the axes are the joystick's.
+ * The SDL2 add-on's game controllers: every joystick (SDL_joystick.h)
+ * as SDL2's controller layout, which a pad has as it is and a joystick
+ * has in part - its directions are the d-pad and its fire is A. The
+ * buttons are read from STDL_JoystickInputHeld; the axes are the
+ * joystick's.
  */
 
 #ifndef STDL_SDL2_GAMECONTROLLER_H

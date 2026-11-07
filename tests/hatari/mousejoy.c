@@ -62,7 +62,7 @@ int main(int argc, char *argv[])
                 }
             }
         }
-        j = STDL_GetJoyState();
+        j = STDL_GetJoystickState(0);
 
         /* the band says which mode we are in, so a photograph of a
          * held fire button carries its own context */

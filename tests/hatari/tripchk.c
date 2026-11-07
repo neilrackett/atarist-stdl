@@ -29,6 +29,7 @@
 #ifdef TRIPRESP
 #include <stdl/stdl_responsive.h>
 #endif
+#include "../../examples/hold.h"
 
 #define FRCLOCK (*(volatile uint32_t *)0x466UL)
 #define HZ200   (*(volatile uint32_t *)0x4BAUL)
@@ -85,6 +86,8 @@ int main(int argc, char *argv[])
     uint8_t *seen[6];
     uint32_t tv[3], dv[3];
     int i, k, bad = 0, fail = 0, distinct, bpp = 4;
+
+    hold_on_exit("TRIPCHK");
 
     (void)argc;
     (void)argv;

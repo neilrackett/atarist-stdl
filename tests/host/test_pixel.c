@@ -1110,6 +1110,188 @@ static void test_partial_middle(void)
 }
 
 /*
+ * Same-phase rows of whole groups longer than BLIT_INLINE_MAX: a
+ * scroller's window out of a wider buffer, which rowcopy.c copies in
+ * passes - eight 40-byte units a strip, then the rows' last 0-32
+ * bytes. Every row length from 9 groups to 48 and 64 (two strips and a
+ * tail) so that every unit count and every tail comes round, at random
+ * offsets and heights, into long- and word-aligned views, with and
+ * without a destination mask. Every length to 64 and 14 rows took 217s
+ * of PIXCHK's full pass on a plain ST; this is about half. Then the overlaps it must decline or get
+ * right: a surface shifted onto itself left, right (rightwards in a
+ * row the 4-plane CPU path has always been right, through bcopy), up,
+ * and up and right, and two surfaces over one block a group apart,
+ * whole rows, where the passes would read a row's tail after the next
+ * row's first unit had written it; the CPU's, as the BLiTTER copies
+ * forwards whatever the overlap.
+ */
+static void test_long_rows(void)
+{
+    enum { W = 1024, H = 10, STRIDE = W / 2, MSTRIDE = W / 8 };
+    static uint8_t bufs[2][STRIDE * H + 8];
+    static uint16_t mbuf[MSTRIDE * H / 2];
+    const int blit_was = STDL_UseBlitter(0);
+    int ng, view, x, y;
+
+    for (ng = 9; ng <= W / 16; ng = ng == 48 ? W / 16 : ng + 1) {
+        for (view = 0; view < 4; view++) {
+            const int withmask = view & 1, borrowed = view >> 1;
+            STDL_Surface *src, *dst;
+            Ref *rs, *rd;
+            STDL_Rect sr, dr;
+            int bad = 0;
+
+            if (PX_SKIP(41 * 4)) continue;
+            if (borrowed) {
+                /* word aligned, never long aligned */
+                uint8_t *a = bufs[0], *b = bufs[1];
+
+                while (((uintptr_t)a & 3) != 2) { a++; }
+                while (((uintptr_t)b & 3) != 2) { b++; }
+                src = STDL_CreateSurfaceFrom(a, W, H, STRIDE, NULL, 0);
+                dst = STDL_CreateSurfaceFrom(b, W, H, STRIDE,
+                                             withmask ? (uint8_t *)mbuf
+                                                      : NULL,
+                                             withmask ? MSTRIDE : 0);
+            } else {
+                src = STDL_CreateSurface(W, H);
+                dst = STDL_CreateSurface(W, H);
+            }
+            if (src == NULL || dst == NULL) {
+                CHECK(0, "long rows setup");
+                break;
+            }
+            randomise(src, 16);
+            randomise(dst, 16);
+            if (withmask && borrowed) {
+                memset(mbuf, 0xFF, sizeof(mbuf));
+            } else if (withmask && STDL_CreateMask(dst, 1) != 0) {
+                CHECK(0, "long rows mask");
+                break;
+            }
+            rs = ref_new(W, H);
+            rd = ref_new(W, H);
+            surf_to_ref(src, rs);
+            surf_to_ref(dst, rd);
+            sr.x = (int16_t)((int)(rnd() % (unsigned)(W / 16 - ng + 1)) * 16);
+            sr.y = (int16_t)(rnd() % 4);
+            sr.w = (uint16_t)(ng * 16);
+            sr.h = (uint16_t)(1 + rnd() % (H - 4));     /* 1-6 */
+            dr.x = (int16_t)((int)(rnd() % (unsigned)(W / 16 - ng + 1)) * 16);
+            dr.y = (int16_t)(rnd() % (unsigned)(H - sr.h + 1));
+            ref_blit(rs, sr.x, sr.y, sr.w, sr.h, rd, dr.x, dr.y, 0, 0,
+                     &dst->clip);
+            STDL_BlitSurface(src, &sr, dst, &dr);
+            CHECK(ref_cmp(dst, rd, "long rows"),
+                  "long rows ng=%d view=%d src=%d,%d dst=%d,%d h=%d", ng,
+                  view, sr.x, sr.y, dr.x, dr.y, sr.h);
+            if (withmask) {
+                /* opaque exactly where the blit landed: a row's
+                 * words read once, not a multiply a pixel */
+                for (y = 0; y < H; y++) {
+                    const uint16_t *mr = (const uint16_t *)
+                        (dst->mask + (size_t)y * dst->maskstride);
+
+                    for (x = 0; x < W; x++) {
+                        const int in = x >= dr.x && x < dr.x + sr.w
+                                    && y >= dr.y && y < dr.y + sr.h;
+
+                        bad += (int)((mr[x >> 4] >> (15 - (x & 15))) & 1)
+                               == in;
+                    }
+                }
+                CHECK(bad == 0, "long rows mask ng=%d view=%d: %d bits",
+                      ng, view, bad);
+            }
+            ref_free(rs);
+            ref_free(rd);
+            STDL_FreeSurface(src);
+            STDL_FreeSurface(dst);
+            if (failures > 3) {
+                STDL_UseBlitter(blit_was);
+                return;
+            }
+        }
+    }
+
+    /* a surface onto itself, as if through a copy: left, right, up,
+     * up and right; rows of 160 and 320 bytes are one pass, the
+     * others more */
+    {
+        static const int16_t mv[4][2] = { { -32, 0 }, { 48, 0 },
+                                          { 0, -3 }, { 16, -2 } };
+        static const int widths[] = { 9, 10, 20, 21, 40, 41, 50 };
+        int m, k;
+
+        for (m = 0; m < 4; m++) {
+            for (k = 0; k < (int)(sizeof widths / sizeof widths[0]); k++) {
+                STDL_Surface *s;
+                Ref *before, *rd;
+                STDL_Rect sr, dr;
+
+                if (PX_SKIP(28)) continue;
+                s = STDL_CreateSurface(W, H);
+                before = ref_new(W, H);
+                rd = ref_new(W, H);
+                randomise(s, 16);
+                surf_to_ref(s, before);
+                surf_to_ref(s, rd);
+                sr.x = 64;
+                sr.y = 5;
+                sr.w = (uint16_t)(widths[k] * 16);
+                sr.h = 5;
+                dr.x = (int16_t)(sr.x + mv[m][0]);
+                dr.y = (int16_t)(sr.y + mv[m][1]);
+                ref_blit(before, sr.x, sr.y, sr.w, sr.h, rd, dr.x, dr.y, 0,
+                         0, &s->clip);
+                STDL_BlitSurface(s, &sr, s, &dr);
+                CHECK(ref_cmp(s, rd, "long rows in place"),
+                      "long rows in place by %d,%d, %d groups", mv[m][0],
+                      mv[m][1], widths[k]);
+                ref_free(before);
+                ref_free(rd);
+                STDL_FreeSurface(s);
+            }
+        }
+    }
+
+    /* two surfaces over one block, the source a group on: whole rows,
+     * so a row's last group is the next row's first */
+    {
+        static const int widths[] = { 320, 336, 640, 704, 1024 };
+        static uint8_t blk[STRIDE * H + 16], want[STRIDE * H + 16];
+        int k;
+
+        for (k = 0; k < (int)(sizeof widths / sizeof widths[0]); k++) {
+            const int w = widths[k], stride = w / 2;
+            STDL_Surface *s, *d;
+            STDL_Rect sr;
+            unsigned i;
+
+            if (PX_SKIP(5)) continue;
+            for (i = 0; i < sizeof blk; i++) {
+                blk[i] = (uint8_t)rnd();
+            }
+            memcpy(want, blk, sizeof blk);
+            memmove(want, want + 8, (size_t)stride * (H - 1));
+            s = STDL_CreateSurfaceFrom(blk + 8, w, H - 1, stride, NULL, 0);
+            d = STDL_CreateSurfaceFrom(blk, w, H - 1, stride, NULL, 0);
+            sr.x = 0;
+            sr.y = 0;
+            sr.w = (uint16_t)w;
+            sr.h = H - 1;
+            /* a source rectangle, or it would be blit_whole's memcpy */
+            STDL_BlitSurface(s, &sr, d, NULL);
+            CHECK(memcmp(blk, want, sizeof blk) == 0,
+                  "long rows over one block, %d wide", w);
+            STDL_FreeSurface(s);
+            STDL_FreeSurface(d);
+        }
+    }
+    STDL_UseBlitter(blit_was);
+}
+
+/*
  * Colour-keyed blits at the same phase: into an unmasked destination
  * they take their own routine, which reads each group's mask word
  * first - nothing visible skips the group, everything visible copies
@@ -2124,6 +2306,7 @@ int main(void)
     PIXEL_RUN(test_points);
     PIXEL_RUN(test_blits);
     PIXEL_RUN(test_partial_middle);
+    PIXEL_RUN(test_long_rows);
     PIXEL_RUN(test_keyed_same_phase);
     PIXEL_RUN(test_shift_plain);
     PIXEL_RUN(test_whole_blit_writeback);

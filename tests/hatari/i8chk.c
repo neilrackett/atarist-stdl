@@ -20,11 +20,15 @@
  */
 #define main i8chk_suite
 #include "../host/test_blit8.c"
+#include "../../examples/hold.h"
 #undef main
 
 int main(void)
 {
-    int r = i8chk_suite();
+    int r;
+
+    hold_on_exit("I8CHK");
+    r = i8chk_suite();
 
     printf("I8:done %s\n", r == 0 ? "PASS" : "FAIL");
     fflush(stdout);

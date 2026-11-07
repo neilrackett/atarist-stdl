@@ -28,7 +28,10 @@
 #                 SoundFileName config, ./hatari.wav by default)
 #
 # Console output lands in tests/hatari/out/NAME.log and is echoed
-# at the end. Environment overrides:
+# at the end. When the script is done the emulator gets a TERM, and
+# a -9 ten seconds later if it is still there (said on stderr).
+# SDL_VIDEODRIVER=dummy runs it with no window, where no key typed
+# on the desktop can reach it. Environment overrides:
 #   HATARI  emulator binary   (default: mac app bundle path)
 #   TOS     TOS/EmuTOS image  (required if no usable default)
 #   FF      fast-forward on|off (default on; use off when taking
@@ -41,7 +44,14 @@
 #           anything: Hatari honours writes to $FFFF8E21 and really
 #           does change clock, so speed-dependent code is testable
 #           here, not only on hardware. Do not pass --cpuclock as
-#           well, which pins it)
+#           well, which pins it). tt and falcon want a 512K TOS
+#           (EmuTOS's etos512*.img, or TOS 3.06 and 4.04), and get
+#           --mmu off, and on a falcon --fpu none, after --machine,
+#           which LATE can still change
+#   MONITOR hatari monitor: mono, rgb, vga or tv (default Hatari's
+#           own, rgb in a fresh configuration). A Falcon wants both
+#           vga and rgb: they give it different modes, RGB's line
+#           384 pixels with the picture centred
 #   SOUND   off, on, or a frequency in Hz (default off). "on" means
 #           44100. Recording is a separate step: send
 #           'fifo hatari-shortcut recsound' to start and again to
@@ -52,7 +62,9 @@
 #   EXTRA   extra hatari options, placed before this script's own
 #           (so a --configfile in it cannot undo them)
 #   LATE    extra hatari options placed after them, just before the
-#           program: for what --machine resets, such as --fpu 68882
+#           program: for what --machine resets, such as --fpu 68882,
+#           and TT-RAM, "--ttram 4 --addr24 off" (refused without the
+#           --addr24 off, which would leave Hatari waiting on a question)
 set -u
 NAME=$1
 PROG=$2
@@ -97,13 +109,41 @@ if [ ! -f "$PROG" ]; then
     echo "$0: program not found: $PROG" >&2
     exit 2
 fi
+# TT-RAM wants 32-bit addressing: without it Hatari stops at a question
+# before TOS starts, which no window answers, and the program never
+# runs (under EmuTOS and TOS 3.06 alike) - only the kill below ends it
+case " ${EXTRA:-} ${LATE:-} " in
+  *" --ttram "[1-9]*)
+    case " ${EXTRA:-} ${LATE:-} " in
+      *" --addr24 off "*) ;;
+      *) echo "$0: --ttram needs --addr24 off as well (in LATE)" >&2
+         exit 2 ;;
+    esac ;;
+esac
+
+# A TT's and a Falcon's own. Hatari 2.6.1's --machine tt keeps the
+# configuration's MMU setting (a configuration saying on stays on),
+# and an emulated MMU cost TTCHK 46-47s of the host's time under
+# fast-forward against 29-32 without, with no truer timing;
+# --machine falcon already drops the FPU there, as a stock Falcon
+# has none, and saying so keeps it so on other versions.
+case $MACHINE in
+  tt)     MACHOPTS="--mmu off" ;;
+  falcon) MACHOPTS="--mmu off --fpu none" ;;
+  *)      MACHOPTS="" ;;
+esac
 
 # EXTRA goes first so this script's own options win: a
 # --configfile in EXTRA (the only way to move the sound capture
 # file) would otherwise replace the TOS and machine chosen here.
 # LATE goes last, because --machine resets the CPU's options.
-"$HATARI" ${EXTRA:-} --tos "$TOS" --machine "$MACHINE" \
-  --fast-forward "$FF" \
+# --confirm-quit false: Hatari's own default asks before it quits, so
+# with a fresh configuration (a HOME of its own) the TERM at the end
+# waited on that question for ever, which no window was there to
+# answer - on st, ste, tt and falcon alike, and with EmuTOS and TOS.
+"$HATARI" ${EXTRA:-} --tos "$TOS" --machine "$MACHINE" $MACHOPTS \
+  ${MONITOR:+--monitor "$MONITOR"} --fast-forward "$FF" \
+  --confirm-quit false \
   --fast-boot on --sound "$SOUND" --statusbar off \
   --conout 2 --cmd-fifo "$FIFO" \
   --screenshot-dir "$SHOTDIR" --screenshot-format png ${LATE:-} \
@@ -145,6 +185,19 @@ done
 
 sleep 2
 kill $HPID 2>/dev/null
+# An emulator that outlives the TERM left this script waiting on it
+# for ever (61 of them over one session). With the quit unconfirmed
+# 164 of 164 runs under tt and falcon ended on it; one held by
+# another of Hatari's questions (--ttram without --addr24 off asks
+# one before TOS starts) gets ten seconds, then -9.
+for i in $(seq 1 20); do
+  kill -0 $HPID 2>/dev/null || break
+  sleep 0.5
+done
+if kill -0 $HPID 2>/dev/null; then
+  echo "$0: hatari ignored TERM for 10s: killed" >&2
+  kill -9 $HPID 2>/dev/null
+fi
 wait $HPID 2>/dev/null
 echo "=== $NAME console output ==="
 cat "$LOG"

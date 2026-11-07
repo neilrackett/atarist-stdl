@@ -14,9 +14,9 @@
  * it was the back page, not what went into the page on screen.
  * Pushes go to the list of the page restored last (before any
  * restore, to the first page restored). STDL_DirtyReset forgets that
- * list only. Two pages are tracked; a third evicts the one restored
- * least recently, which is then restored whole when it next comes
- * back. Restoring is always from the background, so a rectangle
+ * list only. Three pages are tracked (STDL_TRIPLEBUF's); a fourth
+ * evicts the one restored least recently, which is then restored
+ * whole when it next comes back. Restoring is always from the background, so a rectangle
  * pushed twice or too many only costs time; overflowing max_rects
  * restores that page whole.
  */
@@ -51,6 +51,20 @@ void STDL_DirtyReset(void);
  * restored exactly as before.
  */
 void STDL_DirtyWholeGroups(int on);
+
+/*
+ * The background itself changed in r (NULL: everywhere - a new level),
+ * so every page puts r back from it as the page next comes round to
+ * STDL_DirtyRestore, not only the page drawn over it: change the
+ * background surface, then call this, before the frame's restore. A
+ * page not yet restored gets every change made since STDL_DirtyInit
+ * when it first is. Each change is one rectangle in each page's list;
+ * past max_rects, or with NULL, a page is restored whole once. So a
+ * score drawn into the background, a collected item, a door that
+ * opens: drawn once, and every page follows. In an object of its own
+ * (src/dirtybg.c), linked only by a program that calls it.
+ */
+void STDL_DirtyBackground(const STDL_Rect *r);
 
 #ifdef __cplusplus
 }

@@ -29,11 +29,24 @@ int stdl_sdl2_push(SDL_Event *e);
 
 /* joystick.c: an STDL joystick event, the state it carries kept and
  * passed on to an open joystick and controller; the controller's
- * buttons, read and their changes sent, once a pump */
+ * buttons, read and their changes sent, at a pump that brought its
+ * joystick an event */
 void stdl_sdl2_joy_event(const STDL_Event *se);
 void stdl_sdl2_controller_poll(void);
 
 /* audio.c: the open device's format, or 0 */
 SDL_AudioFormat stdl_sdl2_audio_format(void);
+
+/* little-endian fields of the files the add-on reads (BMP, WAV) */
+static __inline__ Uint32 stdl_sdl2_le32(const Uint8 *p)
+{
+    return (Uint32)p[0] | (Uint32)p[1] << 8 | (Uint32)p[2] << 16 |
+           (Uint32)p[3] << 24;
+}
+
+static __inline__ unsigned stdl_sdl2_le16(const Uint8 *p)
+{
+    return (unsigned)(p[0] | p[1] << 8);
+}
 
 #endif /* STDL_SDL2_INTERNAL_H */

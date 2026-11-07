@@ -37,6 +37,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdl/stdl.h>
+#include "../../examples/hold.h"
 
 #define MINTICKS 120            /* 0.6s of the 200Hz clock per case */
 
@@ -467,6 +468,8 @@ int main(void)
 {
     const STDL_MachineInfo *mi;
     int k;
+
+    hold_on_exit("SPRCOST");
 
     if (STDL_Init(STDL_INIT_VIDEO) < 0
         || STDL_SetVideoMode(320, 200, 4, 0) == NULL) {

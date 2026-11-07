@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdl/stdl.h>
+#include "../../examples/hold.h"
 
 #define MINTICKS 120
 
@@ -421,6 +422,8 @@ static void report(const char *label, op_fn f)
 int main(void)
 {
     int k;
+
+    hold_on_exit("PRIMCOST");
 
     if (STDL_Init(STDL_INIT_VIDEO) < 0
         || STDL_SetVideoMode(320, 200, 4, 0) == NULL) {

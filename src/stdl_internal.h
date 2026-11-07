@@ -66,7 +66,14 @@ extern volatile uint16_t stdl_host_nvbls;
 extern void (**stdl_host_vblqueue)(void);
 extern volatile uint8_t stdl_host_vidcnt[3];
 #define STDL_HZ200      stdl_host_clock
+/* one clock for both, but for a suite that moves the VBL apart from
+ * the 200Hz clock (test_joystick, for the pump's beat) */
+#ifdef STDL_HOST_FRCLOCK
+extern volatile uint32_t stdl_host_frclock;
+#define STDL_FRCLOCK    stdl_host_frclock
+#else
 #define STDL_FRCLOCK    stdl_host_clock
+#endif
 #define STDL_HWPAL      stdl_host_hwpal
 #define STDL_NVBLS      stdl_host_nvbls
 #define STDL_VBLQUEUE   stdl_host_vblqueue
@@ -439,7 +446,101 @@ static __inline__ int stdl_is_stram(const void *p, uint32_t bytes)
  * should be reporting the mouse. event.c owns both; src/mouse.c
  * holds the public call that sets the second. */
 void stdl_ikbd_send(uint8_t b);
+
+/* dirty.c's lists, one a page (STDL_DirtyRestore) and one more after
+ * them that STDL_DirtyBackground (dirtybg.c) fills for pages not yet
+ * seen; stdl_dirty_claimed, set by dirtybg.c, is told when a list is
+ * claimed for a new page so it can be given those changes */
+typedef struct {
+    const uint8_t *key;         /* the page's pixels; NULL = unclaimed */
+    STDL_Rect *rects;
+    int n;
+    int overflowed;             /* full restore instead of the list  */
+} stdl_dirty_list_t;
+#define STDL_DIRTY_LISTS 3
+extern stdl_dirty_list_t stdl_dirty_lists[STDL_DIRTY_LISTS + 1];
+extern int stdl_dirty_max;
+extern void (*stdl_dirty_claimed)(int list);
 extern uint8_t stdl_mouse_on;
+
+/*
+ * More than one joystick (STDL_SetNumJoysticks, src/joysticks.c). The
+ * count and the one pointer are event.c's, so a program that never
+ * asks has one joystick, as it always had, and links none of that
+ * code: joystick 0 - the joystick port and pad 0 - stays event.c's
+ * own, and the readers (STDL_GetJoystickState and the rest) reach
+ * joysticks 1-5 through the pointer, which is set whenever the count
+ * is above one. Whether the pads are kept apart from the ports
+ * (STDL_UseJoystickMerge, src/joymerge.c) is joystick 0's pad slot,
+ * -1 apart (stdl_pad0, stdl_xpad.h).
+ */
+extern uint8_t stdl_joy_count;      /* 1 to STDL_MAX_JOYSTICKS */
+extern int stdl_events_installed;   /* the keyboard is the library's */
+extern uint8_t stdl_joy_devices;    /* device events asked for       */
+
+/*
+ * Tell the IKBD what the mouse port is, from the one place: a
+ * joystick when there are two or more ($12 mouse off, $14 joystick
+ * reporting), otherwise a mouse ($08), off again ($12) if the program
+ * said so (STDL_EnableMouse). The install, STDL_EnableMouse and a
+ * change of count call it while the library has the keyboard. event.c.
+ */
+void stdl_ikbd_mode(void);
+
+/* A joystick event (event.c): an axis's value, a button's
+ * STDL_PRESSED or STDL_RELEASED, a hat's bits. */
+void stdl_joy_event(uint8_t type, int which, int index, int value);
+
+/* STDL_JOYDEVICEADDED or REMOVED for joystick `which`, where the
+ * program asked for them (stdl_joy_devices). event.c. */
+void stdl_joy_device(uint8_t type, int which);
+
+/* Joystick 0 as its pad record reads now: its events and keys.
+ * event.c, for the pump and the merge setting. */
+void stdl_pad0_report(uint32_t now);
+
+/* How many more events the queue takes now, where that matters
+ * (event.c): a pad is read only when there is room for all it could
+ * say (STDL_XPAD_EVENTS), so a program taking its events loses none.
+ * The whole queue for a program that pumps without taking. */
+int stdl_event_room(void);
+
+/* Joysticks 1-5 as the pump last reported them: the state byte and
+ * axes 0 and 1, which merge a port with a pad and so are not the
+ * pad's own reading. The SDL 1.2 shim reads the axes. */
+typedef struct {
+    uint8_t  state;     /* the classic five, IKBD shape: port | pad   */
+    uint8_t  spare;
+    int16_t  axis[2];   /* SDL's axes 0 and 1                         */
+} stdl_joy_t;
+
+struct stdl_pad;        /* stdl_xpad.h */
+
+typedef struct {
+    /* the mouse port's byte, from a $FE or a $FD packet */
+    void (*port0)(uint8_t state);
+    /* once a pump, ahead of the IKBD's packets: joysticks 1-5's pads,
+     * and their rumble's end */
+    void (*poll)(uint32_t now);
+    /* every exit, the terminate path's included: joysticks 1-5's
+     * rumble off. Memory writes only. */
+    void (*stop)(void);
+    /* STDL_JoystickInputHeld for joysticks 1-5 (`what` an
+     * STDL_JOYSTICK_ input, 0 for one out of range), or with
+     * STDL_JOYN_STATE and STDL_JOYN_PAD STDL_GetJoystickState and
+     * STDL_HasPad: one entry for the three, so event.c carries one
+     * call */
+    int (*read)(int which, int what);
+    /* the joysticks again after the merge setting changed
+     * (STDL_UseJoystickMerge, src/joymerge.c); returns the count */
+    int (*remap)(void);
+    struct stdl_pad *pads;  /* [STDL_MAX_JOYSTICKS]; [0] is unused:
+                               joystick 0's is stdl_pad0            */
+    stdl_joy_t *joy;        /* [STDL_MAX_JOYSTICKS]; [0] is unused     */
+} stdl_joyn_ops;
+#define STDL_JOYN_STATE (-1)
+#define STDL_JOYN_PAD   (-2)
+extern const stdl_joyn_ops *stdl_joyn;
 
 extern int     stdl_sync_want;
 extern void (*stdl_shutdown_hwscroll)(void);
@@ -607,6 +708,10 @@ void stdl_ym_claim_voice(int voice);    /* effects context only      */
 /* cooperative timer service (compat SDL timers register here so
  * they fire from the pump and the native delays too) */
 extern void (*stdl_timer_hook)(void);
+
+/* The timer and audio hooks, at most once a 200Hz tick (time.c): the
+ * waits' service, and STDL_PollEvent's between its pumps. */
+void stdl_idle_services(void);
 
 /*
  * BLiTTER (blitter.c). stdl_blitter_go runs one plane-rectangle
@@ -1098,6 +1203,26 @@ static __inline__ void stdl_copy_rows_groups(uint8_t *dp,
     }
 #endif
 }
+
+/*
+ * Rows of whole groups too long for the loop above, at movem speed
+ * (rowcopy.c, which says how): bytes a multiple of 8, from 8, h from
+ * 1. The copy goes in passes, right for rows that do not overlap, and
+ * for an overlap in one pass (bytes a multiple of 40 up to 320) where
+ * the destination is at the lower address, or with negative strides
+ * (rows bottom up) where no row overlaps its own source; this tests
+ * for that and returns -1, having copied nothing, where it does not
+ * hold. The copy itself has no other entry.
+ */
+int stdl_copy_rows_checked(uint8_t *dp, const uint8_t *sp, int bytes,
+                           int h, int sstride, int dstride);
+/*
+ * A blit onto its own memory, after its clip (overlap.c): -1 where its
+ * rows go top down and left to right as always, 0 done (rows below
+ * from the bottom, rows to the right from the right).
+ */
+int stdl_blit_overlap(const STDL_Surface *src, STDL_Surface *dst, int sx,
+                      int sy, int dx, int dy, int w, int h, unsigned flags);
 
 /*
  * The rows of one glyph of a 1bpp font, set in colour pw0..pw3 (each

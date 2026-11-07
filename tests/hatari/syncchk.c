@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <mint/osbind.h>
 #include <stdl/stdl.h>
+#include "../../examples/hold.h"
 
 static unsigned char sync_now;
 
@@ -40,6 +41,8 @@ static int rate(void)
 int main(void)
 {
     int before, after[3], fails = 0, k;
+
+    hold_on_exit("SYNCCHK");
 
     before = rate();
     STDL_Init(0);

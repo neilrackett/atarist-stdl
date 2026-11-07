@@ -16,6 +16,7 @@
 #include "stdl_event.h"
 #include "stdl_keys.h"
 #include "xpad.h"
+#include "../../examples/hold.h"
 
 /* Pump for `ms`, which is what ends a rumble. */
 static void pump_for(uint32_t ms)
@@ -52,6 +53,8 @@ int main(void)
 {
     SDL_Joystick *js;
     int i, n;
+
+    hold_on_exit("XPADPROB");
 
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK);
     SDL_SetVideoMode(320, 200, 4, 0);
@@ -95,13 +98,13 @@ int main(void)
         /* Deliberately enabled *after* the pump, with the pad already
          * holding a direction: emulation fires on change, so this is
          * the case that used to synthesise nothing at all. */
-        STDL_JoyKeyMapping(STDLK_UP, STDLK_DOWN, STDLK_LEFT,
+        STDL_JoystickKeyMapping(STDLK_UP, STDLK_DOWN, STDLK_LEFT,
                            STDLK_RIGHT, STDLK_SPACE);
         /* A pad-only button: the stub holds the right shoulder, which
          * an ST joystick has no way to express. */
-        STDL_JoyKeyBind(STDL_JOYKEY_TR, STDLK_RETURN);
-        STDL_JoyKeyBind(STDL_JOYKEY_START, STDLK_ESCAPE);
-        STDL_JoyKeyEmulation(1);
+        STDL_JoystickKeyBind(STDL_JOYSTICK_TR, STDLK_RETURN);
+        STDL_JoystickKeyBind(STDL_JOYSTICK_START, STDLK_ESCAPE);
+        STDL_JoystickKeyEmulation(1);
 
         keys = STDL_GetKeyState(&nkeys);
         fprintf(stderr, "joykey right=%d space=%d up=%d\r\n",
@@ -111,11 +114,11 @@ int main(void)
         /* The native poll path, which a game with its own notion of
          * buttons uses instead of binding keys. */
         fprintf(stderr, "native pad=%d south=%d tr=%d start=%d right=%d\r\n",
-                STDL_HavePad() ? 1 : 0,
-                STDL_JoyInputHeld(STDL_JOYKEY_SOUTH),
-                STDL_JoyInputHeld(STDL_JOYKEY_TR),
-                STDL_JoyInputHeld(STDL_JOYKEY_START),
-                STDL_JoyInputHeld(STDL_JOYKEY_RIGHT));
+                STDL_HasPad(0) ? 1 : 0,
+                STDL_JoystickInputHeld(0, STDL_JOYSTICK_SOUTH),
+                STDL_JoystickInputHeld(0, STDL_JOYSTICK_TR),
+                STDL_JoystickInputHeld(0, STDL_JOYSTICK_START),
+                STDL_JoystickInputHeld(0, STDL_JOYSTICK_RIGHT));
         fprintf(stderr, "joykey return=%d escape=%d\r\n",
                 keys[STDLK_RETURN] ? 1 : 0,
                 keys[STDLK_ESCAPE] ? 1 : 0);
@@ -128,12 +131,12 @@ int main(void)
      * other way. The stub holds lx +25800 and ly -12900.
      */
     fprintf(stderr, "merge x idle=%d right=%d left=%d\r\n",
-            (int)stdl_xpad_axis_merged(0, 0x00),
-            (int)stdl_xpad_axis_merged(0, 0x08),
-            (int)stdl_xpad_axis_merged(0, 0x04));
+            (int)stdl_xpad_axis_merged(&stdl_pad0, 0, 0x00),
+            (int)stdl_xpad_axis_merged(&stdl_pad0, 0, 0x08),
+            (int)stdl_xpad_axis_merged(&stdl_pad0, 0, 0x04));
     fprintf(stderr, "merge y idle=%d down=%d\r\n",
-            (int)stdl_xpad_axis_merged(1, 0x00),
-            (int)stdl_xpad_axis_merged(1, 0x02));
+            (int)stdl_xpad_axis_merged(&stdl_pad0, 1, 0x00),
+            (int)stdl_xpad_axis_merged(&stdl_pad0, 1, 0x02));
 
     /*
      * Rumble. The stub offers a request area and XPAD_CAP_RUMBLE, and a
@@ -155,22 +158,22 @@ int main(void)
         }
 
         snap(&s[taken++], "before", 0, req);
-        snap(&s[taken++], "start", STDL_PadRumble(200, 60, 100), req);
+        snap(&s[taken++], "start", STDL_PadRumble(0, 200, 60, 100), req);
         pump_for(50);
         snap(&s[taken++], "at 50ms", 0, req);
         pump_for(100);
         snap(&s[taken++], "at 150ms", 0, req);
 
-        STDL_PadRumble(90, 0, 1000);
-        snap(&s[taken++], "stop", STDL_PadRumble(0, 0, 0), req);
+        STDL_PadRumble(0, 90, 0, 1000);
+        snap(&s[taken++], "stop", STDL_PadRumble(0, 0, 0, 0), req);
 
-        STDL_PadRumble(90, 0, 1000);
+        STDL_PadRumble(0, 90, 0, 1000);
         x->caps &= (uint16_t)~XPAD_CAP_RUMBLE;
-        snap(&s[taken++], "refused", STDL_PadRumble(90, 90, 100), req);
+        snap(&s[taken++], "refused", STDL_PadRumble(0, 90, 90, 100), req);
         x->caps |= XPAD_CAP_RUMBLE;
 
         /* Left running on purpose: SDL_Quit must end it. */
-        STDL_PadRumble(120, 120, 5000);
+        STDL_PadRumble(0, 120, 120, 5000);
         SDL_Quit();
         snap(&s[taken++], "after quit", 0, req);
 

@@ -38,13 +38,15 @@ CORE    = stubs.c blitmodel.c $(SRC)/surface.c $(SRC)/surfacedup.c \
           $(SRC)/indexed.c \
           $(SRC)/draw.c $(SRC)/blit.c $(SRC)/sprite.c $(SRC)/tileset.c \
           $(SRC)/text.c $(SRC)/shapes.c $(SRC)/palette.c \
-          $(SRC)/planes.c $(SRC)/blitter.c
+          $(SRC)/planes.c $(SRC)/blitter.c $(SRC)/rowcopy.c \
+          $(SRC)/overlap.c
 
 TESTS   = test_pixel test_compose test_cursor test_assets test_planes \
           test_footprint test_indexed test_glyph test_vbl test_blit8 \
           test_underleak test_blitter test_dirty \
           test_voice test_ym test_tone test_sfx test_opl test_refresh \
-          test_wav test_mixer test_ring test_math test_palette test_music test_polygon test_polypat test_raster test_spritebatch test_responsive test_bank8conv
+          test_wav test_mixer test_ring test_math test_palette test_music test_polygon test_polypat test_raster test_spritebatch test_responsive test_bank8conv \
+          test_joystick
 
 all: $(TESTS)
 
@@ -60,7 +62,7 @@ $(TESTS): %: %.c $(CORE) $(HDRS)
 	$(CC) $(CFLAGS) $(XFLAGS) -o $@ $(filter %.c,$^)
 
 test_pixel:     $(SRC)/surfacefrom.c $(SRC)/drawchar.c
-test_dirty:     $(SRC)/dirty.c
+test_dirty:     $(SRC)/dirty.c $(SRC)/dirtybg.c
 test_palette:   $(SRC)/palstage.c $(SRC)/vbl.c
 test_music:     $(SRC)/music.c $(SRC)/ym.c $(SRC)/asset.c
 test_polygon:   $(SRC)/polygon.c
@@ -72,7 +74,7 @@ test_spritebatch: $(SRC)/spritebatch.c
 # the responsive screens, and the bank of 8-plane art bank8conv.py
 # makes with stdlconv (Pillow)
 RESP_SRCS = $(addprefix $(SRC)/,responsive.c planes8.c planes8ex.c \
-            planes8tile.c tall4.c tallst.c hz38400.c asset.c asset8.c drawchar.c \
+            planes8tile.c planes8row.c tall4.c tallst.c hz38400.c asset.c asset8.c drawchar.c \
             blit8.c polygon.c spritebatch.c)
 test_bank8conv: $(RESP_SRCS)
 test_responsive: $(RESP_SRCS) p8ref.c $(SRC)/surfacefrom.c $(SRC)/palstage.c \
@@ -80,6 +82,8 @@ test_responsive: $(RESP_SRCS) p8ref.c $(SRC)/surfacefrom.c $(SRC)/palstage.c \
 # built with the counters, for stdl_blit_force: every operation the
 # BLiTTER could take goes to it, whatever its size
 test_blitter:   XFLAGS = -DSTDL_BLIT_STATS
+# blocks borrowed twice over, for a blit onto its own memory
+test_blitter:   $(SRC)/surfacefrom.c
 test_compose:   $(SRC)/bmp.c $(SRC)/degas.c $(SRC)/asset.c
 test_cursor:    $(SRC)/cursor.c
 test_assets:    $(SRC)/bmp.c $(SRC)/asset.c $(SRC)/degas.c
@@ -99,6 +103,22 @@ test_mixer:     $(SRC)/mixer.c $(SRC)/voice.c $(SRC)/vbl.c $(SRC)/wav.c \
 # the ring device's refill, both paths, pumped by hand
 test_ring:      $(SRC)/ring.c $(SRC)/wav.c $(SRC)/asset.c
 test_sfx:       $(SRC)/ym.c $(SRC)/sfx.c
+# the joysticks: the IKBD's packets through event.c against a fake ACIA,
+# Xpad's own consumer against a provider's block made by Xpad's own
+# provider half, and the SDL 1.2 shim; fakeos/ stands in for
+# <mint/osbind.h>, for this suite alone. The provider half's cookie jar
+# keeps pointers in 32 bits, which an LP64 host warns of; Xpad's own
+# host build turns those two warnings off, as the jar is never walked
+# here.
+XPADSRC = ../../lib/xpad/src
+test_joystick:  XFLAGS = -Ifakeos -I../../include/compat -I$(XPADSRC) \
+                         -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast \
+                         -DSTDL_HOST_FRCLOCK
+test_joystick:  $(SRC)/event.c $(SRC)/joysticks.c \
+                $(SRC)/mouse.c $(SRC)/joymerge.c $(SRC)/joydev.c \
+                $(SRC)/joyread.c $(SRC)/stdl_xpad.c $(XPADSRC)/xpad.c \
+                $(XPADSRC)/xpad_provider.c \
+                $(SRC)/compat.c $(XPADSRC)/xpad.h fakeos/mint/osbind.h
 test_opl:       $(SRC)/ym.c $(SRC)/tone.c $(SRC)/sfx.c $(SRC)/opl.c
 
 # Runs every binary in TESTS rather than a second hand-kept list:

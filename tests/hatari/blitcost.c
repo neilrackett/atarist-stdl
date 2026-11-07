@@ -25,6 +25,7 @@
  */
 #include <stdio.h>
 #include "stdl/stdl.h"
+#include "../../examples/hold.h"
 #define ITER 1500
 /* dx, sx: destination and source x; unequal phases make the blit
  * unaligned (the BLiTTER's skewed passes) */
@@ -51,6 +52,7 @@ int main(int argc, char *argv[])
                                          "edges" };
     STDL_Surface *dst, *src, *srck; int wi, hi, k;
     (void)argc; (void)argv;
+    hold_on_exit("BLITCOST");
     STDL_Init(STDL_INIT_VIDEO);
     STDL_SetVideoMode(320, 200, 4, 0);
     dst = STDL_CreateSurface(336, 200); src = STDL_CreateSurface(336, 200);

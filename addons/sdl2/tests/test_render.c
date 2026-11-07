@@ -737,10 +737,13 @@ int main(void)
 #ifndef STDL_SDL2_TEST_PAGES
 #define STDL_SDL2_TEST_PAGES "3"
 #endif
+#include "../../../examples/hold.h"
 
 int main(void)
 {
     int f;
+
+    hold_on_exit("SDL2RCHK");             /* SDL2RCHK: the results stay on screen */
     /* the machine's own screen, its layout read back from the page */
     SDL_SetHint(STDL_SDL2_HINT_PAGES, STDL_SDL2_TEST_PAGES);
     f = run(0xC0FFEEUL, 0x70, 1);

@@ -5,8 +5,8 @@
  *
  * The SDL2 add-on's events, SDL2's types and layouts: STDL's events
  * translated as they are pumped - keys (with SDL2's repeat flag and
- * text input), the mouse in the renderer's logical coordinates, joystick
- * 0 once opened, a game controller once opened, quit - and the
+ * text input), the mouse in the renderer's logical coordinates, a
+ * joystick once opened, a game controller once opened, quit - and the
  * program's own. STDL's key repeat and character translation are
  * turned on by the first pump, so a program that reads STDL's events
  * itself and never pumps here sees no change. The pump is where STDL's
@@ -142,7 +142,10 @@ typedef struct SDL_JoyButtonEvent {
     Uint8 padding1, padding2;
 } SDL_JoyButtonEvent;
 
-/* sent once, at the first pump, for joystick 0 */
+/* sent by the pump for each joystick STDL has, the first pump's and
+ * any the program asks STDL for later (STDL_SetNumJoysticks); REMOVED
+ * for each it gives up. `which` is the index, which is also the
+ * instance ID. */
 typedef struct SDL_JoyDeviceEvent {
     Uint32 type;
     Uint32 timestamp;

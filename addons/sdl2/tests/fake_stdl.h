@@ -26,10 +26,22 @@ extern uint16_t fake_mod;
 extern int fake_mouse_x, fake_mouse_y;
 extern uint8_t fake_mouse_buttons;
 extern int fake_repeat_delay, fake_repeat_interval, fake_unicode;
-extern int fake_pad;                    /* an Xpad pad is there */
-extern uint32_t fake_held;              /* a bit an STDL_JOYKEY_ */
 extern int fake_rumble_low, fake_rumble_high, fake_rumble_ms, fake_rumbles;
+/* the joysticks (STDL_SetNumJoysticks): how many, each one's pad and
+ * held inputs (a bit an STDL_JOYSTICK_ input), and the merge setting */
+extern int fake_joys, fake_pads[6], fake_rumble_which;
+extern uint32_t fake_helds[6];
+/* STDL_UseJoystickDeviceEvents's, and the core's device events for a
+ * new count or a merge change, every slot changing; the readers' */
+extern int fake_devices;
+void fake_set_joys(int n);
+void fake_set_merge(int n);
+extern int fake_axes[6][6], fake_hats[6];
+/* an STDL event for the next pump; the VBL count the pumps keep time
+ * by, how many there were, and the calls between them */
 void fake_event(const STDL_Event *e);
+extern uint32_t fake_vbl;
+extern int fake_pumps, fake_idles;
 void fake_key(int down, unsigned sym, unsigned mod, unsigned unicode);
 
 /* the ring device: what was asked for, and a refill of a half ring

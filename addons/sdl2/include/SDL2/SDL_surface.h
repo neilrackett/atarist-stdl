@@ -70,6 +70,7 @@ typedef struct SDL_Surface {
 #define SDL_FillRect                   stdl_sdl2_FillRect
 #define SDL_UpperBlit                  stdl_sdl2_UpperBlit
 #define SDL_BlitSurface                SDL_UpperBlit
+#define SDL_LoadBMP_RW                 stdl_sdl2_LoadBMP_RW
 
 /* depth 8 and no masks: SDL_PIXELFORMAT_INDEX8, with a palette of 256
  * (SDL2 gives an 8-bit surface 256 white entries) */
@@ -97,6 +98,13 @@ extern int SDL_FillRect(SDL_Surface *dst, const SDL_Rect *rect, Uint32 color);
  * dstrect then holds; pixels in the colour key are skipped */
 extern int SDL_UpperBlit(SDL_Surface *src, const SDL_Rect *srcrect,
                          SDL_Surface *dst, SDL_Rect *dstrect);
+/* an uncompressed BMP of 1, 4 or 8 bits a pixel, as an INDEX8 surface
+ * with the file's palette (its ncolors the file's count); RLE and
+ * 16-32 bits are refused, with the error set. `stdlconv bmp8` makes
+ * them, several sharing one palette. */
+extern SDL_Surface *SDL_LoadBMP_RW(SDL_RWops *src, int freesrc);
+
+#define SDL_LoadBMP(file) SDL_LoadBMP_RW(SDL_RWFromFile(file, "rb"), 1)
 
 #ifdef __cplusplus
 }

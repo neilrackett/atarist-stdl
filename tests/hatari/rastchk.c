@@ -34,6 +34,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdl/stdl.h>
+#include "../../examples/hold.h"
 
 static volatile uint32_t vbls;
 static void count_vbl(void) { vbls++; }
@@ -74,6 +75,8 @@ int main(int argc, char *argv[])
     static const int steps[3] = { 4, 2, 1 };
     uint32_t base, one[3], two[3], gone[3], gtwo[3];
     int k, fails = 0, ok1, ok2, ok3, ok4;
+
+    hold_on_exit("RASTCHK");
 
     if (STDL_SetVideoMode(320, 200, 4, 0) == NULL
         || STDL_AddVBL(count_vbl) < 0) {

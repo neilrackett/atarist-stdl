@@ -37,6 +37,7 @@
 #include <mint/falcon.h>
 #include <stdl/stdl.h>
 #include <stdl/stdl_responsive.h>
+#include "../../examples/hold.h"
 
 #define FRCLOCK (*(volatile uint32_t *)0x466UL)
 #define HZ200   (*(volatile uint32_t *)0x4BAUL)
@@ -128,6 +129,7 @@ static int8_t noise[4096];
 
 int main(void)
 {
+    hold_on_exit("STG8CHK");
     /* double- and triple-buffered at 1.5 VBLs a frame, then triple at
      * none, where Flip waits for the page before to be taken */
     static const uint32_t modes[3] = { STDL_DOUBLEBUF, STDL_TRIPLEBUF,

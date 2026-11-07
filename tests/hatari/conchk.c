@@ -31,6 +31,7 @@
 #include <stdlib.h>
 #include <stdl/stdl.h>
 #include <stdl/stdl_bench.h>
+#include "../../examples/hold.h"
 
 #ifdef CONCOL
 #define WHAT STDL_RESPONSIVE_COLOUR
@@ -63,6 +64,8 @@ int main(void)
     STDL_Surface *scr;
     uint32_t last;
     int f, worst = 0;
+
+    hold_on_exit("CONCHK");
 
     if (STDL_Init(STDL_INIT_VIDEO) < 0) {
         return 1;

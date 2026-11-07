@@ -30,6 +30,7 @@
 #include <osbind.h>
 #include <stdl/stdl.h>
 #include "c2p.h"
+#include "../../examples/hold.h"
 
 /* the routine before, for the comparison: X fixed at 0x70 */
 void s2c_old1(const uint8_t *src, long sp, uint8_t *dst, long dp,
@@ -162,6 +163,8 @@ int main(void)
     uint8_t *src, *a, *b;
     long cases = 0, bad = 0, oldcases = 0, oldbad = 0, i;
     int dbl, xi, gi, hi, oi, any;
+
+    hold_on_exit("SDL2CHK");
 
     if (STDL_Init(STDL_INIT_VIDEO) < 0) {
         printf("S2C: STDL_Init: %s\nS2C:done\n", STDL_GetError());

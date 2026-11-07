@@ -1458,6 +1458,367 @@ static void test_blitflags(void)
 }
 
 /*
+ * Unkeyed 8-plane blits of 64 pixels and more go a block at a time
+ * (p8_blit_rows, src/planes8row.c): the whole groups between the edges
+ * through rowcopy.c's passes at the same phase and stdl_p8_shift_rows
+ * at another, the edges a group column at a time at either. Each
+ * against a byte-a-pixel model of the two surfaces: every phase, the
+ * same one with edge columns and without, rows from 4 groups to 33
+ * (two strips and a tail), rectangles against either end of the source
+ * row, a destination mask kept, and the overlaps a row at a time is
+ * right for, which these must decline or get right too - a surface onto
+ * itself left, up and up-right, shifted and not, with edge columns and
+ * without, and whole rows over one block a group apart.
+ */
+static int rows8_cmp(const STDL_Surface *d, const uint8_t *want,
+                     const uint8_t *mk, const char *what, int i)
+{
+    int x, y;
+
+    for (y = 0; y < d->h; y++) {
+        /* a row's mask words once: mask_bit's multiply a pixel is a
+         * __mulsi3 call on the machine */
+        const uint16_t *mr = mk == NULL ? NULL : (const uint16_t *)
+            (d->mask + (size_t)y * d->maskstride);
+
+        for (x = 0; x < d->w; x++) {
+            const unsigned got = STDL_GetPixel(d, x, y);
+
+            if (got != want[y * d->w + x]
+                || (mr != NULL && (int)((mr[x >> 4] >> (15 - (x & 15))) & 1)
+                                  != mk[y * d->w + x])) {
+                CHECK(0, "%s %d at (%d,%d): %u mask %d, want %u mask %d",
+                      what, i, x, y, got, mask_bit(d, x, y),
+                      want[y * d->w + x], mk != NULL ? mk[y * d->w + x] : 0);
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+static void test_rows8(void)
+{
+    /* 150 random cases, and the in-place ones refilled a PutPixel a
+     * pixel, took 31s of RESPCHK on a TT; 48 there, refilled a blit */
+#ifdef __m68k__
+    enum { W = 528, H = 10, NC = 48 };
+#else
+    enum { W = 528, H = 10, NC = 150 };
+#endif
+    static uint8_t sm[H * W], want[H * W], mk[H * W];
+    static uint8_t blk[(H + 1) * W + 16], bwant[(H + 1) * W + 16];
+    STDL_Surface *scr, *src, *dst, *dstm;
+    int i, x, y;
+
+    SET_MACHINE(0, 0);
+    g_what = STDL_RESPONSIVE_COLOUR;
+    CHECK(use_lib() == 0, "use");
+    scr = stdl_resp_video->set_mode(320, 200, 8, 0);
+    src = STDL_CreateSurface(W, H);
+    dst = STDL_CreateSurface(W, H);
+    dstm = STDL_CreateSurface(W, H);
+    if (scr == NULL || src == NULL || dst == NULL || dstm == NULL) {
+        CHECK(0, "rows8: setup");
+        goto done;
+    }
+    for (y = 0; y < H; y++) {
+        for (x = 0; x < W; x++) {
+            sm[y * W + x] = (uint8_t)(x * 7 + y * 41 + (x >> 4) * 3 + 1);
+            STDL_PutPixel(src, x, y, sm[y * W + x]);
+        }
+    }
+    rng_state = 4242;
+    for (i = 0; i < NC; i++) {
+        const int kind = i % 4, withmask = i % 5 == 2;
+        STDL_Surface *d = withmask ? dstm : dst;
+        /* not STDL_TRANSPARENT, which punches a masked surface */
+        const uint8_t c = (uint8_t)(i * 37 + 5) == STDL_TRANSPARENT
+                          ? 0 : (uint8_t)(i * 37 + 5);
+        int sx, sy, dx, dy, w, h, ng;
+        STDL_Rect sr, at;
+
+        if (kind == 0) {
+            /* the same phase, whole groups */
+            ng = rr(4, W / 16);
+            w = ng * 16;
+            sx = 16 * rr(0, W / 16 - ng);
+            dx = 16 * rr(0, W / 16 - ng);
+        } else if (kind == 3) {
+            /* the same phase off the groups: an edge column at one end
+             * or both, the source against either end of its row too */
+            int kmin, kmax, kk;
+
+            w = rr(64, W - 32);
+            dx = rr(0, W - w);
+            if (((dx | w) & 15) == 0) {
+                w--;
+            }
+            kmin = -(dx >> 4);                  /* sx = dx + 16k >= 0 */
+            kmax = (W - w - dx) >> 4;           /* sx + w <= W */
+            kk = (i & 12) == 4 ? kmin : (i & 12) == 8 ? kmax : rr(kmin, kmax);
+            sx = dx + 16 * kk;
+        } else {
+            w = rr(64, W - 16);
+            sx = kind == 2 ? ((i & 4) ? 0 : W - w) : rr(0, W - w);
+            dx = rr(0, W - w);
+            if (((sx - dx) & 15) == 0) {
+                dx += dx + 1 <= W - w ? 1 : -1;
+            }
+        }
+        h = rr(1, H);
+        sy = rr(0, H - h);
+        dy = rr(0, H - h);
+        STDL_FillRect(d, NULL, c);
+        memset(want, c, sizeof(want));
+        if (withmask) {
+            CHECK(STDL_CreateMask(d, 1) == 0, "rows8: mask");
+            memset(mk, 1, sizeof(mk));
+        }
+        sr = rect(sx, sy, w, h);
+        at = rect(dx, dy, 0, 0);
+        /* every fifth clipped by the destination's clip, every seventh
+         * by the source's left edge: the blit clips for itself */
+        if (i % 5 == 4) {
+            STDL_Rect clip = rect(dx + 5, dy, w - 11, h);
+
+            STDL_SetClipRect(d, &clip);
+            sx += 5;
+            dx += 5;
+            w -= 11;
+        } else if (i % 7 == 6) {
+            sr.x = -9;
+            w -= 9;
+            dx += 9;
+            sx = 0;
+        }
+        for (y = 0; y < h; y++) {
+            memcpy(want + (dy + y) * W + dx, sm + (sy + y) * W + sx,
+                   (size_t)w);
+            memset(mk + (dy + y) * W + dx, 0, (size_t)w);
+        }
+        STDL_BlitSurface(src, &sr, d, &at);
+        STDL_SetClipRect(d, NULL);
+        CHECK(at.x == dx && at.y == dy && at.w == w && at.h == h,
+              "rows8 %d: the rectangle back %d,%d %ux%u, want %d,%d %dx%d",
+              i, at.x, at.y, at.w, at.h, dx, dy, w, h);
+        if (!rows8_cmp(d, want, withmask ? mk : NULL, "rows8", i)) {
+            fprintf(stderr, "  rows8 %d: %d,%d %dx%d to %d,%d\n", i, sx, sy,
+                    w, h, dx, dy);
+            goto done;
+        }
+    }
+
+    /* onto the screen: a TT's Flip doubles the box the blit touched */
+    {
+        const resp_box *b = &stdl_rs.box[stdl_rs.back];
+        STDL_Rect sr = rect(5, 0, 300, 9), at = rect(17, 30, 0, 0);
+
+        STDL_BlitSurface(src, &sr, scr, &at);
+        if (stdl_rs.falcon) {
+            CHECK(stdl_rs.track == NULL, "rows8: a Falcon keeps no box");
+        } else {
+            CHECK(b->x0 <= 17 && b->x1 >= 316 && b->y0 <= 30 && b->y1 >= 38,
+                  "rows8: the screen's box %d,%d to %d,%d", b->x0, b->y0,
+                  b->x1, b->y1);
+        }
+        for (y = 0; y < 9; y++) {
+            for (x = 0; x < 300; x++) {
+                if (STDL_GetPixel(scr, 17 + x, 30 + y) != sm[y * W + 5 + x]) {
+                    CHECK(0, "rows8: the screen at (%d,%d)", 17 + x, 30 + y);
+                    y = 9;
+                    break;
+                }
+            }
+        }
+#ifndef __m68k__
+        {
+            const int pg = stdl_rs.back;
+
+            stdl_resp_video->flip();
+            CHECK(undoubled(stdl_rs.page[pg], stdl_rs.line, 0, 480) < 0,
+                  "rows8: the blit doubled on a TT");
+        }
+#endif
+    }
+
+    /* a surface onto itself, as if through a copy */
+    {
+        /* by x and y, from x: whole groups from 48 at the same phase,
+         * edge columns from 40 at either */
+        static const int16_t mv[8][3] = { { -32, 0, 48 }, { -5, 0, 40 },
+                                          { 0, -3, 48 }, { -3, -2, 40 },
+                                          { 5, -3, 40 }, { 16, -4, 48 },
+                                          { -16, 0, 40 }, { 16, -2, 40 } };
+        static const int ws[3] = { 320, 336, 400 };
+        int m, k;
+
+        for (m = 0; m < 8; m++) {
+            for (k = 0; k < 3; k++) {
+                const int sx0 = mv[m][2], sy = 5, w = ws[k], h = 5;
+                const int dy = sy + mv[m][1];
+                STDL_Rect sr = rect(sx0, sy, w, h), at;
+
+                at = rect(sx0 + mv[m][0], dy, 0, 0);
+                /* the pattern back, a copy rather than a PutPixel a
+                 * pixel, which was most of this test on the machine */
+                STDL_BlitSurface(src, NULL, dst, NULL);
+                memcpy(want, sm, sizeof(want));
+                for (y = 0; y < h; y++) {
+                    memcpy(want + (at.y + y) * W + at.x,
+                           sm + (sy + y) * W + sx0, (size_t)w);
+                }
+                STDL_BlitSurface(dst, &sr, dst, &at);
+                if (!rows8_cmp(dst, want, NULL, "rows8 in place", m * 3 + k)) {
+                    fprintf(stderr, "  rows8 in place by %d,%d, %d wide\n",
+                            mv[m][0], mv[m][1], w);
+                    goto done;
+                }
+            }
+        }
+    }
+
+    /* two surfaces over one block, the source a group on: whole rows,
+     * so a row's last group is the next row's first */
+    {
+        static const int ws[3] = { 320, 336, 512 };
+        int k;
+        unsigned j;
+
+        for (k = 0; k < 3; k++) {
+            const int w = ws[k];
+            STDL_Surface *s, *d;
+            STDL_Rect sr = rect(0, 0, w, H - 1);
+
+            for (j = 0; j < sizeof(blk); j++) {
+                blk[j] = (uint8_t)rnd();
+            }
+            memcpy(bwant, blk, sizeof(blk));
+            memmove(bwant, bwant + 16, (size_t)w * (H - 1));
+            s = STDL_CreateSurfaceFrom8Planes(blk + 16, w, H - 1, w, NULL, 0);
+            d = STDL_CreateSurfaceFrom8Planes(blk, w, H - 1, w, NULL, 0);
+            CHECK(s != NULL && d != NULL, "rows8: borrowed");
+            if (s != NULL && d != NULL) {
+                /* a source rectangle, as a program shifting a page has */
+                STDL_BlitSurface(s, &sr, d, NULL);
+                CHECK(memcmp(blk, bwant, sizeof(blk)) == 0,
+                      "rows8 over one block, %d wide", w);
+            }
+            STDL_FreeSurface(s);
+            STDL_FreeSurface(d);
+        }
+    }
+done:
+    STDL_FreeSurface(src);
+    STDL_FreeSurface(dst);
+    STDL_FreeSurface(dstm);
+    stdl_resp_video->shutdown();
+    stdl_resp_screen = NULL;
+}
+
+/*
+ * An 8-plane surface onto itself, every way and on every path: whole
+ * groups at the same phase (the block copy), edge columns at it, a
+ * shift, a blit under 64 pixels (the row loop), keyed (its mask the
+ * destination's too), under UNDER and MARK (planes8ex.c), and with a
+ * mask but no key, which the blit sets where it lands - moved
+ * left, right, up, down and four ways between. The answer is the same
+ * blit from a duplicate, which overlaps nothing.
+ */
+static void test_inplace8(void)
+{
+    enum { W = 400, H = 20 };
+    static const struct {
+        int16_t sx, w;
+        uint8_t keyed;
+        unsigned flags;
+    } cf[] = {
+        { 48, 256, 0, 0 },          /* whole groups */
+        { 32, 320, 0, 0 },          /* 320 bytes a row: movem, one pass */
+        { 40, 250, 0, 0 },          /* edge columns at the same phase */
+        { 48, 250, 0, 0 },          /* from a group, a ragged end */
+        { 40, 40, 0, 0 },           /* the row loop */
+        { 40, 250, 1, 0 },          /* keyed */
+        { 40, 250, 1, STDL_BLIT_UNDER },
+        { 48, 256, 1, STDL_BLIT_MARK },
+        { 48, 256, 2, 0 },          /* a mask, not keyed: the blit sets it */
+    };
+    static const int16_t mv[][2] = {
+        { -16, 0 }, { 16, 0 }, { 0, -3 }, { 0, 3 }, { -5, 0 }, { 5, 0 },
+        { -5, -2 }, { 5, 2 }, { 32, -1 }, { -3, 1 }, { 48, 0 }, { 1, 0 },
+        { 0, 1 }, { 16, 5 }
+    };
+    STDL_Surface *scr, *pat;
+    int c, m, x, y;
+
+    SET_MACHINE(0, 0);
+    g_what = STDL_RESPONSIVE_COLOUR;
+    CHECK(use_lib() == 0, "use");
+    scr = stdl_resp_video->set_mode(320, 200, 8, 0);
+    pat = STDL_CreateSurface(W, H);
+    if (scr == NULL || pat == NULL) {
+        CHECK(0, "inplace8: setup");
+        goto done;
+    }
+    for (y = 0; y < H; y++) {
+        for (x = 0; x < W; x++) {
+            /* colour 3 the key, about one pixel in nine */
+            STDL_PutPixel(pat, x, y, (uint8_t)((x * 29 + y * 13
+                                                + (x >> 3) * 7) % 9 == 0
+                                               ? 3 : x * 7 + y * 41 + 5));
+        }
+    }
+    for (c = 0; c < (int)(sizeof cf / sizeof cf[0]); c++) {
+        for (m = 0; m < (int)(sizeof mv / sizeof mv[0]); m++) {
+            STDL_Surface *sf = STDL_CreateSurface(W, H), *ref, *cpy;
+            STDL_Rect sr = rect(cf[c].sx, 4, cf[c].w, 10), at, at2;
+            int bad = 0;
+
+            STDL_BlitSurface(pat, NULL, sf, NULL);
+            if (cf[c].keyed) {
+                STDL_SetColourKey(sf, 1, 3);
+            }
+            if (cf[c].keyed == 2) {
+                sf->flags &= ~STDL_SRCKEY;
+            }
+            ref = STDL_DuplicateSurface(sf);
+            cpy = STDL_DuplicateSurface(sf);
+            if (sf == NULL || ref == NULL || cpy == NULL) {
+                CHECK(0, "inplace8: surfaces");
+                goto done;
+            }
+            at = rect(cf[c].sx + mv[m][0], 4 + mv[m][1], 0, 0);
+            at2 = at;
+            STDL_BlitSurfaceEx(cpy, &sr, ref, &at2, cf[c].flags);
+            STDL_BlitSurfaceEx(sf, &sr, sf, &at, cf[c].flags);
+            for (y = 0; y < H && !bad; y++) {
+                for (x = 0; x < W; x++) {
+                    if (STDL_GetPixel(sf, x, y) != STDL_GetPixel(ref, x, y)
+                        || mask_bit(sf, x, y) != mask_bit(ref, x, y)) {
+                        CHECK(0, "inplace8: %d wide from x %d, keyed %d, "
+                              "flags %u, by %d,%d: (%d,%d) %u mask %d, "
+                              "want %u mask %d", cf[c].w, cf[c].sx,
+                              cf[c].keyed, cf[c].flags, mv[m][0], mv[m][1],
+                              x, y, STDL_GetPixel(sf, x, y),
+                              mask_bit(sf, x, y), STDL_GetPixel(ref, x, y),
+                              mask_bit(ref, x, y));
+                        bad = 1;
+                        break;
+                    }
+                }
+            }
+            STDL_FreeSurface(sf);
+            STDL_FreeSurface(ref);
+            STDL_FreeSurface(cpy);
+        }
+    }
+done:
+    STDL_FreeSurface(pat);
+    stdl_resp_video->shutdown();
+    stdl_resp_screen = NULL;
+}
+
+/*
  * A surface over a caller's block of 8 planes
  * (STDL_CreateSurfaceFrom8Planes), and STDL_CreateSurfaceFrom's still
  * 4 planes: a stride wider than it needs, drawing that lands in the
@@ -1616,11 +1977,21 @@ static void test_tiles(void)
         return;
     }
 
-    /* the first frame's box is the one tile's groups */
+    /* the first frame's box is the one tile's groups on a TT, and a
+     * Falcon keeps none (p8_screen_init clears the track: the page
+     * drawn into is the one shown). Keyed on the machine, not on the
+     * track: SET_MACHINE does nothing on the machine, so RESPCHK on a
+     * Falcon used to check a TT's box and fail with the empty one,
+     * "1,0 to 0,199", and a guard on the track itself would pass a TT
+     * that lost it */
     STDL_BlitTile(t8, 1, scr, 37, 50);
     b = &stdl_rs.box[stdl_rs.back];
-    CHECK(b->x0 == 32 && b->x1 == 47 && b->y0 == 50 && b->y1 == 57,
-          "the tile's box: %d,%d to %d,%d", b->x0, b->y0, b->x1, b->y1);
+    if (stdl_rs.falcon) {
+        CHECK(stdl_rs.track == NULL, "a Falcon keeps no box");
+    } else {
+        CHECK(b->x0 == 32 && b->x1 == 47 && b->y0 == 50 && b->y1 == 57,
+              "the tile's box: %d,%d to %d,%d", b->x0, b->y0, b->x1, b->y1);
+    }
     for (ok = 1, y = 0; y < 8; y++) {
         for (x = 0; x < 16; x++) {
             ok &= STDL_GetPixel(scr, 32 + x, 50 + y)
@@ -1974,9 +2345,17 @@ static void test_reference(void)
 } while (0)
 #endif
 
+#ifdef __m68k__
+#include "../../examples/hold.h"
+#endif
+
 int main(void)
 {
     unsigned i;
+
+#ifdef __m68k__
+    hold_on_exit("RESPCHK");     /* RESPCHK: the results stay on screen */
+#endif
 
 #ifdef __m68k__
     if (STDL_Init(STDL_INIT_VIDEO) < 0
@@ -1998,6 +2377,8 @@ int main(void)
     TIMED(test_reference());
     TIMED(test_transparent());
     TIMED(test_blitflags());
+    TIMED(test_rows8());
+    TIMED(test_inplace8());
     TIMED(test_borrowed());
     TIMED(test_tiles());
     TIMED(test_triple());

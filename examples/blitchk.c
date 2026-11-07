@@ -23,8 +23,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdl/stdl.h>
+#include "hold.h"
 
 #define ITERATIONS 300
+#define LONGROWS   40
 
 static uint32_t rng = 0x12345678;
 static uint32_t rnd(void)
@@ -232,6 +234,50 @@ static int compare_pass(void)
     printf(failures == 0 ? "PASS: %d operations identical\n"
                          : "FAIL: %d mismatches in %d ops\n",
            failures == 0 ? ITERATIONS : failures, ITERATIONS);
+
+    /*
+     * Rows of whole groups longer than 64 bytes, which the random run
+     * above all but never makes (its sources are 160 wide): a
+     * scroller's window, 9 to 20 groups, which the CPU copies with
+     * movem in passes of 40-byte units and the rows' tails, into the
+     * masked destinations. After the run, from its own generator
+     * state, so the run is the operations it always was.
+     */
+    if (failures == 0) {
+        STDL_Surface *wide = STDL_CreateSurface(320, 64);
+        int bad = 0, x, y;
+
+        for (y = 0; wide != NULL && y < 64; y++) {
+            for (x = 0; x < 320; x++) {
+                STDL_PutPixel(wide, x, y, (uint8_t)(rnd() % maxcol));
+            }
+        }
+        for (i = 0; wide != NULL && i < LONGROWS; i++) {
+            int ng = 9 + (int)(rnd() % 12);
+            STDL_Rect sr, r, r2;
+
+            sr.x = (int16_t)(16 * (int)(rnd() % (unsigned)(21 - ng)));
+            sr.y = (int16_t)(rnd() % 32);
+            sr.w = (uint16_t)(16 * ng);
+            sr.h = (uint16_t)(1 + rnd() % 32);
+            r.x = (int16_t)(16 * (int)(rnd() % (unsigned)(21 - ng)));
+            r.y = (int16_t)(rnd() % 128);
+            r2 = r;
+            STDL_UseBlitter(0);
+            STDL_BlitSurface(wide, &sr, da, &r);
+            STDL_UseBlitter(1);
+            STDL_BlitSurface(wide, &sr, db, &r2);
+            if (compare(da, db) != 0) {
+                printf("MISMATCH long rows %d: %d groups\n", i, ng);
+                bad++;
+                break;
+            }
+        }
+        printf(bad == 0 ? "PASS: %d long-row copies identical\n"
+                        : "FAIL: long-row copies differ\n", LONGROWS);
+        failures += bad;
+        STDL_FreeSurface(wide);
+    }
 #ifdef STDL_BLIT_STATS
     /*
      * A comparison the BLiTTER never took part in compares the CPU
@@ -292,6 +338,8 @@ static void timing_pass(const char *label)
 int main(void)
 {
     int failures, blit_avail;
+
+    hold_on_exit(NULL);
 
     if (STDL_Init(STDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "init failed: %s\n", STDL_GetError());
@@ -384,6 +432,8 @@ int main(void)
         STDL_UseMegaSteSpeedup(1);      /* back to the default */
     }
 
+    printf("BLITCHK done: %s\n", failures != 0 ? "FAIL" : "PASS");
+    fflush(stdout);
     STDL_Quit();
     return failures != 0;
 }

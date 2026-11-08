@@ -156,9 +156,17 @@ all: $(LIB) sizecheck libcallcheck ovhostcheck $(EXAMPLES) assets
 # blit now comes in through its own object with its own blit
 # (overlap4.c, overlap8.c); blit.o, planes8.o and planes8ex.o
 # disassemble as they did, and overlap.o is the 1,224 bytes it was.
+#
+# Raised 37040 -> 37100 the same day, by overlap4.o's test of whether
+# two surfaces' bytes meet (60): STDL_BlitSurfaceEx hands every blit
+# with a borrowed surface to it, and one port, drawing from a borrowed
+# sprite cache onto a borrowed layer, played 1.6% slower on a plain ST
+# with v1.23.0, 0.7% with the test. The same test inline in blit.c left
+# it 0.2% slower, but reshaped STDL_BlitSurfaceEx and cost SPRCOST's
+# small blits 0.14-0.27% where nothing is borrowed; blit.o is unchanged.
 PIXEL_OBJS = $(addprefix $(OBJDIR)/src/,draw.o blit.o sprite.o \
              surface.o blitter.o rowcopy.o overlap.o overlap4.o)
-PIXEL_MAX  = 37040
+PIXEL_MAX  = 37100
 
 # The responsive screens' own code (stdl_responsive.h), which only a
 # program that asks for an option links: the colour is responsive.o,

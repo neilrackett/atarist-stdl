@@ -99,7 +99,11 @@ warnings** with the Makefile's `-Wall -Wextra`.
   version tag is the release and nothing is uploaded by hand. An
   example added to the Makefile's `EXAMPLES` list therefore ships
   on the release page; one built by hand and left in `dist/` does
-  not, which is deliberate.
+  not, which is deliberate. Tag `main`'s tip: the workflow's token may
+  not move `latest` across a change to `.github/workflows` (v1.23.1's
+  release was refused so, its tag behind a workflow fix on `main`). If
+  it happens, run the release by hand from `main` (workflow_dispatch),
+  which builds and moves `latest` to `main`'s tip.
 - **On target**: `tests/hatari/run.sh NAME dist/PROG.TOS BOOT_WAIT
   "cmd;cmd;..."` drives a program in Hatari with console capture,
   screenshots, key injection (raw ST scancodes, not SDL codes) and

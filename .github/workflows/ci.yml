@@ -52,14 +52,20 @@ jobs:
         # a container. The installer picks the image for the runner's
         # architecture, so this is an x86_64 image here and an arm64
         # one on a developer's Mac; both carry gcc 4.6.4 and libcmini.
-        # Fetched to a file first: piped, a 504 page from GitHub went to
-        # bash as a script. -f fails on an HTTP error, and a busy moment
-        # is tried again (v1.23.0's first CI run failed twice on one).
+        # Through GitHub's API (gh), with the plain download as the
+        # fallback, to a file and then run: on 2026-11-08 the release's
+        # download URL answered 504 for over half an hour while the API
+        # served the same file, and piped to bash, the 504 page had gone
+        # in as a script.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 \
-            -o "$RUNNER_TEMP/install_toolkit.sh" \
-            https://github.com/sidecartridge/atarist-toolkit-docker/releases/latest/download/install_atarist_toolkit_docker.sh
-          bash "$RUNNER_TEMP/install_toolkit.sh"
+          gh release download latest -R sidecartridge/atarist-toolkit-docker \
+              -p install_atarist_toolkit_docker.sh -D "$RUNNER_TEMP" \
+            || curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 \
+              -o "$RUNNER_TEMP/install_atarist_toolkit_docker.sh" \
+              https://github.com/sidecartridge/atarist-toolkit-docker/releases/latest/download/install_atarist_toolkit_docker.sh
+          bash "$RUNNER_TEMP/install_atarist_toolkit_docker.sh"
 
       - name: Build and test
         # `make ci` is the whole recipe and lives in the Makefile, so

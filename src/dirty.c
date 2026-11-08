@@ -32,21 +32,23 @@
 #include <string.h>
 #include "stdl_internal.h"
 
-typedef struct {
-    const uint8_t *key;         /* the page's pixels; NULL = unclaimed */
-    STDL_Rect *rects;
-    int n;
-    int overflowed;             /* full restore instead of the list  */
-} dirty_list_t;
+typedef stdl_dirty_list_t dirty_list_t;
 
-#define NLISTS 3
+#define NLISTS STDL_DIRTY_LISTS
+
+/* the pages' lists, and after them the one STDL_DirtyBackground
+ * (dirtybg.c) keeps for pages not yet seen; it is the only other
+ * reader, through these names */
+dirty_list_t stdl_dirty_lists[NLISTS + 1];
+int stdl_dirty_max;
+void (*stdl_dirty_claimed)(int list);
+#define lists     stdl_dirty_lists
+#define max_rects stdl_dirty_max
 
 static STDL_Surface *bg;
-static dirty_list_t lists[NLISTS];
 static unsigned used[NLISTS];   /* the restore each list last served */
 static unsigned restores;
 static int cur;                 /* the list STDL_DirtyPush fills      */
-static int max_rects;
 /* evicted pages, each owed a whole restore when it next comes back;
  * four remembered, oldest forgotten first */
 static const uint8_t *owes[4];
@@ -76,7 +78,7 @@ void STDL_DirtyQuit(void)
 {
     int i;
 
-    for (i = 0; i < NLISTS; i++) {
+    for (i = 0; i <= NLISTS; i++) {
         free(lists[i].rects);
     }
     memset(lists, 0, sizeof(lists));
@@ -163,6 +165,9 @@ static int list_for(const uint8_t *key)
     lists[pick].n = 0;
     lists[pick].overflowed = 0;
     used[pick] = restores;
+    if (stdl_dirty_claimed != NULL) {
+        stdl_dirty_claimed(pick);   /* the background's changes so far */
+    }
     return pick;
 }
 

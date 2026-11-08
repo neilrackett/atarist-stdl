@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdl/stdl.h>
+#include "../../examples/hold.h"
 
 #ifdef TALLHGT
 #define TALLOPT STDL_RESPONSIVE_HEIGHT
@@ -98,6 +99,8 @@ int main(void)
     char got[96];
     int i, p, deep;
     uint32_t t;
+
+    hold_on_exit("TALLCHK");
 
     fprintf(stderr, "TC:start\n");
     if (STDL_Init(STDL_INIT_VIDEO) < 0

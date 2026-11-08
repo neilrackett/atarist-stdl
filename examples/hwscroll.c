@@ -106,7 +106,7 @@ int main(int argc, char *argv[])
         printf("HWSCROLL: %s\n", STDL_GetError());
         return 1;
     }
-    STDL_JoyKeyEmulation(1);        /* a stick drives the arrows */
+    STDL_JoystickKeyEmulation(1);        /* a stick drives the arrows */
 
     t0 = STDL_GetTicks();
     for (;;) {

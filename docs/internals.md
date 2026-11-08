@@ -39,6 +39,8 @@ pointers are declared in `src/stdl_internal.h`:
 | --------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------- |
 | `stdl_shutdown_*`                             | each module that installs something, as it opens | `release_hardware()` in `video.c`, on every exit     |
 | `stdl_audio_hook`, `stdl_timer_hook`, `stdl_cursor_hook` | the ring device, SDL timers (`compat.c`), the cursor | the event pump and the native delays                 |
+| `stdl_joyn` (and the count, `stdl_joy_count`) | `STDL_SetNumJoysticks` (`joysticks.c`)          | the event pump (the mouse port's packets, the other joysticks' pads), every exit (their rumble), the readers (`STDL_GetJoystickState` and the rest, in `event.c` and `stdl_xpad.c`), `STDL_UseJoystickMerge` (`joymerge.c`, to re-map) and the SDL 1.2 shim |
+| `stdl_pad0.slot` (joystick 0's pad record, -1 while the pads are apart) | `STDL_UseJoystickMerge` (`joymerge.c`)            | `stdl_xpad.c` (pad 0 read at rest once, and then not), `STDL_HasPad`, `joysticks.c` (the mapping) |
 | `stdl_music_tick`, `stdl_tone_tick`, `stdl_sfx_tick` | music, tones, effects                            | `ym.c`'s VBL slot, in that order                     |
 | `stdl_pal_apply_hook`, `stdl_pal_raw_hook`, `stdl_pal_write` | palette staging, the responsive screen           | `palette.c`, `video.c`                               |
 | `stdl_blit_policy`, `stdl_ovsc_flip`          | `overscan.c`, while a border is open             | `blitter.c`, `STDL_Flip`                             |
@@ -66,6 +68,12 @@ object already linked, set by the new object.
 3. **The pump.** `STDL_PollEvent` and the native delays run the
    cooperative services through the hooks above: SDL timers, the audio
    ring's refill, the cursor. Nothing in them runs from an interrupt.
+   `STDL_PollEvent` pumps once a VBL (`STDL_PumpEventsIfDue`: the VBL
+   count moved since the last pump, or five ticks of the 200Hz clock
+   for a VBL that does not count) and between pumps serves only the
+   timers and the refill, at most once a 200Hz tick (time.c's
+   `stdl_idle_services`, the delays' own); `STDL_PumpEvents` and the
+   waits pump whenever called.
 4. **Exit.** `STDL_Quit` or the `atexit` runs `restore_all()`:
    `release_hardware()`, then the frees, then leaving supervisor mode.
    `abort()`, a failed `assert` and a
@@ -85,7 +93,7 @@ interrupt, and each is put back by `release_hardware()`:
 | The YM tick: music, tones, effects          | a TOS VBL queue slot                     | `ym.c`        | any of them is playing        |
 | `STDL_AddVBL` callbacks                     | VBL queue slots                          | `vbl.c`       | added                         |
 | ...including the voice mixer, palette staging, STE scrolling, the rasters' table restart | through `STDL_AddVBL`  | their modules | open                          |
-| IKBD packets                                | `ikbdsys`, from `Kbdvbase()`             | `event.c`     | the keyboard is taken         |
+| IKBD packets                                | `ikbdsys`, from `Kbdvbase()`             | `event.c`     | the keyboard is taken (with two joysticks, the IKBD reports the mouse port as one, `$12 $14`, until one again or exit) |
 | The borders                                 | Timers A and B; prefixes on the VBL (`$70`) and Timer C | `overscan.c`  | a border is open              |
 | Rasters                                     | Timer B; a prefix on Timer C             | `raster.c`    | rasters are open              |
 | TT console output                           | the `xconout` vectors (`$57E`)           | `responsive.c`| a responsive screen on a TT   |
@@ -110,6 +118,25 @@ line-locked timers can interrupt it.
   single-buffered screen (`stdl_drawn_visibly`), and surfaces beyond
   ST RAM. With a border open, `stdl_blit_policy` places each operation
   against the beam.
+- **Rows of whole groups.** A same-phase blit's rows longer than 64
+  bytes on 4 planes, or of 64 pixels and more on 8, go to the movem
+  copy in `rowcopy.c`, every row in one call; on 8 planes a blit at
+  another phase takes its whole groups through `planes8row.c`'s
+  rotation, and either phase its edge columns a column at a time.
+  Where source and destination overlap in a way those passes would
+  get wrong, the row-at-a-time paths copy them as before.
+- **A blit onto its own memory** (`overlap.c`, built for size), asked
+  after the clip and only where source and destination are one surface
+  or one is borrowed, decides once which way the rows must go.
+  Leftwards and upwards they go as always. Downwards they run from the
+  bottom: on 4 planes through the usual paths over headers whose 16-bit
+  strides step back a row (the unmasked same-phase paths and the
+  BLiTTER read them signed), on 8 planes as the movem copy from the
+  last row; a keyed, shifted or masked move goes in bands from the
+  bottom, none overlapping its own source. Rightwards, whole groups are
+  a `memmove` a row; anything else goes through a 1K buffer on the
+  stack a few rows at a time, or, keyed, a column at a time. The
+  BLiTTER's keyed passes are never given an overlap.
 - **The composition flags** (`UNDER`, `MARK`) exclude the fast paths,
   the whole-group copies and every BLiTTER pass, rather than teaching
   them the flag.

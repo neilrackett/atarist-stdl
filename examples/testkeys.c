@@ -17,10 +17,13 @@
 #include <string.h>
 
 #include "SDL.h"
+#include "hold.h"
 
 int main(int argc, char *argv[])
 {
 	SDLKey key;
+
+	hold_on_exit(NULL);
 
 	if ( SDL_Init(SDL_INIT_VIDEO) < 0 ) {
 		fprintf(stderr, "Couldn't initialize SDL: %s\n",

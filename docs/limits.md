@@ -64,19 +64,41 @@ stop trying and redesign instead.
   `STDL_OpenInput` gives a program the events without the mode, on
   whatever screen it was started on or sets itself.
 * Colour-key masks are snapshots: re-key after modifying pixels.
+* A blit whose source and destination overlap (a surface onto itself,
+  or onto another surface over the same memory) is right in every
+  direction, through the BLiTTER and on 8 planes as well (since
+  November 2026; before, only leftwards and upwards). What it costs
+  depends on the direction (SCRLCOST, a 320x200 page):
+  - leftwards and upwards, nothing but the test (0.2ms on an STE);
+  - downwards, the rows run from the bottom: moved down a row with its
+    strip, 23.8ms on a plain ST, 22.3 on an STE, 9.8 on a TT;
+  - rightwards by whole groups, a `memmove` a row: 304x200 pixels
+    moved right 16 with their column, 44.8ms on a plain ST or an STE
+    (24.2 as one `memmove` of an unpadded page, which a program can do
+    itself);
+  - rightwards by anything else, through a 1K buffer on the stack a
+    few rows at a time: moved right a pixel, 161ms on a plain ST, 77 on
+    an STE, 45.6 on a TT. A keyed source, or rows wider than the
+    buffer (2,048 pixels on 4 planes, 1,024 on 8), goes a column at a
+    time, none wider than the move: the same pixel's move took 3.6s
+    on a plain ST that way.
+  A scroller moving right is cheaper copying its window from a ring or
+  a second surface.
 * `SDL_SetPalette(SDL_PHYSPAL)` clamps to the 16 hardware entries.
 * The whole program runs in supervisor mode between `STDL_Init` and
   `STDL_Quit`/exit; keep that in mind if you spawn GEMDOS
   subprocesses (don't).
 * While STDL owns the IKBD, BIOS console *input* is dead
   (`Cconin`, `Bconin`); console output still works.
-* Timer callbacks only run inside `SDL_Delay` - a busy main loop
-  that never delays never fires timers. Use `STDL_GetTicks`
-  directly for frame pacing.
+* Timer callbacks only run inside `SDL_Delay`, `SDL_PollEvent` and
+  the pump - a busy main loop that neither delays nor polls never
+  fires timers. Use `STDL_GetTicks` directly for frame pacing.
 * Audio is STE/Mega STE DMA only and cooperative: the ring refill
-  (and the user callback) runs inside `STDL_PumpEvents` /
-  `SDL_Delay`. Keep the pump running at least every ~150ms while
-  audio plays. Plain ST: `STDL_OpenAudio` fails cleanly - ship
+  (and the user callback) runs inside `STDL_PollEvent`,
+  `STDL_PumpEvents` and `SDL_Delay`. `STDL_PollEvent` pumps once a VBL
+  and serves the refill and the timers between, once a 200Hz tick, so
+  a loop that polls once a frame is enough; keep it running at least
+  every ~150ms while audio plays. Plain ST: `STDL_OpenAudio` fails cleanly - ship
   silent, as the design intends. Playback rates are the four DMA
   rates; other rates are nearest-neighbour resampled (convert
   offline with `stdlconv wav` for a bit-exact path).
@@ -113,8 +135,12 @@ stop trying and redesign instead.
   inharmonically) sound as noise or falling tones - and where
   `STDL_PlaySfx` puts effects first. Chords keep one note. Streams replay at 50Hz and
   assume a 50Hz display (colour low resolution). There is no MOD /
-  OGG / MP3 path: sample-based music has no YM equivalent - author
-  natively (SNDH-style) or re-score via MIDI.
+  OGG / MP3 path: sample-based music has no YM equivalent. STDL plays
+  no SNDH or YM files either, only its own streams, so music reaches
+  it as MIDI (`stdlconv midi`: write or re-score it in any sequencer
+  that saves a MIDI file, and expect a chiptune cover) or as a YM2151
+  log (`stdlconv opm`). A sample sequencer of a program's own on
+  `STDL_Voice` (an STE or later) is the other way.
 * Effects share the three YM voices with music: a playing effect
   owns its voice (music skips it, then gets it back with its state
   restored). The speaker is always voice A; `STDL_PlaySfx` prefers
@@ -174,7 +200,8 @@ stop trying and redesign instead.
 * Hardware scrolling (`STDL_SetScrollWindow` / `STDL_SetScrollOrigin`)
   is STE and Mega STE only: the plain ST has no LINEWIDTH or HSCROLL
   register and a 256-byte base granularity. The calls fail cleanly
-  there, and a port keeps a copy-based fallback. The buffer stride is
+  there, and a port scrolls by copying (`docs/porting.md`, "Scrolling
+  without the STE's registers", has what it costs). The buffer stride is
   a multiple of 8 from 160 to 670 bytes (LINEWIDTH is a byte of
   words), fine scrolling needs a stride of at least 168, and the
   base is word aligned. A request is on screen at the next VBL,
@@ -188,9 +215,18 @@ stop trying and redesign instead.
   before drawing beneath it, and prefer sprites for pointers in
   games that redraw every frame. Cursors are at most 32x32 with
   width a multiple of 8; "inverted" cursor pixels render black.
-* SDL joystick support is the physical joystick port only: one
-  stick, two digital axes, one button. No hats, balls, or analog
-  values.
+* SDL joystick support is the IKBD's two ports and an Xpad
+  provider's pads. A program has one joystick, the joystick port
+  (with pad 0), until it asks for more with `STDL_SetNumJoysticks`:
+  two make the mouse port joystick 1 and turn the mouse off until it
+  goes back to one, so a game cannot have a second stick and the
+  mouse at once; more are pads, only where a provider has the slots -
+  up to four joysticks with the pads merged into the ports' (the
+  default), up to six with them apart (`STDL_UseJoystickMerge`). A stick in a port is two digital axes and
+  one button; analogue values and hats come only from a pad, and
+  there are no balls. Joystick key emulation is joystick 0's alone.
+  The STE's and the Falcon's enhanced joystick ports (Jaguar pads)
+  are not read.
 * `STDL_DrawText` fonts are limited to 16-pixel-wide cells.
 * Tiles blit at group-aligned x only (`x & ~15`); use sprites for
   free positioning.

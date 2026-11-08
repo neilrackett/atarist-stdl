@@ -30,8 +30,10 @@ extern "C" {
  * A whole source onto a destination the same size - srcrect NULL,
  * dstrect NULL or at 0,0, no colour key, no masks, no clipping, a
  * width that is a multiple of 16 - is one memcpy on a machine without
- * a BLiTTER: 19.5ms for 320x200 on an 8MHz ST, against 42 row by
- * row. A full-size srcrect is not spotted, so pass NULL.
+ * a BLiTTER: 19.3ms for 320x200 on an 8MHz ST. A full-size srcrect is
+ * not spotted, so pass NULL: it takes the row path, whose rows of
+ * whole groups over 64 bytes go to a movem copy, 20.7ms the same
+ * 320x200 (a window out of a wider buffer costs that too).
  *
  * A source of 8 planes (stdl_responsive.h) onto a destination of 4
  * sets the error and draws nothing: 4 planes hold no colour above 15.

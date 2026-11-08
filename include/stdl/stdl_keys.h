@@ -108,7 +108,7 @@ typedef enum {
     STDL_KMOD_CAPS   = 0x2000,
     STDL_KMOD_MODE   = 0x4000,
     /* set on key events synthesised from the joystick when
-     * STDL_JoyKeyEmulation is enabled */
+     * STDL_JoystickKeyEmulation is enabled */
     STDL_KMOD_JOYSTICK = 0x8000
 } STDL_Mod;
 

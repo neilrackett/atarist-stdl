@@ -67,20 +67,165 @@ m68k-atari-mint-gcc -o GAME.TOS objs... libstdl.a
 Either way, compile the game with STDL's `include/` on the include path,
 and a ported SDL 1.2 program with `include/compat` as well.
 
-## A game's Makefile
+## Setting up a game or a fork
 
-If your game's Makefile decides when to rebuild `libstdl.a` by globbing
-STDL's sources, glob both directories - not every source is under
-`src/`:
+What follows was tried end to end: a small SDL 1.2 program in a
+repository of its own, STDL added from GitHub as below, built in the
+toolchain container and run in Hatari as a plain ST.
 
-```make
-STDL_SRCS = $(wildcard $(STDL)/src/*.c) $(wildcard $(STDL)/lib/xpad/src/*.c)
+### Where STDL goes
+
+A git submodule at `extern/stdl`, pinned to a release tag:
+
+```
+git submodule add https://github.com/neilrackett/atarist-stdl extern/stdl
+git -C extern/stdl checkout v1.23.0          # the release you want
+git add extern/stdl
+git submodule update --init --recursive      # STDL's own submodule, lib/xpad
 ```
 
-A glob that only sees `src/` will not notice an Xpad submodule bump, so
-it will happily link an archive built against the previous ABI. Objects
-build into `$(STDL)/obj/`, mirroring each source's path
-(`obj/src/blit.o`), never beside the sources.
+- **A submodule, built from source:** the game compiles the library with
+  the toolchain it uses itself, so the headers and the archive always
+  agree. A release's prebuilt `libstdl-cmini.a` needs that release's
+  headers anyway.
+- **A tag:** it says which release the game is on, and moving to the
+  next one is a commit of its own that can be measured.
+- **`extern/`:** it keeps STDL apart from the game's own sources, so a
+  glob over `src/` never picks up STDL's files, and a reader can see
+  what is vendored.
+- **The container sees only the directory `stcmd` starts in**, so STDL
+  must be inside the game's repository. A checkout beside it
+  (`../stdl`) is invisible to the build.
+
+Stage the tag (`git add extern/stdl`) before `git submodule update`:
+run first, the update puts the submodule back on the commit recorded
+when it was added, which is `main` as it was that day. Whoever clones
+the game later needs `git clone --recursive`, or `git submodule update
+--init --recursive` after the clone. STDL's guides for AI agents then come from
+the submodule too, as relative links, so they follow it from release to
+release:
+
+```
+mkdir -p .claude/skills
+ln -s ../../extern/stdl/.claude/skills/stdl .claude/skills/stdl
+ln -s ../../extern/stdl/.claude/skills/stdl-sdl2 .claude/skills/stdl-sdl2
+```
+
+### The ST build's Makefile
+
+Beside the game's own build, as `Makefile.atari`, run from the
+repository's root with `stcmd make -f Makefile.atari`:
+
+```make
+STDL     = extern/stdl
+CMINI   ?= /freemint/libcmini
+CROSS    = m68k-atari-mint-
+CC       = $(CROSS)gcc
+CFLAGS   = -O2 -fomit-frame-pointer -std=gnu99 -Wall -MMD -MP -DPORT_STDL \
+           -I$(STDL)/include -I$(STDL)/include/compat -I$(CMINI)/include
+OBJDIR   = build-atari
+SRCS     = src/game.c
+OBJS     = $(SRCS:%.c=$(OBJDIR)/%.o)
+TARGET   = dist/GAME.TOS
+
+STDL_LIB  = $(STDL)/libstdl-cmini.a
+STDL_SRCS = $(wildcard $(STDL)/src/*.c $(STDL)/include/stdl/*.h \
+                       $(STDL)/include/compat/*.h $(STDL)/lib/xpad/src/*.c)
+
+all: $(TARGET)
+
+$(STDL_LIB): $(STDL_SRCS)
+	$(MAKE) -C $(STDL) libstdl-cmini.a
+
+$(OBJDIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(TARGET): $(OBJS) $(STDL_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) -nostdlib -L$(CMINI)/lib -Wl,--traditional-format -o $@ \
+	    $(CMINI)/lib/crt0.o $(OBJS) $(STDL_LIB) -lcmini -lgcc
+	$(CROSS)strip $@
+
+clean:
+	rm -rf $(OBJDIR) $(TARGET)
+
+-include $(OBJS:.o=.d)
+.PHONY: all clean
+```
+
+- **libcmini, as above.** The program sets its own stack, under the ST
+  build's macro: `long _stksize = 32768;`.
+- **`STDL_SRCS` globs every directory STDL's sources are in**, so a
+  change to STDL rebuilds the archive. A glob that sees only `src/`
+  misses an Xpad bump (`lib/xpad/src/`) and links an archive built
+  against the previous ABI. STDL builds its objects into
+  `$(STDL)/obj/`, never beside its sources.
+- **`-I$(STDL)/include/compat`** is what a ported SDL 1.2
+  program needs, so that `#include "SDL.h"` finds STDL's shim. A game
+  written for STDL from the start leaves it out and includes
+  `<stdl/stdl.h>`.
+- **The objects go in a directory of their own** (`build-atari/`), so
+  the ST build and the desktop build never see each other's.
+- `dist/` is the Hatari drive: put the program's data files beside
+  `GAME.TOS` there (Testing, below).
+
+### Assets
+
+`stdlconv`'s image commands (`bmp16`, `bmp8`, `pi1`, `bank`) need Python 3 with
+Pillow, and the toolchain container has Python 3 without Pillow. So
+convert art on the host (`pip install pillow`), and keep the converted
+files in the repository, so the container's build never needs them;
+`midi`, `opm`, `wav` and `embed` need only Python. A Makefile rule
+from the source art to the converted file keeps the pipeline written
+down: `examples/README.md` points at one. The converted files are the
+program's data, not inputs to its build, so the container never needs
+them: track them where someone without Pillow must still be able to
+run the game (STDL tracks its examples' in `examples/assets/`), or
+make them into `dist/` with the program.
+
+### What git should ignore
+
+Before the first `git add`, so that neither the build's output nor a
+TOS image is committed (the image under `tmp/tos/` is copyrighted, or
+EmuTOS's to ship, and not the game's):
+
+```
+build-atari/
+dist/
+tmp/
+```
+
+That suits a `dist/` that holds only what the Makefile makes. Data
+files tracked beside the program belong elsewhere (`data/`, say), with
+a rule that copies them into `dist/`.
+
+### Shipping
+
+A double-sided 3.5-inch floppy holds 720K, a little over 700K of it
+free for files once formatted (a single-sided one half that), but
+nearly every player now runs games from a hard disk or a cartridge
+that stands in for one, so a game that outgrows a floppy ships as a
+folder (a zip) to copy there.
+
+### Keeping the desktop build
+
+A fork usually wants its desktop build to keep working:
+
+- **Leave the game's own build as it is**, and add the ST build beside
+  it (`Makefile.atari` above), never in place of it.
+- **`#include "SDL.h"`** works for both builds: the desktop build finds
+  SDL's own header through `sdl-config --cflags` (`-I.../include/SDL`),
+  the ST build finds the shim through `-I$(STDL)/include/compat`.
+  Rewrite `#include <SDL/SDL.h>` to that form, as the shim has no
+  `SDL/` directory.
+- **Put the ST's own lines under a macro the ST Makefile defines**
+  (`-DPORT_STDL` above): `_stksize`, STDL calls the desktop does not
+  have (`STDL_JoystickKeyEmulation`, the asset loaders), and the converted
+  art's file names. The compiler's own `__m68k__` is the wrong test: a
+  desktop SDL build for another 68000 target defines it too. Every path
+  the macro does not cover keeps the game's behaviour exactly, so the
+  desktop build stays a reference to compare the port with.
 
 ## Testing
 

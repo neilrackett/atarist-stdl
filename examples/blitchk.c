@@ -16,6 +16,11 @@
  * Any divergence between the CPU and blitter paths is a bug in one
  * of them. Finishes with a fill/blit timing comparison.
  *
+ * It takes about two minutes on a Mega STE (114s in Hatari; 302s
+ * while the comparison was memcmp's byte loop), printing a dot every
+ * 30 operations, about a second, so a hang shows as the dots
+ * stopping, and its time at the end.
+ *
  * On machines without a blitter it degenerates to comparing the
  * CPU path with itself and reports that nothing was accelerated.
  */
@@ -23,14 +28,24 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdl/stdl.h>
+#include "hold.h"
 
 #define ITERATIONS 300
+#define LONGROWS   40
 
 static uint32_t rng = 0x12345678;
 static uint32_t rnd(void)
 {
     rng = rng * 1103515245UL + 12345UL;
     return (rng >> 16) & 0x7FFF;
+}
+
+/* rnd() % n, for n up to 65535: rnd() is at most 0x7FFF, so a 16-bit
+ * divide gives the values the 32-bit % did, without the library call
+ * a 32-bit % is on a 68000 */
+static unsigned rndmod(unsigned n)
+{
+    return (uint16_t)rnd() % (uint16_t)n;
 }
 
 static int maxcol = 16;         /* colours the plane budget allows */
@@ -43,7 +58,7 @@ static STDL_Surface *make_src(int keyed)
 
     for (y = 0; y < 64; y++) {
         for (x = 0; x < 160; x++) {
-            STDL_PutPixel(s, x, y, (uint8_t)(rnd() % lim));
+            STDL_PutPixel(s, x, y, (uint8_t)(rndmod(lim)));
         }
     }
     if (keyed) {
@@ -69,13 +84,13 @@ static void make_sprites(void)
     nspr = 0;
     for (k = 0; k < 8; k++) {
         int nframes = (k == 7) ? 3 : 1;
-        int w = ws[k], h = 3 + (int)(rnd() % 28);
+        int w = ws[k], h = 3 + (int)(rndmod(28));
         STDL_Surface *s = STDL_CreateSurface(w * nframes, h);
         int x, y;
 
         for (y = 0; y < h; y++) {
             for (x = 0; x < w * nframes; x++) {
-                STDL_PutPixel(s, x, y, (uint8_t)(rnd() % maxcol));
+                STDL_PutPixel(s, x, y, (uint8_t)(rndmod(maxcol)));
             }
         }
         STDL_SetColourKey(s, 1, 0);
@@ -96,15 +111,54 @@ static void free_sprites(void)
     nspr = 0;
 }
 
+/*
+ * Whether n bytes at a and b differ. The check after every operation
+ * is most of the run: memcmp goes a byte at a time, and took 36-41s of
+ * each 45-50s pass on a Mega STE (Hatari). cmpm.l compares a long at
+ * a time; the surfaces come from malloc, so their addresses are even,
+ * which is all a 68000's long reads need.
+ */
+static int differ(const void *a, const void *b, uint32_t n)
+{
+#ifdef __m68k__
+    const uint8_t *p = a, *q = b;
+    uint16_t n8 = (uint16_t)(n >> 5), n1 = (uint16_t)((n >> 2) & 7);
+    int d;
+
+    if ((((uintptr_t)a | (uintptr_t)b) & 1) != 0 || n >= 0x200000UL) {
+        return memcmp(a, b, n) != 0;
+    }
+    __asm__ volatile(
+        "	moveq	#1,%0\n"
+        "	bra.s	2f\n"
+        "1:\n"
+        "	.rept	8\n"
+        "	cmpm.l	(%1)+,(%2)+\n"
+        "	bne.s	9f\n"
+        "	.endr\n"
+        "2:	dbra	%3,1b\n"
+        "	bra.s	4f\n"
+        "3:	cmpm.l	(%1)+,(%2)+\n"
+        "	bne.s	9f\n"
+        "4:	dbra	%4,3b\n"
+        "	moveq	#0,%0\n"
+        "9:\n"
+        : "=&d"(d), "+a"(p), "+a"(q), "+d"(n8), "+d"(n1)
+        :
+        : "cc", "memory");
+    return d != 0 || memcmp(p, q, n & 3) != 0;
+#else
+    return memcmp(a, b, n) != 0;
+#endif
+}
+
 static int compare(const STDL_Surface *a, const STDL_Surface *b)
 {
-    if (memcmp(a->pixels, b->pixels,
-               (uint32_t)a->stride * a->h) != 0) {
+    if (differ(a->pixels, b->pixels, (uint32_t)a->stride * a->h)) {
         return 1;
     }
     if (a->mask != NULL && b->mask != NULL
-        && memcmp(a->mask, b->mask,
-                  (uint32_t)a->maskstride * a->h) != 0) {
+        && differ(a->mask, b->mask, (uint32_t)a->maskstride * a->h)) {
         return 2;
     }
     return 0;
@@ -120,7 +174,7 @@ static int compare(const STDL_Surface *a, const STDL_Surface *b)
 static int compare_pass(void)
 {
     STDL_Surface *src_plain, *src_keyed, *da, *db;
-    int i, failures = 0;
+    int i, dot = 0, failures = 0;
 
     rng = 0x12345678;
     src_plain = make_src(0);
@@ -136,23 +190,23 @@ static int compare_pass(void)
 #endif
     make_sprites();
     for (i = 0; i < ITERATIONS; i++) {
-        int op = (int)(rnd() % 5);
+        int op = (int)(rndmod(5));
         int phase = (int)(rnd() & 15);
         STDL_Rect r, r2;
 
         if (op == 4) {
             /* a sprite, anywhere near the surface, through a random
              * clip rectangle */
-            STDL_Sprite *spr = sprs[rnd() % (unsigned)nspr];
-            int frame = (int)(rnd() % spr->nframes);
-            int x = (int)(rnd() % 420) - 90;
-            int y = (int)(rnd() % 200) - 30;
+            STDL_Sprite *spr = sprs[rndmod((unsigned)nspr)];
+            int frame = (int)(rndmod(spr->nframes));
+            int x = (int)(rndmod(420)) - 90;
+            int y = (int)(rndmod(200)) - 30;
             STDL_Rect clip, all = { 0, 0, 320, 160 };
 
-            clip.x = (int16_t)(rnd() % 60);
-            clip.y = (int16_t)(rnd() % 30);
-            clip.w = (uint16_t)(20 + rnd() % 260);
-            clip.h = (uint16_t)(20 + rnd() % 130);
+            clip.x = (int16_t)(rndmod(60));
+            clip.y = (int16_t)(rndmod(30));
+            clip.w = (uint16_t)(20 + rndmod(260));
+            clip.h = (uint16_t)(20 + rndmod(130));
             STDL_SetClipRect(da, &clip);
             STDL_SetClipRect(db, &clip);
             STDL_UseBlitter(0);
@@ -169,10 +223,10 @@ static int compare_pass(void)
             if (col >= maxcol) {
                 col = 0;
             }
-            r.x = (int16_t)(16 * (int)(rnd() % 22) - 16);
-            r.y = (int16_t)((int)(rnd() % 180) - 10);
-            r.w = (uint16_t)(16 * (1 + rnd() % 21));
-            r.h = (uint16_t)(1 + rnd() % 100);
+            r.x = (int16_t)(16 * (int)(rndmod(22)) - 16);
+            r.y = (int16_t)((int)(rndmod(180)) - 10);
+            r.w = (uint16_t)(16 * (1 + rndmod(21)));
+            r.h = (uint16_t)(1 + rndmod(100));
             r2 = r;
             STDL_UseBlitter(0);
             STDL_FillRect(da, &r, col);
@@ -180,14 +234,14 @@ static int compare_pass(void)
             STDL_FillRect(db, &r2, col);
         } else if (op == 0) {
             /* fill: random rect, random colour or transparent */
-            uint8_t col = (uint8_t)(rnd() % (maxcol + 1));
+            uint8_t col = (uint8_t)(rndmod((maxcol + 1)));
             if (col == maxcol) {
                 col = STDL_TRANSPARENT;
             }
-            r.x = (int16_t)((int)(rnd() % 360) - 20);
-            r.y = (int16_t)((int)(rnd() % 180) - 10);
-            r.w = (uint16_t)(rnd() % 200);
-            r.h = (uint16_t)(rnd() % 100);
+            r.x = (int16_t)((int)(rndmod(360)) - 20);
+            r.y = (int16_t)((int)(rndmod(180)) - 10);
+            r.w = (uint16_t)(rndmod(200));
+            r.h = (uint16_t)(rndmod(100));
             r2 = r;
             STDL_UseBlitter(0);
             STDL_FillRect(da, &r, col);
@@ -199,12 +253,12 @@ static int compare_pass(void)
             STDL_Surface *src = (op == 1) ? src_plain : src_keyed;
             int dphase = (rnd() & 1) ? phase : (int)(rnd() & 15);
             STDL_Rect sr;
-            sr.x = (int16_t)(phase + 16 * (int)(rnd() % 3));
-            sr.y = (int16_t)(rnd() % 20);
-            sr.w = (uint16_t)(rnd() % 160);
-            sr.h = (uint16_t)(rnd() % 64);
-            r.x = (int16_t)(dphase + 16 * ((int)(rnd() % 14) - 1));
-            r.y = (int16_t)((int)(rnd() % 170) - 10);
+            sr.x = (int16_t)(phase + 16 * (int)(rndmod(3)));
+            sr.y = (int16_t)(rndmod(20));
+            sr.w = (uint16_t)(rndmod(160));
+            sr.h = (uint16_t)(rndmod(64));
+            r.x = (int16_t)(dphase + 16 * ((int)(rndmod(14)) - 1));
+            r.y = (int16_t)((int)(rndmod(170)) - 10);
             r2 = r;
             STDL_UseBlitter(0);
             STDL_BlitSurface(src, &sr, da, &r);
@@ -216,7 +270,7 @@ static int compare_pass(void)
             int diff = compare(da, db);
             if (diff != 0) {
                 failures++;
-                printf("MISMATCH iter %d op %d (%s)\n", i, op,
+                printf("\nMISMATCH iter %d op %d (%s)\n", i, op,
                        diff == 1 ? "pixels" : "mask");
                 if (failures > 5) {
                     break;
@@ -228,10 +282,62 @@ static int compare_pass(void)
                        (uint32_t)da->maskstride * da->h);
             }
         }
+        /* a dot every 30 operations, about a second on a Mega STE,
+         * so that a slow pass and a hung one look different */
+        if (++dot == 30) {
+            dot = 0;
+            putchar('.');
+            fflush(stdout);
+        }
     }
+    printf("\n");
     printf(failures == 0 ? "PASS: %d operations identical\n"
                          : "FAIL: %d mismatches in %d ops\n",
            failures == 0 ? ITERATIONS : failures, ITERATIONS);
+
+    /*
+     * Rows of whole groups longer than 64 bytes, which the random run
+     * above all but never makes (its sources are 160 wide): a
+     * scroller's window, 9 to 20 groups, which the CPU copies with
+     * movem in passes of 40-byte units and the rows' tails, into the
+     * masked destinations. After the run, from its own generator
+     * state, so the run is the operations it always was.
+     */
+    if (failures == 0) {
+        STDL_Surface *wide = STDL_CreateSurface(320, 64);
+        int bad = 0, x, y;
+
+        for (y = 0; wide != NULL && y < 64; y++) {
+            for (x = 0; x < 320; x++) {
+                STDL_PutPixel(wide, x, y, (uint8_t)(rndmod(maxcol)));
+            }
+        }
+        for (i = 0; wide != NULL && i < LONGROWS; i++) {
+            int ng = 9 + (int)(rndmod(12));
+            STDL_Rect sr, r, r2;
+
+            sr.x = (int16_t)(16 * (int)(rndmod((unsigned)(21 - ng))));
+            sr.y = (int16_t)(rndmod(32));
+            sr.w = (uint16_t)(16 * ng);
+            sr.h = (uint16_t)(1 + rndmod(32));
+            r.x = (int16_t)(16 * (int)(rndmod((unsigned)(21 - ng))));
+            r.y = (int16_t)(rndmod(128));
+            r2 = r;
+            STDL_UseBlitter(0);
+            STDL_BlitSurface(wide, &sr, da, &r);
+            STDL_UseBlitter(1);
+            STDL_BlitSurface(wide, &sr, db, &r2);
+            if (compare(da, db) != 0) {
+                printf("MISMATCH long rows %d: %d groups\n", i, ng);
+                bad++;
+                break;
+            }
+        }
+        printf(bad == 0 ? "PASS: %d long-row copies identical\n"
+                        : "FAIL: long-row copies differ\n", LONGROWS);
+        failures += bad;
+        STDL_FreeSurface(wide);
+    }
 #ifdef STDL_BLIT_STATS
     /*
      * A comparison the BLiTTER never took part in compares the CPU
@@ -292,11 +398,15 @@ static void timing_pass(const char *label)
 int main(void)
 {
     int failures, blit_avail;
+    uint32_t start;
+
+    hold_on_exit(NULL);
 
     if (STDL_Init(STDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "init failed: %s\n", STDL_GetError());
         return 1;
     }
+    start = STDL_GetTicks();
     blit_avail = STDL_GetMachineInfo()->has_blitter;
     printf("blitter %s\n", blit_avail ? "present" : "ABSENT");
 
@@ -384,6 +494,9 @@ int main(void)
         STDL_UseMegaSteSpeedup(1);      /* back to the default */
     }
 
+    printf("BLITCHK done: %s, in %lus\n", failures != 0 ? "FAIL" : "PASS",
+           (unsigned long)((STDL_GetTicks() - start) / 1000));
+    fflush(stdout);
     STDL_Quit();
     return failures != 0;
 }

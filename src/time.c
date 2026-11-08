@@ -9,7 +9,8 @@
  * The waits service the cooperative hooks (DMA audio refill, compat
  * timers) once per 5ms tick, so a program sitting in STDL_Delay or
  * STDL_FrameLimit keeps sound and timers running - the same
- * guarantee STDL_PumpEvents gives a polling main loop.
+ * guarantee STDL_PollEvent gives a polling main loop, which pumps
+ * once a VBL and serves the hooks between.
  */
 
 #include "stdl_internal.h"
@@ -31,8 +32,9 @@ uint32_t STDL_GetHz200(void)
     return STDL_HZ200;
 }
 
-/* run the cooperative services, at most once per 200Hz tick */
-static void idle_services(void)
+/* run the cooperative services, at most once per 200Hz tick: in the
+ * waits, and in STDL_PollEvent between its pumps (event.c) */
+void stdl_idle_services(void)
 {
     static uint32_t last;
     uint32_t now = STDL_HZ200;
@@ -54,7 +56,7 @@ void STDL_Delay(uint32_t ms)
     /* round up so short delays don't degenerate to busy spinning */
     uint32_t end = STDL_HZ200 + (ms + 4) / 5;
     while ((int32_t)(STDL_HZ200 - end) < 0) {
-        idle_services();
+        stdl_idle_services();
     }
 }
 
@@ -76,7 +78,7 @@ void STDL_FrameLimit(int fps)
         next = now;   /* first call, or we fell hopelessly behind */
     }
     while ((int32_t)(STDL_HZ200 - next) < 0) {
-        idle_services();
+        stdl_idle_services();
     }
     next += step;
 }

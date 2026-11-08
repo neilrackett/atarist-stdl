@@ -21,6 +21,7 @@
  */
 #define main ixchk_suite
 #include "../host/test_indexed.c"
+#include "../../examples/hold.h"
 #undef main
 
 /* cycles a pixel at 8MHz for a 192x70 frame, keyed and not */
@@ -68,6 +69,8 @@ int main(void)
 {
     unsigned long plain, keyed, pre;
     int r;
+
+    hold_on_exit("IXCHK");
 
     if (STDL_Init(0) < 0) {
         return 1;

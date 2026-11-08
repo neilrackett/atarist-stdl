@@ -7,22 +7,29 @@
  * c2p.c), on a TT or a Falcon. Every variant's assembler against the C
  * twin, which the host checks pixel by pixel: X = 0's, each fixed X's
  * (0x10 to 0xF0) and the run-time XOR's at every X, one line and two,
- * boxes of 1 to 20 groups (under 4 the dispatch takes the C, so both
- * are the twin there), odd sources, and a pattern round the
+ * boxes of 1 to 20 groups, odd sources, and a pattern round the
  * destination that a stray write would break. Then the routine the
  * add-on's came from, which inverted planes 4-6 with a fixed not.l and
  * not.w, against the add-on's at X = 0x70; and the time of a whole
  * 320x240 frame each way, into ST-RAM as a page is, a TT's rows
- * doubled.
+ * doubled, and of a frame's worth of boxes two groups wide, a sprite's
+ * box, against the C twin and the routine before.
  *
  *   STCMD_NO_TTY=1 stcmd make sdl2
  *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -std=gnu99 \
  *       -m68020-60 -msoft-float -Iinclude -Iaddons/sdl2/include/SDL2 \
- *       -Iaddons/sdl2/src -o dist/SDL2CHK.TOS tests/hatari/sdl2chk.c \
- *       libstdl-sdl2.a libstdl.a
- *   TOS="<TOS 3.06>" MACHINE=tt LATE="--mmu off" \
+ *       -Iaddons/sdl2/src -c -o obj/sdl2chk.o tests/hatari/sdl2chk.c
+ *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -m68000 \
+ *       -o dist/SDL2CHK.TOS obj/sdl2chk.o libstdl-sdl2.a libstdl.a
+ *   TOS="<TOS 3.06>" MACHINE=tt \
  *       EXTRA="--cpu-exact on --compatible on --memsize 4" \
- *       tests/hatari/run.sh s2c dist/SDL2CHK.TOS 8 "waitfor S2C:done"
+ *       tests/hatari/run.sh s2c dist/SDL2CHK.TOS 8 \
+ *       "waitfor S2C:done;waitfor S2C:done"
+ *
+ * linked against the 68000 libraries, as a program using the add-on
+ * is, so that it starts on a Falcon with no FPU (MACHINE=falcon and
+ * TOS 4.04 or EmuTOS). Its cases take about two and a half minutes of
+ * the host's time in Hatari, past one waitfor's two.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +37,7 @@
 #include <osbind.h>
 #include <stdl/stdl.h>
 #include "c2p.h"
+#include "../../examples/hold.h"
 
 /* the routine before, for the comparison: X fixed at 0x70 */
 void s2c_old1(const uint8_t *src, long sp, uint8_t *dst, long dp,
@@ -138,6 +146,22 @@ static uint8_t *stram(long n)
 
 enum { W = 320, H = 240, PAGE = 640L * 240 + 64 };
 
+/* the whole page a long at a time: mintlib's memcmp goes a byte at a
+ * time, and with it the cases took a TT more than run.sh's two minutes
+ * of waiting in Hatari */
+static int differ(const uint8_t *a, const uint8_t *b)
+{
+    const uint32_t *p = (const uint32_t *)(const void *)a;
+    const uint32_t *q = (const uint32_t *)(const void *)b;
+    long n = PAGE / 4;
+    while (n-- > 0) {
+        if (*p++ != *q++) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void ms(char *out, uint32_t ticks, int frames)
 {
     /* 38400 ticks a second */
@@ -156,12 +180,14 @@ static const struct stdl_sdl2_c2pv *const fixed[16] = {
 
 int main(void)
 {
-    static const long gs[] = { 1, 3, 4, 5, 20 };
+    static const long gs[] = { 1, 2, 3, 4, 5, 20 };
     static const long hs[] = { 1, 7 };
     static const long offs[] = { 0, 1, 3 };
     uint8_t *src, *a, *b;
     long cases = 0, bad = 0, oldcases = 0, oldbad = 0, i;
     int dbl, xi, gi, hi, oi, any;
+
+    hold_on_exit("SDL2CHK");
 
     if (STDL_Init(STDL_INIT_VIDEO) < 0) {
         printf("S2C: STDL_Init: %s\nS2C:done\n", STDL_GetError());
@@ -182,7 +208,7 @@ int main(void)
     for (any = 0; any < 2; any++)
     for (dbl = 0; dbl < 2; dbl++)
     for (xi = 0; xi < 16; xi++)
-    for (gi = 0; gi < 5; gi++)
+    for (gi = 0; gi < 6; gi++)
     for (hi = 0; hi < 2; hi++)
     for (oi = 0; oi < 3; oi++) {
         uint32_t x2, x0;
@@ -195,7 +221,7 @@ int main(void)
                       any ? &stdl_sdl2_c2p_any : fixed[xi], x2, x0);
         stdl_sdl2_c2p_c(src + offs[oi], W + 7, b + 32, W, g, h, dbl, x2, x0);
         cases++;
-        if (memcmp(a, b, PAGE) != 0) {
+        if (differ(a, b)) {
             if (bad < 4) {
                 printf("S2C: MISMATCH %s dbl %d X %u groups %ld rows %ld"
                        " source +%ld\n", any ? "any" : "fixed", dbl, x, g,
@@ -208,7 +234,7 @@ int main(void)
             (dbl ? s2c_old2 : s2c_old1)(src + offs[oi], W + 7, b + 32, W,
                                         g, h);
             oldcases++;
-            if (memcmp(a, b, PAGE) != 0) {
+            if (differ(a, b)) {
                 oldbad++;
             }
         }
@@ -258,6 +284,42 @@ int main(void)
         printf("S2C: a 320x240 frame%s, ms: X = 0 %s, X = 0x70 fixed %s,"
                " at run time %s, the routine before %s\n",
                dbl ? " on two lines" : "", m0, m70, many, mold);
+    }
+    /* the same frame as boxes two groups wide and 240 rows high */
+    for (dbl = 0; dbl < 2; dbl++) {
+        enum { FRAMES = 10, BW = 2 };
+        uint32_t x2, x0, t0, t1, t2, t3;
+        char m70[16], mc[16], mold[16];
+        int f, c;
+        stdl_sdl2_c2p_xor(0x70, &x2, &x0);
+        t0 = STDL_GetHz38400();
+        for (f = 0; f < FRAMES; f++) {
+            for (c = 0; c < W / 16; c += BW) {
+                stdl_sdl2_c2p(src + c * 16, W, a + c * 16, W, BW, H, dbl,
+                              &stdl_sdl2_c2p_x70, x2, x0);
+            }
+        }
+        t1 = STDL_GetHz38400();
+        for (f = 0; f < FRAMES; f++) {
+            for (c = 0; c < W / 16; c += BW) {
+                stdl_sdl2_c2p_c(src + c * 16, W, a + c * 16, W, BW, H, dbl,
+                                x2, x0);
+            }
+        }
+        t2 = STDL_GetHz38400();
+        for (f = 0; f < FRAMES; f++) {
+            for (c = 0; c < W / 16; c += BW) {
+                (dbl ? s2c_old2 : s2c_old1)(src + c * 16, W, b + c * 16, W,
+                                            BW, H);
+            }
+        }
+        t3 = STDL_GetHz38400();
+        ms(m70, t1 - t0, FRAMES);
+        ms(mc, t2 - t1, FRAMES);
+        ms(mold, t3 - t2, FRAMES);
+        printf("S2C: the frame in boxes two groups wide%s, ms: X = 0x70"
+               " fixed %s, the C twin %s, the routine before %s\n",
+               dbl ? " on two lines" : "", m70, mc, mold);
     }
     printf("S2C:done\n");
     STDL_Quit();

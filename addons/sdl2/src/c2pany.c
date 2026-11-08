@@ -16,9 +16,9 @@
 #include "c2p_asm.h"
 
 #define C2P_ANY \
-    "	move.l	72(%sp),%d7\n" \
+    "	move.l	104(%sp),%d7\n" \
     "	eor.l	%d7,%d2\n" \
-    "	move.l	76(%sp),%d7\n" \
+    "	move.l	108(%sp),%d7\n" \
     "	eor.l	%d7,%d0\n"
 
 __asm__(C2P_PAIR("stdl_sdl2_c2p_any", C2P_ANY));

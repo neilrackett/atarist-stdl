@@ -27,7 +27,7 @@ SDL2SRCS      = $(SDL2DIR)/src/init.c $(SDL2DIR)/src/error.c \
                 $(SDL2DIR)/src/joystick.c $(SDL2DIR)/src/surface.c \
                 $(SDL2DIR)/src/rwops.c $(SDL2DIR)/src/log.c \
                 $(SDL2DIR)/src/audio.c $(SDL2DIR)/src/audiomix.c \
-                $(SDL2DIR)/src/wav.c
+                $(SDL2DIR)/src/wav.c $(SDL2DIR)/src/bmp.c
 SDL2OBJS      = $(patsubst %.c,$(OBJDIR)/%.o,$(SDL2SRCS))
 SDL2CMINIOBJS = $(patsubst %.c,$(OBJDIR)/%.cmini.o,$(SDL2SRCS))
 
@@ -53,6 +53,11 @@ SDL2_CPU    = -m68020-60 -msoft-float
 SDL2_CPU000 = init error hints
 $(foreach o,$(SDL2_CPU000),$(OBJDIR)/$(SDL2DIR)/src/$(o).o \
     $(OBJDIR)/$(SDL2DIR)/src/$(o).cmini.o): SDL2_CPU = -m68000
+
+# For size: the BMP loader runs once a file (bmp.c gives the bytes).
+SDL2_SIZE = bmp
+$(foreach o,$(SDL2_SIZE),$(OBJDIR)/$(SDL2DIR)/src/$(o).o \
+    $(OBJDIR)/$(SDL2DIR)/src/$(o).cmini.o): SDL2_CFLAGS += -Os
 
 $(SDL2OBJS): $(OBJDIR)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -96,16 +101,54 @@ $(SDL2CMINILIB): $(SDL2CMINIOBJS) $(SDL2XCMINIOBJS)
 # the partial groups in functions of their own, and the catch-up's
 # copy a loop for each layout: a copy inside the texture and the
 # screen went from 269 instructions to 141, 2,033 of a Falcon's cycles
-# to 1,061.
+# to 1,061. Then, on 2026-11-07, two raises, each deliberate and
+# kept to its bytes so the 152-byte headroom stays:
+# - 1,036 for SDL_LoadBMP (bmp.o, -Os), taken only if called, so that
+#   a port keeps SDL2's own call for its art rather than a reader of
+#   its own;
+# - 536 for every joystick STDL has (STDL_SetNumJoysticks, six at
+#   most) as SDL2's joysticks and controllers, each with its own state
+#   and events, and the pump's SDL_JOYDEVICEADDED and REMOVED pairs as
+#   the count moves (joystick.o 1,672 to 2,024, events.o 2,208 to
+#   2,392). The readers it names for every joystick are the core's own
+#   calls, which take the joystick (v1.23.0); the code behind joysticks
+#   1-5 is linked only by a program that asks for more than one.
+# 28,720 in all, from 27,148. Then 104 bytes of the headroom for the
+# merge setting (STDL_UseJoystickMerge), at whose change every
+# joystick goes and comes back (events.o 2,392 to 2,496), and 32 when
+# the joysticks were made simpler: their buttons read from STDL
+# (STDL_JoystickInputHeld) rather than kept, their handles in BSS
+# (192 bytes of initialised data gone), each index set where a handle
+# is first asked after, and a controller's buttons read only at a pump
+# that brought its joystick an event or after a re-map (joystick.o
+# 2,024 to 2,048, events.o 2,496 to 2,504). 28,840 in all as
+# released. Then 36 for the pump once a VBL (STDL_PumpEventsIfDue):
+# SDL_PollEvent pumps on STDL_PollEvent's beat and its waits pump
+# every look (events.o 2,504 to 2,540), which took a Falcon's frame of
+# 16 keys with four pads from 18-19ms to 3.5; the budget was raised by
+# the 4 that passed it. 28,876 in all. Then 188 less when the device
+# events and the axes and hats came from the core (STDL_JOYDEVICE*,
+# STDL_GetJoystickAxis and Hat): events.o 2,540 to 2,160 without its
+# own device bookkeeping, joystick.o 2,048 to 2,240 translating the
+# device events and without its copies of the axes. 28,688. Then 492
+# less when the conversion's loops lost the copy of the group before
+# them (c2p_asm.h): c2p.o 1,704 to 1,452, the largest variant
+# (c2pany.o) 940 to 704. 28,196.
 # A TT or a Falcon has the room; the budget is there so that growth is
 # a decision, raised with its reason or not at all.
-SDL2_MAX = 27300
+SDL2_MAX = 28876
 
 # The checks a build of the add-on must pass:
 # - no SDL_ link symbol in either archive (SDL_stdinc.h says why);
 # - the public headers compile as gnu99 and as C++98 with warnings as
 #   errors, and refuse to meet the 1.2 shim;
 # - its text within SDL2_MAX;
+# - each conversion loop, with the code round it that runs once a row
+#   (c2p_asm.h's _cache0 to _cache1), within the 240 bytes that sit in
+#   the 68030's 256-byte instruction cache whatever their alignment:
+#   one that outgrew it would fetch part of itself again every row,
+#   from ST-RAM on a Falcon. The assembler cannot measure that span
+#   itself, as it has forward branches, so nm does;
 # - no libgcc arithmetic at all, as libcallcheck checks the core's
 #   against tests/libcalls.allow: the drawing is built for the 68020,
 #   which multiplies and divides 32 bits itself, so a call would be a
@@ -134,6 +177,15 @@ sdl2check: $(SDL2LIB) $(SDL2CMINILIB)
 	 if [ $$n -gt $(SDL2_MAX) ]; then \
 	   echo "*** over the SDL2 add-on's size budget"; exit 1; \
 	 fi
+	@$(CROSS)nm -t d $(SDL2LIB) | awk ' \
+	   $$3 ~ /_cache0$$/ { n = $$3; sub(/_cache0$$/, "", n); s[n] = $$1 + 0 } \
+	   $$3 ~ /_cache1$$/ { n = $$3; sub(/_cache1$$/, "", n); e[n] = $$1 + 0 } \
+	   END { for (n in s) { d = e[n] - s[n]; c++; \
+	           if (d <= 0 || d > 240) { bad = 1; \
+	             print "*** " n ": " d " bytes of loop, past the 240 that sit in the 68030 instruction cache" } } \
+	         if (c < 34) { bad = 1; \
+	           print "*** " c + 0 " conversion loops measured, 34 expected" } \
+	         exit bad }'
 	@calls=`sh tools/libcalls.sh $(SDL2OBJS) $(SDL2XOBJS)` || exit 1; \
 	 if [ -n "$$calls" ]; then \
 	   echo "$$calls"; \

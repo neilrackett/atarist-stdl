@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdl/stdl.h>
+#include "hold.h"
 
 /* a few note frequencies in Hz */
 #define C3 131
@@ -61,6 +62,8 @@ int main(int argc, char *argv[])
 {
     static const int melody[] = { C4, E4, G4, C5, G4, E4 };
     int i;
+
+    hold_on_exit(NULL);
 
     (void)argc; (void)argv;
     if (STDL_Init(STDL_INIT_VIDEO) < 0) {

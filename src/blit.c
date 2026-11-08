@@ -79,8 +79,8 @@ void clear_mask_short(uint16_t *m, int n)
 #endif
 
 static __attribute__((noinline)) void blit_rows_edges(uint8_t *dp,
-        const uint8_t *sp, int ng, int h, uint16_t sstride,
-        uint16_t dstride, uint32_t lrm)
+        const uint8_t *sp, int ng, int h, int16_t sstride,
+        int16_t dstride, uint32_t lrm)
 {
     const int np = stdl_planes;
     const int32_t sskip = (int32_t)sstride - ng * 8;
@@ -447,6 +447,42 @@ static __attribute__((noinline)) void blit_rows_keyed(uint8_t *dp,
 }
 
 /*
+ * Same-phase rows of whole groups, unmasked, no flags, longer than
+ * BLIT_INLINE_MAX: a window out of a scroller's wider buffer, a
+ * screen-wide strip. They went through a memcpy call a row, whose
+ * set-up was as long as a 160-byte row's copy: a 320x200 window 38.0ms
+ * on a plain ST, against 19.5 for a movem loop (SCRLCOST). All the
+ * rows go to rowcopy.c's movem copy now, in one call, out of line as
+ * blit_aligned_plain is and for its reason; where the rows overlap in
+ * a way its passes would get wrong, a call a row as before, memmove
+ * now: the memcpy it was is mintlib's and libcmini's bcopy, which made
+ * a shift rightwards in a row right only by that.
+ * A destination mask's words are cleared a row at a time in a loop,
+ * which costs a 20-group row less than memset's set-up alone.
+ */
+static __attribute__((noinline)) void blit_rows_long(uint8_t *dp,
+        const uint8_t *sp, uint8_t *dm, int ng, int h,
+        int16_t sstride, int16_t dstride, int dmstride)
+{
+    const int bytes = ng << 3;
+    int y;
+
+    if (stdl_copy_rows_checked(dp, sp, bytes, h, sstride, dstride) != 0) {
+        for (y = 0; y < h; y++) {
+            memmove(dp, sp, (size_t)bytes);
+            sp += sstride;
+            dp += dstride;
+        }
+    }
+    if (dm != NULL) {
+        for (y = 0; y < h; y++) {
+            clear_mask_short((uint16_t *)dm, ng);
+            dm += dmstride;
+        }
+    }
+}
+
+/*
  * The same-phase blit with no flags, out of line: an unmasked copy
  * into an unmasked destination goes to blit_rows_edges, anything else
  * to the general loop. Taking these instantiations out of
@@ -458,7 +494,7 @@ static __attribute__((noinline)) void blit_rows_keyed(uint8_t *dp,
 static __attribute__((noinline)) void blit_aligned_plain(
         const uint8_t *srow, uint8_t *drow,
         const uint8_t *smrow, uint8_t *dmrow,
-        uint16_t sstride, uint16_t dstride,
+        int16_t sstride, int16_t dstride,
         int smstride, int dmstride, int ng, int h, uint32_t lrm)
 {
     const uint16_t lm = (uint16_t)(lrm >> 16), rm = (uint16_t)lrm;
@@ -812,7 +848,8 @@ STDL_PLANE_INLINE void blit_rows_shift_plain(const uint8_t *srow,
 unsigned long stdl_blit_calls;      /* entries                    */
 unsigned long stdl_blit_blitter;    /* rows through the BLiTTER   */
 unsigned long stdl_blit_inline;     /* short rows copied inline   */
-unsigned long stdl_blit_memcpy;     /* rows through memcpy        */
+unsigned long stdl_blit_memcpy;     /* long rows: the movem copy,
+                                     * or memmove where they overlap */
 unsigned long stdl_blit_merge;      /* same-phase rows merged per
                                      * group: masked, partial edge
                                      * groups, or composition flags */
@@ -828,15 +865,20 @@ int stdl_blit_force;                /* ignore the size thresholds */
 
 /*
  * One surface onto another of the same size, whole - the background
- * restore - on a machine without a BLiTTER. STDL_BlitSurfaceEx does
- * it a memcpy call a row, and each call's set-up is as long as the
- * copy of a 320-wide row: 42ms for a full screen on a plain ST.
- * Rows with no padding make the surface one block, and one memcpy
- * of it takes 19. Caught here, before the general path, because a
- * long-row path inside STDL_BlitSurfaceEx made every small blit 1-2%
- * slower by changing how gcc allocates registers in that function
- * (measured with tests/hatari/blitcost.c; a padding-only control
- * moved nothing). Out of line, and only reached without a source
+ * restore - on a machine without a BLiTTER. STDL_BlitSurfaceEx did it
+ * a memcpy call a row, each call's set-up as long as the copy of a
+ * 320-wide row: 42ms for a full screen on a plain ST (rowcopy.c's
+ * movem rows, 20.7, since November 2026). Rows with no padding make
+ * the surface one block, and one copy of it takes 19.3. memmove, as
+ * two surfaces borrowed over one block overlap - a page shifted in
+ * place, down as well as up - and a forward copy downwards reads rows
+ * it has already written; it was memcpy, right only because mintlib's
+ * and libcmini's are the same bcopy as their memmove (one entry point
+ * in both, so the same speed). Caught here, before the general path,
+ * because a long-row path inside STDL_BlitSurfaceEx made every small
+ * blit 1-2% slower by changing how gcc allocates registers in that
+ * function (measured with tests/hatari/blitcost.c; a padding-only
+ * control moved nothing). Out of line, and only reached without a source
  * rectangle, so a blit that names one pays a single test; anything
  * else it passes on to the general path. With a BLiTTER the general
  * path is faster still (17ms on an STE), so it keeps the copy - when
@@ -866,7 +908,7 @@ blit_whole(STDL_Surface *src, STDL_Surface *dst, STDL_Rect *dstrect)
     stdl_blit_memcpy += (unsigned long)dst->h;
     stdl_blit_rows += (unsigned long)dst->h;
 #endif
-    memcpy(dst->pixels, src->pixels, (size_t)dst->stride * dst->h);
+    memmove(dst->pixels, src->pixels, (size_t)dst->stride * dst->h);
     if (dstrect != NULL) {
         dstrect->w = (uint16_t)dst->w;
         dstrect->h = (uint16_t)dst->h;
@@ -968,6 +1010,18 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
         dstrect->h = (uint16_t)h;
     }
 
+    /*
+     * Onto its own memory - the same surface, or one of two borrowed
+     * over one block - with the destination at the higher address, the
+     * rows below or along the same rows to the right: out of line, as
+     * code in this function moves its other paths (AGENTS.md), and
+     * asked only where it can be so.
+     */
+    if ((src == dst || ((src->flags | dst->flags) & STDL_PREALLOC))
+        && stdl_blit_overlap(src, dst, sx, sy, dx, dy, w, h, flags) == 0) {
+        return 0;
+    }
+
     masked = (src->flags & STDL_SRCKEY) && src->mask != NULL;
     /*
      * With no destination mask there is nothing for UNDER or MARK
@@ -1067,28 +1121,28 @@ int STDL_BlitSurfaceEx(STDL_Surface *src, const STDL_Rect *srcrect,
                      * which cost more than a 16-pixel row's two
                      * moves. Here they are asked once.
                      */
+                    /* signed, as are blit_rows_long's and
+                     * blit_aligned_plain's: these rows run bottom up
+                     * where a page moves down in place
+                     * (stdl_blit_overlap) */
                     stdl_copy_rows_groups(dp, sp, ng, h,
-                                     (int32_t)src->stride - bytes,
-                                     (int32_t)dst->stride - bytes);
+                                     (int16_t)src->stride - bytes,
+                                     (int16_t)dst->stride - bytes);
                     return 0;
                 }
+                if (!shortrow) {
+                    blit_rows_long(dp, sp, dmrow, ng, h, src->stride,
+                                   dst->stride, dmstride);
+                    return 0;
+                }
+                /* short rows into a masked destination; mask rows are
+                 * words and every other mask write in the library
+                 * already assumes it, so there is nothing to test for
+                 * here */
                 for (y = 0; y < h; y++) {
-                    if (shortrow) {
-                        copy_row_short(dp, sp, bytes);
-                    } else {
-                        memcpy(dp, sp, (size_t)bytes);
-                    }
-                    if (dmrow != NULL) {
-                        /* mask rows are words and every other mask
-                         * write in the library already assumes it,
-                         * so there is nothing to test for here */
-                        if (shortrow) {
-                            clear_mask_short((uint16_t *)dmrow, ng);
-                        } else {
-                            memset(dmrow, 0, (size_t)(ng * 2));
-                        }
-                        dmrow += dmstride;
-                    }
+                    copy_row_short(dp, sp, bytes);
+                    clear_mask_short((uint16_t *)dmrow, ng);
+                    dmrow += dmstride;
                     sp += src->stride;
                     dp += dst->stride;
                 }

@@ -253,7 +253,7 @@ typedef int              SDLMod;
 #define KMOD_SHIFT  STDL_KMOD_SHIFT
 #define KMOD_ALT    STDL_KMOD_ALT
 /* STDL extension: the event was synthesised from the joystick
- * (STDL_JoyKeyEmulation), so a game can give e.g. joystick-up its
+ * (STDL_JoystickKeyEmulation), so a game can give e.g. joystick-up its
  * own meaning without affecting the cursor key */
 #define KMOD_JOYSTICK STDL_KMOD_JOYSTICK
 
@@ -361,7 +361,12 @@ typedef STDL_Cursor SDL_Cursor;
 #define SDL_DISABLE 0
 
 /* ---------------------------------------------------------------- */
-/* joystick: the physical joystick port (port 1) as stick 0         */
+/* joystick: the physical joystick port (port 1) as stick 0, with an
+ * Xpad provider's pad 0; sticks 1-5 (the mouse port, then the pads,
+ * STDL_UseJoystickMerge says how) only where the program asks STDL for
+ * more, STDL_SetNumJoysticks (stdl_event.h). No hotplug, as in SDL
+ * 1.2: after asking, close the sticks and open what SDL_NumJoysticks
+ * says. */
 
 typedef struct SDL_Joystick SDL_Joystick;
 int  SDL_NumJoysticks(void);

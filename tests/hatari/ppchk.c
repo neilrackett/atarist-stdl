@@ -38,12 +38,15 @@
 #define PP_CLOCK() ((unsigned long)STDL_GetTicks())
 #define main ppchk_suite
 #include "../host/test_polypat.c"
+#include "../../examples/hold.h"
 #undef main
 
 int main(void)
 {
     uint32_t t0;
     int r;
+
+    hold_on_exit("PPCHK");
 
     if (STDL_Init(0) < 0) {
         return 1;

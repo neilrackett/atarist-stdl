@@ -21,8 +21,23 @@
 #include "stdl_internal.h"
 #include "stdl_xpad.h"
 
-#define ACIA_KBD_CTRL (*(volatile uint8_t *)0xFFFFFC00UL)
-#define ACIA_KBD_DATA (*(volatile uint8_t *)0xFFFFFC02UL)
+#ifdef __m68k__
+#define ACIA_KBD_CTRL   (*(volatile uint8_t *)0xFFFFFC00UL)
+#define ACIA_KBD_RX     (*(volatile uint8_t *)0xFFFFFC02UL)
+#define ACIA_KBD_TX(b)  (*(volatile uint8_t *)0xFFFFFC02UL = (b))
+#define SETTLE_CLOCK    STDL_HZ200
+#else
+/* host tests (tests/host/test_joystick.c): the ACIA is a byte stream
+ * the test feeds and a log of the commands sent, and the quiesce's
+ * clock moves on as it is read, so its wait ends */
+uint8_t stdl_host_acia_ctrl(void);
+uint8_t stdl_host_acia_rx(void);
+void stdl_host_acia_tx(uint8_t b);
+#define ACIA_KBD_CTRL   stdl_host_acia_ctrl()
+#define ACIA_KBD_RX     stdl_host_acia_rx()
+#define ACIA_KBD_TX(b)  stdl_host_acia_tx(b)
+#define SETTLE_CLOCK    (++stdl_host_clock)
+#endif
 
 /* ---------------------------------------------------------------- */
 /* interrupt-side state                                             */
@@ -33,6 +48,11 @@
 #define TAG_KEY      0x0000     /* low byte: scancode | break bit    */
 #define TAG_MOUSEBTN 0x0100     /* low byte: IKBD button bits        */
 #define TAG_JOY      0x0200     /* low byte: joystick 1 state        */
+#define TAG_JOY0     0x0300     /* low byte: joystick 0, the mouse
+                                   port, which is STDL's joystick 1
+                                   where a program asked for two
+                                   (src/joysticks.c); dropped where
+                                   it did not */
 
 static volatile uint16_t stdl_ring[RING_SIZE];
 static volatile uint8_t  stdl_ring_head;   /* ISR writes here */
@@ -77,7 +97,7 @@ static uint8_t packet_len(uint8_t header)
 void stdl_ikbd_process(void)
 {
     while (ACIA_KBD_CTRL & 0x01) {
-        uint8_t b = ACIA_KBD_DATA;
+        uint8_t b = ACIA_KBD_RX;
 
         if (pkt_pending != 0) {
             pkt_buf[pkt_idx++] = b;
@@ -93,11 +113,18 @@ void stdl_ikbd_process(void)
                         }
                         break;
                     }
-                    case 0xFD:
-                        ring_push((uint16_t)(TAG_JOY | pkt_buf[1]));
-                        break;
+                    case 0xFD:      /* both: port 0, then port 1 */
                     case 0xFE:
-                        break;  /* joystick 0 = mouse port, unused */
+                        /* One push for the two: ring_push is
+                         * inlined at each call, and a push apiece
+                         * made the handler 140 bytes longer where
+                         * this makes it 90. */
+                        ring_push((uint16_t)(TAG_JOY0 | pkt_buf[0]));
+                        if (pkt_type == 0xFE) {
+                            break;
+                        }
+                        pkt_buf[0] = pkt_buf[1];
+                        /* fall through */
                     case 0xFF:
                         ring_push((uint16_t)(TAG_JOY | pkt_buf[0]));
                         break;
@@ -116,6 +143,7 @@ void stdl_ikbd_process(void)
 }
 
 void stdl_ikbd_handler(void);
+#ifdef __m68k__
 __asm__(
     "\t.text\n"
     "_stdl_ikbd_handler:\n"
@@ -123,6 +151,12 @@ __asm__(
     "\tjsr _stdl_ikbd_process\n"
     "\tmovem.l (%sp)+,%d0-%d1/%a0-%a1\n"
     "\trts\n");
+#else
+void stdl_ikbd_handler(void)
+{
+    stdl_ikbd_process();
+}
+#endif
 
 /* ---------------------------------------------------------------- */
 /* install / remove                                                 */
@@ -133,7 +167,17 @@ typedef struct {
 } kbdvecs_t;
 
 static long old_ikbdsys;
-static int  events_installed;
+int stdl_events_installed;
+
+/* How many joysticks a program reads, and the code behind the second
+ * to the fourth: STDL_SetNumJoysticks (src/joysticks.c) sets both, so
+ * a program that never asks has one and links none of that code. */
+uint8_t stdl_joy_count = 1;
+const stdl_joyn_ops *stdl_joyn;
+
+/* whether device events are wanted (STDL_UseJoystickDeviceEvents,
+ * src/joydev.c): 0 until a program asks */
+uint8_t stdl_joy_devices;
 
 /* The joystick has two possible sources and they merge: a stick on the
  * port, and a controller published through Xpad. Kept apart so one
@@ -171,7 +215,7 @@ static void capture_keytabs(void)
 void stdl_ikbd_send(uint8_t b)
 {
     while (!(ACIA_KBD_CTRL & 0x02)) { }     /* wait for TDRE */
-    ACIA_KBD_DATA = b;
+    ACIA_KBD_TX(b);
 }
 
 /* Pause IKBD output and wait for bytes already in flight to drain
@@ -190,16 +234,16 @@ static void ikbd_quiesce(void)
     uint32_t settle;
 
     stdl_ikbd_send(0x13);                        /* pause output */
-    settle = STDL_HZ200 + 4;                /* ~20ms: command transit
+    settle = SETTLE_CLOCK + 4;              /* ~20ms: command transit
                                                plus a packet in flight */
-    while ((int32_t)(STDL_HZ200 - settle) < 0) { }
+    while ((int32_t)(SETTLE_CLOCK - settle) < 0) { }
 }
 
 void stdl_events_install(void)
 {
     kbdvecs_t *kv;
 
-    if (events_installed) {
+    if (stdl_events_installed) {
         return;
     }
     capture_keytabs();
@@ -210,15 +254,9 @@ void stdl_events_install(void)
     pkt_pending = 0;
     mouse_buttons_isr = 0;
     stdl_ikbd_send(0x11);                        /* resume output */
-    if (!stdl_mouse_on) {
-        /* $12 stops the IKBD reporting the mouse at all. Re-sent
-         * here because the command lives in the keyboard processor
-         * and does not survive whatever ran before us. Joystick
-         * traffic is untouched: its packets are $FD, $FE and $FF
-         * against the mouse's $F7 to $FB, and $16 above still gets
-         * its reply. */
-        stdl_ikbd_send(0x12);
-    }
+    /* Re-sent here because the mode lives in the keyboard processor
+     * and does not survive whatever ran before us. */
+    stdl_ikbd_mode();
     stdl_ikbd_send(0x16);                        /* interrogate joysticks:
                                                the $FD reply seeds
                                                joy_state with the true
@@ -229,26 +267,31 @@ void stdl_events_install(void)
     joy_ikbd = 0;
     joy_xpad = 0;
     stdl_xpad_open();
-    events_installed = 1;
+    stdl_events_installed = 1;
 }
 
 void stdl_events_remove(void)
 {
     /* Before the desktop gets the machine back: a provider holds a
      * rumble until it is replaced, and nothing would replace it. */
-    stdl_xpad_rumble_stop();
-    if (events_installed) {
+    stdl_xpad_rumble_stop(&stdl_pad0);
+    if (stdl_joyn != NULL) {
+        stdl_joyn->stop();          /* the other pads' rumble */
+    }
+    if (stdl_events_installed) {
         kbdvecs_t *kv = (kbdvecs_t *)Kbdvbase();
         ikbd_quiesce();
         kv->ikbdsys = old_ikbdsys;
         stdl_ikbd_send(0x11);
         /* Always, whatever the program asked for: the desktop this
          * hands back to needs a pointer, and a game that disabled
-         * the mouse and then crashed would otherwise leave the
-         * machine without one. Pure ACIA writes, so it is legal
-         * from the terminate path too. */
+         * the mouse - or asked for two joysticks, which takes the
+         * mouse port - and then crashed would otherwise leave the
+         * machine without one. $08 makes the port a mouse again.
+         * Pure ACIA writes, so it is legal from the terminate path
+         * too. */
         stdl_ikbd_send(0x08);
-        events_installed = 0;
+        stdl_events_installed = 0;
     }
 }
 
@@ -290,6 +333,58 @@ static uint8_t  joy1_fire;          /* 0x80 while the right mouse
                                        whenever mouse reporting is
                                        on - is held */
 
+/*
+ * Two or more joysticks: $12 and $14, the mouse off and joystick event
+ * reporting, which makes the mouse port a joystick ($FE packets) -
+ * $12 alone does not, as a mouse moved on a silenced port sent nothing
+ * on a real Mega STE (STDL_EnableMouse's entry in AGENTS.md). One: $08,
+ * the mouse, TOS's own mode, and $12 after it to silence it if the
+ * program said so. Joystick traffic is untouched by $08 and $12: its
+ * packets are $FD, $FE and $FF against the mouse's $F7 to $FB.
+ * The bytes chosen first and two sends, as stdl_ikbd_send is inlined
+ * at each: four sends were 124 bytes, these 102 (a table and a loop
+ * were no smaller).
+ */
+void stdl_ikbd_mode(void)
+{
+    const int joys = stdl_joy_count > 1;
+
+    stdl_ikbd_send((uint8_t)(joys ? 0x12 : 0x08));
+    if (joys || !stdl_mouse_on) {
+        stdl_ikbd_send((uint8_t)(joys ? 0x14 : 0x12));
+        /* With the mouse silent, port 1's fire comes in its own
+         * packet, and what the right button last said is stale: kept,
+         * a release in the packet would get it back, and fire would
+         * stay held. */
+        joy1_fire = 0;
+    }
+}
+
+/* A device event, where the program asked for them: the type and
+ * `which` sit where a joystick event's do. */
+void stdl_joy_device(uint8_t type, int which)
+{
+    if (stdl_joy_devices) {
+        stdl_joy_event(type, which, 0, 0);
+    }
+}
+
+void stdl_joy_event(uint8_t type, int which, int index, int value)
+{
+    STDL_Event ev;
+
+    memset(&ev, 0, sizeof(ev));
+    ev.jaxis.type = type;
+    ev.jaxis.which = (uint8_t)which;
+    ev.jaxis.axis = (uint8_t)index;     /* a button's and a hat's too */
+    if (type == STDL_JOYAXISMOTION) {
+        ev.jaxis.value = (int16_t)value;
+    } else {
+        ev.jbutton.state = (uint8_t)value;  /* and jhat.value: one byte */
+    }
+    STDL_PushEvent(&ev);
+}
+
 void (*stdl_audio_hook)(void);
 void (*stdl_cursor_hook)(int x, int y);
 void (*stdl_timer_hook)(void);
@@ -304,6 +399,23 @@ int STDL_PushEvent(const STDL_Event *e)
     return 0;
 }
 
+/*
+ * Pumps that found events waiting with none taken since the last
+ * take, counted to 8: 0 or 1 for a program that takes its events, as
+ * each pump of a drain follows a take. A program that only pumps and
+ * polls (STDL_PumpEvents and STDL_GetJoystickState, or
+ * SDL_JoystickUpdate) never empties the queue, and its pads held back
+ * for room would never move for it; once eight pumps have passed so,
+ * room does not matter to it, and a full queue drops events as it
+ * always did.
+ */
+static uint8_t untaken;
+
+int stdl_event_room(void)
+{
+    return (untaken < 8) ? QUEUE_SIZE - queue_len : QUEUE_SIZE;
+}
+
 static int pop_event(STDL_Event *e)
 {
     if (queue_len == 0) {
@@ -312,6 +424,7 @@ static int pop_event(STDL_Event *e)
     *e = queue[queue_head];
     queue_head = (queue_head + 1) & (QUEUE_SIZE - 1);
     queue_len--;
+    untaken = 0;
     return 1;
 }
 
@@ -497,7 +610,7 @@ static uint8_t joykey_enabled;
 static const uint8_t joykey_bits[5] = {
     0x01, 0x02, 0x04, 0x08, 0x80
 };
-static uint8_t joykey_scan[STDL_JOYKEY_COUNT] = {
+static uint8_t joykey_scan[STDL_JOYSTICK_INPUTS] = {
     0x48, 0x50, 0x4B, 0x4D, 0x38
 };
 
@@ -537,11 +650,10 @@ static void joykey_emulate_buttons(uint32_t now)
     uint16_t changed;
     int i;
 
-    if (stdl_xpad_present()) {
-        for (i = 1; i < STDL_XPAD_BUTTONS; i++) {
-            if (stdl_xpad_button(i)) {
-                now_held = (uint16_t)(now_held | (1u << i));
-            }
+    /* no pad, or none merged into joystick 0, reads at rest */
+    for (i = 1; i < STDL_XPAD_BUTTONS; i++) {
+        if (stdl_xpad_button(&stdl_pad0, i)) {
+            now_held = (uint16_t)(now_held | (1u << i));
         }
     }
 
@@ -551,7 +663,7 @@ static void joykey_emulate_buttons(uint32_t now)
     }
 
     for (i = 1; i < STDL_XPAD_BUTTONS; i++) {
-        int input = STDL_JOYKEY_FIRE + i;
+        int input = STDL_JOYSTICK_FIRE + i;
 
         if (!(changed & (1u << i)) || joykey_scan[input] == 0) {
             continue;
@@ -571,7 +683,7 @@ static void joykey_release_buttons(uint32_t now)
     int i;
 
     for (i = 1; i < STDL_XPAD_BUTTONS; i++) {
-        int input = STDL_JOYKEY_FIRE + i;
+        int input = STDL_JOYSTICK_FIRE + i;
 
         if ((joykey_held & (1u << i)) && joykey_scan[input] != 0) {
             handle_scancode((uint8_t)(joykey_scan[input] | 0x80), now,
@@ -588,7 +700,7 @@ static int joykey_input_held(int input)
     if (input < 5) {
         return (joy_state & joykey_bits[input]) != 0;
     }
-    return (joykey_held & (1u << (input - STDL_JOYKEY_FIRE))) != 0;
+    return (joykey_held & (1u << (input - STDL_JOYSTICK_FIRE))) != 0;
 }
 
 /* find the ST scancode producing a keysym; 0 if the key doesn't
@@ -609,7 +721,7 @@ static uint8_t sym_to_scan(uint16_t sym)
     return 0;
 }
 
-void STDL_JoyKeyEmulation(int enable)
+void STDL_JoystickKeyEmulation(int enable)
 {
     uint8_t want = (uint8_t)(enable != 0);
 
@@ -622,7 +734,7 @@ void STDL_JoyKeyEmulation(int enable)
      * let go: turning it on mid-game, or turning it on at all with a
      * pad resting against a corner, would silently do nothing. Latch
      * what is held now, and release it again on the way out so a
-     * synthetic key cannot be left stuck down. STDL_JoyKeyMapping
+     * synthetic key cannot be left stuck down. STDL_JoystickKeyMapping
      * already does exactly this across a remap.
      */
     if (want) {
@@ -647,14 +759,35 @@ uint8_t stdl_joy_ikbd(void)
     return joy_ikbd;
 }
 
-int STDL_HavePad(void)
+/*
+ * Joysticks 1-5, for the three readers below: there only below the
+ * count, which is above one only once STDL_SetNumJoysticks has set
+ * stdl_joyn. One call out of line, shared, so that what the index
+ * costs a program reading joystick 0 alone is a test and a branch a
+ * reader.
+ */
+static __attribute__((noinline)) int joyn_read(int which, int what)
 {
-    return stdl_xpad_present();
+    return ((unsigned)which < stdl_joy_count) ? stdl_joyn->read(which, what)
+                                              : 0;
 }
 
-int STDL_JoyInputHeld(int input)
+int STDL_HasPad(int which)
 {
-    if (input < 0 || input >= STDL_JOYKEY_COUNT) {
+    if (which != 0) {
+        return joyn_read(which, STDL_JOYN_PAD);
+    }
+    /* apart, pad 0 is a joystick of its own (STDL_UseJoystickMerge),
+     * and joystick 0's slot -1 */
+    return stdl_pad0.slot >= 0 && stdl_xpad_present();
+}
+
+int STDL_JoystickInputHeld(int which, int input)
+{
+    if (which != 0) {
+        return joyn_read(which, input);
+    }
+    if (input < 0 || input >= STDL_JOYSTICK_INPUTS) {
         return 0;
     }
     if (input < 5) {
@@ -662,19 +795,17 @@ int STDL_JoyInputHeld(int input)
          * and a pad both reach these five. */
         return (joy_state & joykey_bits[input]) != 0;
     }
-    if (!stdl_xpad_present()) {
-        return 0;
-    }
-    return stdl_xpad_button(input - STDL_JOYKEY_FIRE);
+    /* no pad, or none merged into joystick 0, reads at rest */
+    return stdl_xpad_button(&stdl_pad0, input - STDL_JOYSTICK_FIRE);
 }
 
-int STDL_JoyKeyBind(int input, uint16_t sym)
+int STDL_JoystickKeyBind(int input, uint16_t sym)
 {
     uint32_t now = STDL_GetTicks();
     uint8_t scan;
     int held;
 
-    if (input < 0 || input >= STDL_JOYKEY_COUNT) {
+    if (input < 0 || input >= STDL_JOYSTICK_INPUTS) {
         return 0;
     }
 
@@ -697,7 +828,7 @@ int STDL_JoyKeyBind(int input, uint16_t sym)
     return (sym != 0 && scan != 0);
 }
 
-int STDL_JoyKeyMapping(uint16_t up, uint16_t down, uint16_t left,
+int STDL_JoystickKeyMapping(uint16_t up, uint16_t down, uint16_t left,
                        uint16_t right, uint16_t fire)
 {
     const uint16_t syms[5] = { up, down, left, right, fire };
@@ -725,7 +856,6 @@ int STDL_JoyKeyMapping(uint16_t up, uint16_t down, uint16_t left,
 static void handle_joy(uint8_t state)
 {
     uint8_t changed = (uint8_t)(state ^ joy_state);
-    STDL_Event ev;
     int axis;
 
     /*
@@ -737,19 +867,13 @@ static void handle_joy(uint8_t state)
      * is the only version where an event and a poll cannot disagree.
      */
     for (axis = 0; axis < 2; axis++) {
-        int16_t value = stdl_xpad_axis_merged(axis, joy_ikbd);
+        int16_t value = stdl_xpad_axis_merged(&stdl_pad0, axis, joy_ikbd);
 
         if (value == joy_axis[axis]) {
             continue;
         }
         joy_axis[axis] = value;
-
-        memset(&ev, 0, sizeof(ev));
-        ev.jaxis.type = STDL_JOYAXISMOTION;
-        ev.jaxis.which = 0;
-        ev.jaxis.axis = (uint8_t)axis;
-        ev.jaxis.value = value;
-        STDL_PushEvent(&ev);
+        stdl_joy_event(STDL_JOYAXISMOTION, 0, axis, value);
     }
 
     /* Buttons and key emulation are digital, so a bit has to move. */
@@ -757,14 +881,9 @@ static void handle_joy(uint8_t state)
         return;
     }
     if (changed & 0x80) {
-        memset(&ev, 0, sizeof(ev));
-        ev.jbutton.type = (state & 0x80) ? STDL_JOYBUTTONDOWN
-                                         : STDL_JOYBUTTONUP;
-        ev.jbutton.which = 0;
-        ev.jbutton.button = 0;
-        ev.jbutton.state = (state & 0x80) ? STDL_PRESSED
-                                          : STDL_RELEASED;
-        STDL_PushEvent(&ev);
+        stdl_joy_event((state & 0x80) ? STDL_JOYBUTTONDOWN
+                                      : STDL_JOYBUTTONUP,
+                       0, 0, (state & 0x80) != 0);
     }
     if (joykey_enabled) {
         joykey_emulate(state, changed, STDL_GetTicks());
@@ -848,9 +967,54 @@ static void flush_motion(void)
     STDL_PushEvent(&ev);
 }
 
+/*
+ * Joystick 0 as its pad record now reads, merged with the port: its
+ * events and its emulated keys. The pump's, after a reading, and the
+ * merge setting's (src/joymerge.c), when pad 0 leaves and joystick 0
+ * lets go of what it held.
+ */
+void stdl_pad0_report(uint32_t now)
+{
+    joy_xpad = stdl_xpad_classic(&stdl_pad0);
+    handle_joy((uint8_t)(joy_ikbd | joy_xpad));
+    stdl_xpad_events(&stdl_pad0, 0);
+    if (joykey_enabled) {
+        joykey_emulate_buttons(now);
+    }
+}
+
+/*
+ * When the pump last ran: the VBL count, and the 200Hz count for a
+ * VBL that does not count (a program's own VBL handler that leaves
+ * _frclock alone, or the VBL masked), where a pump every five ticks,
+ * a 50Hz frame and a little more, keeps the events coming. Both 0
+ * until the first pump, which is then due at once: the 200Hz count
+ * runs from boot, and is past 5 in its first 25ms.
+ */
+static uint32_t pump_vbl, pump_hz;
+
+int STDL_PumpEventsIfDue(void)
+{
+    if (STDL_FRCLOCK == pump_vbl && STDL_HZ200 - pump_hz < 5) {
+        stdl_idle_services();
+        return 0;
+    }
+    STDL_PumpEvents();
+    return 1;
+}
+
 void STDL_PumpEvents(void)
 {
     uint32_t now = STDL_GetTicks();
+
+    pump_vbl = STDL_FRCLOCK;
+    pump_hz = STDL_HZ200;
+
+    /* An empty queue needs no reset: only a take empties it, and a
+     * take resets the count (pop_event). */
+    if (queue_len != 0 && untaken < 8) {
+        untaken++;
+    }
 
     /*
      * An Xpad provider has no packets to deliver, so it is polled here
@@ -865,13 +1029,25 @@ void STDL_PumpEvents(void)
      * on its own works.
      */
     if (stdl_xpad_present()) {
-        joy_xpad = stdl_xpad_poll();
-        handle_joy((uint8_t)(joy_ikbd | joy_xpad));
-        stdl_xpad_events();
-        stdl_xpad_rumble_tick(now);
-        if (joykey_enabled) {
-            joykey_emulate_buttons(now);
+        stdl_xpad_rumble_tick(&stdl_pad0, now);
+        /*
+         * Read only with room in the queue for all it could say - its
+         * twenty events, and with key emulation its keys too, up to
+         * seventeen, so the queue empty (every input bound and moving
+         * in one pump would pass even that) - or a full queue would
+         * lose what the reading had already taken as reported. Left,
+         * it is read at a pump with room: late, not lost
+         * (stdl_event_room says when room matters). And not when it
+         * has nothing to say (stdl_xpad_read).
+         */
+        if (stdl_event_room() >= (joykey_enabled ? QUEUE_SIZE
+                                                 : STDL_XPAD_EVENTS)
+            && stdl_xpad_read(&stdl_pad0)) {
+            stdl_pad0_report(now);
         }
+    }
+    if (stdl_joyn != NULL) {
+        stdl_joyn->poll(now);       /* the other pads */
     }
 
     /* drain the interrupt-side ring */
@@ -906,10 +1082,17 @@ void STDL_PumpEvents(void)
                  * After STDL_EnableMouse(0) this stops happening -
                  * the IKBD hands fire back to joystick 1's own
                  * packet, measured with a real stick on a Mega STE -
-                 * so the fold goes inert rather than wrong. */
-                joy1_fire = (uint8_t)((item & 0x01) ? 0x80 : 0);
-                joy_ikbd = (uint8_t)((joy_ikbd & 0x0F) | joy1_fire);
-                handle_joy((uint8_t)(joy_ikbd | joy_xpad));
+                 * so the fold goes inert rather than wrong.
+                 * Only while the mouse reports, then: with it off, or
+                 * with two joysticks, fire is in the packet, and a
+                 * mouse packet still in flight at the switch must not
+                 * move it (stdl_ikbd_mode clears what it said). */
+                if (stdl_mouse_on && stdl_joy_count == 1) {
+                    joy1_fire = (uint8_t)(item << 7);   /* bit 0 */
+                    joy_ikbd = (uint8_t)((joy_ikbd & 0x0F)
+                                         | joy1_fire);
+                    handle_joy((uint8_t)(joy_ikbd | joy_xpad));
+                }
                 break;
             case TAG_JOY:
                 /* OR rather than overwrite: a direction change in
@@ -918,19 +1101,35 @@ void STDL_PumpEvents(void)
                 joy_ikbd = (uint8_t)((item & 0xFF) | joy1_fire);
                 handle_joy((uint8_t)(joy_ikbd | joy_xpad));
                 break;
+            case TAG_JOY0:
+                if (stdl_joyn != NULL) {
+                    stdl_joyn->port0((uint8_t)item);
+                }
+                break;
             default:
                 break;
         }
     }
     flush_motion();
 
-    /* synthesise key repeats */
+    /*
+     * Synthesise key repeats, one a pump at most. On their own beat
+     * (the next one an interval after the last was due, not after this
+     * pump), so that a pump a VBL gives the interval asked on average:
+     * the default 30ms came every 40ms at 50Hz when each was timed from
+     * the pump. More than an interval behind (the program away), the
+     * beat starts again from now rather than sending the lost ones.
+     */
     if (repeat_sym != 0 && repeat_delay > 0
         && (int32_t)(now - repeat_next) >= 0) {
         push_key(STDL_KEYDOWN, repeat_scan, repeat_sym,
                  scan_to_unicode(repeat_scan), repeat_mod);
-        repeat_next = now + (uint32_t)(repeat_interval > 0
-                                       ? repeat_interval : 1);
+        repeat_next += (uint32_t)(repeat_interval > 0 ? repeat_interval
+                                                      : 1);
+        if ((int32_t)(now - repeat_next) >= 0) {
+            repeat_next = now + (uint32_t)(repeat_interval > 0
+                                           ? repeat_interval : 1);
+        }
     }
 
     /* cooperative services */
@@ -945,18 +1144,26 @@ void STDL_PumpEvents(void)
     }
 }
 
+/* Once a VBL (STDL_PumpEventsIfDue): a drain of k events was k + 1
+ * pumps, each reading every pad and the ring again - 17 a frame and
+ * 6.4ms of an 8MHz ST's frame for a frame's 16 events and two sticks,
+ * 18.9ms with four pads as well (PUMPCOST); 2.8 and 3.0ms now. */
 int STDL_PollEvent(STDL_Event *e)
 {
-    STDL_PumpEvents();
+    STDL_PumpEventsIfDue();
     if (e == NULL) {
         return queue_len != 0;
     }
     return pop_event(e);
 }
 
+/* A wait pumps every time it looks, as an explicit STDL_PumpEvents
+ * does: it is idle, and its 5ms delay is its beat. STDL_PollEvent then
+ * only takes, as the pump has just run. */
 int STDL_WaitEvent(STDL_Event *e)
 {
     for (;;) {
+        STDL_PumpEvents();
         if (STDL_PollEvent(e)) {
             return 1;
         }
@@ -1021,9 +1228,17 @@ void STDL_WarpMouse(uint16_t x, uint16_t y)
     STDL_PushEvent(&ev);
 }
 
-uint8_t STDL_GetJoyState(void)
+uint8_t STDL_GetJoystickState(int which)
 {
+    if (which != 0) {
+        return (uint8_t)joyn_read(which, STDL_JOYN_STATE);
+    }
     return joy_state;
+}
+
+int STDL_NumJoysticks(void)
+{
+    return stdl_joy_count;
 }
 
 const char *STDL_GetKeyName(uint16_t sym)

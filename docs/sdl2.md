@@ -70,7 +70,7 @@ The calls it has:
 | Mouse | `SDL_GetMouseState`, `SDL_ShowCursor` (there is no cursor) |
 | Joystick | `SDL_NumJoysticks`, `SDL_JoystickNameForIndex`, `SDL_JoystickOpen`, `SDL_JoystickClose`, `SDL_JoystickName`, `SDL_JoystickInstanceID`, `SDL_JoystickNumAxes`, `SDL_JoystickNumButtons`, `SDL_JoystickNumHats`, `SDL_JoystickGetAxis`, `SDL_JoystickGetButton`, `SDL_JoystickGetHat`, `SDL_JoystickRumble`, `SDL_JoystickEventState` |
 | Game controller | `SDL_IsGameController`, `SDL_GameControllerOpen`, `SDL_GameControllerClose`, `SDL_GameControllerName`, `SDL_GameControllerNameForIndex`, `SDL_GameControllerGetAttached`, `SDL_GameControllerGetJoystick`, `SDL_GameControllerGetButton`, `SDL_GameControllerGetAxis`, `SDL_GameControllerRumble`, `SDL_GameControllerEventState` |
-| Surfaces | `SDL_CreateRGBSurface`, `SDL_CreateRGBSurfaceWithFormat`, `SDL_CreateRGBSurfaceFrom`, `SDL_FreeSurface`, `SDL_SetSurfacePalette`, `SDL_LockSurface`, `SDL_UnlockSurface`, `SDL_SetColorKey`, `SDL_GetColorKey`, `SDL_SetClipRect`, `SDL_GetClipRect`, `SDL_FillRect`, `SDL_BlitSurface` (`SDL_UpperBlit`) |
+| Surfaces | `SDL_CreateRGBSurface`, `SDL_CreateRGBSurfaceWithFormat`, `SDL_CreateRGBSurfaceFrom`, `SDL_FreeSurface`, `SDL_SetSurfacePalette`, `SDL_LockSurface`, `SDL_UnlockSurface`, `SDL_SetColorKey`, `SDL_GetColorKey`, `SDL_SetClipRect`, `SDL_GetClipRect`, `SDL_FillRect`, `SDL_BlitSurface` (`SDL_UpperBlit`), `SDL_LoadBMP`, `SDL_LoadBMP_RW` (uncompressed, 1, 4 or 8 bits: below) |
 | Streams | `SDL_RWFromFile`, `SDL_RWFromFP`, `SDL_RWFromMem`, `SDL_RWFromConstMem`, `SDL_AllocRW`, `SDL_FreeRW`, `SDL_RWsize`, `SDL_RWseek`, `SDL_RWtell`, `SDL_RWread`, `SDL_RWwrite`, `SDL_RWclose`, `SDL_ReadU8`, `SDL_ReadLE16`/`BE16`/`LE32`/`BE32`, `SDL_WriteU8`, `SDL_WriteLE16`/`BE16`/`LE32`/`BE32` |
 | Log | `SDL_Log`, `SDL_LogVerbose`, `SDL_LogDebug`, `SDL_LogInfo`, `SDL_LogWarn`, `SDL_LogError`, `SDL_LogCritical`, `SDL_LogMessage`, `SDL_LogMessageV`, `SDL_LogSetPriority`, `SDL_LogSetAllPriority` |
 | Audio | `SDL_OpenAudio`, `SDL_OpenAudioDevice`, `SDL_PauseAudio`, `SDL_PauseAudioDevice`, `SDL_GetAudioStatus`, `SDL_GetAudioDeviceStatus`, `SDL_LockAudio`, `SDL_LockAudioDevice`, `SDL_UnlockAudio`, `SDL_UnlockAudioDevice`, `SDL_CloseAudio`, `SDL_CloseAudioDevice`, `SDL_QueueAudio`, `SDL_GetQueuedAudioSize`, `SDL_ClearQueuedAudio`, `SDL_MixAudio`, `SDL_MixAudioFormat`, `SDL_LoadWAV`, `SDL_LoadWAV_RW`, `SDL_FreeWAV`, `SDL_GetNumAudioDevices`, `SDL_GetAudioDeviceName`, `SDL_GetNumAudioDrivers`, `SDL_GetAudioDriver`, `SDL_GetCurrentAudioDriver` |
@@ -117,11 +117,21 @@ All of these come from the machine:
 - **Pump at least every 150ms.** The pump (`SDL_PollEvent`,
   `SDL_PumpEvents`, the waits) is where STDL serves its timers and
   audio and ends a pad's rumble, as an SDL2 program pumps once a frame
-  anyway. The first pump turns on STDL's key repeat (SDL2's keys
-  repeat, with `repeat` set) and its character translation, and sends
-  `SDL_JOYDEVICEADDED` (and `SDL_CONTROLLERDEVICEADDED` with
-  `SDL_INIT_GAMECONTROLLER`), as SDL2 does for a device there at
-  start-up. A program that reads STDL's events itself and never pumps
+  anyway. `SDL_PollEvent` pumps once a VBL, at the first call after
+  the display's VBL, and otherwise takes from the queue: a drain loop
+  is one pump a frame however many events it takes (it was two for
+  each event, 18-19ms of a Falcon's frame with four pads and 16 keys;
+  now 3.5ms), and an event comes at most a VBL later than a pump at
+  every call would have given it. `SDL_PumpEvents` and the waits pump
+  whenever called. The first pump turns on STDL's key repeat (SDL2's keys
+  repeat, with `repeat` set), its character translation and its device
+  events (`STDL_UseJoystickDeviceEvents`), which say every joystick
+  there is then, as SDL2 does for the devices there at start-up, and
+  from then each one STDL adds, drops or re-maps, straight after the
+  releases it brings: each becomes `SDL_JOYDEVICEADDED` or `REMOVED`
+  (and `SDL_CONTROLLERDEVICEADDED` or `REMOVED` with
+  `SDL_INIT_GAMECONTROLLER`), a change undone before the next pump
+  included. A program that reads STDL's events itself and never pumps
   here keeps STDL as it set it.
 - **Keys:** SDL2's scancodes and key codes, from STDL's symbols. An
   Atari keyboard's keys sit where SDL2 puts them on a USB board; Help,
@@ -130,17 +140,41 @@ All of these come from the machine:
   no `SDL_TEXTEDITING`. `KMOD_` values are SDL2's, which are STDL's.
 - **The mouse** is in the logical size's coordinates, measured from
   its top left. There is no relative mode, wheel or cursor.
-- **One joystick, 0:** an ST joystick (2 axes, 1 button) or an Xpad
-  pad (6 axes, 13 buttons, a hat), always a game controller too, and
-  never plugged in or out. Its state is kept whether it is open or
-  not, as SDL2 keeps it; events are sent once it is open. A game
-  controller's buttons are read from STDL's held inputs once a pump,
-  so its d-pad is the pad's hat or the joystick's directions. Rumble
-  takes the top 8 bits of each motor and at most 65,535ms.
+- **Joysticks: STDL's, by the same numbers.** One, joystick 0 (the
+  joystick port and an Xpad provider's pad 0), unless the program asks
+  STDL for more: `STDL_SetNumJoysticks(n)` (`stdl_event.h`), called
+  directly beside the add-on. 2 makes the mouse port joystick 1 (with
+  pad 1) and turns the mouse off while there are two - the IKBD
+  reports one or the other - and 3 and 4 add pads 2 and 3 where the
+  provider has those slots. With `STDL_UseJoystickMerge(0)` the pads
+  are joysticks of their own after the two ports, 2 to 5, six at most;
+  when it changes, every joystick whose pad changes stands for other
+  sources, so STDL says `REMOVED` and `ADDED` again for each, after the
+  releases. Each is an ST joystick (2 axes, 1 button)
+  or, with a pad behind it, 6 axes, 13 buttons and a hat, always a
+  game controller too, its instance ID its index. Ask before the first
+  pump and its device events cover them all; ask later and STDL says
+  each change as it makes it (no physical plugging is seen: a pad slot
+  with nothing in it is a joystick at rest). Its state is STDL's, open
+  or not, as SDL2 keeps a joystick's: the axes and the hat
+  (`STDL_GetJoystickAxis`, `STDL_GetJoystickHat`) and the buttons
+  (`STDL_JoystickInputHeld`), whether polled from the joystick or the
+  controller, so the two agree; events are sent once it is open. A
+  controller's buttons are read at a pump that brought its joystick an
+  event, a device event included, and their changes sent, so its d-pad
+  is the pad's hat or the joystick's directions; one that goes lets go
+  of everything first, and comes back at rest.
+  Rumble is each pad's own, takes the top 8 bits of each motor and at
+  most 65,535ms. The code behind joysticks 1-5 is linked only where
+  the program asks; the device events' call, which the first pump
+  makes, and the axis and hat readers are 364 bytes in every program
+  (`joydev.o` 120, `joyread.o` 244).
 - **Surfaces are 8-bit,** `SDL_PIXELFORMAT_INDEX8`, with a palette of
   256; a blit copies bytes, keyed or not, and blits onto itself where
   unkeyed. `SDL_CreateTextureFromSurface` copies the indices: the
   surface's palette is not the screen's, the renderer's is.
+  `SDL_LoadBMP` reads 8-bit BMPs, and 1- and 4-bit ones as 8-bit, but
+  not RLE or 16 to 32 bits (the next section).
 - **The log goes to a file or nowhere,** never to the console. On a TT
   a console write makes the next flip copy the whole page, and the
   text stays in the picture.
@@ -152,10 +186,11 @@ All of these come from the machine:
   the rate it asked for, never before the first unpause. Its bytes go
   through a buffer of that size on their way to the ring, which asks
   for about 2,048 frames at a time.
-  - **It runs where STDL refills the ring:** inside `SDL_PollEvent`,
-    `SDL_PumpEvents`, the waits and `SDL_Delay`, not on a thread. So a
-    program pumps at least every 150ms while audio plays, and a refill
-    while `SDL_LockAudio` is held plays silence.
+  - **It runs where STDL refills the ring:** inside `SDL_PollEvent`
+    (at its pump, once a VBL), `SDL_PumpEvents`, the waits and
+    `SDL_Delay`, not on a thread. So a program pumps at least every
+    150ms while audio plays, and a refill while `SDL_LockAudio` is held
+    plays silence.
   - **Formats:** `AUDIO_U8`, `AUDIO_S8`, `AUDIO_S16LSB` and
     `AUDIO_S16MSB`, mono or stereo. Float and 32 bits are refused
     without `SDL_AUDIO_ALLOW_FORMAT_CHANGE`, which gives
@@ -169,6 +204,68 @@ All of these come from the machine:
   - **WAV files** are uncompressed PCM, 8 or 16 bits; `stdlconv wav`
     converts the rest offline. Mixing and WAV reading are objects of
     their own, linked only if called.
+
+## Getting art in: `stdlconv bmp8` and `SDL_LoadBMP`
+
+The screen has one palette, so every image a program shows at once
+must use it. `stdlconv bmp8` (`tools/stdlconv/stdlconv.py`, on the host
+with Python 3 and Pillow) converts a program's images together into
+uncompressed 8-bit BMPs that all carry the same palette, and
+`SDL_LoadBMP` loads each as an INDEX8 surface with it:
+
+```
+python3 $STDL/tools/stdlconv/stdlconv.py bmp8 art/title.png art/sprites.png \
+    -o dist --tt --zero 000000 --key FF00FF
+```
+
+writes `dist/TITLE.BMP` and `dist/SPRITES.BMP` (each input's name, upper
+case, as TOS keeps it). The palette is the art's own colours when they
+fit, and otherwise a median cut over every image at once, refined by
+k-means. Art already indexed through one shared palette keeps its
+indices, since a program may count on them (a key, a range it cycles),
+unless `--zero`, `--key`, `--border` or `--colors` needs entries of its
+own.
+
+| Option | What it does |
+|---|---|
+| `-o DIR` | where the BMPs go (default `.`) |
+| `--colors N` | at most N entries, 2-256 (default 256) |
+| `--tt` | the palette snapped to a TT's 4 bits a channel, rounded, so a TT shows it as written. A Falcon keeps 6 bits and shows each of those 16 levels within 2.4 of 255. Without it, a TT shows each channel's top 4 bits, up to 15 of 255 darker than the file says, and a Falcon its top 6 |
+| `--key RRGGBB[=N]` | pixels of exactly that colour, and transparent ones, as index N (default the last), which no other colour takes: give N to `SDL_SetColorKey` |
+| `--zero RRGGBB` | index 0 that colour, otherwise one like any other. Register 0 is also the border round a TT's or a Falcon's picture (above), so `000000` keeps it black with no border index |
+| `--border X` | index X (a multiple of 16) left unused and black, for art whose colour 0 is not black: `STDL_SDL2_SetBorderIndex(renderer, X)` |
+| `--dither` | Floyd-Steinberg onto the palette (default none, so flat areas stay flat) |
+| `--pal FILE` | the palette alone as well, 4 bytes an entry (r, g, b, 255), to read into an `SDL_Color` array for `SDL_SetPaletteColors` |
+
+Loading them is SDL2's own code. The screen's palette can come from
+any of the files, as they all carry it:
+
+```c
+SDL_Surface *title = SDL_LoadBMP("TITLE.BMP");
+SDL_Surface *sprites = SDL_LoadBMP("SPRITES.BMP");
+SDL_SetPaletteColors(pal, title->format->palette->colors, 0,
+                     title->format->palette->ncolors);
+STDL_SDL2_SetRenderPalette(renderer, pal);
+SDL_SetColorKey(sprites, SDL_TRUE, 255);        /* --key's index */
+tex = SDL_CreateTextureFromSurface(renderer, title);
+```
+
+A program that loads its art through SDL2_image changes `IMG_Load` to
+`SDL_LoadBMP` and its files' names to the converted ones; it gets an
+`SDL_Surface` either way.
+
+`SDL_LoadBMP` and `SDL_LoadBMP_RW` take uncompressed BMPs of 1, 4 or 8
+bits a pixel, bottom-up or top-down, with Windows' 40-byte header or a
+later one (V2 to V5). The surface is always `SDL_PIXELFORMAT_INDEX8`,
+1- and 4-bit pixels a byte each, with the file's palette, its
+`ncolors` the file's count, as SDL2 gives it. What it refuses, it
+refuses with the error set in SDL2's words: RLE ("Compressed BMP files
+not supported"), 16, 24 or 32 bits ("24-bpp BMP images are not
+supported"), OS/2's 12-byte header, which SDL2 does read ("BMP file
+with bad dimensions (0x0)", as SDL2 says of a header it does not
+know), and a file cut short ("Error reading from datastream"). It is
+an object of its own, 1,036 bytes, linked only by a program that calls
+it.
 
 ## How a frame is drawn
 
@@ -219,16 +316,23 @@ took that to 9.5 and the copies from 1.09ms a frame to 0.70.
 ## The conversion and its cost
 
 The conversion is ten merges a group with the assembler's writes
-spread among the next group's work. Its loop, 184-196 bytes, sits in
-the 68030's 256-byte instruction cache, and the build fails if it
-outgrows 240 bytes. Boxes under 4 groups go through its C twin.
+spread among the next group's work, and a box of any size is one
+call. Its loop, with the code that moves it from row to row, is
+214-240 bytes and sits in the 68030's 256-byte instruction cache; the
+build fails if it outgrows 240 bytes.
 
 A whole 320x240 frame into ST-RAM, in Hatari, ms:
 
 | | X = 0 | fixed X | X at run time |
 |---|---|---|---|
-| TT (rows on two lines) | 39.85 | 40.36 | 42.07 |
-| Falcon on VGA | 69.22 | 70.37 | 73.34 |
+| TT (rows on two lines) | 31.02 | 31.94 | 33.06 |
+| Falcon on VGA | 59.99 | 61.58 | 63.70 |
+
+Narrow boxes cost a little more a group, for the row's start: a
+frame's worth of boxes two groups wide, a sprite's, takes a fixed X
+36.47ms on a TT and 69.11 on a Falcon. Until November 2026 boxes that
+narrow went through the C twin, at 68.40 and 95.50, and whole frames
+took 40.36 and 70.37.
 
 A frame that changes a tenth of the screen pays about a tenth of that,
 plus the copies its pages missed.
@@ -297,6 +401,13 @@ the present's conversion and flip times for a bench.
     never before the unpause, and its bytes reaching the ring in order
     through pauses and locks. Then the spec's negotiation, the queue,
     SDL2's mixing arithmetic against a reference, and WAV files.
+  - `test_bmp`: `SDL_LoadBMP` on BMPs written a pixel at a time, of 1,
+    4 and 8 bits, every width from 1 to 35, either way up, with each
+    header; what it refuses; every prefix of a file, cut short. Then
+    the round trip: `bmp8conv.py` converts art with each of `stdlconv
+    bmp8`'s options and checks what it promises, and each file must
+    load as Pillow reads it, with the core's 4-bit example BMPs,
+    which other tools wrote. Skipped without Pillow.
 - **`SDL2AUD` (`tests/hatari/sdl2aud.c`):** the audio on the machine's
   DMA sound. For a 16-bit stereo spec at 22050, signed 8 bits at a DMA
   rate and 6258Hz, every callback the obtained size, and the rate the
@@ -307,3 +418,10 @@ the present's conversion and flip times for a bench.
   times.
 - **`SDL2RCHK`:** `test_render.c` built for the machine against the
   real STDL. `addons/sdl2/tests/test_render.c` says how to build it.
+- **`SDL2BMP` (`tests/hatari/sdl2bmp.c`):** art `stdlconv bmp8` made
+  (`sdl2bmp.py`), loaded with `SDL_LoadBMP` from the drive with the
+  core's 4-bit `SAIL.BMP`, each hashed as `sdl2bmp.py` hashes Pillow's
+  reading of it, and shown. On a TT and a Falcon on VGA and RGB in
+  Hatari the hashes matched, and the screen matched the picture to
+  the pixel, its colours exact on a TT and within 3 of 255 on a
+  Falcon.

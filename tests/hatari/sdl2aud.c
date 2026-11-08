@@ -29,6 +29,7 @@
 #include "SDL.h"
 
 #include <stdio.h>
+#include "../../examples/hold.h"
 
 static Uint32 bytes, calls, wrong, expect;
 static Uint8 phase;
@@ -147,6 +148,8 @@ int main(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;
+
+    hold_on_exit("SDL2AUD");
     if (SDL_Init(SDL_INIT_AUDIO) < 0) {
         printf("S2A: %s\nS2A:done\n", SDL_GetError());
         return 1;

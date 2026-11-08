@@ -11,17 +11,6 @@
 
 #include "internal.h"
 
-static Uint32 le32(const Uint8 *p)
-{
-    return (Uint32)p[0] | (Uint32)p[1] << 8 | (Uint32)p[2] << 16 |
-           (Uint32)p[3] << 24;
-}
-
-static Uint16 le16(const Uint8 *p)
-{
-    return (Uint16)(p[0] | p[1] << 8);
-}
-
 SDL_AudioSpec *SDL_LoadWAV_RW(SDL_RWops *src, int freesrc, SDL_AudioSpec *spec,
                               Uint8 **audio_buf, Uint32 *audio_len)
 {
@@ -48,7 +37,7 @@ SDL_AudioSpec *SDL_LoadWAV_RW(SDL_RWops *src, int freesrc, SDL_AudioSpec *spec,
             SDL_SetError("No data chunk in the WAVE file");
             goto done;
         }
-        n = le32(c + 4);
+        n = stdl_sdl2_le32(c + 4);
         if (memcmp(c, "fmt ", 4) == 0) {
             if (n < 16 || SDL_RWread(src, fmt, 16, 1) != 1) {
                 SDL_SetError("Bad fmt chunk in the WAVE file");
@@ -57,10 +46,10 @@ SDL_AudioSpec *SDL_LoadWAV_RW(SDL_RWops *src, int freesrc, SDL_AudioSpec *spec,
             n -= 16;
             have_fmt = 1;
         } else if (memcmp(c, "data", 4) == 0) {
-            const int channels = have_fmt ? le16(fmt + 2) : 0;
-            const int bits = have_fmt ? le16(fmt + 14) : 0;
+            const int channels = have_fmt ? stdl_sdl2_le16(fmt + 2) : 0;
+            const int bits = have_fmt ? stdl_sdl2_le16(fmt + 14) : 0;
             Uint32 got, frame;
-            if (!have_fmt || le16(fmt) != 1) {
+            if (!have_fmt || stdl_sdl2_le16(fmt) != 1) {
                 SDL_SetError("WAVE files here are PCM, uncompressed");
                 goto done;
             }
@@ -78,7 +67,7 @@ SDL_AudioSpec *SDL_LoadWAV_RW(SDL_RWops *src, int freesrc, SDL_AudioSpec *spec,
             got = (Uint32)SDL_RWread(src, *audio_buf, 1, n);
             frame = (Uint32)channels * (Uint32)(bits / 8);
             memset(spec, 0, sizeof(*spec));
-            spec->freq = (int)le32(fmt + 4);
+            spec->freq = (int)stdl_sdl2_le32(fmt + 4);
             spec->format = bits == 8 ? AUDIO_U8 : AUDIO_S16LSB;
             spec->channels = (Uint8)channels;
             spec->samples = 4096;

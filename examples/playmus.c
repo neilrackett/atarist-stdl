@@ -24,6 +24,7 @@
 
 #include "SDL.h"
 #include "SDL_mixer.h"
+#include "hold.h"
 
 #define PLAY_SECONDS 20
 
@@ -34,6 +35,8 @@ int main(int argc, char *argv[])
 	Mix_Chunk *beep;
 	Uint32 start, next_beep;
 	int beeps = 0;
+
+    hold_on_exit(NULL);
 
 	if ( SDL_Init(SDL_INIT_AUDIO) < 0 ) {
 		fprintf(stderr, "Couldn't initialize SDL: %s\n",

@@ -49,6 +49,7 @@
 #include <osbind.h>
 #include <mint/falcon.h>
 #include <stdl/stdl.h>
+#include "../../examples/hold.h"
 
 #define FRCLOCK  (*(volatile uint32_t *)0x466UL)
 #define HZ200    (*(volatile uint32_t *)0x4BAUL)
@@ -239,6 +240,8 @@ int main(void)
     int has_mch, has_cpu, has_vdo, has_snd, ismach;
     char tb[64];
     uint8_t *page8 = NULL, *raw = NULL;
+
+    hold_on_exit("TTCHK");
 
     if (STDL_Init(STDL_INIT_VIDEO | STDL_INIT_AUDIO) < 0) {
         return 1;

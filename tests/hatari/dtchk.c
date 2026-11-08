@@ -18,11 +18,14 @@
  */
 #define main dtchk_suite
 #include "../host/test_dirty.c"
+#include "../../examples/hold.h"
 #undef main
 
 int main(void)
 {
     int r;
+
+    hold_on_exit("DTCHK");
 
     if (STDL_Init(0) < 0) {
         return 1;

@@ -52,9 +52,10 @@ warnings** with the Makefile's `-Wall -Wextra`.
 - **On-target probes for the pixel paths.** `tests/hatari/pixchk.c`
   runs the host pixel suite on the machine - the only check of the
   asm on a plain ST, where BLITCHK has nothing to compare against.
-  Its default build samples three cases of each test, about 20s a
-  pass, for real hardware; `-DPIXCHK_FULL` runs every case, 16
-  minutes a pass on a plain ST, for the emulator.
+  Its default build samples three cases of each test, about 23s a
+  pass, for real hardware; `-DPIXCHK_FULL` runs every case, 18
+  minutes a pass on a plain ST (1,070s in Hatari, November 2026, 115s
+  of it the long whole-group rows), for the emulator.
   **Time a test on the target before handing it to someone with
   hardware.** The full suite was three hours a pass on a plain ST,
   and nobody knew until a tester was left staring at a silent screen,
@@ -124,8 +125,8 @@ warnings** with the Makefile's `-Wall -Wextra`.
   target that fails the build if the pixel-path objects outgrow
   `PIXEL_MAX` in the Makefile, or the responsive screens' own objects
   (`responsive.o`, `planes8.o`, `planes8ex.o`, `planes8tile.o`,
-  `asset8.o`, `tall4.o`: a program asking for the colour links 25.2K of
-  them) outgrow
+  `planes8row.o`, `asset8.o`, `tall4.o`: a program asking for the colour
+  links 26.3K of them) outgrow
   `RESP_MAX`. The archive links whole objects into
   programs with 512K-1M of RAM to share between code and heap, so
   library text spends the port's memory: a 12K growth in the
@@ -466,7 +467,11 @@ warnings** with the Makefile's `-Wall -Wextra`.
   the release before the fix, it shows each one fail. To get those desktops in
   Hatari, pass `--tos-res ttlow` or `ttmed` with `--machine falcon`:
   autostart writes its own NEWDESK.INF, which asks for ST Low
-  whatever the NVRAM says. And Hatari writes its NVRAM back on every
+  whatever the NVRAM says. That is TOS 4.04: EmuTOS 1.4 keeps the
+  NVRAM's mode, which with Hatari's own NVRAM is 640x480 in 16
+  colours on VGA (mode word 0x001a) and 0x012a on RGB, where TOS 4.04
+  had ST Low (0x0192, 0x00a2); `--tos-res stlow` gives both ST Low.
+  And Hatari writes its NVRAM back on every
   exit, so point `HOME` elsewhere for a run that changes it.
 - **A TT is STE-class too, and neither machine's display rate is the
   sync register's.** `tests/hatari/ttchk.c` (TTCHK) measures what the
@@ -744,7 +749,9 @@ warnings** with the Makefile's `-Wall -Wextra`.
   against the reference on the TT's or the Falcon's own screen, page
   hashes where the host keeps pages. Each part says its time (`RC:`
   lines; `TEST_TIMES=1` on the host). It took 152s of a TT's time, three
-  minutes in Hatari, and longer than `run.sh`'s two-minute `waitfor`:
+  minutes in Hatari (and `test_rows8`, the block blits, 11s more since
+  November 2026: its first version took 31), and longer than `run.sh`'s
+  two-minute `waitfor`:
   chain several, or run.sh stops the emulator (see the SIGTERM note
   below) before the end. It had grown to 90 minutes in Hatari:
   - the page hash was FNV's, a 32-bit multiply a byte, which on a
@@ -763,11 +770,73 @@ warnings** with the Makefile's `-Wall -Wextra`.
   polygon mutations the reference had never caught were (a colour
   leaving the mask, a hole keeping its colour): the random run now
   draws a polygon onto its masked surface every frame, last.
-- **Hatari ignores `run.sh`'s SIGTERM on this host** (seen with
-  `--machine tt` and `falcon`): `run.sh` then waits out its caller's
-  `timeout`, and the emulator outlives it - 61 of them had piled up
-  over one session. Wait for the program's own "done" line and end
-  that emulator with `kill -9`, matched by its `--cmd-fifo` path.
+
+  On a Falcon it failed one check, under TOS 4.04 and EmuTOS alike,
+  on VGA and RGB (November 2026): `test_tiles` asked for the box a
+  TT's Flip doubles, and a Falcon keeps none (`p8_screen_init` clears
+  `stdl_rs.track`, as the page drawn into is the one shown), so the
+  box was still the empty one (`the tile's box: 1,0 to 0,199`);
+  `SET_MACHINE` does nothing on the machine. The box checks
+  (`test_tiles`, `test_rows8`) now go by `stdl_rs.falcon`: a TT must
+  keep the box, a Falcon must keep none - not by the track itself,
+  which would pass a TT that lost it. RESPCHK passes on both.
+- **Hatari ignores `run.sh`'s SIGTERM while it waits to confirm a
+  quit.** It was first seen with `--machine tt` and `falcon` and taken
+  for theirs: `run.sh` waited out its caller's `timeout`, and 61
+  emulators had piled up over one session. What holds it is Hatari's
+  own default, which asks before it quits: a configuration of its own
+  (a `HOME` or `--configfile` without the key) asks, and under
+  `SDL_VIDEODRIVER=dummy` no window is there to answer. A TERM went
+  unanswered on st, ste, tt and falcon alike, with EmuTOS and with TOS
+  3.06 (Hatari 2.6.1, November 2026); with `--confirm-quit false` 164
+  of 164 TT and Falcon runs ended on it. Runs with a window were not
+  tried again. `run.sh` passes that itself
+  now, and sends -9 ten seconds after a TERM that did not end the
+  emulator, saying so on stderr: another of Hatari's questions holds
+  it as well, such as the one `--ttram` without `--addr24 off` asks
+  before TOS starts (no program started then, under either TOS).
+- **EmuTOS's 512K image stands in for TOS 3.06 and 4.04** (EmuTOS 1.4,
+  `etos512uk.img`; its 256K image has no TT or Falcon video, NVRAM or
+  second MFP). Under Hatari 2.6.1, cycle-exact, 4MB, a TT `--mmu off`
+  and a Falcon on VGA and RGB (PAL, and NTSC from the NVRAM), each of
+  TTCHK, FALCCHK (and `-DFALCCHK_SCRAMBLE`), RESPCHK, TALLCHK, TALLCOL,
+  TALLHGT, STG8CHK, CONCHK, CONCOL, SDL2RCHK, SDL2RCH2, SDL2AUD and
+  SDL2DEMO was run under both, on the desktops TTCHK and FALCCHK were
+  run from before, 168 runs in pairs (November 2026):
+  - every check said the same: the cookies, STDL's machine info, the
+    modes' words (0x0113 on VGA, 0x0023 RGB PAL, 0x0003 NTSC), the
+    rates (60 on a TT; a Falcon's ST Low 50 on VGA and RGB PAL and 60
+    NTSC, its 8-bit screen 60 on VGA), STG8CHK's 0 of 61-124 blanks
+    in another page's colour, FALCCHK's triangle (97 crossings a
+    second in both recordings) and both samples played, the crossbar
+    put back, SDL2RCHK and SDL2RCH2 with no failures, SDL2AUD's specs
+    all ok (its drain rates a half's refill apart, 182 or 184 calls at
+    22050Hz, 0.1-0.7% off, either way round); RESPCHK passed on
+    a TT under both and failed the same one check on a Falcon under
+    both, a check of the test's since fixed (its entry above);
+  - the programs' own pictures were the same pixel for pixel (TTCHK's
+    cards, FALCCHK's bars, both pages of each tall card), and the
+    desktop after each came back in the mode and colours it had after
+    a program that leaves the screen alone, under both;
+  - EmuTOS's own differences: the Falcon desktop (in FALCCHK's entry);
+    Getrez() 2 under 320x480 in 256 colours where TOS 4.04 says 7;
+    console text in an 8-bit mode drawn magenta, where TOS 3.06 and
+    4.04 draw it white; the largest free ST-RAM block (3679K against
+    TOS 3.06's 3670K, on a Falcon with an ST Low desktop 3798K against
+    3762K, and hundreds of K apart with other desktop modes); STG8CHK's
+    log a half-line or two later in the blank (VFC 17-37 against
+    16-35, VDB 63 or more); and its boot takes another time (a
+    Falcon's TALLCHK ended 11s after the start against 16s, a TT's
+    checks a few seconds later than under TOS 3.06), so a screenshot
+    taken a fixed time after the start catches another moment (shoot
+    in a burst, or after a marker);
+  - timings on a TT moved by up to 10% either way between the two
+    (RESPCHK's parts, in whole seconds, 30-34s against 28-31s, EmuTOS
+    the slower; CONCHK's present 6.35ms against 6.90, EmuTOS the
+    quicker; CONCOL's 8.77ms both), on a Falcon hardly (RESPCHK's ten
+    timed parts on VGA and RGB the same whole seconds, 49-56s, but one
+    a second apart); compare timings under one TOS.
+  The runs are `tests/hatari/out/e_*` (EmuTOS) beside `r_*` (TOS).
 - **The Mega STE's cache decides the bottom border's flick, word by
   word.** Drawing with a border open flickered the bottom border at
   16MHz with the cache on, never at 8MHz or with it off, and worst
@@ -1048,7 +1117,9 @@ warnings** with the Makefile's `-Wall -Wextra`.
   plain store loop at every screen width (a 16x16 clear 1347us
   against 745, 320x32 4687 against 4375). Only a contiguous block,
   or rows of 32 groups and more, still take it.
-- **After touching blit/fill paths**: run `dist/BLITCHK.TOS` - it
+- **After touching blit/fill paths**: run `dist/BLITCHK.TOS`, about
+  two minutes on a Mega STE (longer than `run.sh`'s two-minute
+  `waitfor`: chain two), a dot a second while it works - it
   randomises fills/blits and compares the CPU and BLiTTER paths
   byte-for-byte on target. Both paths must stay identical;
   `STDL_UseBlitter(0)` forces CPU. It runs every plane budget twice,
@@ -1085,9 +1156,213 @@ warnings** with the Makefile's `-Wall -Wextra`.
   which gcc cannot spill whatever else changes. Moving every row loop
   out of line behind a job struct was also tried and made small
   blits 5-25% slower - the function's fixed cost is its own clip and
-  set-up, not register pressure from the loops. Measure every change
-  to that function on `st`, all 85 SPRCOST cases, not the one you
-  meant to change.
+  set-up, not register pressure from the loops. Even a type counts:
+  the row strides read as `int16_t` on every path, for rows run bottom
+  up, made keyed blits 1.2-1.7% slower (November 2026); only the
+  unmasked same-phase paths read them signed. Measure every change to
+  that function on `st`, all 85 SPRCOST cases, not the one you meant
+  to change.
+- **Scrolling without scroll registers is a copy, and the copy is the
+  frame** (SCRLCOST, `tests/hatari/scrlcost.c`, November 2026: st, ste,
+  megaste, a TT and a Falcon on VGA, cycle-exact, EmuTOS 256K and 512K).
+  On a plain ST a 320x200 redraw of 16x16 tiles is 97.9ms and the whole
+  page through `STDL_BlitSurface` with a NULL srcrect, one `memcpy`,
+  19.3ms. The probe's first run proposed three library speed-ups, and
+  all three are built, before and after under the same TOS (ms a frame,
+  the CPU's column on an STE and a Mega STE):
+
+  | | plain ST | STE | Mega STE | TT | Falcon |
+  |---|---|---|---|---|---|
+  | a window out of a wider buffer | 38.0 / 20.7 | 38.0 / 20.7 | 29.3 / 19.0 | 15.7 / 8.2 | 31.4 / 16.5 |
+  | the probe's own movem loop | 19.5 | 19.5 | 18.3 | 8.1 | 16.2 |
+  | a window across a ring's seams | 53.8 / 26.4 | 53.8 / 26.4 | 38.0 / 22.7 | 22.7 / 8.8 | 45.7 / 17.7 |
+  | a window at a sub-group x | 132-164, the shift chain, as was | | | 117.5 / 12.4 | 235.8 / 24.9 |
+  | a whole-page 1-pixel ROXL | 37.3 | | | 10.2 | 20.3 |
+
+  - **4 planes: rows of whole groups longer than `BLIT_INLINE_MAX`**
+    went through a `memcpy` call a row. They go to `src/rowcopy.c`
+    now: ten longs a `movem.l`, eight of them unrolled with the stores
+    at fixed offsets and entered by a jump, every row of a strip of up
+    to 320 bytes, then the rows' last 0-32 bytes in a pass of their
+    own, all in one call from `blit_rows_long`, out of line in blit.c.
+    A row costs its units and 48 cycles (the jump, the strides, the
+    count sharing d0 with the jump's offset): the 1.2ms between the
+    library's 20.7 and the probe's 19.5. A ring's window is two pieces
+    a row, each paying that and a tail pass, hence 26.4 and not 20; a
+    layout with no seam (the skill's scan-walk) is the plain window.
+  - **8 planes, the same phase:** the same copy, from
+    `src/planes8row.c` for blits of 64 pixels and more; their edge
+    columns, where the destination's x or end is off a group, go as the
+    shifted blits' do, a long copied under the mask. Without them those
+    went a row at a time: a 304-pixel panel at x = 8 took 14.9ms on a
+    TT and 29.9 on a Falcon, 9.3 and 18.6 now.
+  - **8 planes, another phase:** the whole groups between the edges in
+    `stdl_p8_shift_rows` (planes8row.c): a plane pair is a load, a
+    rotate, a swap and a merge, one rotation serving two groups; the
+    edges a group column at a time as the row loop draws them, their
+    source groups chosen once and walked by the stride (three mulu.w
+    a row an edge before: the ring below 5.6% slower on both). A ring
+    scrolled a pixel a frame went from 122.0ms (worst frame 130.9) to
+    21.2 (41.8) on a TT and from 245.2 (263.1) to 42.4 (83.8) on a
+    Falcon; sixteen pre-shifted rings with sprite columns from 24.6
+    (26.3) to 13.1 (17.5) and 49.5 (52.3) to 26.2 (35.1).
+  - **What they decline.** Passes are right for any rows that do not
+    overlap, and for an overlap with the destination at a lower address
+    than the source in one pass (whole units, one strip), as a forward
+    copy is; `stdl_copy_rows_checked` tests the rows' extents and
+    declines the rest, which go a row at a time as before (on 4 planes
+    `memmove`, which keeps rightwards in a row right). 8-plane blits
+    with an edge column or a shift decline any overlap, as their edges
+    go before their middles. Every overlap SCRLCOST checks came out as before: right on
+    the 4-plane CPU, and on an STE, a Mega STE, a TT and a Falcon wrong
+    in the same four checks by the same pixel counts (all right since:
+    "A blit onto its own memory" below).
+  - **The cost to everything else.** SPRCOST on a plain ST, all 85
+    cases: geometric mean 1.0001 against same-binary floors of 1.0023
+    and 1.0018, four cases a single 5ms tick slower (up to 0.8%; two
+    of them fills, whose code did not change). Run with ten
+    times the measuring window (`MINTICKS` 1200), no case was slower in
+    every sample, mean 0.9998 against floors of 1.0002, and aligned
+    restores 0.3-0.6% faster. Only `blit.o` and `planes8.o` changed of
+    the old objects (`objdump -dr`; `event.o`, `stdl_xpad.o` and
+    `time.o` only in the names gcc numbers function-local statics by,
+    shifted by the new prototypes). On a TT and a Falcon small
+    unaligned 8-plane blits are 1-3% slower (13 16x16 tile blits 18.8
+    to 19.3ms, 38.0 to 39.0) and restores 2% faster, inside the layout
+    floor: the old library's own objects relinked, forwards and
+    reversed, moved that case to 19.0 and 38.7 and others by up to 5%
+    (a TT's memmove-and-strip frame 12.6 to 13.2).
+    The hand-off from `p8_blit` sits after its clip and reshaped its
+    registers; called first and clipping for itself, as planes8ex.c
+    is, it measured within 1-3% of that either way on both machines
+    and was 620 bytes larger.
+  - **Bytes:** `PIXEL_MAX` +532 (rowcopy.o 416, blit.o 116), `RESP_MAX`
+    +1,152 (planes8row.o 1,096, planes8.o 56).
+  - **The BLiTTER's size rules stand.** BLITCOST on an STE: the CPU's
+    long aligned rows 21-41% faster (320x16 5045 to 3295 per 1500), and
+    the BLiTTER still wins every long-row shape the sweep has (2915).
+  - **Tested:** `test_long_rows` (test_pixel.c) and `test_rows8`
+    (test_responsive.c) against models, every unit count, tail and two
+    strips, views, masks, clips and the overlaps; nine mutations of the
+    4-plane paths and thirteen of the 8-plane ones each failed them.
+    On the machine PIXCHK (plain ST, full and sampled) and BLITCHK
+    (STE, Mega STE, now 40 long-row copies a pass against the BLiTTER)
+    pass, and RESPCHK passes on a TT and on a Falcon (where it then
+    still failed only the `test_tiles` box check since fixed). Broken
+    on purpose in the asm: the tails' jump a long early failed PIXCHK, and crashed SCRLCOST
+    outright (it wrote past its rows); a long late, which writes nothing
+    it should not, failed four of SCRLCOST's ring checks; the shift's
+    mask a bit short failed RESPCHK and three of SCRLCOST's checks on a
+    TT.
+  - **A full-screen scroller on a plain ST is a 25Hz game, and now one
+    with room in it:** the window copy alone is still a whole 50Hz
+    frame (20.7ms), and with eight pre-shifted sprites (7.6) and a new
+    column of tiles (4.9) a coarse-scrolling frame is about 33ms (an
+    estimate from the parts), inside two frames, where it had been
+    about 51, three. Smooth scrolling a pixel a frame with sixteen
+    rings is 43.3ms before sprites (worst 45.8), three frames. On a TT
+    and a Falcon smooth scrolling no longer needs rings for speed.
+
+  Its checks compare every technique's page with a model of the map
+  pixel by pixel, and built with `-DSC_BREAK` (two techniques a row
+  short) exactly those nine checks fail.
+- **Noted for later, not built: coarse vertical scrolling of a plain
+  ST's video base.** Its base moves in 256-byte steps, and lcm(160,
+  256) = 1280 bytes is 8 lines, so a page laid out for it can scroll
+  vertically in 8-line steps with no copy at all, by letting
+  `STDL_SetScrollWindow` accept a plain ST for that one case
+  (`STDL_Flip` owns the base today, and the call refuses a plain ST).
+  Revisit only if scrolling on a plain ST still needs it after the
+  copies above: they made a full-screen coarse scroll fit two frames.
+- **A blit onto its own memory goes the way its overlap needs**
+  (November 2026; until then it was right only leftwards and upwards,
+  and wrong through the BLiTTER and on 8 planes in the other two
+  directions, by 29,234 to 57,044 pixels in SCRLCOST's checks).
+  `STDL_BlitSurfaceEx`, `p8_blit` and `p8_blit_ex` ask
+  `stdl_blit_overlap` (`src/overlap.c`) once, after the clip, and only
+  where src and dst are one surface or one is borrowed
+  (`STDL_PREALLOC`): a compare and a flag test in the blit, the rest out
+  of line in an object of its own, built with `-Os` (1,224 bytes,
+  1,500 at `-O2`). It compares the rows' groups in memory, so two
+  surfaces over one block are one surface's rectangles to it:
+  - **Destination at the lower address** (left, up, or left within a
+    group): the rows go as they always have. A keyed blit there goes to
+    the CPU, as the BLiTTER's keyed passes (XOR, AND, XOR over the
+    whole rectangle, the last reading what the first wrote) are wrong
+    for any overlap. A destination row is taken a group wider than the
+    source's, as its phase can reach one more; a one-row keyed move left
+    by 17 needs that (a host check of it).
+  - **Rows below:** from the bottom. On 4 planes at the same phase with
+    no key and no destination mask - a page moved down - through the
+    usual paths over headers (`blit_heads`) that start at the last row
+    and whose 16-bit strides step back; `stdl_copy_rows_groups`,
+    `blit_rows_long`, `blit_aligned_plain` and `blit_rows_edges` read
+    them signed, the BLiTTER's line increments are signed anyway, and
+    `stdl_copy_rows_checked` passes negative strides where no row
+    overlaps its own source. On 8 planes whole groups go to that movem
+    copy from the last row where its one pass holds them. Anything else
+    goes in bands from the bottom, none taller than the rows between a
+    source row's end and its destination.
+  - **The same rows, to the right:** whole groups at the same phase with
+    no key, flags or destination mask (every plane, on 4 planes) are a
+    `memmove` a row, walked by pointer (indexed by a `mulu` a row it took
+    47.5ms against 44.8). Anything else is copied whole groups at a time
+    into a 1K buffer on the stack (with a group of guard either side, as
+    a shifted blit reads beside its rows), as many rows as fit, and
+    blitted from there; keyed, or wider than the buffer, a column at a
+    time from the right, none wider than the move.
+
+  What it costs (SCRLCOST, Hatari, EmuTOS; every check on all five
+  machines passes, where the old library failed six on an STE and six
+  on a Mega STE, the new right 1 and right 8 among them):
+  - down 1 with its strip: plain ST 23.8ms as before (`blit_whole`'s
+    `memmove`), STE 21.4 to 22.3 and Mega STE 11.3 to 12.0 through the
+    BLiTTER bottom up (the test and a second call), TT 16.2 to 9.8 and
+    Falcon 32.0 to 19.2 (the movem copy, where they had gone a row at a
+    time, wrongly);
+  - right 16 with its column (304 wide): plain ST 44.4 to 44.8, STE
+    21.1 to 44.8 and Mega STE 11.4 to 34.3 (the BLiTTER's wrong pass
+    to a `memmove` a row), TT 12.4 to 12.5, Falcon 24.6 to 24.9;
+  - right 1 and right 8 in place (304x200 from x = 8): plain ST 161 and
+    179ms, STE 77 and 75 with the BLiTTER, Mega STE 56 and 55, TT 45.6
+    and 37.7, Falcon 91.3 and 75.4. The CPU's old results were wrong;
+    the BLiTTER's were right, by luck, at 17.8ms on an STE: it reads
+    each word before writing it when the move stays inside a group, and
+    one pass there cost 192 bytes, so it was left out;
+  - up 1, which only asks: STE 21.4 to 21.6.
+
+  SPRCOST on a plain ST, all 90 cases (nothing in it overlaps): 0.9984
+  against floors of 1.0014 and 1.0023; with `MINTICKS` 1200, 0.9986
+  against 1.0002, five cases slower in every sample by 0.1-0.25% (keyed
+  16x16 and 32x16 blits, a dirty restore) and seventeen faster (plain
+  blits 0.4-0.9%, a clipped-out blit 6%). On a TT and a Falcon small
+  shifted 8-plane blits moved inside the layout floor (13 tile blits
+  18.6 to 19.0ms on a TT and 37.7 to 38.6 on a Falcon, where relinking
+  the old objects alone had given 19.0 and 38.7). Changed objects:
+  `blit.o`, `rowcopy.o`, `planes8.o`, `planes8ex.o`, and the new
+  `overlap.o` (`objdump -dr`). Tried and dropped on the way:
+  - strides signed on every 4-plane path: keyed blits 1.2-1.7% slower in
+    SPRCOST, through `BlitSurfaceEx`'s registers, so masked and shifted
+    moves down go in bands instead;
+  - the 8-plane rows bottom up in `p8_blit`'s own loop: small shifted
+    8-plane blits 10% slower on a TT and a Falcon (13 tile blits 18.6
+    to 20.5ms, 37.7 to 41.7);
+  - columns for everything off whole groups: right 1 took 3.6s on a
+    plain ST and 567ms on an STE; the buffer for whole groups too:
+    right 16 88.8ms against 44.8 on a plain ST, 79.6 against 44.8 on an
+    STE.
+
+  Tested on the host against a blit from a copy (`inplace_pass` in
+  test_blitter.c: 14 shapes by 15 moves, with the BLiTTER refused,
+  forced, and on two planes of four; `test_inplace8` in
+  test_responsive.c: 9 shapes by 14 moves), and
+  `stdl_copy_rows_checked` against a snapshot for strides of both
+  signs. Broken on purpose, 41 mutations each failed them (27 on 4
+  planes, 14 on 8); three more pass, as they change only the path
+  taken: the buffer never used (columns instead), the 8-plane movem
+  copy handed strides that do not step back (it declines, and bands
+  follow), and `blit_aligned_plain`'s strides unsigned (it only hands
+  them to `blit_rows_edges`, which reads them signed).
 - **Refit a threshold against every shape it decides between.** The
   first BLiTTER refit measured only whole-group copies, handed
   partial-edge restores to the CPU, and made them 2-3x slower on an
@@ -1177,19 +1452,30 @@ and the rules below keep it from being anything else's.
   - There is no libgcc arithmetic.
   - Each check was broken on purpose once and failed.
 - **The conversion (`c2p*.c`, `c2p_asm.h`).**
-  - The group loop must stay within 240 bytes, which fits the 68030's
-    256-byte instruction cache whatever its alignment. The assembler
-    refuses more.
+  - Each loop, with the code round it that runs once a row (from
+    `_cache0` to `_cache1`), must stay within 240 bytes, which fits the
+    68030's 256-byte instruction cache whatever its alignment.
+    `sdl2check` measures that span with `nm` and refuses more, as the
+    assembler cannot measure across forward branches. So nothing
+    else goes inside a row: a copy of the group before the loop, which
+    the loops had until November 2026, made them 428 bytes, fetched
+    again at every row; taking it out made whole frames 12-21% faster
+    in Hatari and boxes two groups wide a third to a half.
+  - Every box goes through the assembler on the machine, however
+    narrow; the C twin is the host's, and the reference the machine
+    checks the assembler against.
   - A fixed border index X has an object of its own (`c2px.c`, built
     15 times), which `STDL_SDL2_SetBorderIndex` names inline for a
-    constant X. Reading X at run time cost 4.5% of a frame.
+    constant X. Reading X at run time costs about 3% of a frame.
   - `SDL2CHK` (`tests/hatari/sdl2chk.c`) checks every variant against
     the C twin on the machine and times them.
 - **Input keeps SDL2's numbers.** Scancodes, key codes, `KMOD_` bits
   and event types are SDL2's own values, which programs keep in saved
   key maps; `test_events` checks a sample, and that every STDL symbol
   with a scancode has one key's. Joystick and controller state comes
-  from STDL's public events and `STDL_JoyInputHeld`, nothing deeper.
+  from STDL's public events and the readers, which take the joystick
+  (`STDL_JoystickInputHeld`, `STDL_HasPad`, `STDL_PadRumble`,
+  `STDL_NumJoysticks`), nothing deeper, for every joystick STDL has.
 - **Audio keeps SDL2's contract on STDL's ring.** The ring asks for
   what a half of it needs; the program's callback gets exactly the
   obtained size, through a buffer, and is never called before the
@@ -1202,6 +1488,18 @@ and the rules below keep it from being anything else's.
   none of the compositor's groups, batches or masks, which is why
   eight different breakages of those each failed it. `SDL2RCHK` is the
   same test on the machine.
+- **What runs once a file is built -Os** (`SDL2_SIZE` in sdl2.mk, as
+  the core's `SIZE_OBJS`). `SDL_LoadBMP` (`bmp.o`) came to 1,036 bytes
+  against 1,280 at -O2, where gcc 4.6 also copied the error path out
+  at every `goto` to it.
+- **`stdlconv bmp8` maps through Pillow only what it cannot look up.**
+  Pillow's `quantize(palette=...)` finds the nearest to 6 bits a
+  channel, so a colour that is in the palette can land on a neighbour
+  (101,100,100 went to the entry before it, 100,100,100). So the
+  art's own colours are looked up exactly, and Pillow maps the rest:
+  the nearest of 74,931 colours in Python took 14.8s, against 0.2.
+  `test_bmp`'s `bmp8conv.py` checks each of bmp8's promises, and each
+  was broken on purpose once and failed.
 - **A change a porter would meet goes into `docs/sdl2.md` and the
   `stdl-sdl2` skill** (`.claude/skills/stdl-sdl2/SKILL.md`) in the same
   change, as the core's API changes go into the `stdl` skill.
@@ -1222,6 +1520,12 @@ and the rules below keep it from being anything else's.
   porting a game reads the headers first. Check it the cheap way
   before committing: grep the new symbol across `docs/ README.md
   .claude/` and see it come back.
+- **A change to a released call can go in a minor release when the
+  build catches every old use** - a call with the old arguments that no
+  longer compiles, or a name that is gone and no longer links - and is
+  written up for programs moving up in the `stdl` skill's "Moving to a
+  newer STDL" section, newest release first, with what a caller
+  changes.
 - **New functionality needs an example that exercises it.** The
   examples are how a port author sees an API working before
   committing to it, and they ship as .TOS binaries on the release
@@ -1283,6 +1587,65 @@ and the rules below keep it from being anything else's.
   no GEMDOS calls, no heap, no leaving supervisor mode. Keep new
   shutdown work in `release_hardware()` on the right side of that
   line.
+- **`STDL_PollEvent` pumps once a VBL** (`STDL_PumpEventsIfDue`,
+  November 2026): when the VBL count has moved since the last pump, or
+  there has been none, and otherwise it only takes from the queue,
+  serving the timers and the audio refill at most once a 200Hz tick
+  (time.c's `stdl_idle_services`, the delays' own). `STDL_PumpEvents`
+  always pumps, and `STDL_WaitEvent` pumps every time it looks.
+  - Before, every call pumped: a drain of k events was k + 1 pumps,
+    each reading the ring and every pad again. PUMPCOST
+    (`tests/hatari/pumpcost.c`: 250 frames, each 16 events of its own
+    and two sticks moved from the script, drained as a game does), in
+    Hatari cycle-exact: on an ST 17.3 pumps and 6.43ms a frame to 1
+    and 2.76ms, with four stub pads apart 18.87ms to 2.98; on a Falcon
+    2.52ms to 0.80, with the four pads 7.16 to 0.88. The SDL2 add-on
+    pumped twice an event (each `SDL_PollEvent` pumped, and its drain
+    of STDL's queue pumped again for each STDL event): SDL2PUMP
+    (`tests/hatari/sdl2pump.c`, the four pads apart, 16 keys a frame)
+    on a Falcon 33-35 pumps and 18.0-19.0ms a frame, now 1 and 3.5ms.
+    The add-on pumps on the same beat: `SDL_PollEvent` takes from its
+    queue unless `STDL_PumpEventsIfDue` pumped, and `SDL_PumpEvents`
+    and the waits always pump.
+  - Latency, a key from the ACIA's interrupt to its event (the vector
+    at $118 wrapped by the probe; 19-20 keys, a stray stick packet
+    left out): a loop that polls once a frame, after the VBL, unchanged
+    (ST 10.8ms average against 10.8, Falcon 10.6 against 7.1 and 11.1
+    against 10.3, inside the sampling); a loop that only polls, from
+    0.2-1.3ms to 8.5-12.1 (the next VBL, at most 20ms at 50Hz and 17
+    at 60). That is the cost, and only for a program that polls
+    between frames.
+  - Behaviour in time kept: key repeat runs on its own beat (the next
+    one an interval after the last was due, from now again if more
+    than an interval behind), as each repeat timed from a pump a VBL
+    made the default 30ms 40 at 50Hz; the timers and the refill
+    between pumps, so an SDL 1.2 game firing timers from a busy
+    polling loop keeps their pace; rumble ends, the cursor and the
+    room count (`untaken`, now pumps a VBL apart) were a pump a frame
+    for a game draining once a frame already. A VBL that does not
+    count (a program's own VBL handler leaving `_frclock` alone, or the
+    VBL masked) gets a pump every five 200Hz ticks: just over a 50Hz
+    frame, so at 50Hz the VBL comes first. A TT or a Falcon at 60 or
+    71Hz pumps at its own rate. The terminate path never pumps.
+  - Bytes: event.o 7,120 to 7,204 (the step 46, the pump's two clocks
+    and the repeat's beat 28, the wait's own pump 8), time.o 324 to 280
+    (the service out of line, which the delays had each inlined), the
+    add-on's events.o 2,504 to 2,540; every program 37 bytes larger,
+    SDL2DEMO 76.
+  - Pads held back for room now come at the next frame's pump rather
+    than later in the same drain: "eighty events, none lost" takes four
+    frames, a pad a frame, and "pad 0 waits for room" two.
+  - `tests/host/test_joystick.c` ("the pump's beat", "key repeat's own
+    beat") moves the VBL apart from the 200Hz clock (`STDL_HOST_FRCLOCK`
+    for that suite alone), and the add-on's `test_events` ("beat") has a
+    VBL count of its own in its fakes. 13 breaks all fail them: a pump
+    at every call, the VBL ignored, the 200Hz fallback gone or a tick
+    early, nothing served between pumps, the explicit pump or the waits
+    gated (the add-on's wait then never returns), repeats timed from
+    the pump or sending the lost ones, the add-on pumping STDL at every
+    call or never, or leaving an explicit pump to STDL's beat. A flag for
+    the first pump went: `_hz_200` counts from boot, so the 200Hz test
+    makes the first call due, and its break could not fail.
 - **Joystick input has two sources and they merge, never override.**
   A stick on port 1 arrives as IKBD packets; a modern controller
   arrives as an Xpad block found through the cookie jar
@@ -1304,6 +1667,275 @@ and the rules below keep it from being anything else's.
   against `XPADSTUB.PRG`, taking snapshots and printing them
   afterwards: a console print costs about 150ms under Hatari, longer
   than the pulse it would be timing.
+- **More than one joystick is asked for, and the mouse port is a mouse
+  or a joystick, never both** (`STDL_SetNumJoysticks`, November 2026).
+  - 1 is the default and exactly what every program had: joystick 0 (the
+    joystick port and pad 0) and the mouse. 2 sends the IKBD $12 and $14,
+    and its $FE packets become joystick 1; 3 and 4 add Xpad pads 2 and 3
+    where the provider has those slots (`pad_count`, which a published
+    block may not change), so 4 with no provider is 2. $14 is there for
+    the hardware: a mouse moved on a port silenced by $12 alone sent no
+    $FE on a real Mega STE (the mouse entry above), and Hatari reports
+    the port after $12 alone, so the emulator cannot say whether it is
+    needed. On a real Mega STE (November 2026, IKBDMODE) the mouse-port
+    stick worked after $14 alone and after $12 $14, and the mouse
+    worked on the desktop afterwards; both bytes are kept, the $12 to
+    be certain the mouse is off. A commercial two-player ST game
+    that shipped and played on real machines, from a published
+    disassembly, installs its own handler and sends $15 (interrogation
+    mode) with no $12, then polls both ports once a VBL ($16, answered
+    by $FD and both ports' bytes): so a joystick mode command is what
+    turns the mouse port into a stick, and the $12 is probably not
+    needed for the stick (it is kept: it costs one byte once, and
+    turns the mouse off for certain). Polling was not taken: that game's $FD
+    replies overran the ACIA's one byte while interrupts were off and
+    lost keys, and the IKBD interrupt that delivered them delayed a
+    raster split by about 300 cycles; $14 sends a packet only when a
+    stick changes. `tests/hatari/ikbdmode.c` (IKBDMODE) is the probe
+    for the hardware: a packet counter of its own on the IKBD vector
+    and five modes on keys 1-5, each after $08 ($08 alone, $14 alone,
+    $12 alone, $12 $14, $15 with $16 a frame), the counts on screen and
+    in IKBDMODE.LOG. Hatari, cycle-exact on an ST with both ports from
+    `joykeys.cfg`: the mouse-port stick sent nothing after $08 alone,
+    and the same 4 $FE packets after $14 alone, $12 alone and both, so
+    its answer is the emulator's model, not the chip's. A mouse left in the port should move
+    joystick 1 as it moves, its quadrature lines being the stick's.
+  - A joystick's sources are fixed: merged (the default), 0 is port 1
+    and pad 0, 1 port 0 and pad 1, 2 and 3 pads 2 and 3, each port
+    merged with its pad as joystick 0's always was. Joystick 0 so stays
+    what it was when a program goes to two, and a player keeps their
+    number when another's pad leaves. The design asked for "two
+    joysticks, or the first two pads"; with the merge it is both at
+    once.
+  - Apart (`STDL_UseJoystickMerge(0)`, the Use* convention: 1, 0, -1 to
+    ask, the previous returned), the pads follow the ports: 0 port 1, 1
+    port 0, 2 to 5 pads 0 to 3, six joysticks at most where four are
+    merged. The mouse rule does not change: two or more turn it off, an
+    ST's mouse port being a mouse or a joystick. Joystick 0 stays
+    event.c's; the setting is its pad record's slot (`stdl_pad0.slot`,
+    -1 apart), and going apart lets go of what pad 0 held at once
+    (`stdl_pad0_report`, the pump's own report of joystick 0), as
+    joysticks 1-5 let go of theirs, so that the releases come before
+    the device events; a record without a slot is then never read, and
+    `STDL_HasPad(0)` and `STDL_PadRumble(0, ...)` say no pad. Merged
+    again, pad 0 joins as at the start. (Until November 2026 the
+    releases came at the next pump, and a merge set and unset before
+    it had to keep the record to send them.) joysticks.c keeps each
+    other joystick's record and re-maps at once on a switch: one going,
+    or whose pad changes hands, releases what it held and stops its
+    rumble; one coming starts its pad at rest; the count follows what
+    was asked (6 is 4 merged and 6 apart). `STDL_UseJoystickMerge` is
+    an object of its own (`joymerge.c`, 160 bytes), for a program with
+    one joystick that wants the port alone.
+  - Device events come from the core (November 2026):
+    `STDL_JOYDEVICEREMOVED` and `STDL_JOYDEVICEADDED` (14 and 15, SDL
+    1.2's reserved numbers; `e.jdevice.which`), pushed where the
+    re-map happens, straight after the releases - joysticks.c for 1-5,
+    each one going or whose pad slot changes, joymerge.c for joystick 0
+    at every merge change. Before, the SDL2 add-on worked them out at
+    its pump by comparing `STDL_NumJoysticks` and the merge setting
+    with what it had said, which missed a change undone between two
+    pumps (2 to 1 to 2, the merge set twice) although the core had
+    re-mapped and sent releases, and held its REMOVED to the pump's end.
+    Only for a program that asks, `STDL_UseJoystickDeviceEvents(1)`
+    (`joydev.c`, 120 bytes), which also says ADDED for each joystick
+    there is then, as SDL2 does at start-up: a program written before
+    them would not know them, and the SDL 1.2 shim, whose
+    `SDL_PollEvent` is `STDL_PollEvent` itself, could only drop them at
+    the cost of a function of its own in front of every SDL 1.2
+    program's queue; it never asks. The add-on asks at its first pump,
+    and its `say()` and end-of-pump bookkeeping went (events.o 2,540 to
+    2,160). They take queue room as any event does; a re-map pushes its
+    releases and its device events at once, as it pushed the releases
+    before. A controller that goes lets go of all it held before its
+    REMOVED, and comes back at rest.
+  - The axes and the hat are the core's readers,
+    `STDL_GetJoystickAxis(which, axis)` (`STDL_JOYSTICK_AXIS_X`, `_Y`,
+    `_RX`, `_RY`, `_LT`, `_RT`) and `STDL_GetJoystickHat(which)`
+    (`STDL_HAT_*`), as the events carry them and 0 for a joystick, an
+    axis or a pad that is not there (`joyread.c`, 244 bytes, its own
+    object). The SDL 1.2 shim read `stdl_joyn` and the pad records for
+    them, and the add-on kept copies built from the events: both read
+    the core now (compat.o 2,180 to 1,976; the add-on's joystick.o
+    drops its axes and hats, 2,048 to 2,240 with the device events'
+    translation).
+  - Checked by `test_joystick`'s "device events, asked for" (the
+    sequences the add-on missed, the order against the releases, none
+    unasked) and "axes and hats, read" (every axis against the last
+    event that carried it), and the add-on's `test_events`, whose fakes
+    push device events as the core does: 22 breaks all fail them, one
+    only once "one joystick" read past the count with joysticks.c not
+    linked.
+  - Every pad is read by one piece of code (stdl_xpad.c), each
+    joystick's pad a record (`stdl_pad_t`: the reading, what was last
+    reported, its slot, its rumble): joystick 0's is `stdl_pad0`,
+    joysticks.c keeps the others'. A reading the same as the last one
+    reported (three long compares) is no news, and the pump skips the
+    report and the events, joystick 0's included; a record without a
+    slot reads at rest once and then not at all. Before, joysticks.c had
+    a reading, diff and rumble of its own beside stdl_xpad.c's: one
+    path took joysticks.o from 2,644 bytes to 1,256 and left
+    stdl_xpad.o its 1,584.
+  - Two more sources a program could want, neither read today: a
+    parallel-port four-player adapter (its sockets 3 and 4 on D4-D7
+    with BUSY and D0-D3 with STROBE, port A bit 5 of the PSG), and
+    Jaguar pads on an STE's or a Falcon's enhanced ports ($FF9200 read
+    before $FF9202).
+  - The readers take the joystick first: `STDL_GetJoystickState(which)`,
+    `STDL_JoystickInputHeld(which, input)`, `STDL_HasPad(which)` and
+    `STDL_PadRumble(which, low, high, ms)`. The public names say
+    Joystick, not Joy (the key emulation's calls and the inputs,
+    `STDL_JOYSTICK_*`); the events and their structs keep SDL's
+    (`STDL_JOYAXISMOTION`, `STDL_JoyAxisEvent`), which a porter looks
+    for. The inputs' count is `STDL_JOYSTICK_INPUTS`, so that it cannot
+    be read as a number of joysticks.
+  - Only joystick 0 makes keys (`STDL_JoystickKeyEmulation`, the bindings).
+  - Every way back gives the mouse back. 1 again sends $08 (and $12 if
+    `STDL_EnableMouse(0)` was asked, which only records while there are
+    two), and `stdl_events_remove` sends $08 on every exit.
+  - The mode is one function, `stdl_ikbd_mode` (event.c), which the
+    install, `STDL_EnableMouse` and the re-map each call: two joysticks
+    or more, $12 $14; one, $08, and $12 after it with the mouse off.
+    That changed three sequences (November 2026), each a repeat the
+    IKBD takes at any time: the install sends $13 $11 $08 $16 where it
+    took the mouse's mode as TOS left it ($13 $11 $16),
+    `STDL_EnableMouse(0)` $08 $12 where it sent $12, and with two
+    joysticks `STDL_EnableMouse` re-sends $12 $14 where it sent
+    nothing. `STDL_EnableMouse` tells the IKBD only while the library
+    has the keyboard, where it had asked `stdl.initialised`: a $12
+    sent between STDL_Init and the mode set outlived a program that
+    left before taking the keyboard, the only place the mouse is given
+    back; the install applies what was asked.
+    `tests/hatari/mousebk.c` runs JOYCHK at two joysticks, lets it leave
+    by STDL_Quit, exit and abort(), then counts TOS's own mouse and
+    joystick packets for a click and the mouse port's stick: 4 mouse and
+    0 joystick after each, against 0 and 6 with $12 $14 sent by hand,
+    its control. An address error in supervisor mode stops at EmuTOS's
+    panic, whose "press any key" never gets one with STDL's handler on
+    `ikbdsys`, with one joystick as with two; that route was not seen to
+    its end.
+  - The right mouse button carries joystick 0's fire while the mouse
+    reports, and only then: the fold asks for the mouse on and one
+    joystick, and `joy1_fire` (static in event.c) is cleared wherever
+    the mouse stops reporting (`stdl_ikbd_mode`). With it off, port 1's
+    fire comes in its own packet, and a mouse packet still in flight
+    must not move it. Before, only the count was asked and the clearing
+    was the re-map's: fire held through `STDL_EnableMouse(0)` stayed
+    held for good after its release (`test_joystick`'s "fire, then the
+    mouse off" failed before and passes now).
+  - Cost in a program that never asks, 424 bytes in all when the
+    joysticks came (544 now, below). event.o 332:
+    224 for the mouse port's ring item, the pump's two hooks and the
+    exit's, the install's $12 and $14 and the count, 84 for the index
+    on the three readers there - a test and a branch each, into one
+    shared out-of-line call (`joyn_read`) through `stdl_joyn`'s single
+    `read` entry - and 24 for the merge setting's byte and
+    `STDL_HasPad(0)`'s test of it. stdl_xpad.o 92: 76 for rumble's
+    index, a tail call to the hook, and 16 for pad 0 read at rest and
+    its rumble refused while apart. The packet handler inlines `ring_push` at each call, and
+    a push apiece for $FD and $FE made it 140 bytes longer where one
+    shared push makes it 90. compat.o is 592 bytes larger in an SDL 1.2
+    port, reading joysticks 1-5's axes and pad slots from `stdl_joyn`.
+    The one pad path and the queue's room (below), November 2026: 160
+    more in event.o - the pump 52 (the room and its count, pad 0 read
+    through its record, and 68 less for the fold's bit shifted into
+    place rather than chosen by a branch gcc copied), `stdl_ikbd_mode`
+    102 where the install is 68 less, `stdl_joy_event` 84 (one event
+    push for every joystick event of both objects), the room 22 -
+    stdl_xpad.o the same, mouse.o 40 and compat.o 120 less (472 in
+    an SDL 1.2 port). So 544 in a program that never asks (630 since,
+    with the pump once a VBL's 37 and the device events' and readers'
+    49, in their entries): CHECKKEY, STARTER and SFXDEMO are 120
+    bytes larger, TSPRITE and TCURSOR through the SDL 1.2 shim 2
+    smaller, TJOY 1,363 and JOYBOXES 1,277 smaller. The device events
+    and the readers added 49 to that (event.o 7,204 to 7,260: the push,
+    40, and joystick 0's report out of the pump, 18; stdl_xpad.o 8
+    less): CHECKKEY, STARTER and SFXDEMO 49 larger, TSPRITE 92 (the
+    readers, 244, for the shim's 204), JOYBOXES 105 and TJOY 190,
+    SDL2DEMO 98.
+  - Where the readers live was measured. In a separate object of their
+    own (`joystate.o`, 372 bytes) they cost a program reading joystick
+    0 that, and every SDL2 program, whose add-on names them for any
+    joystick; in event.o and stdl_xpad.o they cost every program 160,
+    and the separate object went. CHECKKEY, TSPRITE and STARTER are 164
+    bytes larger for it, SDL2DEMO 220 smaller. Inline header forms that
+    a constant 0 folds to joystick 0's own call would have cost a
+    joystick-0 program nothing, at the price of four public calls that
+    are no longer functions; not done.
+  - `joysticks.o` (1,256 bytes, 256 of BSS for six) is linked only by a
+    program that asks (link maps: of TJOY, CHECKKEY, TSPRITE, STARTER
+    and SDL2DEMO, only TJOY, which asks). The add-on grew 536 bytes for
+    four joysticks, then 104 (events.o) for the re-map pairs, then 32
+    when its buttons became STDL's own (`STDL_JoystickInputHeld`) and
+    its handles BSS (192 bytes of data gone; `sdl2.mk`), and lost 188
+    when the device events and the readers moved into the core. Every
+    SDL2 program links `joydev.o` and `joyread.o` (364), and no longer
+    `joymerge.o`.
+  - No pad event is lost to STDL's 32-event queue. A pad is read only
+    with room for the most it can say, 20 (six axes, thirteen buttons,
+    the hat), and joystick 0's with key emulation on only with the
+    queue empty, as its keys come too (up to 17 more, which pass 32
+    only if every input is bound and all move in one pump); otherwise
+    it is read at a later pump, late rather than lost. Before, four
+    pads changing everything in one pump passed it (`test_joystick`'s
+    comparison of pad 0 with pad 2 lost two of 34, and pumped a pad at
+    a time; now one pump), and "eighty events, none lost" and "pad 0
+    waits for room" would have lost 48 and 8. A program that only pumps
+    and polls never empties the queue, and its pads would wait for
+    good: the room counts only while events are being taken
+    (`stdl_event_room`; `untaken` counts pumps that found events
+    waiting with none taken since, and from 8 a full queue drops events
+    as it always did; "pumped, never taken").
+  - Checked: `tests/host/test_joystick.c` runs the real packet parser on
+    a fake ACIA, Xpad's own consumer on a fake provider, and the SDL 1.2
+    shim, apart as well as merged (six at once, switching both ways with
+    releases, joystick 0 apart with one joystick); 34 deliberate breaks
+    all failed it, four only once the test was made to see them (an
+    in-flight mouse packet that changes a button, three slots, a pad
+    held from the start, every pad's rumble at exit), and a reader past
+    the count by ASan. The add-on's `test_events` covers the device
+    events, the re-map pairs and each joystick's state (12 breaks of
+    12, one only once the test set the merge before the first pump). In Hatari,
+    `tests/hatari/joychk.c` with `tests/hatari/joykeys.cfg`, which
+    drives both ports from fifo letters, and `--trace ikbd_cmds`: both
+    ports and the switch back on an ST, a TT and a Falcon, and four pads
+    from `XPADSTUB.PRG` built with `-DXPADSTUB_PADS=4` on an STE, each
+    one's state, its releases when dropped, and its rumble written and
+    ended. Apart, on an ST with the four stub pads: six joysticks, the
+    shim naming 2 to 5 "Xpad pad 0" to "3", each pad's rumble in its own
+    slot and ended, joystick 0 the port alone, the switch both ways
+    releasing what changed hands, and the mouse back at one joystick and
+    at exit. JOYCHK prints a console line for every event, about 150ms
+    each under Hatari, so a script's keys can run seconds ahead of it: a
+    click typed after "1" arrived while it still had six, and an Esc
+    behind it ended it before it printed the releases. Give it time
+    between keys.
+  - The one pad path (November 2026) was checked the same way. 37
+    breaks of the core's joystick code all fail `test_joystick`, 6 only
+    once the test was made to see them: pad 0 read with no room, and
+    with key emulation's room as a pad's ("pad 0 waits for room"); the
+    fold with the mouse off (an in-flight right button after
+    `STDL_EnableMouse(0)`); `STDL_EnableMouse` before the keyboard is
+    the library's (STDL_Init first); a pad changing hands news at once;
+    and a joystick event's state byte (`has_button` now checks it). An
+    unchanged pad read as news shows only in the reading, which "a pad
+    as it was, not reported" calls itself. Two more passed and went: the
+    merge resetting pad 0's record as it rejoined, which lost a release
+    when it rejoined before a pump ("apart and back between pumps"),
+    and the count reset when the pump finds the queue empty, which
+    could not fail, as only a take empties the queue and a take resets
+    the count.
+    The add-on's 14 breaks all fail `test_events`; one found
+    `SDL_GameControllerRumble` rumbling joystick 0 for a controller
+    opened without its joystick (its index unset), now set where a
+    handle is first asked after (`there`). In Hatari, on an ST with
+    EmuTOS (cycle-exact, no window), JOYCHK on both ports and with the
+    four stub pads apart, six, rumbled and merged again, TJOY with the
+    four pads, JOYBOXES on both ports and xpadprobe with one pad each
+    printed exactly what the same programs built from the release
+    before printed; the IKBD's commands differed only by the install's
+    new $08, and gave the mouse back ($08) at one joystick and at
+    exit.
 - **Xpad is a submodule at `lib/xpad`**, not a vendored copy, and the
   Makefile compiles `$(XPAD)/xpad.c` straight out of it. It used to be
   a copy in `src/`; that stopped being safe once the ABI started
@@ -1473,4 +2105,16 @@ and the rules below keep it from being anything else's.
 - Compat behaviour belongs in compat.c/mixer.c as thin wrappers;
   if a wrapper needs real logic, the logic probably belongs in the
   library (see STDL_FillRect's SDL write-back contract).
+- A program that runs to its end by itself - an example, a probe in
+  `tests/hatari/`, a host test built for the machine - calls
+  `hold_on_exit()` (`examples/hold.h`) first thing in `main`, so that
+  on a real machine it says "Press a key." and waits rather than
+  dropping back to the desktop with its results: `NULL` in an example,
+  its name in a probe, which then also writes everything it printed
+  to NAME.LOG beside it (a probe that prints while it has a screen of
+  its own loses that text when STDL gives the desktop back: TRIPCHK's
+  did, in Hatari). Started with a command line it does neither, and
+  run.sh needs nothing: its output reaches the console as it is
+  printed, and the script ends the emulator. Not for a program that
+  waits for Escape already, nor VBLCHK, whose test is an abnormal exit.
 - Commits: no Co-Authored-By trailers.

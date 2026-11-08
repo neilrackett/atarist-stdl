@@ -157,18 +157,49 @@ uint16_t fake_mod;
 int fake_mouse_x, fake_mouse_y;
 uint8_t fake_mouse_buttons;
 int fake_repeat_delay = -1, fake_repeat_interval = -1, fake_unicode = -1;
-int fake_pad;
-uint32_t fake_held;
 int fake_rumble_low, fake_rumble_high, fake_rumble_ms, fake_rumbles;
+int fake_joys = 1, fake_pads[6], fake_rumble_which;
+uint32_t fake_helds[6];
 
-static STDL_Event events[64];
-static int nevents, evhead;
+/* STDL's queue, and what its next pump brings (fake_event); the
+ * pumps' beat a VBL count of the test's own */
+static STDL_Event events[64], pending[64];
+static int nevents, evhead, npending;
+uint32_t fake_vbl;
+int fake_pumps, fake_idles;
+static uint32_t pumped_vbl;
+static int pumped;
 
 void fake_event(const STDL_Event *e)
 {
-    if (nevents < 64) {
-        events[nevents++] = *e;
+    if (npending < 64) {
+        pending[npending++] = *e;
     }
+}
+
+void STDL_PumpEvents(void)
+{
+    int i;
+    fake_pumps++;
+    pumped = 1;
+    pumped_vbl = fake_vbl;
+    if (evhead == nevents) {
+        evhead = nevents = 0;
+    }
+    for (i = 0; i < npending && nevents < 64; i++) {
+        events[nevents++] = pending[i];
+    }
+    npending = 0;
+}
+
+int STDL_PumpEventsIfDue(void)
+{
+    if (pumped && fake_vbl == pumped_vbl) {
+        fake_idles++;
+        return 0;
+    }
+    STDL_PumpEvents();
+    return 1;
 }
 
 void fake_key(int down, unsigned sym, unsigned mod, unsigned unicode)
@@ -186,6 +217,7 @@ void fake_key(int down, unsigned sym, unsigned mod, unsigned unicode)
 
 int STDL_PollEvent(STDL_Event *e)
 {
+    STDL_PumpEventsIfDue();
     if (evhead == nevents) {
         evhead = nevents = 0;
         return 0;
@@ -224,24 +256,111 @@ int STDL_EnableUNICODE(int enable)
     return was;
 }
 
-int STDL_HavePad(void)
+/* As STDL's: each joystick's pad and held inputs, there only while
+ * there are that many */
+int STDL_NumJoysticks(void)
 {
-    return fake_pad;
+    return fake_joys;
 }
 
-int STDL_JoyInputHeld(int input)
+/* STDL's device events, as the core pushes them: ADDED for each one
+ * there is when they are asked for, then each change */
+int fake_devices;
+
+static void fake_device(int added, int which)
 {
-    return (fake_held >> input) & 1;
+    STDL_Event e;
+    if (fake_devices) {
+        memset(&e, 0, sizeof(e));
+        e.type = added ? STDL_JOYDEVICEADDED : STDL_JOYDEVICEREMOVED;
+        e.jdevice.which = (uint8_t)which;
+        fake_event(&e);
+    }
 }
 
-int STDL_PadRumble(uint8_t low, uint8_t high, uint16_t ms)
+int STDL_UseJoystickDeviceEvents(int on)
 {
-    if (!fake_pad) {
+    const int was = fake_devices;
+    int i;
+    if (on >= 0 && (on != 0) != was) {
+        fake_devices = on != 0;
+        for (i = 0; on && i < fake_joys; i++) {
+            fake_device(1, i);
+        }
+    }
+    return was;
+}
+
+/* as STDL_SetNumJoysticks says it: each one gone, each one come */
+void fake_set_joys(int n)
+{
+    int i;
+    for (i = 1; i < 6; i++) {
+        if (i < fake_joys && i >= n) {
+            fake_device(0, i);
+        } else if (i >= fake_joys && i < n) {
+            fake_device(1, i);
+        }
+    }
+    fake_joys = n;
+}
+
+/* as STDL_UseJoystickMerge says it with every slot changing: joystick
+ * 0 gone and back, then each of the others gone and each there now */
+void fake_set_merge(int n)
+{
+    int i;
+    fake_device(0, 0);
+    fake_device(1, 0);
+    for (i = 1; i < 6; i++) {
+        if (i < fake_joys) {
+            fake_device(0, i);
+        }
+        if (i < n) {
+            fake_device(1, i);
+        }
+    }
+    fake_joys = n;
+}
+
+/* the axes and hats as STDL's readers say them */
+int fake_axes[6][6], fake_hats[6];
+
+int16_t STDL_GetJoystickAxis(int which, int axis)
+{
+    return (which >= 0 && which < fake_joys && axis >= 0 && axis < 6)
+        ? (int16_t)fake_axes[which][axis] : 0;
+}
+
+uint8_t STDL_GetJoystickHat(int which)
+{
+    return (which >= 0 && which < fake_joys) ? (uint8_t)fake_hats[which] : 0;
+}
+
+static int fake_there(int which)
+{
+    return which >= 0 && which < fake_joys;
+}
+
+int STDL_HasPad(int which)
+{
+    return fake_there(which) && fake_pads[which];
+}
+
+int STDL_JoystickInputHeld(int which, int input)
+{
+    return fake_there(which) ? (int)((fake_helds[which] >> input) & 1) : 0;
+}
+
+int STDL_PadRumble(int which, uint8_t low, uint8_t high, uint16_t ms)
+{
+    if (!STDL_HasPad(which)) {
         return -1;
     }
     fake_rumble_low = low;
     fake_rumble_high = high;
     fake_rumble_ms = ms;
+    fake_rumble_which = which;
     fake_rumbles++;
     return 0;
 }

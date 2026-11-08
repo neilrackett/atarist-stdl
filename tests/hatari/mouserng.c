@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdl/stdl.h>
 #include <stdl/stdl_responsive.h>
+#include "../../examples/hold.h"
 
 static void warp(int x, int y, int *gx, int *gy)
 {
@@ -35,6 +36,8 @@ int main(void)
 {
     STDL_Surface *s;
     int rows, bx, by, fx, fy, mx, my, ok;
+
+    hold_on_exit("MOUSERNG");
     if (STDL_Init(STDL_INIT_VIDEO) < 0) {
         printf("MR: STDL_Init failed\nMR:done\n");
         return 1;

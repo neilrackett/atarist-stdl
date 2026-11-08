@@ -26,6 +26,7 @@
  */
 #include <stdio.h>
 #include <stdl/stdl.h>
+#include "../../examples/hold.h"
 
 extern int stdl_blit_force;
 
@@ -72,6 +73,8 @@ int main(void)
     static const int hs[] = { 8, 16, 32, 64 };
     static const char *const kn[] = { "solid", "disc", "ring" };
     int wi, hi, k, v;
+
+    hold_on_exit("SPRFIT");
 
     STDL_Init(STDL_INIT_VIDEO);
     STDL_SetVideoMode(320, 200, 4, 0);

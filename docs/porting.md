@@ -66,6 +66,8 @@ separate, and must never meet this one's.
   traffic is unaffected, the library puts reporting back when it
   releases the keyboard including down the terminate path, and
   `STDL_GetMouseState` simply stops changing rather than failing.
+  Two joysticks (`STDL_SetNumJoysticks`) turn it off as well, and the
+  mouse port's stick reports instead.
 * **Pausing the voice device**: an open sound DMA clicks about once
   every thirty seconds on a real STE even looping pure silence, and
   that is hardware rather than anything the library does. If your
@@ -147,9 +149,9 @@ separate, and must never meet this one's.
 | `SDL_SetColorKey` | `STDL_SetColourKey` | builds the transparency mask (a snapshot); key >= 16 = use the existing mask, no scan - for surfaces whose transparency is built during decode |
 | `SDL_LoadBMP` | `STDL_LoadBMP` | uncompressed 1/4/8bpp, max 16 colours |
 | `SDL_SetColors` / `SDL_SetPalette` | palette module | `SDL_LOGPAL` / `SDL_PHYSPAL` honoured; `STDL_StagePalette(1)` lands changes in the vertical blank |
-| events / keysyms / `SDL_GetKeyState` | event module | numbering matches SDL 1.2; the keyboard is taken at `STDL_SetVideoMode`, or by `STDL_OpenInput` for a program that sets no mode |
+| events / keysyms / `SDL_GetKeyState` | event module | numbering matches SDL 1.2; the keyboard is taken at `STDL_SetVideoMode`, or by `STDL_OpenInput` for a program that sets no mode. `SDL_PollEvent` pumps once a VBL and otherwise only takes from the queue, so a drain loop is one pump a frame; `SDL_PumpEvents` and `SDL_WaitEvent` always pump |
 | `SDL_GetTicks` / `SDL_Delay` | time module | 200Hz clock: 5ms resolution |
-| `SDL_AddTimer` / `SDL_SetTimer` | compat | cooperative: callbacks fire inside `SDL_Delay` |
+| `SDL_AddTimer` / `SDL_SetTimer` | compat | cooperative: callbacks fire inside `SDL_Delay` and `SDL_PollEvent`, once a 200Hz tick at most |
 | `SDL_OpenAudio` / `SDL_LoadWAV` | `STDL_Audio` | STE DMA; cooperative refill, 2% of an 8MHz STE plus your callback when it writes signed 8-bit at a DMA rate straight into the ring; other formats are converted at every refill (13% for unsigned 8-bit mono at 12517Hz, 48% for 16-bit stereo at 22050); PCM WAVs only (`stdlconv wav`) |
 | `Mix_PlayMusic` etc (SDL_mixer) | `STDL_Music` | YM register streams from `stdlconv midi` (or `stdlconv opm` for YM2151 music logged as VGM); works on every ST. Natively: `STDL_MusicFromMemory`, `STDL_MusicFrame`/`STDL_MusicLength`/`STDL_SeekMusic` for position, `STDL_GetMusicRegisters` for meters |
 | `Mix_PlayChannel` / `Mix_LoadWAV` | mixer shim | up to 4 chunks on the `STDL_Voice` mixer, from the VBL (STE only): 5% of an 8MHz STE for one chunk at 6258Hz and 20% for four, 8% and 40% at 12517 - the rate `Mix_OpenAudio` picks for a PC game's 22050; half scale at full volume |
@@ -158,7 +160,7 @@ separate, and must never meet this one's.
 | PC-speaker sequences | `STDL_PlaySfx` | step-array effects (periods+volumes), tone or noise, auto voice; optional per-step noise for tone and noise together (gunshots, sinking explosions) |
 | music as live notes (MIDI-note streams, a tracker of your own) | `STDL_ToneOn/Set/Off` | 16 note slots onto the 3 YM voices, last-note priority; above `STDL_Music`, below effects. `STDL_ToneOpen` once from the main line if the notes come from your own timer or VBL callback |
 | AdLib / IMF music and effects (OPL2 register streams) | `STDL_OplWrite` | one call per register write; channels 0-8 become tone slots 0-8, the replay rate stays the game's |
-| `SDL_Joystick*` | compat veneer | port 1 as stick 0: 2 digital axes, 1 button |
+| `SDL_Joystick*` | compat veneer | port 1 as stick 0: 2 digital axes, 1 button (6 axes, 13 buttons and a hat with an Xpad pad). More only where the port asks: `STDL_SetNumJoysticks(2)` makes the mouse port stick 1 (the mouse off), and more add pads - up to 4 sticks merged, 6 apart (`STDL_UseJoystickMerge(0)`); no hotplug, so open what `SDL_NumJoysticks` says after asking. `SDL_JoystickGetAxis` and `GetHat` are `STDL_GetJoystickAxis` and `STDL_GetJoystickHat`, `GetButton` `STDL_JoystickInputHeld` |
 | `SDL_CreateCursor` / `SDL_SetCursor` | `STDL_Cursor` | software save-under cursor, max 32x32 |
 
 ## Game services (extracted from the FreeNukum and Sopwith ports)
@@ -218,8 +220,8 @@ separate, and must never meet this one's.
   `STDL_ScrollWindowPending` says when it has landed,
   for a page-flipping caller that must not draw into the page still
   being fetched. `STDL_HasHwScroll` is the test to make at init: on a
-  plain ST the calls fail cleanly and the port keeps a copy-based
-  fallback. Do not mix with `STDL_Flip`: both program the
+  plain ST the calls fail cleanly (the next bullet is what to do
+  there). Do not mix with `STDL_Flip`: both program the
   base; `STDL_ResetScrollWindow` puts the stock registers back for a
   program that returns to page flipping mid-run (`STDL_Quit` and the
   terminate path do it anyway). See `examples/hwscroll.c`, and the
@@ -227,24 +229,88 @@ separate, and must never meet this one's.
   strips spread over the frames that uncover them, a base that walks
   forward instead of wrapping, and a page duplicated below itself for
   endless vertical scrolling.
+* **Scrolling without the STE's registers** (a plain ST, or a TT's or a
+  Falcon's 8-plane screen, which has none): it is a copy, and the copy
+  is most of the frame. Measured with `tests/hatari/scrlcost.c` in
+  Hatari, a redraw of a 320x200 screen of 16x16 tiles is 97.9ms on a
+  plain ST, so redraw only the strip that comes into view (a column of
+  13 tiles, 4.9ms). Keep the tiles in a background buffer bigger than
+  the screen that sprites never touch, copy the window into the back
+  page with `STDL_BlitSurface` and a srcrect, and draw the sprites on
+  top: nothing then needs restoring, flipped pages included. The whole
+  page in one `memcpy` is 19.3ms on a plain ST, a whole 50Hz frame, and
+  a window out of a wider buffer 20.7ms, as the library copies rows of
+  whole groups with `movem` (26.4 across a ring's seams, where each row
+  is two pieces). So a full-screen scroller there is a 25Hz game, with
+  room for sprites: with eight pre-shifted ones and a new column a
+  frame is about 33ms (an estimate from the parts). Smooth horizontal
+  scrolling on a plain ST needs a ring for each pixel phase (37.6K each)
+  and an aligned copy from the one that matches x: 43.3ms a frame with
+  16 rings, a pixel a frame. On a TT's or a Falcon's 8 planes the window
+  is 8.2ms or 16.5, and 12.4 or 24.9 at a sub-group x, so one ring
+  scrolls a pixel a frame without pre-shifted copies. A surface blitted
+  onto itself comes out right whichever way it moves, but rightwards
+  off whole groups it goes through a buffer, several times a copy's
+  cost (`limits.md`). On a TT, Flip's
+  present adds 8.9ms to any frame that changed the whole screen. The
+  skill's scrolling notes have the measured table, the 8-plane figures
+  and the recipes.
 * **Splash screens**: `STDL_ShowDegas("SPLASH.PI1")` after
   SetVideoMode shows a Degas picture with its palette while the
   game loads (`stdlconv pi1` converts, `stdlconv embed` makes C
   arrays for linked-in splashes).
-* **Joystick for keyboard games**: `STDL_JoyKeyEmulation(1)` turns
+* **Joystick for keyboard games**: `STDL_JoystickKeyEmulation(1)` turns
   stick changes into key events (tagged `STDL_KMOD_JOYSTICK`, key
   state included) - keyboard-bound games need no joystick code at
   all. The default mapping is arrows + left Alt;
-  `STDL_JoyKeyMapping(STDLK_w, STDLK_s, STDLK_a, STDLK_d,
+  `STDL_JoystickKeyMapping(STDLK_w, STDLK_s, STDLK_a, STDLK_d,
   STDLK_SPACE)` rebinds it to the game's own convention (returns
   how many keys resolved, so bad bindings are caught; 0 leaves an
-  input unmapped).
+  input unmapped). It is joystick 0's alone: a second player's stick
+  sends joystick events and never keys.
+* **Two players, or up to six**: `STDL_SetNumJoysticks(2)`, once,
+  before or after `STDL_SetVideoMode`, gives two joysticks: 0 is the
+  joystick port, 1 the mouse port, the mouse off while there are two
+  (the IKBD reports both ports then, and the mouse port cannot be
+  both). More add an Xpad provider's pads where it has them, and the
+  call returns how many there are. By default each port is merged
+  with the pad of its number (0 with pad 0, 1 with pad 1), as
+  joystick 0 always has been, and pads 2 and 3 are joysticks 2 and 3:
+  four at most. `STDL_UseJoystickMerge(0)` keeps them apart instead:
+  the two ports, then pads 0 to 3 as joysticks 2 to 5, six at most -
+  for more players, or a port and a pad that are two players'. It can
+  change at any time; whatever changes hands is released first. A
+  joystick keeps its number when pads come and go. Events carry it in
+  `which`; `STDL_GetJoystickState(which)`,
+  `STDL_JoystickInputHeld(which, input)`, `STDL_HasPad(which)`,
+  `STDL_GetJoystickAxis(which, axis)` and `STDL_GetJoystickHat(which)`
+  poll it, and the SDL 1.2 shim opens every one and reads them through
+  those. `STDL_UseJoystickDeviceEvents(1)` adds `STDL_JOYDEVICEADDED`
+  and `STDL_JOYDEVICEREMOVED` as joysticks come, go or are re-mapped,
+  each after the releases it brings; SDL 1.2 has no such event, and
+  the shim never asks for them. Asking for 1 again gives
+  the mouse back, and so does every exit, a crash included. A program
+  that never asks links none of it: the hooks, the readers' index, the
+  merge setting and the device events' push cost every program about
+  590 bytes (and the SDL 1.2 shim about 510 more, with the axis and
+  hat readers, `joyread.o`, it reads every stick through), the code
+  behind the other five is 1.3K of its own (`joysticks.o`), and the
+  setting's call 160 bytes (`joymerge.o`). No pad event is lost to the
+  32-event queue: a pad waits for room, its events a pump late.
+* **The joystick calls take the joystick first**:
+  `STDL_GetJoystickState(0)`, `STDL_JoystickInputHeld(0, input)`,
+  `STDL_HasPad(0)` and `STDL_PadRumble(0, low, high, ms)` are what a
+  one-player game calls. They took the number, and their names that
+  say Joystick, in v1.23.0; the `stdl` skill's "Moving to a newer
+  STDL" says what older code changes.
 * **Rumble**: SDL 1.2 has none, so it is an addition rather than a
-  mapping. `STDL_PadRumble(low, high, ms)` pulses an Xpad pad's heavy
+  mapping. `STDL_PadRumble(0, low, high, ms)` pulses an Xpad pad's heavy
   and light motors (0-255 each) and returns -1 when there is no pad
   or it has no motors, so call it unconditionally at the moment it
   belongs to - a hit, a landing, an explosion. The event pump ends
   the pulse, so it runs long while the game is not pumping.
+  The first argument is the joystick, so each player's pad rumbles on
+  its own.
 * **Filenames**: loaders retry with an uppercased name, so
   `"icon.bmp"` works on GEMDOS.
 
@@ -397,7 +463,10 @@ truncates colours to the low N bits rather than rejecting them. See
   combine: `STDL_DirtyRestore(screen)` then draw and push, every
   frame, and with `STDL_DOUBLEBUF` (or `STDL_TRIPLEBUF`) each page
   keeps its own list, so the back page is erased of what was drawn
-  into it last time rather than of what is on screen.
+  into it last time rather than of what is on screen. When the
+  background itself changes (a score drawn into it, a door, a new
+  level), `STDL_DirtyBackground(&rect)` (`NULL` for all of it) puts the
+  change on every page as each comes round.
 * **Key repeat**: the IKBD sends no auto-repeats; STDL synthesises
   them only after `SDL_EnableKeyRepeat`, matching SDL.
 * **Slow frames swallow key presses**: when a frame takes longer

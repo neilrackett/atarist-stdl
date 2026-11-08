@@ -15,11 +15,7 @@
 
 #include "responsive.h"
 
-/* a word of a plane `sh` pixels into the pair of words (a, b) */
-#define P8_WIN(a, b, sh) \
-    (((((uint32_t)(a) << 16) | (b)) >> (16 - (sh))) & 0xFFFFu)
-
-static const uint16_t p8_zero[8];   /* a source group past either edge */
+const uint16_t p8_zero[8];          /* responsive.h: P8_WIN's zero group */
 
 /*
  * As the 4-plane CPU blit draws one (blit.c's copy_group): a group at a
@@ -86,7 +82,12 @@ int p8_blit_ex(const STDL_Surface *src, const STDL_Rect *srcrect,
     np = 1 << ss;
     sng = (unsigned)src->stride >> (ss + 1);
     masked = (src->flags & STDL_SRCKEY) && src->mask != NULL;
-    for (y = 0; y < h; y++) {
+    /* onto its own memory with the destination at the higher address,
+     * done already (overlap.c) */
+    y = (src == dst || ((src->flags | dst->flags) & STDL_PREALLOC))
+        && stdl_blit_overlap(src, dst, sx, sy, dx, dy, w, h, flags) == 0
+        ? h : 0;
+    for (; y < h; y++) {
         const uint16_t *sw = (const uint16_t *)(src->pixels
                                  + stdl_row_off(sy + y, src->stride));
         const uint16_t *sm = masked

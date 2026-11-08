@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdl/stdl.h>
+#include "hold.h"
 
 #define RATE 560                    /* IMF ticks per second */
 
@@ -84,6 +85,8 @@ int main(int argc, char *argv[])
     uint32_t t0, next_tick = 0;
     size_t i = 0;
     int bar = 0;
+
+    hold_on_exit(NULL);
 
     (void)argc; (void)argv;
     if (STDL_Init(STDL_INIT_VIDEO) < 0) {

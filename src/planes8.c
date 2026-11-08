@@ -47,21 +47,6 @@ static __inline__ void p8_pat(unsigned c, uint32_t pat[4])
     pat[3] = p8_pair[(c >> 6) & 3];
 }
 
-/* the colour in pat into group g where m (both halves) is set */
-static __inline__ void p8_merge(uint32_t *g, uint32_t m,
-                                const uint32_t pat[4])
-{
-    g[0] ^= (g[0] ^ pat[0]) & m;
-    g[1] ^= (g[1] ^ pat[1]) & m;
-    g[2] ^= (g[2] ^ pat[2]) & m;
-    g[3] ^= (g[3] ^ pat[3]) & m;
-}
-
-static __inline__ uint32_t p8_m32(unsigned m16)
-{
-    return (uint32_t)m16 | ((uint32_t)m16 << 16);
-}
-
 static __inline__ uint32_t *p8_group(const STDL_Surface *s, int x, int y)
 {
     return (uint32_t *)(s->pixels + stdl_row_off(y, s->stride)
@@ -834,7 +819,14 @@ static int p8_blit(STDL_Surface *src, const STDL_Rect *srcrect,
         dstrect->h = (uint16_t)h;
     }
     masked = (src->flags & STDL_SRCKEY) && src->mask != NULL;
-    for (y = 0; y < h; y++) {
+    /* onto its own memory with the destination at the higher address,
+     * done already (overlap.c); 64 pixels and more, a block at a time
+     * where it can be (planes8row.c) */
+    y = ((src == dst || ((src->flags | dst->flags) & STDL_PREALLOC))
+         && stdl_blit_overlap(src, dst, sx, sy, dx, dy, w, h, flags) == 0)
+        || (!masked && p8_blit_rows(src, dst, sx, sy, dx, dy, w, h) == 0)
+        ? h : 0;
+    for (; y < h; y++) {
         if (!STDL_IS_RESP(src)) {
             p8_blit_row4(src->pixels + stdl_row_off(sy + y, src->stride),
                          src->stride >> 3,

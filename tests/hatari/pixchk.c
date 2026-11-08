@@ -18,12 +18,14 @@
  * reference model as well.
  *
  * Two builds. The default samples the suite - PIXCHK_QUICK cases of
- * each test, spread over its range - for real hardware: about 20s a
- * pass on a plain ST, 18s on an STE, 12s on a Mega STE, and every
- * test still runs. With -DPIXCHK_FULL it runs every case and prints
- * each test's time as it goes: 16 minutes a pass on a plain ST, a
- * job for the emulator. (It was three hours, most of it the suite's
- * own checking - see AGENTS.md.) Run the full build on `st` first:
+ * each test, spread over its range - for real hardware: about 23s a
+ * pass on a plain ST, and 18s on an STE and 12s on a Mega STE before
+ * the long whole-group rows' test (which took the ST's from 20), and
+ * every test still runs. With -DPIXCHK_FULL it runs every case and
+ * prints each test's time as it goes: 18 minutes a pass on a plain ST
+ * (16 before that test), a job for the emulator. (It was three hours,
+ * most of it the suite's own checking - see AGENTS.md.) Run the full
+ * build on `st` first:
  *
  *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -std=gnu99 \
  *       -Iinclude -Ilib/xpad/src -DPIXCHK_FULL \
@@ -64,11 +66,14 @@
 
 #define main pixchk_suite
 #include "../host/test_pixel.c"
+#include "../../examples/hold.h"
 #undef main
 
 int main(void)
 {
     int use, bad = 0;
+
+    hold_on_exit("PIXCHK");
 
     if (STDL_Init(STDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "init failed: %s\n", STDL_GetError());
@@ -79,10 +84,10 @@ int main(void)
     px_quick = PIXCHK_QUICK;
     if (px_quick > 0) {
         printf("PX: %u cases a test,\n"
-               "PX: about 20s a pass\n", px_quick);
+               "PX: about 23s a pass\n", px_quick);
     } else {
         printf("PX: every case,\n"
-               "PX: about 16 min a pass on an ST\n");
+               "PX: about 18 min a pass on an ST\n");
     }
     fflush(stdout);
     for (use = 0; use <= 1; use++) {

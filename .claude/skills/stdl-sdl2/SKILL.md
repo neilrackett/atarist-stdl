@@ -27,20 +27,82 @@ build lists the work.
 | Program uses | On the add-on |
 |---|---|
 | 8-bit art, one 256-colour palette | fits: `SDL_PIXELFORMAT_INDEX8` textures and surfaces |
-| 32-bit textures or surfaces (ARGB8888...) | convert the art to a 256-colour palette; there is no 32-bit path |
+| 32-bit textures or surfaces (ARGB8888...) | convert the art to one 256-colour palette (`stdlconv bmp8`, below); there is no 32-bit path |
 | more than 320x240, or renderer scaling | redesign for 320x240; nothing scales, a copy that would fails |
 | `SDL_RenderDrawLine`/`Point`/`Rect`, `FillRect` on the renderer, `RenderCopyEx`, blend or colour modes, render targets | not there: draw into the program's own 8-bit buffer instead |
 | `SDL_GetWindowSurface`/`UpdateWindowSurface` | not there: a texture over the program's buffer (`STDL_SDL2_CreateTextureFrom`) does the same job |
 | threads, `SDL_AddTimer` | not there: no threads; do the work in the main loop |
 | float or 32-bit audio, `SDL_AudioStream`, `SDL_AudioCVT` | U8, S8, S16LSB and S16MSB only |
-| SDL2_mixer, SDL2_image, SDL2_ttf | not there |
+| SDL2_mixer | not there. Effects: STDL's voices (`stdl_voice.h`, four mixed from the VBL, no pump needed) or `STDL_PlaySample` (one sample, no mixing, free per frame), called beside the add-on in place of `SDL_OpenAudio` (one of them owns the DMA sound at a time). Music: STDL's YM streams (`STDL_Music`, made by `stdlconv midi`), which play on the sound chip beside either. MOD, OGG and MP3 have no path |
+| SDL2_image | not there: convert the art offline with `stdlconv bmp8` into 8-bit BMPs sharing one palette (below), and load them with SDL2's own `SDL_LoadBMP`, which gives an INDEX8 surface with that palette. `IMG_Load` becomes `SDL_LoadBMP` on the converted files; `stdlconv embed` links a file in, for `SDL_LoadBMP_RW(SDL_RWFromConstMem(...), 1)` |
+| SDL2_ttf | not there: render the glyphs offline into an INDEX8 sheet (an image through `stdlconv bmp8` with the rest of the art), and draw text into the program's own buffer from it, then copy the text's box once (a copy per glyph costs a Falcon about 1,060 cycles each) |
 | 320x200 (EGA, DOOM-era games) | fits, centred: on a TT 400 of TT Low's 480 lines, black above and below, so square pixels and a flatter picture than its 4:3 original |
 
 A 16-colour game that does not need SDL2 is better served by STDL's
 core (the `stdl` skill): ST Low natively, every ST, no conversion. The
 add-on always writes eight planes.
 
+**8-bit art.** The screen has one palette, so every image the program
+shows at once must share it: `stdlconv bmp8` quantises a program's
+images together (the art's own colours when they fit, else a median cut
+over all of them at once) into uncompressed 8-bit BMPs that each carry
+that palette. Pillow on the host does the work (`pip install pillow`;
+the toolchain container has none):
+
+```
+python3 $STDL/tools/stdlconv/stdlconv.py bmp8 art/title.png art/sprites.png \
+    -o dist --tt --zero 000000 --key FF00FF
+```
+
+That wrote `dist/TITLE.BMP` and `dist/SPRITES.BMP` (each input's name,
+upper case) and said "palette: 256 entries, the art's 17 colours,
+exact; key at 255; snapped to a TT's 4 bits a channel".
+
+- `--tt` snaps the palette to what a TT shows (4 bits a channel), so a
+  TT shows the file's colours exactly; a Falcon shows those within 2.4
+  of 255. Use it for art meant for both: without it a TT shows each
+  channel's top 4 bits, up to 15 of 255 darker.
+- `--key RRGGBB[=N]`: that exact colour, and transparent pixels (a
+  PNG's alpha), become index N (default the last, 255), which no other
+  colour takes: give N to `SDL_SetColorKey`.
+- `--zero 000000` keeps index 0 black, which is also the border round
+  the picture (register 0), so no border index is needed. Art whose
+  colour 0 must be something else takes `--border 0xF0` instead, which
+  leaves index 0xF0 unused and black for `STDL_SDL2_SetBorderIndex`.
+- Art already 8-bit through one shared palette keeps its indices (a
+  program may cycle a range of them or key on one), unless `--zero`,
+  `--key`, `--border` or `--colors` needs entries.
+- `--dither` for photographic art, `--colors N` for fewer entries,
+  `--pal FILE` for the palette alone (r, g, b, 255 an entry, straight
+  into an `SDL_Color` array).
+
+Then the program loads them as it would anywhere, and takes the
+screen's palette from any of them:
+
+```c
+SDL_Surface *title = SDL_LoadBMP("TITLE.BMP");
+SDL_Surface *sprites = SDL_LoadBMP("SPRITES.BMP");
+SDL_SetPaletteColors(pal, title->format->palette->colors, 0,
+                     title->format->palette->ncolors);
+SDL_SetColorKey(sprites, SDL_TRUE, 255);
+SDL_Texture *t = SDL_CreateTextureFromSurface(ren, title);
+```
+
+`SDL_LoadBMP` takes uncompressed 1-, 4- and 8-bit BMPs (any header but
+OS/2's), always as INDEX8, and refuses RLE and 16-32 bits with SDL2's
+error. It costs 1,036 bytes, linked only if called. `SDL2BMP`
+(`tests/hatari/sdl2bmp.c`) shows converted art loaded and drawn on a TT
+and a Falcon.
+
 ## Building
+
+Put STDL in the program's repository as a submodule at `extern/stdl`,
+pinned to a release tag, as STDL's `docs/building.md`, "Setting up a
+game or a fork", describes: that section's Makefile builds STDL's
+archive inside the container and keeps a fork's desktop build working
+beside the Atari one. For the add-on, its archive rule runs `$(MAKE) -C
+$(STDL) libstdl-sdl2-cmini.a libstdl-cmini.a`, and the compile and link
+lines are these:
 
 ```
 stcmd make sdl2      # in STDL: libstdl-sdl2.a, libstdl-sdl2-cmini.a, dist/SDL2DEMO.TOS
@@ -150,14 +212,31 @@ for (;;) {
 
 - **Pump at least every 150ms** (`SDL_PollEvent`, `SDL_PumpEvents`, the
   waits, `SDL_Delay`): that is where STDL serves its timers and audio.
-  The first pump turns on key repeat and character translation and
-  sends `SDL_JOYDEVICEADDED` (and the controller's), as SDL2 does.
+  `SDL_PollEvent` pumps once a VBL and otherwise takes from the queue,
+  so `while (SDL_PollEvent(&ev))` once a frame is one pump; a loop
+  that polls between frames sees an event up to a VBL later.
+  `SDL_PumpEvents` and the waits always pump.
+  The first pump turns on key repeat, character translation and STDL's
+  device events, so `SDL_JOYDEVICEADDED` (and the controller's) comes
+  for each joystick there is, and then `ADDED` and `REMOVED` as STDL
+  adds, drops or re-maps one, each after the releases it brings, as
+  SDL2 says devices plugged in and out.
 - **Keys** have SDL2's scancodes and key codes (saved key maps keep
   working); `SDL_TEXTINPUT` carries ASCII; no `SDL_TEXTEDITING`.
 - **The mouse** is in the logical size's coordinates; no relative
   mode, wheel or cursor.
-- **One joystick, 0**: an ST joystick or an Xpad pad, always a game
-  controller too; rumble on a pad.
+- **Joysticks:** one, joystick 0 (the joystick port, or an Xpad pad),
+  unless the program asks STDL for more, which it does directly beside
+  the add-on: `STDL_SetNumJoysticks(2)` makes the mouse port joystick 1
+  and turns the mouse off while there are two; 3 and 4 add Xpad pads 2
+  and 3 where a provider has them, or, with the pads apart
+  (`STDL_UseJoystickMerge(0)`), pads 0 to 3 are joysticks 2 to 5. Each
+  is a game controller too, its instance ID its index, with rumble on
+  its own pad, and its axes and hat STDL's own (`STDL_GetJoystickAxis`,
+  `STDL_GetJoystickHat`). Ask before the first pump and the ADDED
+  events cover them all; ask later and each change is said, and a
+  change of the merge setting says REMOVED and ADDED again for each. Two players on the keyboard and the
+  mouse at once is not on offer.
 - **Time:** `SDL_GetTicks`, `SDL_GetTicks64`, the performance counter
   at 38,400Hz, `SDL_Delay`.
 - **Audio** is one device on STDL's ring and the DMA sound. The
@@ -177,17 +256,36 @@ for (;;) {
 
 ## Testing in Hatari
 
-- **Cycle-exact, always**: `--cpu-exact on --compatible on`.
-- **A TT:** TOS 3.06, `--machine tt --mmu off` (with the MMU emulated
-  the emulator falls to half real time and its timing is no truer).
-  TT-RAM needs `--addr24 off` as well (`--memsize 2 --ttram 4 --addr24
-  off` is 2MB of ST-RAM and 4MB of TT-RAM).
-- **A Falcon:** TOS 4.04, `--machine falcon --fpu none`, `--monitor vga`
-  or `rgb` (RGB's line is 384 pixels with the picture centred, so test
-  both).
-- **`--confirm-quit false`** whenever Hatari runs with a `HOME` or
-  config of its own: its default asks to confirm a quit, and a finished
-  emulator then waits on that dialog for ever.
+- **A TOS you can download:** EmuTOS 1.4's 512K image,
+  `etos512uk.img` (the `stdl` skill's "Testing in Hatari" has the
+  download, and what EmuTOS does differently). It boots a TT and a
+  Falcon, and SDL2RCHK, SDL2RCH2 (two pages), SDL2AUD and SDL2DEMO gave
+  the same results under it as under TOS 3.06 and 4.04, the
+  copyrighted ROMs the add-on was measured on; `TOS=` takes those the
+  same way where the maintainer has them.
+- **The driver** is STDL's `tests/hatari/run.sh`
+  (`extern/stdl/tests/hatari/run.sh` from a port), always cycle-exact:
+
+  ```
+  X="--cpu-exact on --compatible on --memsize 4"
+  SDL_VIDEODRIVER=dummy TOS=$PWD/tmp/tos/etos512uk.img MACHINE=tt \
+    EXTRA="$X" extern/stdl/tests/hatari/run.sh s2 dist/GAME.TOS 8 "waitfor ready;shot"
+  ```
+
+- **A TT:** `MACHINE=tt`, to which the driver adds `--mmu off` (an
+  emulated MMU cost a TT check 46-47s of the host's time against 29-32,
+  and its timing is no truer). TT-RAM is `EXTRA="--cpu-exact on
+  --compatible on --memsize 2" LATE="--ttram 4 --addr24 off"`, 2MB of
+  ST-RAM and 4MB of TT-RAM; without `--addr24 off` Hatari stops at a
+  question before TOS starts and the program never runs.
+- **A Falcon:** `MACHINE=falcon`, to which the driver adds `--fpu none`,
+  with `MONITOR=vga` and again with `MONITOR=rgb`: RGB's line is 384
+  pixels with the picture centred, and its rate is the desktop's PAL
+  (50Hz) or NTSC (60Hz), so test both.
+- **`--confirm-quit false`:** the driver passes it. A runner of your
+  own needs it whenever Hatari runs with a `HOME` or config of its own:
+  Hatari's default asks to confirm a quit, and a finished emulator
+  then ignores a TERM and waits on that question for ever.
 - **`SDL_VIDEODRIVER=dummy`** runs Hatari with no window, which also
   keeps keys typed on the desktop away from the test.
 - **The screen check:** `SDL_SetHint(STDL_SDL2_HINT_CHECK, "1")` before

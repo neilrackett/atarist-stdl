@@ -245,7 +245,7 @@ int main(void)
     if (music) {
         STDL_SetVoiceTick(music_tick, NULL);
     }
-    STDL_JoyKeyEmulation(1);
+    STDL_JoystickKeyEmulation(1);
 
     fps_t0 = STDL_GetHz200();
     for (;;) {

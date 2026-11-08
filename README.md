@@ -33,7 +33,8 @@ With STDL, full colour at 50-60fps on a 520 ST is truly achievable.
 Porting SDL2 games to a stock TT or Falcon? STDL's optional SDL2 add-on
 (`addons/sdl2/`, [docs/sdl2.md](docs/sdl2.md)) makes it easy, drawing
 256-colour textures on STDL's responsive screen and converting only what's
-changed each frame.
+changed each frame. The art comes in through SDL2's own `SDL_LoadBMP`, from
+8-bit BMPs that `stdlconv bmp8` makes sharing the screen's one palette.
 
 It is the one place STDL is chunky, it is never part of the core library, and
 a program gets it only by asking for it.
@@ -75,7 +76,8 @@ it calls.
 - **Input**: keyboard, mouse and joystick through SDL's own API. Modern
   controllers work through [Xpad](https://github.com/neilrackett/atarist-xpad)
   (a SidecarTridge running MD/Sidepad, for example) with analogue axes,
-  thirteen buttons and rumble, and ports need no changes. `STDL_OpenInput`
+  thirteen buttons and rumble, and ports need no changes. Two players,
+  or up to six with pads, on `STDL_SetNumJoysticks`. `STDL_OpenInput`
   takes the input without setting a video mode, for tools.
 - **68000 arithmetic**: `<stdl/stdl_math.h>` is the 68000's own 16-bit
   multiply and divide, because gcc 4.6 turns any product it cannot prove
@@ -89,7 +91,7 @@ it calls.
 
 | Doc                                                | For                                                                       |
 | -------------------------------------------------- | ------------------------------------------------------------------------- |
-| [docs/building.md](docs/building.md)               | building the library, linking a game against libcmini or mintlib          |
+| [docs/building.md](docs/building.md)               | building the library, linking a game, setting up a game's or a fork's repository |
 | [docs/porting.md](docs/porting.md)                 | porting SDL 1.2 code: workflow, what maps, rewrite patterns, ST gotchas   |
 | [docs/format.md](docs/format.md)                   | the byte-level contract: surfaces, masks, sprites, banks, music           |
 | [docs/limits.md](docs/limits.md)                   | what STDL will not do, and why                                            |
@@ -143,7 +145,9 @@ on-target checks - are built into `dist/` and ship as
 `stdl-examples.zip` on the
 [release page](https://github.com/neilrackett/atarist-stdl/releases/tag/latest).
 All run under EmuTOS or TOS in Hatari; [examples/README.md](examples/README.md)
-lists them.
+lists them. A new game starts best from `STARTER.TOS`
+([examples/starter.c](examples/starter.c)): one screen of platforms built
+the way a plain ST wants, with its art and music pipeline in the Makefile.
 
 ## Ports
 
@@ -167,10 +171,10 @@ said so: the XOR primitives, batched spans and points, the plane budget,
 
 ## Porting with an LLM
 
-The repo ships a porting guide written for AI agents
-([.claude/skills/stdl/SKILL.md](.claude/skills/stdl/SKILL.md)): the surface
-format contract, API costs, SDL-to-STDL rewrite patterns, stdlconv usage and
-the Hatari test loop. An SDL2 program for a TT or a Falcon has its own,
+The repo ships a guide to porting and writing games, written for AI agents
+([.claude/skills/stdl/SKILL.md](.claude/skills/stdl/SKILL.md)): whether a
+program fits, the surface format contract, API costs, SDL-to-STDL rewrite
+patterns, starting a new game, stdlconv usage and the Hatari test loop. An SDL2 program for a TT or a Falcon has its own,
 [.claude/skills/stdl-sdl2/SKILL.md](.claude/skills/stdl-sdl2/SKILL.md), for
 the SDL2 add-on. They are plain markdown, so they work with any agent:
 

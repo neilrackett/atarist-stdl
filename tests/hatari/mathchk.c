@@ -20,6 +20,7 @@
 #define MATH_N 20000L
 #define main math_suite
 #include "../host/test_math.c"
+#include "../../examples/hold.h"
 #undef main
 
 #define REPS 20000
@@ -87,6 +88,8 @@ int main(void)
 {
     uint32_t fl;
     int r;
+
+    hold_on_exit("MATHCHK");
 
     if (STDL_Init(0) < 0) {
         fprintf(stderr, "init failed: %s\n", STDL_GetError());

@@ -31,6 +31,7 @@
  */
 #include <stdio.h>
 #include "SDL.h"
+#include "../../examples/hold.h"
 
 /* the beam's byte offset into the displayed page */
 static unsigned long vcount(void)
@@ -52,6 +53,8 @@ int main(int argc, char *argv[])
     STDL_Rect mark = { 0, 0, 16, 16 };
     unsigned long base;
     int phase, f;
+
+    hold_on_exit("PALSTG");
 
     (void)argc;
     (void)argv;

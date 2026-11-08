@@ -115,6 +115,10 @@ int stdl_sdl2_hdrcheck_rest(void)
     SDL_FillRect(s, NULL, 3);
     SDL_BlitSurface(s, NULL, s, &r);
     SDL_FreeSurface(s);
+    s = SDL_LoadBMP("ART.BMP");
+    n += s ? s->format->palette->ncolors : 0;
+    SDL_FreeSurface(SDL_LoadBMP_RW(SDL_RWFromConstMem(mem, 16), 1));
+    SDL_FreeSurface(s);
 
     rw = SDL_RWFromMem(mem, (int)sizeof(mem));
     SDL_WriteBE32(rw, 1);

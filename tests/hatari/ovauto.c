@@ -95,6 +95,7 @@
 #include <stdarg.h>
 #include <osbind.h>
 #include <stdl/stdl.h>
+#include "../../examples/hold.h"
 
 extern uint16_t stdl_ovsc_n1[32], stdl_ovsc_n2t, stdl_ovsc_postn;
 extern uint16_t stdl_ovsc_test;
@@ -252,6 +253,8 @@ int main(void)
 {
     STDL_Surface *screen;
     int t, sp, h = 0, status = 0;
+
+    hold_on_exit("OVAUTO");
 
     if (!read_cfg()) {
         (void)Cconws("OVAUTO: no OVAUTO.CFG\r\n");

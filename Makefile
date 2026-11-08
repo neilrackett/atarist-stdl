@@ -29,7 +29,7 @@ CFLAGS  = -O2 -fomit-frame-pointer -std=gnu99 -Wall -Wextra \
 LIB     = libstdl.a
 
 LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
-          src/palette.c src/event.c src/time.c src/dirty.c \
+          src/palette.c src/event.c src/time.c src/dirty.c src/dirtybg.c \
           src/sprite.c src/tileset.c src/text.c src/shapes.c \
           src/asset.c \
           src/compat.c src/bmp.c \
@@ -39,11 +39,13 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/surfacefrom.c src/surfacedup.c src/blit8.c \
           src/voice.c $(XPAD)/xpad.c src/stdl_xpad.c src/overscan.c \
           src/hwscroll.c src/tone.c src/cpuspeed.c src/opl.c \
-          src/refresh.c src/mouse.c src/stram.c src/wav.c src/ring.c \
+          src/refresh.c src/mouse.c src/joysticks.c src/joymerge.c \
+          src/joydev.c src/joyread.c \
+          src/stram.c src/wav.c src/ring.c \
           src/palstage.c src/polygon.c src/polypat.c src/raster.c \
           src/spritebatch.c src/responsive.c src/planes8.c src/planes8ex.c \
           src/planes8tile.c src/asset8.c src/tall4.c src/tallst.c \
-          src/hz38400.c
+          src/hz38400.c src/rowcopy.c src/planes8row.c src/overlap.c
 # Objects live under obj/, mirroring each source's own path. Sources
 # now come from two places, this repo and the xpad submodule, and
 # building beside the source would drop .o files inside lib/xpad. The
@@ -63,7 +65,8 @@ EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
            dist/BLITCHK.TOS dist/VBLCHK.TOS dist/OVERSCAN.TOS \
            dist/HWSCROLL.TOS dist/TONEDEMO.TOS dist/OPLDEMO.TOS \
            dist/MUSICVU.TOS dist/POLYDEMO.TOS dist/PATDEMO.TOS \
-           dist/RASTERS.TOS dist/RESPDEMO.TOS dist/OVHOST.TOS
+           dist/RASTERS.TOS dist/RESPDEMO.TOS dist/OVHOST.TOS \
+           dist/STARTER.TOS dist/JOYBOXES.TOS
 
 # Pinned, not left to ordering: a rule added above this one would
 # silently become the default goal, and `make` would then build
@@ -122,22 +125,65 @@ all: $(LIB) sizecheck libcallcheck ovhostcheck $(EXAMPLES) assets
 # means (a clipped-out blit 5%, PutPixel and DrawChar 2.9%) against a
 # layout floor of 0.03%, and a program 135-178 bytes; the 8-plane code
 # itself is linked only by a program that asks.
+#
+# Raised 35300 -> 35832 on 2026-11-07, by the 532 bytes of a movem copy
+# for rows of whole groups longer than BLIT_INLINE_MAX: rowcopy.o
+# (416), and blit.o's hand-off to it (116). A scroller's 320x200 window
+# out of a wider buffer went from 38.0ms to 20.7 on a plain ST, a
+# memcpy call a row before (SCRLCOST), and every aligned blit of 9
+# groups and more gains with it; SPRCOST's geometric mean on a plain ST
+# moved 1.0001 against same-binary floors of 1.0023 and 1.0018.
+# blit_whole's memmove (for memcpy) took blit.o 16 bytes down since.
+#
+# Raised 35832 -> 36984 the same day, by 1,152 of the 1,396 bytes that
+# make a blit onto its own memory right in every direction, where it
+# had been right only leftwards and upwards (docs/limits.md): overlap.o
+# (1,224, built for size; 1,500 at -O2), blit.o 124 (the hand-off after
+# the clip, and the unmasked same-phase paths reading their strides
+# signed, so that rows run bottom up through them) and rowcopy.o 48
+# (its test for rows run bottom up). overlap.o counts here because
+# every blit links it. SPRCOST's geometric mean on a plain ST went to
+# 0.9984 against floors of 1.0014 and 1.0023 (0.9986 against 1.0002
+# with MINTICKS 1200, keyed blits up to 0.25% slower in every sample,
+# plain ones 0.4-0.9% faster); strides signed on every path had cost
+# keyed blits 1.2-1.7%, so masked and shifted rows below go in bands.
 PIXEL_OBJS = $(addprefix $(OBJDIR)/src/,draw.o blit.o sprite.o \
-             surface.o blitter.o)
-PIXEL_MAX  = 35300
+             surface.o blitter.o rowcopy.o overlap.o)
+PIXEL_MAX  = 36984
 
 # The responsive screens' own code (stdl_responsive.h), which only a
 # program that asks for an option links: the colour is responsive.o,
-# planes8.o, planes8ex.o and planes8tile.o, 25K (1.5K of it the blit
-# flags and borrowed 8-plane surfaces, 1.5K the tiles, 0.6K the 256
-# colours staged to the blank), a bank's 256-colour art
+# planes8.o, planes8ex.o, planes8tile.o and planes8row.o, 26K (1.5K of
+# it the blit flags and borrowed 8-plane surfaces, 1.5K the tiles, 1.1K
+# blits a block at a time, 0.6K the 256 colours staged to the blank),
+# a bank's 256-colour art
 # (STDL_RESPONSIVE_BANKS) asset8.o, 2.1K more, and the tall screen
 # alone responsive.o and tall4.o, 5.1K.
 # A title for a 512K ST pays it in free memory as well as on disk, so
 # it has a budget of its own: 28,620 bytes on 2026-11-03.
+#
+# Raised 28750 -> 29902 on 2026-11-07, by the 1,152 bytes of 8-plane
+# blits a block at a time: planes8row.o (1,096) and planes8.o's hand-off
+# to it (56). A 320x200 window went from 15.7ms to 8.2 on a TT and 31.4
+# to 16.5 on a Falcon, and at a sub-group x from 117.5ms to 12.4 and
+# 235.8 to 24.9 (SCRLCOST, Hatari, EmuTOS). planes8row.o is 1,120 since
+# its edge columns walk their rows by the stride, the source groups
+# chosen once (24 bytes, and no multiply a row).
+#
+# Raised 29902 -> 29928 later that day, by 26 of the 120 bytes that
+# took same-phase blits with edge columns as well (planes8row.o 1,240):
+# their middles through the movem copy and their edges as the shifted
+# blits' are, at the same phase a long copied under the mask. A
+# 304-pixel panel at x = 8 went from 14.9ms to 9.3 on a TT and 29.9 to
+# 18.6 on a Falcon; the test once a row rather than once a pair is 64
+# of the bytes, as a pair's cost the shifted edges 1.5%.
+#
+# Not raised for blits onto their own memory (overlap.o, counted with
+# the pixel path): their hand-offs left planes8ex.o 24 bytes larger and
+# p8_blit 136 smaller, 29,816 in all.
 RESP_OBJS  = $(addprefix $(OBJDIR)/src/,responsive.o planes8.o \
-             planes8ex.o planes8tile.o asset8.o tall4.o)
-RESP_MAX   = 28750
+             planes8ex.o planes8tile.o planes8row.o asset8.o tall4.o)
+RESP_MAX   = 29928
 
 sizecheck: $(PIXEL_OBJS) $(RESP_OBJS)
 	@n=`$(CROSS)size $(PIXEL_OBJS) | awk 'NR>1 {t+=$$1} END {print t}'`; \
@@ -199,6 +245,25 @@ ovhostcheck: $(OVHOST_OBJ)
 assets: | dist
 	cp -f examples/assets/* dist/
 
+# The starter's bank and music, made from their sources (STARTER.TOS,
+# examples/README.md). Run on the host: the bank's images need Pillow,
+# which the toolchain container lacks. The results are tracked in
+# examples/assets/, so `make` never runs this and needs no Python.
+STDLCONV    = python3 tools/stdlconv/stdlconv.py
+STARTER_ART = examples/art/tiles.png examples/art/hero.png \
+              examples/art/font.png
+
+starter-art: examples/assets/STARTER.BNK examples/assets/DEMO.STM
+
+examples/assets/STARTER.BNK: $(STARTER_ART) tools/stdlconv/stdlconv.py
+	$(STDLCONV) bank $@ palette:0:examples/art/tiles.png \
+	    tileset:1:examples/art/tiles.png:tile=16x16 \
+	    sprite:2:examples/art/hero.png:framew=16:key=0 \
+	    font:3:examples/art/font.png:cell=8x8:first=32
+
+examples/assets/DEMO.STM: examples/assets/DEMO.MID tools/stdlconv/stdlconv.py
+	$(STDLCONV) midi $< $@
+
 $(EXAMPLES): | dist
 
 dist:
@@ -215,7 +280,7 @@ $(OBJDIR)/%.o: %.c
 # flags, a rare path (planes8ex.c says why), and the 8-plane tiles,
 # whose loops come out the same but for the count (1,524 bytes, 1,808
 # at -O2); and a bank's 8-plane art, loaded once (2,088 against 2,456)
-SIZE_OBJS = planes8ex planes8tile asset8
+SIZE_OBJS = planes8ex planes8tile asset8 overlap
 $(foreach o,$(SIZE_OBJS),$(OBJDIR)/src/$(o).o $(OBJDIR)/src/$(o).cmini.o): \
     CFLAGS += -Os
 
@@ -291,6 +356,10 @@ $(OBJDIR)/stats/%.o: %.c
 dist/BLITCHK.TOS: examples/blitchk.c $(STATSOBJS) $(LIB)
 	$(CC) $(CFLAGS) -DSTDL_BLIT_STATS -Iinclude/compat -o $@ $< \
 	    $(STATSOBJS) $(LIB) && $(STRIP) $@
+dist/JOYBOXES.TOS: examples/joyboxes.c $(LIB)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
+dist/STARTER.TOS: examples/starter.c $(LIB)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
 dist/OVERSCAN.TOS: examples/overscan.c $(LIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
 # no libstdl.a: the host object is all of STDL this program has
@@ -376,4 +445,5 @@ clean:
 run-%:
 	hatari --machine ste --memsize 4 --fast-boot on dist/$*.TOS
 
-.PHONY: sizecheck libcallcheck ovhostcheck all clean assets test cmini bundle ci
+.PHONY: sizecheck libcallcheck ovhostcheck all clean assets starter-art test \
+        cmini bundle ci

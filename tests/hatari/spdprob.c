@@ -15,6 +15,7 @@
  */
 #include <stdio.h>
 #include <stdl/stdl.h>
+#include "../../examples/hold.h"
 
 #define HZ200 (*(volatile uint32_t *)0x4BAL)
 
@@ -39,6 +40,8 @@ int main(int argc, char *argv[])
     static const int mode[4] = { 0, 1, 2, 3 };
     uint32_t t[4];
     int i;
+
+    hold_on_exit("SPDPROB");
 
     (void)argc; (void)argv;
     if (STDL_Init(STDL_INIT_VIDEO) < 0) {

@@ -6,7 +6,10 @@
  * A blit onto its own memory - one surface onto itself, or two
  * borrowed over one block - with the destination at the higher
  * address: decided once, after the clip, for STDL_BlitSurfaceEx
- * (blit.c) and the 8-plane blits (planes8.c, planes8ex.c).
+ * (blit.c, through overlap4.c) and the 8-plane blits (planes8.c and
+ * planes8ex.c, through overlap8.c). Its pieces go through the caller's
+ * own blit: a call to STDL_BlitSurfaceEx here linked blit.o, all 13.8K
+ * of the 4-plane paths, into every program drawing on 8 planes.
  *
  * An object of its own and built for size, as a rare path: code added
  * to blit.c has moved STDL_BlitSurfaceEx's other paths 1-7% on a plain
@@ -83,8 +86,9 @@ static void blit_heads(STDL_Surface *t,
  * group (16 bytes) wider, as its phase can reach one more than the
  * source's.
  */
-int stdl_blit_overlap(const STDL_Surface *src, STDL_Surface *dst, int sx,
-                      int sy, int dx, int dy, int w, int h, unsigned flags)
+int stdl_blit_overlap_by(stdl_blit_fn blit, const STDL_Surface *src,
+                         STDL_Surface *dst, int sx, int sy, int dx, int dy,
+                         int w, int h, unsigned flags)
 {
     const int gb = (dst->planes & 8) ? 4 : 3;     /* a group: 16 or 8 */
     const uint8_t *s0 = src->pixels + stdl_row_off(sy, src->stride)
@@ -186,11 +190,11 @@ int stdl_blit_overlap(const STDL_Surface *src, STDL_Surface *dst, int sx,
             f.w = (uint16_t)t[2].w;
             f.h = (uint16_t)m;
             z.x = z.y = 0;
-            STDL_BlitSurfaceEx(&t[0], &f, &t[2], &z, 0);
+            blit(&t[0], &f, &t[2], &z, 0);
             r.x = (int16_t)(sx & 15);
             r.y = 0;
         }
-        STDL_BlitSurfaceEx(bounce ? &t[2] : &t[0], &r, &t[1], &at, flags);
+        blit(bounce ? &t[2] : &t[0], &r, &t[1], &at, flags);
         if (m < h) {
             y -= m;
         } else {

@@ -823,7 +823,7 @@ static int p8_blit(STDL_Surface *src, const STDL_Rect *srcrect,
      * done already (overlap.c); 64 pixels and more, a block at a time
      * where it can be (planes8row.c) */
     y = ((src == dst || ((src->flags | dst->flags) & STDL_PREALLOC))
-         && stdl_blit_overlap(src, dst, sx, sy, dx, dy, w, h, flags) == 0)
+         && stdl_blit_overlap8(src, dst, sx, sy, dx, dy, w, h, flags) == 0)
         || (!masked && p8_blit_rows(src, dst, sx, sy, dx, dy, w, h) == 0)
         ? h : 0;
     for (; y < h; y++) {

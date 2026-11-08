@@ -24,9 +24,13 @@
 # 68000 faults on, fails here instead of crashing a machine.
 
 CC      = cc
+# -fno-common: a variable defined in two files is an error, as it is on
+# the Linux runner, where macOS's linker merged the two (v1.23.0's first
+# release run failed on stdl_audio_hook, in event.c and stubs.c, that
+# a Mac had passed)
 CFLAGS  = -std=gnu99 -O1 -g -fsanitize=address,alignment \
           -fno-sanitize-recover=alignment -Wall -Wextra \
-          -Wno-unused-parameter -Wno-unused-function \
+          -Wno-unused-parameter -Wno-unused-function -fno-common \
           -I../../include -I../../src
 
 SRC     = ../../src
@@ -39,7 +43,7 @@ CORE    = stubs.c blitmodel.c $(SRC)/surface.c $(SRC)/surfacedup.c \
           $(SRC)/draw.c $(SRC)/blit.c $(SRC)/sprite.c $(SRC)/tileset.c \
           $(SRC)/text.c $(SRC)/shapes.c $(SRC)/palette.c \
           $(SRC)/planes.c $(SRC)/blitter.c $(SRC)/rowcopy.c \
-          $(SRC)/overlap.c
+          $(SRC)/overlap.c $(SRC)/overlap4.c
 
 TESTS   = test_pixel test_compose test_cursor test_assets test_planes \
           test_footprint test_indexed test_glyph test_vbl test_blit8 \
@@ -75,7 +79,7 @@ test_spritebatch: $(SRC)/spritebatch.c
 # makes with stdlconv (Pillow)
 RESP_SRCS = $(addprefix $(SRC)/,responsive.c planes8.c planes8ex.c \
             planes8tile.c planes8row.c tall4.c tallst.c hz38400.c asset.c asset8.c drawchar.c \
-            blit8.c polygon.c spritebatch.c)
+            blit8.c polygon.c spritebatch.c overlap8.c)
 test_bank8conv: $(RESP_SRCS)
 test_responsive: $(RESP_SRCS) p8ref.c $(SRC)/surfacefrom.c $(SRC)/palstage.c \
                  $(SRC)/vbl.c
@@ -113,7 +117,7 @@ test_sfx:       $(SRC)/ym.c $(SRC)/sfx.c
 XPADSRC = ../../lib/xpad/src
 test_joystick:  XFLAGS = -Ifakeos -I../../include/compat -I$(XPADSRC) \
                          -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast \
-                         -DSTDL_HOST_FRCLOCK
+                         -DSTDL_HOST_FRCLOCK -DSTDL_HOST_EVENT
 test_joystick:  $(SRC)/event.c $(SRC)/joysticks.c \
                 $(SRC)/mouse.c $(SRC)/joymerge.c $(SRC)/joydev.c \
                 $(SRC)/joyread.c $(SRC)/stdl_xpad.c $(XPADSRC)/xpad.c \

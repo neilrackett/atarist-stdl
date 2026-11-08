@@ -8,9 +8,11 @@
 # must not meet.
 
 CC      = cc
+# -fno-common, as tests/host: two definitions of a variable fail here
+# as they do on the Linux runner
 CFLAGS  = -std=gnu99 -O1 -g -fsanitize=address,alignment \
           -fno-sanitize-recover=alignment -Wall -Wextra \
-          -Wno-unused-parameter -Wno-unused-function \
+          -Wno-unused-parameter -Wno-unused-function -fno-common \
           -I../include/SDL2 -I../src -I../../../include
 
 SRC     = ../src

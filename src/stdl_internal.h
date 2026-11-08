@@ -1219,10 +1219,22 @@ int stdl_copy_rows_checked(uint8_t *dp, const uint8_t *sp, int bytes,
 /*
  * A blit onto its own memory, after its clip (overlap.c): -1 where its
  * rows go top down and left to right as always, 0 done (rows below
- * from the bottom, rows to the right from the right).
+ * from the bottom, rows to the right from the right). The pieces go
+ * through blit, which is the caller's own: stdl_blit_overlap
+ * (overlap4.c) for 4 planes passes STDL_BlitSurfaceEx, and
+ * stdl_blit_overlap8 (overlap8.c) the 8-plane blit, so that a program drawing on 8
+ * planes does not link blit.o's 4-plane paths for this (13.8K).
  */
+typedef int (*stdl_blit_fn)(STDL_Surface *src, const STDL_Rect *sr,
+                            STDL_Surface *dst, STDL_Rect *dr,
+                            unsigned flags);
+int stdl_blit_overlap_by(stdl_blit_fn blit, const STDL_Surface *src,
+                         STDL_Surface *dst, int sx, int sy, int dx, int dy,
+                         int w, int h, unsigned flags);
 int stdl_blit_overlap(const STDL_Surface *src, STDL_Surface *dst, int sx,
                       int sy, int dx, int dy, int w, int h, unsigned flags);
+int stdl_blit_overlap8(const STDL_Surface *src, STDL_Surface *dst, int sx,
+                       int sy, int dx, int dy, int w, int h, unsigned flags);
 
 /*
  * The rows of one glyph of a 1bpp font, set in colour pw0..pw3 (each

@@ -46,7 +46,14 @@ jobs:
           submodules: recursive
 
       - name: Install the Atari ST toolkit
-        run: curl -sL https://github.com/sidecartridge/atarist-toolkit-docker/releases/latest/download/install_atarist_toolkit_docker.sh | bash
+        # Fetched to a file first: piped, a 504 page from GitHub went to
+        # bash as a script. -f fails on an HTTP error, and a busy moment
+        # is tried again (v1.23.0's first CI run failed twice on one).
+        run: |
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 \
+            -o "$RUNNER_TEMP/install_toolkit.sh" \
+            https://github.com/sidecartridge/atarist-toolkit-docker/releases/latest/download/install_atarist_toolkit_docker.sh
+          bash "$RUNNER_TEMP/install_toolkit.sh"
 
       - name: Build and test
         # The same `make ci` as the build workflow, gates included: a

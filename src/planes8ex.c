@@ -85,7 +85,7 @@ int p8_blit_ex(const STDL_Surface *src, const STDL_Rect *srcrect,
     /* onto its own memory with the destination at the higher address,
      * done already (overlap.c) */
     y = (src == dst || ((src->flags | dst->flags) & STDL_PREALLOC))
-        && stdl_blit_overlap(src, dst, sx, sy, dx, dy, w, h, flags) == 0
+        && stdl_blit_overlap8(src, dst, sx, sy, dx, dy, w, h, flags) == 0
         ? h : 0;
     for (; y < h; y++) {
         const uint16_t *sw = (const uint16_t *)(src->pixels

@@ -176,8 +176,12 @@ int STDL_SamplePlaying(void)
     return 0;
 }
 
-/* defined in event.c on target, whose pump calls it */
+/* defined in event.c on target, whose pump calls it, and here only for
+ * the suites that do not link event.c (test_joystick does:
+ * STDL_HOST_EVENT) */
+#ifndef STDL_HOST_EVENT
 void (*stdl_audio_hook)(void);
+#endif
 
 /* defined in video.c on target, which the host tests do not link */
 void (*stdl_pal_apply_hook)(void);

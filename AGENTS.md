@@ -1279,12 +1279,18 @@ warnings** with the Makefile's `-Wall -Wextra`.
   and wrong through the BLiTTER and on 8 planes in the other two
   directions, by 29,234 to 57,044 pixels in SCRLCOST's checks).
   `STDL_BlitSurfaceEx`, `p8_blit` and `p8_blit_ex` ask
-  `stdl_blit_overlap` (`src/overlap.c`) once, after the clip, and only
-  where src and dst are one surface or one is borrowed
-  (`STDL_PREALLOC`): a compare and a flag test in the blit, the rest out
-  of line in an object of its own, built with `-Os` (1,224 bytes,
-  1,500 at `-O2`). It compares the rows' groups in memory, so two
-  surfaces over one block are one surface's rectangles to it:
+  `src/overlap.c` once, after the clip, and only where src and dst are
+  one surface or one is borrowed (`STDL_PREALLOC`): a compare and a
+  flag test in the blit, the rest out of line in an object of its own,
+  built with `-Os` (1,224 bytes, 1,500 at `-O2`). Each kind comes in
+  through its own small object with its own blit for the pieces,
+  `stdl_blit_overlap` (`overlap4.c`, `STDL_BlitSurfaceEx`) and
+  `stdl_blit_overlap8` (`overlap8.c`, the 8-plane blit): with
+  `STDL_BlitSurfaceEx` called from overlap.c itself, v1.23.0 linked
+  blit.o's 4-plane paths (13,788 bytes) into every program drawing on
+  8 planes, and one port's TT and Falcon build grew 17K. It compares
+  the rows' groups in memory, so two surfaces over one block are one
+  surface's rectangles to it:
   - **Destination at the lower address** (left, up, or left within a
     group): the rows go as they always have. A keyed blit there goes to
     the CPU, as the BLiTTER's keyed passes (XOR, AND, XOR over the

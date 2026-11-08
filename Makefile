@@ -45,7 +45,8 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/palstage.c src/polygon.c src/polypat.c src/raster.c \
           src/spritebatch.c src/responsive.c src/planes8.c src/planes8ex.c \
           src/planes8tile.c src/asset8.c src/tall4.c src/tallst.c \
-          src/hz38400.c src/rowcopy.c src/planes8row.c src/overlap.c
+          src/hz38400.c src/rowcopy.c src/planes8row.c src/overlap.c \
+          src/overlap4.c src/overlap8.c
 # Objects live under obj/, mirroring each source's own path. Sources
 # now come from two places, this repo and the xpad submodule, and
 # building beside the source would drop .o files inside lib/xpad. The
@@ -147,9 +148,17 @@ all: $(LIB) sizecheck libcallcheck ovhostcheck $(EXAMPLES) assets
 # with MINTICKS 1200, keyed blits up to 0.25% slower in every sample,
 # plain ones 0.4-0.9% faster); strides signed on every path had cost
 # keyed blits 1.2-1.7%, so masked and shifted rows below go in bands.
+#
+# Raised 36984 -> 37040 on 2026-11-08, by overlap4.o (56): overlap.o
+# had called STDL_BlitSurfaceEx for its pieces, which linked blit.o's
+# 4-plane paths, 13,788 bytes, into every program drawing on 8 planes
+# (one port's TT and Falcon build grew 17K with v1.23.0). Each kind of
+# blit now comes in through its own object with its own blit
+# (overlap4.c, overlap8.c); blit.o, planes8.o and planes8ex.o
+# disassemble as they did, and overlap.o is the 1,224 bytes it was.
 PIXEL_OBJS = $(addprefix $(OBJDIR)/src/,draw.o blit.o sprite.o \
-             surface.o blitter.o rowcopy.o overlap.o)
-PIXEL_MAX  = 36984
+             surface.o blitter.o rowcopy.o overlap.o overlap4.o)
+PIXEL_MAX  = 37040
 
 # The responsive screens' own code (stdl_responsive.h), which only a
 # program that asks for an option links: the colour is responsive.o,
@@ -180,9 +189,12 @@ PIXEL_MAX  = 36984
 #
 # Not raised for blits onto their own memory (overlap.o, counted with
 # the pixel path): their hand-offs left planes8ex.o 24 bytes larger and
-# p8_blit 136 smaller, 29,816 in all.
+# p8_blit 136 smaller, 29,816 in all. overlap8.o (60), the 8-plane
+# blits' own way in, which keeps blit.o out of their programs, counts
+# here: 29,876.
 RESP_OBJS  = $(addprefix $(OBJDIR)/src/,responsive.o planes8.o \
-             planes8ex.o planes8tile.o planes8row.o asset8.o tall4.o)
+             planes8ex.o planes8tile.o planes8row.o asset8.o tall4.o \
+             overlap8.o)
 RESP_MAX   = 29928
 
 sizecheck: $(PIXEL_OBJS) $(RESP_OBJS)
@@ -280,7 +292,7 @@ $(OBJDIR)/%.o: %.c
 # flags, a rare path (planes8ex.c says why), and the 8-plane tiles,
 # whose loops come out the same but for the count (1,524 bytes, 1,808
 # at -O2); and a bank's 8-plane art, loaded once (2,088 against 2,456)
-SIZE_OBJS = planes8ex planes8tile asset8 overlap
+SIZE_OBJS = planes8ex planes8tile asset8 overlap overlap4 overlap8
 $(foreach o,$(SIZE_OBJS),$(OBJDIR)/src/$(o).o $(OBJDIR)/src/$(o).cmini.o): \
     CFLAGS += -Os
 

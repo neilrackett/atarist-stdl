@@ -1117,7 +1117,9 @@ warnings** with the Makefile's `-Wall -Wextra`.
   plain store loop at every screen width (a 16x16 clear 1347us
   against 745, 320x32 4687 against 4375). Only a contiguous block,
   or rows of 32 groups and more, still take it.
-- **After touching blit/fill paths**: run `dist/BLITCHK.TOS` - it
+- **After touching blit/fill paths**: run `dist/BLITCHK.TOS`, about
+  two minutes on a Mega STE (longer than `run.sh`'s two-minute
+  `waitfor`: chain two), a dot a second while it works - it
   randomises fills/blits and compares the CPU and BLiTTER paths
   byte-for-byte on target. Both paths must stay identical;
   `STDL_UseBlitter(0)` forces CPU. It runs every plane budget twice,
@@ -1675,14 +1677,17 @@ and the rules below keep it from being anything else's.
     the hardware: a mouse moved on a port silenced by $12 alone sent no
     $FE on a real Mega STE (the mouse entry above), and Hatari reports
     the port after $12 alone, so the emulator cannot say whether it is
-    needed. Not yet run on hardware. A commercial two-player ST game
+    needed. On a real Mega STE (November 2026, IKBDMODE) the mouse-port
+    stick worked after $14 alone and after $12 $14, and the mouse
+    worked on the desktop afterwards; both bytes are kept, the $12 to
+    be certain the mouse is off. A commercial two-player ST game
     that shipped and played on real machines, from a published
     disassembly, installs its own handler and sends $15 (interrogation
     mode) with no $12, then polls both ports once a VBL ($16, answered
     by $FD and both ports' bytes): so a joystick mode command is what
     turns the mouse port into a stick, and the $12 is probably not
-    needed (it is kept: it costs one byte once, and the hardware may
-    still say otherwise). Polling was not taken: that game's $FD
+    needed for the stick (it is kept: it costs one byte once, and
+    turns the mouse off for certain). Polling was not taken: that game's $FD
     replies overran the ACIA's one byte while interrupts were off and
     lost keys, and the IKBD interrupt that delivered them delayed a
     raster split by about 300 cycles; $14 sends a packet only when a

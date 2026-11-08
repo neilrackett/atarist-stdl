@@ -6,10 +6,10 @@
  * The conversion's loops for one fixed X, built once for each of the 15
  * (sdl2.mk: -DSTDL_SDL2_XS=10 ... f0) into an object of its own, so a
  * program names its X as a constant (STDL_SDL2_SetBorderIndex) and
- * links only that pair. X's bits 4 and 5 are planes 4 and 5, the low
- * and high words of d2 once the merges are done, and bits 6 and 7
+ * links only that pair. X's bits 4 and 5 are planes 4 and 5, the high
+ * and low words of d2 once the merges are done, and bits 6 and 7
  * planes 6 and 7, d0's: each long takes a not.w (the low word), a not.l
- * (both) or both (the high word alone), before the swaps.
+ * (both) or both (the high word alone).
  */
 
 #include "c2p.h"
@@ -37,18 +37,18 @@
 
 #if (C2PX_X & 0x30) == 0x30
 #define C2PX_T2 "	not.l	%d2\n"
-#elif (C2PX_X & 0x30) == 0x10
-#define C2PX_T2 "	not.w	%d2\n"
 #elif (C2PX_X & 0x30) == 0x20
+#define C2PX_T2 "	not.w	%d2\n"
+#elif (C2PX_X & 0x30) == 0x10
 #define C2PX_T2 "	not.l	%d2\n	not.w	%d2\n"
 #else
 #define C2PX_T2 ""
 #endif
 #if (C2PX_X & 0xC0) == 0xC0
 #define C2PX_T0 "	not.l	%d0\n"
-#elif (C2PX_X & 0xC0) == 0x40
-#define C2PX_T0 "	not.w	%d0\n"
 #elif (C2PX_X & 0xC0) == 0x80
+#define C2PX_T0 "	not.w	%d0\n"
+#elif (C2PX_X & 0xC0) == 0x40
 #define C2PX_T0 "	not.l	%d0\n	not.w	%d0\n"
 #else
 #define C2PX_T0 ""

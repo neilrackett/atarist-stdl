@@ -130,7 +130,10 @@ $(SDL2CMINILIB): $(SDL2CMINIOBJS) $(SDL2XCMINIOBJS)
 # events and the axes and hats came from the core (STDL_JOYDEVICE*,
 # STDL_GetJoystickAxis and Hat): events.o 2,540 to 2,160 without its
 # own device bookkeeping, joystick.o 2,048 to 2,240 translating the
-# device events and without its copies of the axes. 28,688.
+# device events and without its copies of the axes. 28,688. Then 492
+# less when the conversion's loops lost the copy of the group before
+# them (c2p_asm.h): c2p.o 1,704 to 1,452, the largest variant
+# (c2pany.o) 940 to 704. 28,196.
 # A TT or a Falcon has the room; the budget is there so that growth is
 # a decision, raised with its reason or not at all.
 SDL2_MAX = 28876
@@ -140,6 +143,12 @@ SDL2_MAX = 28876
 # - the public headers compile as gnu99 and as C++98 with warnings as
 #   errors, and refuse to meet the 1.2 shim;
 # - its text within SDL2_MAX;
+# - each conversion loop, with the code round it that runs once a row
+#   (c2p_asm.h's _cache0 to _cache1), within the 240 bytes that sit in
+#   the 68030's 256-byte instruction cache whatever their alignment:
+#   one that outgrew it would fetch part of itself again every row,
+#   from ST-RAM on a Falcon. The assembler cannot measure that span
+#   itself, as it has forward branches, so nm does;
 # - no libgcc arithmetic at all, as libcallcheck checks the core's
 #   against tests/libcalls.allow: the drawing is built for the 68020,
 #   which multiplies and divides 32 bits itself, so a call would be a
@@ -168,6 +177,15 @@ sdl2check: $(SDL2LIB) $(SDL2CMINILIB)
 	 if [ $$n -gt $(SDL2_MAX) ]; then \
 	   echo "*** over the SDL2 add-on's size budget"; exit 1; \
 	 fi
+	@$(CROSS)nm -t d $(SDL2LIB) | awk ' \
+	   $$3 ~ /_cache0$$/ { n = $$3; sub(/_cache0$$/, "", n); s[n] = $$1 + 0 } \
+	   $$3 ~ /_cache1$$/ { n = $$3; sub(/_cache1$$/, "", n); e[n] = $$1 + 0 } \
+	   END { for (n in s) { d = e[n] - s[n]; c++; \
+	           if (d <= 0 || d > 240) { bad = 1; \
+	             print "*** " n ": " d " bytes of loop, past the 240 that sit in the 68030 instruction cache" } } \
+	         if (c < 34) { bad = 1; \
+	           print "*** " c + 0 " conversion loops measured, 34 expected" } \
+	         exit bad }'
 	@calls=`sh tools/libcalls.sh $(SDL2OBJS) $(SDL2XOBJS)` || exit 1; \
 	 if [ -n "$$calls" ]; then \
 	   echo "$$calls"; \

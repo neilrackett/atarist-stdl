@@ -1450,12 +1450,21 @@ and the rules below keep it from being anything else's.
   - There is no libgcc arithmetic.
   - Each check was broken on purpose once and failed.
 - **The conversion (`c2p*.c`, `c2p_asm.h`).**
-  - The group loop must stay within 240 bytes, which fits the 68030's
-    256-byte instruction cache whatever its alignment. The assembler
-    refuses more.
+  - Each loop, with the code round it that runs once a row (from
+    `_cache0` to `_cache1`), must stay within 240 bytes, which fits the
+    68030's 256-byte instruction cache whatever its alignment.
+    `sdl2check` measures that span with `nm` and refuses more, as the
+    assembler cannot measure across forward branches. So nothing
+    else goes inside a row: a copy of the group before the loop, which
+    the loops had until November 2026, made them 428 bytes, fetched
+    again at every row; taking it out made whole frames 12-21% faster
+    in Hatari and boxes two groups wide a third to a half.
+  - Every box goes through the assembler on the machine, however
+    narrow; the C twin is the host's, and the reference the machine
+    checks the assembler against.
   - A fixed border index X has an object of its own (`c2px.c`, built
     15 times), which `STDL_SDL2_SetBorderIndex` names inline for a
-    constant X. Reading X at run time cost 4.5% of a frame.
+    constant X. Reading X at run time costs about 3% of a frame.
   - `SDL2CHK` (`tests/hatari/sdl2chk.c`) checks every variant against
     the C twin on the machine and times them.
 - **Input keeps SDL2's numbers.** Scancodes, key codes, `KMOD_` bits

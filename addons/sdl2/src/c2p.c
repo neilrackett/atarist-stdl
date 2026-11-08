@@ -17,8 +17,12 @@
  * One port's whole-frame conversions took 136% of their budget on a
  * Falcon in C against 121% for a routine with that overlap, and a
  * first C version of twelve merges, too big for the 68030's 256-byte
- * instruction cache, twice as long. The loop is checked against that
- * cache when it is assembled (c2p_asm.h).
+ * instruction cache, twice as long. The machine sends every box
+ * through the assembler, a group wide or twenty: gcc's C, with every
+ * mask an immediate and a whole merge for the 16-bit exchange, took a
+ * Falcon 103.1ms a frame's worth of boxes two groups wide against the
+ * assembler's 69.1 (Hatari). The loops are checked against the cache
+ * when the add-on is built (sdl2.mk's sdl2check).
  *
  * This object has the C, the dispatch and the loops for X = 0, which
  * every program takes; a fixed X's loops are c2px.c's, one object an X,
@@ -84,14 +88,13 @@ void rows(const uint8_t *src, long sp, uint8_t *dst, long dp, long groups,
             MERGE(a0, a2, 2, 0x33333333UL);     /* k1 with u1 */
             MERGE(a1, a3, 2, 0x33333333UL);
             /* planes 0 and 1 are a3's low word and high word, 2 and 3
-             * a1's, 4 and 5 a2's, 6 and 7 a0's: X's planes inverted,
-             * then a swap each and a long */
-            a2 ^= x2;
-            a0 ^= x0;
+             * a1's, 4 and 5 a2's, 6 and 7 a0's: a swap each puts them
+             * in screen order (the assembler's 16-bit exchange does
+             * both at once), then X's planes are inverted */
             a3 = (a3 << 16) | (a3 >> 16);
             a1 = (a1 << 16) | (a1 >> 16);
-            a2 = (a2 << 16) | (a2 >> 16);
-            a0 = (a0 << 16) | (a0 >> 16);
+            a2 = ((a2 << 16) | (a2 >> 16)) ^ x2;
+            a0 = ((a0 << 16) | (a0 >> 16)) ^ x0;
             ST(d, a3);
             ST(d + 4, a1);
             ST(d + 8, a2);
@@ -134,11 +137,7 @@ void stdl_sdl2_c2p(const uint8_t *src, long sp, uint8_t *dst, long dp,
                    long groups, long h, int dbl,
                    const struct stdl_sdl2_c2pv *v, uint32_t x2, uint32_t x0)
 {
-    if (groups < STDL_SDL2_C2P_ASM_GROUPS) {
-        stdl_sdl2_c2p_c(src, sp, dst, dp, groups, h, dbl, x2, x0);
-    } else {
-        (dbl ? v->two : v->one)(src, sp, dst, dp, groups, h, x2, x0);
-    }
+    (dbl ? v->two : v->one)(src, sp, dst, dp, groups, h, x2, x0);
 }
 #else
 /* the host has the C alone; the variants are there to be named, the

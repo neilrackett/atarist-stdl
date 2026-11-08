@@ -316,16 +316,23 @@ took that to 9.5 and the copies from 1.09ms a frame to 0.70.
 ## The conversion and its cost
 
 The conversion is ten merges a group with the assembler's writes
-spread among the next group's work. Its loop, 184-196 bytes, sits in
-the 68030's 256-byte instruction cache, and the build fails if it
-outgrows 240 bytes. Boxes under 4 groups go through its C twin.
+spread among the next group's work, and a box of any size is one
+call. Its loop, with the code that moves it from row to row, is
+214-240 bytes and sits in the 68030's 256-byte instruction cache; the
+build fails if it outgrows 240 bytes.
 
 A whole 320x240 frame into ST-RAM, in Hatari, ms:
 
 | | X = 0 | fixed X | X at run time |
 |---|---|---|---|
-| TT (rows on two lines) | 39.85 | 40.36 | 42.07 |
-| Falcon on VGA | 69.22 | 70.37 | 73.34 |
+| TT (rows on two lines) | 31.02 | 31.94 | 33.06 |
+| Falcon on VGA | 59.99 | 61.58 | 63.70 |
+
+Narrow boxes cost a little more a group, for the row's start: a
+frame's worth of boxes two groups wide, a sprite's, takes a fixed X
+36.47ms on a TT and 69.11 on a Falcon. Until November 2026 boxes that
+narrow went through the C twin, at 68.40 and 95.50, and whole frames
+took 40.36 and 70.37.
 
 A frame that changes a tenth of the screen pays about a tenth of that,
 plus the copies its pages missed.

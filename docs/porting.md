@@ -437,12 +437,14 @@ truncates colours to the low N bits rather than rejecting them. See
     divide by it. Hatari's TT runs ST Low at 60, a Falcon on VGA its
     desktop at 60. `STDL_SetRefresh` changes nothing there: it measures
     and returns the rate.
-  - **Sound.** DMA sound is decided by the `_SND` cookie (a TT's can be
-    switched off). A Falcon has no 6258Hz: the voices, the SDL_mixer
-    shim and `STDL_OpenAudio` play at 12517 there, and
-    `STDL_PlaySample` plays a 6258Hz buffer from a copy at 12517. Its
-    crossbar is routed DMA-to-DAC on the first start and put back at
-    exit, so a Falcon program run before cannot leave yours silent.
+  - **Sound.** DMA sound is decided by the `_SND` cookie's bit 1 alone,
+    on every machine (a TT's can be switched off, an emulator can give
+    an ST some, and with no cookie there is none). A Falcon has no
+    6258Hz: the voices, the SDL_mixer shim and `STDL_OpenAudio` play at
+    12517 there, and `STDL_PlaySample` plays a 6258Hz buffer from a
+    copy at 12517. Its crossbar is routed DMA-to-DAC on the first start
+    and put back at exit, so a Falcon program run before cannot leave
+    yours silent.
   - **Desktop.** A Falcon's is a VIDEL mode `Getrez()` cannot describe
     and a TT's uses more than 16 colours, so the mode and all 256
     colour registers come back at exit; the monitor,

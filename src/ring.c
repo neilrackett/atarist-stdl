@@ -128,7 +128,7 @@ int STDL_OpenAudio(STDL_AudioSpec *desired, STDL_AudioSpec *obtained)
         STDL_Init(STDL_INIT_AUDIO);
     }
     if (!stdl.mach.has_dma_sound) {
-        STDL_SetError("no DMA sound hardware (STE/Mega STE only)");
+        STDL_SetError("no DMA sound (the _SND cookie's bit 1)");
         return -1;
     }
     if (desired == NULL || desired->channels < 1

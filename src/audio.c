@@ -93,11 +93,14 @@ void stdl_dma_stop(void)
 
 static void microwire_write(uint16_t data);
 
-/* master and both channels to 0dB; a Falcon has no Microwire (its
- * levels are the XBIOS Soundcmd's, which the desktop leaves at full) */
+/* master and both channels to 0dB, through the Microwire, which an
+ * STE, a Mega STE and a TT have. A Falcon has none (its levels are the
+ * XBIOS Soundcmd's, which the desktop leaves at full), and nor has an
+ * ST whose _SND cookie says DMA sound from an emulator: there the
+ * registers would bus-error, or each write wait out its 10ms bound */
 static void set_output_levels(void)
 {
-    if (stdl_is_falcon()) {
+    if (stdl.mach.mch_cookie < 0x00010000UL || stdl_is_falcon()) {
         return;
     }
     microwire_write(0x4E8);     /* %10 011 101000  master 0dB   */
@@ -240,7 +243,7 @@ static int sample_start(const void *data, uint32_t bytes, int freq,
         STDL_Init(STDL_INIT_AUDIO);
     }
     if (!stdl.mach.has_dma_sound) {
-        STDL_SetError("no DMA sound hardware (STE/Mega STE only)");
+        STDL_SetError("no DMA sound (the _SND cookie's bit 1)");
         return -1;
     }
     STDL_SamplePlaying();       /* expire a finished one-shot */

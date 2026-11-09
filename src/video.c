@@ -100,7 +100,6 @@ static int altram_present(uintptr_t phystop)
 static void detect_machine(void)
 {
     long *jar = *(long **)0x5A0UL;
-    int has_snd = 0;
     uint32_t snd = 0;
 
     stdl.mach.mch_cookie = 0;
@@ -113,7 +112,6 @@ static void detect_machine(void)
                 stdl.mach.cpu = (uint16_t)jar[1];
             } else if (jar[0] == 0x5F534E44L) {   /* '_SND' */
                 snd = (uint32_t)jar[1];
-                has_snd = 1;
             }
         }
     }
@@ -123,11 +121,12 @@ static void detect_machine(void)
     stdl.mach.is_megaste = (stdl.mach.mch_cookie == 0x00010010UL);
     stdl.mach.is_tt = (uint8_t)stdl_is_tt();
     stdl.mach.is_falcon = (uint8_t)stdl_is_falcon();
-    /* _SND bit 1 is the STE's DMA sound, which a TT's DIP switch can
-     * take away; a TOS without the cookie is an ST's or an STE's, and
-     * the machine type says */
-    stdl.mach.has_dma_sound = (uint8_t)(has_snd ? (snd & 2) != 0
-                                                : stdl.mach.is_ste);
+    /* _SND bit 1, 8-bit DMA sound, alone: TOS sets it on an STE, a
+     * Mega STE, a TT (whose DIP switch can take it away) and a Falcon,
+     * and a DMA sound emulator on an ST can set it; with no cookie
+     * there is none (TOS 1.00-1.04, which has no jar, runs only on an
+     * ST) */
+    stdl.mach.has_dma_sound = (uint8_t)((snd & 2) != 0);
 }
 
 /*

@@ -67,8 +67,9 @@ void STDL_WaitVBL(void);
  * display rate measured rather than assumed, a Falcon's sound routed
  * and its missing 6258Hz played at 12517. is_tt and is_falcon are for
  * a program that wants to do more there; has_dma_sound is what decides
- * the sound devices, from the _SND cookie where TOS has one (a TT's
- * DMA sound can be switched off), the machine type where it has not.
+ * the sound devices, from the _SND cookie's bit 1 alone: a TT's DMA
+ * sound can be switched off, an emulator can give an ST some, and with
+ * no cookie there is none.
  */
 typedef struct {
     uint8_t  is_ste;       /* STE-class shifter: 4096 colours          */

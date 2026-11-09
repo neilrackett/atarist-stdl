@@ -707,7 +707,7 @@ int STDL_OpenVoices(int freq)
         STDL_Init(STDL_INIT_AUDIO);
     }
     if (!stdl.mach.has_dma_sound) {
-        STDL_SetError("no DMA sound hardware (STE/Mega STE only)");
+        STDL_SetError("no DMA sound (the _SND cookie's bit 1)");
         return -1;
     }
     STDL_SamplePlaying();       /* expire a finished one-shot */

@@ -684,8 +684,16 @@ SDL_VIDEODRIVER=dummy TOS=$TOS512 MACHINE=falcon MONITOR=rgb EXTRA="$X" \
   - its boot takes another time, so a screenshot a fixed time after the
     start catches another moment: shoot after a marker the program
     prints to stderr, or in a burst (`shot;sleep 0.3;shot;...`).
-- Hatari's 68030 timing is approximate under any TOS: the display's
-  rate, Timer B and cycle counts are for a real machine to settle.
+- Hatari's 68030 is fast as well as approximate. A real TT took 1.5
+  to 2.3 times as long as Hatari's TT over the same binary (2026-11-11,
+  cycle-exact with the data cache on; about twice for calls, for code
+  larger than the 256-byte instruction cache and for memory read in
+  order), and nobody has timed a real Falcon. So every TT and Falcon
+  time here and in `docs/` is Hatari's: compare two builds by it, and
+  never decide from it that a frame fits. `tests/hatari/cpuchk.c`
+  (CPUCHK) measures the factor on a machine, and
+  `tests/hatari/sccmp.py` compares its log with Hatari's. The
+  display's rate and Timer B are for a real machine to settle too.
 
 **The driver.** From a port that vendors STDL the path is
 `stdl/tests/hatari/run.sh` or `extern/stdl/tests/hatari/run.sh`:

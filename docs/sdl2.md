@@ -337,6 +337,12 @@ took 40.36 and 70.37.
 A frame that changes a tenth of the screen pays about a tenth of that,
 plus the copies its pages missed.
 
+Every time here is Hatari's. A real TT took 1.5 to 2.3 times as long
+as Hatari's TT over the same compiled code (2026-11-11), and a real
+Falcon has not been timed: compare builds by these figures, and take a
+frame budget from a machine. `tests/hatari/cpuchk.c` (CPUCHK) measures
+the difference on one.
+
 ## The border index
 
 A TT's and a Falcon's border, the frame round the screen's memory that

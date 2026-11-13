@@ -9,6 +9,10 @@
 # spread between its pass A and pass B, which ran the same binary.
 # A difference inside the floors is not a difference.
 #
+# CPUCHK (tests/hatari/cpuchk.c) writes the same lines: Hatari's log
+# as OLD and a real machine's as NEW gives how many times as long the
+# machine takes as the emulator.
+#
 #   tests/hatari/sccmp.py OLD.log NEW.log [column] [filter]
 #
 # column is "cpu" (default) or "lib"; filter keeps only case labels

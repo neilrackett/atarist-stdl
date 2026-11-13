@@ -178,6 +178,11 @@ for (;;) {
 
 ## What things cost (Hatari, a TT at 32MHz, a Falcon at 16MHz)
 
+These are Hatari's figures, and a real TT took 1.5 to 2.3 times as
+long as Hatari's over the same code (see Testing below): at twice, a
+frame that takes 10ms here misses a 60Hz display there. Compare builds
+by them; take a frame budget from a real machine.
+
 - **A whole 320x240 frame converts in about 40ms on a TT and 70ms on a
   Falcon** (a full 320x200: about 34ms on a TT). A program that converts
   the whole screen every frame is capped near 25 and 14 frames a second
@@ -304,8 +309,13 @@ for (;;) {
   `info basepage` shows it), `profile on` and `profile save` from the
   command fifo, at real speed. A function reached by a branch rather
   than a call is counted as its caller's.
-- Hatari's 68030 timing is approximate: confirm figures that matter on
-  a real machine.
+- Hatari's 68030 is faster than a real one: a real TT took 1.5 to 2.3
+  times as long as Hatari's TT over the same binary (2026-11-11, about
+  twice for calls, code larger than the instruction cache and memory
+  read in order), and a real Falcon has not been timed. Compare builds
+  in Hatari; confirm a frame budget on a machine. CPUCHK
+  (`tests/hatari/cpuchk.c`) measures the factor, and
+  `tests/hatari/sccmp.py` compares its log with Hatari's.
 
 ## Rules for changing the add-on itself
 

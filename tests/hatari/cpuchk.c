@@ -5,14 +5,14 @@
  *
  * How long does this machine take over ordinary compiled code, and how
  * far is the emulator from it? Every TT and Falcon timing in this
- * repository was taken in Hatari, and on 2026-11-11 a real TT (TOS
- * 3.06, both caches on) took 1.5 to 2.3 times as long as Hatari's TT
- * (--cpu-exact on --data-cache on --mmu off) over one binary built by
- * another compiler: 1.46 for a loop the instruction cache holds, 2.2
- * to 2.3 for calls, for code larger than the cache and for reading
- * memory in order, ST-RAM and TT-RAM alike. CPUCHK is that measurement
- * built as STDL's programs are, so that the factor for this library's
- * own figures can be taken on the machine, against run.sh's settings.
+ * repository was taken in Hatari. On 2026-11-13 a real TT (TOS 3.06,
+ * 2MB of ST-RAM and 4MB of TT-RAM, both caches on) took 2.27 times as
+ * long as Hatari's TT with the same TOS and memory (--cpu-exact on
+ * --data-cache on --mmu off) over this program, its geometric mean:
+ * 1.4 to 1.6 for scattered reads, 2.0 for a loop the instruction cache
+ * holds, 2.3 for calls, 2.7 to 2.8 for memory read in order, and 3.0
+ * and 3.9 for a copy into ST-RAM from ST-RAM and from TT-RAM. The
+ * table is in AGENTS.md.
  *
  * It times, against the 200Hz counter, a second of each of:
  *

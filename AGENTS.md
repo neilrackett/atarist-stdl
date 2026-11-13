@@ -841,41 +841,56 @@ warnings** with the Makefile's `-Wall -Wextra`.
     timed parts on VGA and RGB the same whole seconds, 49-56s, but one
     a second apart); compare timings under one TOS.
   The runs are `tests/hatari/out/e_*` (EmuTOS) beside `r_*` (TOS).
-- **Hatari's TT runs compiled code up to twice as fast as a real one,
-  so its TT and Falcon times compare builds; they do not budget
-  frames.** On 2026-11-11 a real TT (TOS 3.06, CACR 0x3111, both
-  caches on) took 1.5 to 2.3 times as long as Hatari's TT
-  (cycle-exact, data cache on, `--mmu off`) over one binary, from a
-  study of a port that did not go ahead:
-  - 1.46 for a two-instruction loop in the cache: the machine took the
-    68030's documented 8 cycles a turn, Hatari about 5.6;
-  - 2.19 for code larger than the instruction cache, 2.33 for calls of
-    a small function;
-  - 2.20 and 2.29 for TT-RAM and ST-RAM read in order, 1.46 for reads
-    scattered over TT-RAM;
-  - a five-minute benchmark 2.15 to 2.31 on every line, twice.
+- **A real TT takes 2.3 times as long as Hatari's TT, and three to
+  four times over ST-RAM copies, so Hatari's TT and Falcon times
+  compare builds; they do not budget frames.**
+  `tests/hatari/cpuchk.c` (CPUCHK) measured it on 2026-11-13: a real
+  TT (TOS 3.06, 2MB of ST-RAM and 4MB of TT-RAM, CACR 0x3111, its code
+  in TT-RAM) against Hatari's with the same TOS and memory
+  (cycle-exact, data cache on, `--mmu off`), one binary, real time
+  over emulated, with the caches as found:
 
-  That binary was another compiler's (gcc 13, its code in TT-RAM), so
-  the factor for STDL's code is still to be measured. Every TT and
-  Falcon time in this file, the docs and the skills is Hatari's; at
-  twice, the 8-plane game's 11.1ms frame on a TT (above) would be past
-  a 60Hz frame. Nobody has timed a real Falcon.
-  `tests/hatari/cpuchk.c` (CPUCHK) is the probe for it, built as STDL's
-  programs are and linking no STDL (its handlers would only add to
-  the time): a second each of a loop, code past the cache, calls,
-  ST-RAM and TT-RAM read in order and scattered, and a screen copied,
+  | case | Hatari, ns | real TT, ns | real/Hatari |
+  |---|---|---|---|
+  | two instructions in the cache, a turn | 129.8 | 254.5 | 1.96 |
+  | one of 32 pieces of code, past the cache, a step | 3,906 | 6,938 | 1.78 |
+  | a call of a small function | 2,066 | 4,762 | 2.31 |
+  | ST-RAM read in order, a long | 270.7 | 759.2 | 2.80 |
+  | ST-RAM read scattered, a long | 1,268 | 2,035 | 1.60 |
+  | ST-RAM to ST-RAM by memcpy, a long | 527.4 | 1,598 | 3.03 |
+  | TT-RAM read in order, a long | 260.8 | 700.5 | 2.69 |
+  | TT-RAM read scattered, a long | 1,258 | 1,782 | 1.42 |
+  | TT-RAM to ST-RAM by memcpy, a long | 359.1 | 1,392 | 3.88 |
+
+  - The geometric mean is 2.27, and 2.99 with both caches off; a
+    run's two passes agreed within 0.3%. The real loop is the 68030's
+    documented 8 cycles a turn, where Hatari charges about 4.
+  - The worst cases are the ones a TT's screen work is made of: an
+    8-plane page, the TT's present to its doubled lines, the tall
+    16-colour screen's compare and the SDL2 add-on's conversion all
+    move data in ST-RAM, so expect their Hatari times to be about
+    three times that on the machine (an inference from these cases,
+    not yet a measurement of them). Even at the mean, the 8-plane
+    game's 11.1ms frame on a TT (above) would be 25ms, past a 60Hz
+    frame.
+  - Against Hatari under EmuTOS 1.4 the mean is 2.38 (1.56 to 4.21):
+    Hatari's TT runs CPUCHK 5% faster under EmuTOS than under TOS 3.06.
+    Take the emulator's log under the TOS the machine has, or say
+    which. A study for a port that did not go ahead had found 1.5 to
+    2.3 on 2026-11-11 with another compiler's binary, which
+    copied nothing.
+  - Nobody has timed a real Falcon. Hatari's Falcon is its TT at half
+    the clock, every CPUCHK case 2.0 times as long, so it is not
+    evidence either way.
+
+  CPUCHK is built as STDL's programs are and links no STDL (its
+  handlers would only add to the time). It runs a second of each case
   with a 68030's caches as found, on and off (a Mega STE's speeds,
   elsewhere as found), twice over in SPRCOST's log format, so
-  `sccmp.py HATARI.log CPUCHK.LOG` gives each case's real/emulated
-  time and their geometric mean. Under run.sh (EmuTOS 1.4) its loop
-  is 128ns a turn on a TT, its code in TT-RAM or ST-RAM, and 285 on a
-  Falcon, whose every case is 2.0 times the TT's: Hatari's Falcon is
-  its TT at half the clock. The maintainer's Hatari configuration has
-  cycle-exact and the data cache on, and `--cpu-exact on --data-cache
-  on` in LATE changed no figure. The study's own binary under EmuTOS
-  took 625-685ms for its loop where TOS 3.06 had taken 700, and 2,065
-  for its calls against 2,440, so take the emulator's log under the
-  TOS the machine has, or say which.
+  `sccmp.py HATARI.log CPUCHK.LOG` gives the table above with its
+  geometric mean. The maintainer's Hatari configuration has
+  cycle-exact and the data cache on; `--cpu-exact on --data-cache on`
+  in LATE changed no figure.
 - **The Mega STE's cache decides the bottom border's flick, word by
   word.** Drawing with a border open flickered the bottom border at
   16MHz with the cache on, never at 8MHz or with it off, and worst

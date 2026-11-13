@@ -62,8 +62,9 @@ rows = screen->h;                           /* 240, or 200 */
   screen is always double-buffered, and `STDL_TRIPLEBUF` gives it a
   third page as on an ST, another of the display's: 153.6K of ST RAM
   on a TT, 64-92K on a Falcon in 256 colours. The times are Hatari's:
-  a real TT took 1.5 to 2.3 times as long as Hatari's TT over the
-  same compiled code, and a real Falcon has not been timed, so take a
+  a real TT takes 2.3 times as long as Hatari's TT over the same
+  compiled code, and 3.0 to 3.9 times over copies into ST-RAM, which
+  is what a present is; a real Falcon has not been timed, so take a
   frame budget from a machine.
 * **Art.** With `STDL_RESPONSIVE_BANKS` as well, a bank holds each
   id's 256-colour version beside the ST's, and the same

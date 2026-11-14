@@ -18,8 +18,8 @@ CFLAGS  = -std=gnu99 -O1 -g -fsanitize=address,alignment \
 SRC     = ../src
 HDRS    = $(wildcard ../include/SDL2/*.h) $(SRC)/internal.h
 
-TESTS   = test_basics test_c2p test_render test_events test_surface \
-          test_audio test_bmp
+TESTS   = test_basics test_c2p test_render test_render_st test_events \
+          test_surface test_audio test_bmp
 
 # the renderer on fake_stdl.c's screens: the add-on as a program links
 # it, STDL's calls stood in for
@@ -42,6 +42,15 @@ test_c2p: test_c2p.c $(SRC)/c2p.c $(SRC)/c2p.h
 test_render: test_render.c fake_stdl.c fake_stdl.h $(RENDER) $(HDRS) \
              $(SRC)/c2p.h
 	$(CC) $(CFLAGS) -o $@ test_render.c fake_stdl.c $(RENDER)
+
+# the ST build's renderer (STDL_SDL2_ST, with st.c) on the stand-in's
+# ST screens, then on its TT's and Falcon's
+RENDERST = $(RENDER) $(SRC)/st.c
+
+test_render_st: test_render.c fake_stdl.c fake_stdl.h $(RENDERST) $(HDRS) \
+                $(SRC)/st.h
+	$(CC) $(CFLAGS) -DSTDL_SDL2_ST -o $@ test_render.c fake_stdl.c \
+	    $(RENDERST)
 
 test_events: test_events.c fake_stdl.c fake_stdl.h $(RENDER) $(REST) $(HDRS)
 	$(CC) $(CFLAGS) -o $@ test_events.c fake_stdl.c $(RENDER) $(REST)

@@ -41,10 +41,30 @@
  *   TOS="<TOS 3.06>" MACHINE=tt LATE="--mmu off" \
  *       EXTRA="--cpu-exact on --compatible on --memsize 4" \
  *       tests/hatari/run.sh s2r dist/SDL2RCHK.TOS 8 "waitfor S2R:done"
+ *
+ * Built with STDL_SDL2_ST it is the ST build's test (test_render_st on
+ * the host: the tall screen's 240 rows, 200 where the border did not
+ * open and 216 for one cut short, with two pages and three and border
+ * indices 0 and 0x70): the page shown must be the model's middle rows put
+ * through the renderer's map of the palette onto 16 colours, a pixel
+ * at a time, and a present flips when that map has moved though
+ * nothing was drawn. The map and the registers must be what the
+ * reduction (st.c) makes of the palette, and the reduction is checked
+ * for what it promises before the runs. On an ST:
+ *
+ *   STCMD_NO_TTY=1 stcmd make sdl2st
+ *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -std=gnu99 -m68000 \
+ *       -DSTDL_SDL2_ST -Iinclude -Iaddons/sdl2/include/SDL2 \
+ *       -Iaddons/sdl2/src -c -o rchk.o addons/sdl2/tests/test_render.c
+ *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -m68000 \
+ *       -o dist/SDL2RCST.TOS rchk.o libstdl-sdl2-st.a libstdl.a
  */
 
 #include "SDL.h"
 #include "SDL_stdl.h"
+#ifdef STDL_SDL2_ST
+#include "st.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -160,6 +180,37 @@ static void model_fill(Uint8 c)
 static Uint8 *want;
 static long want_bytes;
 
+#ifdef STDL_SDL2_ST
+/* the ST build: an ST's 16-colour page, or on a TT or a Falcon the
+ * 256-colour one, as the other build has it */
+static int is_st;
+static int page_rows = 240;
+#define PAGE_ROWS page_rows
+
+/* the page's rows, the screen's middle ones, through the renderer's
+ * map, four planes */
+static void expect_page_st(long stride)
+{
+    const Uint8 *map = stdl_sdl2_st_map(R);
+    int x, y, p;
+    memset(want, 0, (size_t)want_bytes);
+    for (y = 0; y < page_rows; y++) {
+        for (x = 0; x < 320; x++) {
+            const unsigned v = map[model[y + (240 - page_rows) / 2][x]];
+            Uint8 *grp = want + y * stride + (x >> 4) * 8;
+            for (p = 0; p < 4; p++) {
+                if (v >> p & 1) {
+                    grp[2 * p + ((x & 15) >> 3)] |= (Uint8)(0x80 >> (x & 7));
+                }
+            }
+        }
+    }
+}
+#else
+#define is_st 0
+#define PAGE_ROWS 240
+#endif
+
 static void expect_page(long stride, long margin, int dbl)
 {
     const long dp = dbl ? stride / 2 : stride;
@@ -202,9 +253,17 @@ static void check_shown(void)
         want_bytes = bytes;
         want = (Uint8 *)malloc((size_t)bytes);
     }
-    stride_ = bytes / 240;
+#ifdef STDL_SDL2_ST
+    page_rows = is_st ? (int)(bytes / 160) : 240;
+#endif
+    stride_ = bytes / PAGE_ROWS;
     dbl_ = stride_ == 640;
     margin_ = ((dbl_ ? stride_ / 2 : stride_) - 320) / 2;
+#ifdef STDL_SDL2_ST
+    if (is_st) {
+        expect_page_st(stride_);
+    } else
+#endif
     expect_page(stride_, margin_, dbl_);
     if (memcmp(base, want, (size_t)bytes) != 0) {
         long i = 0;
@@ -219,11 +278,60 @@ static void check_shown(void)
     }
 }
 
+#ifdef STDL_SDL2_ST
+/* the map the palette has now, and whether it is the renderer's */
+static Uint8 now_map[256];
+static SDL_Color now_regs[16];
+
+static int map_moved(void)
+{
+    if (!is_st) {
+        return 0;
+    }
+    memcpy(now_map, stdl_sdl2_st_map(R), 256);
+    return stdl_sdl2_st_update(pal->colors, pal->ncolors, X, now_map,
+                               now_regs);
+}
+
+/* registers and map: what the palette as last staged makes of them */
+static void check_registers_st(void)
+{
+    const SDL_Color *regs = STDL_SDL2_GetRegisterColours(R);
+    int i, bad = 0;
+    bad += map_moved();
+    for (i = 0; i < 16; i++) {
+        if (regs[i].r != now_regs[i].r || regs[i].g != now_regs[i].g ||
+            regs[i].b != now_regs[i].b) {
+            bad++;
+        }
+#ifndef __m68k__
+        if (fake_regs[i].r != now_regs[i].r ||
+            fake_regs[i].g != now_regs[i].g ||
+            fake_regs[i].b != now_regs[i].b) {
+            bad++;
+        }
+#endif
+    }
+    CHECK(bad == 0);
+}
+#else
+static int map_moved(void)
+{
+    return 0;
+}
+#endif
+
 /* registers: colour i ^ X, register 0 black when X is set */
 static void check_registers(void)
 {
     const SDL_Color *regs = STDL_SDL2_GetRegisterColours(R);
     int i, bad = 0;
+#ifdef STDL_SDL2_ST
+    if (is_st) {
+        check_registers_st();
+        return;
+    }
+#endif
     for (i = 0; i < 256; i++) {
         const unsigned j = (unsigned)i ^ X;
         SDL_Color c = { 0, 0, 0, 255 };
@@ -250,6 +358,8 @@ static void present(void)
 #ifndef __m68k__
     const int flips = fake_flips;
 #endif
+    /* the ST build flips for a new map alone */
+    drawn |= map_moved();
     SDL_RenderPresent(R);
     STDL_SDL2_GetShownPage(R, &base, &bytes);
     if (drawn) {
@@ -298,10 +408,41 @@ static void clear_now(void)
     model_fill((Uint8)X);
     drawn = 0;
     STDL_SDL2_GetShownPage(R, &base, &bytes);
+    /* on an ST X's colour as the map has it: zeroes only when X is
+     * set */
+    if (is_st) {
+        if (base) {
+            check_shown();
+        }
+        return;
+    }
     for (i = 0; base && i < bytes; i++) {
         nonzero += base[i] != 0;
     }
     CHECK(nonzero == 0);
+}
+
+/* a fade's step: the palette staged with no present. The ST build
+ * presents all the same when the map has moved. */
+static void stage_now(void)
+{
+    const int moved = map_moved();
+#ifndef __m68k__
+    const int flips = fake_flips;
+#endif
+    CHECK(STDL_SDL2_StagePalette(R) == 0);
+#ifndef __m68k__
+    CHECK(fake_flips == flips + moved);
+#endif
+    if (moved) {
+        const Uint8 *base;
+        long bytes;
+        STDL_SDL2_GetShownPage(R, &base, &bytes);
+        check_shown();
+        last_base = base;
+        drawn = 0;
+    }
+    check_registers();
 }
 
 static void random_colours(int n)
@@ -514,8 +655,7 @@ static void port_sequences(void)
     /* a fade: colours staged, no present */
     for (i = 7; i >= 0; i--) {
         random_colours(256);
-        CHECK(STDL_SDL2_StagePalette(R) == 0);
-        check_registers();
+        stage_now();
     }
 
     /* a copy clipped to nothing draws nothing, and does not flip */
@@ -602,8 +742,7 @@ static void random_run(long steps)
         } else if (what < 82) {
             random_colours(1 + rndn(40));
         } else if (what < 84) {
-            CHECK(STDL_SDL2_StagePalette(R) == 0);
-            check_registers();
+            stage_now();
         } else if (what < 86) {
             clear_now();
         } else if (what < 89) {
@@ -639,6 +778,9 @@ static int run(unsigned long s, unsigned x, int xconst)
     failures = 0;
     SDL_SetHint(STDL_SDL2_HINT_CHECK, "1");
     CHECK(SDL_Init(SDL_INIT_VIDEO) == 0);
+#ifdef STDL_SDL2_ST
+    is_st = STDL_SDL2_NO_256();
+#endif
     win = SDL_CreateWindow("test", SDL_WINDOWPOS_CENTERED,
                            SDL_WINDOWPOS_CENTERED, 320, 240, 0);
     CHECK(win != NULL);
@@ -686,7 +828,178 @@ static int run(unsigned long s, unsigned x, int xconst)
     return failures;
 }
 
-#ifndef __m68k__
+#ifdef STDL_SDL2_ST
+/* what the reduction promises (st.h) */
+static int reduce_checks(void)
+{
+    SDL_Color c[256], few[16], out[16];
+    Uint8 map[256];
+    int i, k, ch, used[16];
+    failures = 0;
+    seed = 0x5EED;
+    /* 15 colours and black, anywhere among the 256: each shown
+     * exactly, whichever one channel tells them apart */
+    for (ch = 0; ch < 4; ch++) {
+        memset(few, 0, sizeof(few));
+        for (k = 1; k < 16; k++) {
+            const Uint8 apart = (Uint8)(k * 16), same = 200;
+            few[k].r = ch == 0 ? apart : ch == 3 ? (Uint8)(1 + rndn(255))
+                                                 : same;
+            few[k].g = ch == 1 ? apart : ch == 3 ? (Uint8)rnd() : same;
+            few[k].b = ch == 2 || ch == 3 ? apart : same;
+        }
+        for (i = 0; i < 256; i++) {
+            c[i] = few[rndn(16)];
+        }
+        stdl_sdl2_st_reduce(c, 256, 0, map, out);
+        for (i = 0; i < 256; i++) {
+            const SDL_Color o = out[map[i]];
+            CHECK(map[i] < 16);
+            CHECK(o.r == c[i].r && o.g == c[i].g && o.b == c[i].b);
+            CHECK((map[i] == 0) == !(c[i].r | c[i].g | c[i].b));
+        }
+    }
+    /* any 256: slot 0 black and only black's and X's, every other slot
+     * used and the mean of its colours; a short palette's rest slot 0 */
+    for (k = 0; k < 20; k++) {
+        const unsigned x = (k & 1) ? 0x70 : 0;
+        const int n = k < 10 ? 256 : 1 + rndn(256);
+        unsigned sum[16][3], cnt[16];
+        for (i = 0; i < 256; i++) {
+            c[i].r = (Uint8)rnd();
+            c[i].g = (Uint8)rnd();
+            c[i].b = (Uint8)rnd();
+        }
+        c[5].r = c[5].g = c[5].b = 0;
+        stdl_sdl2_st_reduce(c, n, x, map, out);
+        memset(used, 0, sizeof(used));
+        memset(sum, 0, sizeof(sum));
+        memset(cnt, 0, sizeof(cnt));
+        CHECK(!(out[0].r | out[0].g | out[0].b));
+        for (i = 0; i < 256; i++) {
+            const int black = i >= n || !(c[i].r | c[i].g | c[i].b) ||
+                              (x && (unsigned)i == x);
+            CHECK(map[i] < 16);
+            CHECK((map[i] == 0) == black);
+            used[map[i]] = 1;
+            sum[map[i]][0] += c[i].r;
+            sum[map[i]][1] += c[i].g;
+            sum[map[i]][2] += c[i].b;
+            cnt[map[i]]++;
+        }
+        for (i = 1; i < 16; i++) {
+            if (n >= 64) {
+                CHECK(used[i]);
+            }
+            if (cnt[i]) {
+                CHECK(out[i].r == (sum[i][0] + cnt[i] / 2) / cnt[i]);
+                CHECK(out[i].g == (sum[i][1] + cnt[i] / 2) / cnt[i]);
+                CHECK(out[i].b == (sum[i][2] + cnt[i] / 2) / cnt[i]);
+            }
+        }
+    }
+    /* a palette change: the map stays for the same colours, for a
+     * fade's steps, at black and on the way back, its colours the kept
+     * map's means; it moves for other colours */
+    {
+        SDL_Color f[256], want_c[16];
+        Uint8 kept[256];
+        int moved = 0;
+        for (i = 0; i < 256; i++) {
+            c[i].r = (Uint8)i;
+            c[i].g = (Uint8)(i * 7);
+            c[i].b = (Uint8)(255 - i);
+        }
+        memset(map, 0, sizeof(map));
+        CHECK(stdl_sdl2_st_update(c, 256, 0, map, out) == 1);
+        CHECK(stdl_sdl2_st_update(c, 256, 0, map, out) == 0);
+        memcpy(kept, map, sizeof(kept));
+        for (k = 14; k >= 4; k--) {
+            for (i = 0; i < 256; i++) {
+                f[i].r = (Uint8)(c[i].r * k / 15);
+                f[i].g = (Uint8)(c[i].g * k / 15);
+                f[i].b = (Uint8)(c[i].b * k / 15);
+            }
+            moved += stdl_sdl2_st_update(f, 256, 0, map, out);
+        }
+        CHECK(moved == 0);
+        CHECK(memcmp(kept, map, sizeof(kept)) == 0);
+        stdl_sdl2_st_fit(f, 256, 0, kept, want_c);
+        CHECK(memcmp(want_c, out, sizeof(want_c)) == 0);
+        memset(f, 0, sizeof(f));
+        CHECK(stdl_sdl2_st_update(f, 256, 0, map, out) == 0);
+        CHECK(stdl_sdl2_st_update(c, 256, 0, map, out) == 0);
+        CHECK(memcmp(kept, map, sizeof(kept)) == 0);
+        for (i = 0; i < 256; i++) {
+            f[i].r = (Uint8)rnd();
+            f[i].g = (Uint8)rnd();
+            f[i].b = (Uint8)rnd();
+        }
+        CHECK(stdl_sdl2_st_update(f, 256, 0, map, out) == 1);
+    }
+    if (failures) {
+        printf("test_render_st: the reduction failed\n");
+    }
+    return failures;
+}
+#endif
+
+#if !defined(__m68k__) && defined(STDL_SDL2_ST)
+static int main256(void);
+
+/* an ST, which the ST build's SDL_Init takes */
+int main(void)
+{
+    /* the tall screen's 240 rows; 200 where the border cannot open,
+     * which is ST Low's page and may have three; a border cut short */
+    static const unsigned xs[] = { 0, 0x70 };
+    static const int rows[] = { 240, 200, 216 };
+    int ri, pages, xi, total = reduce_checks(), runs = 0;
+    for (ri = 0; ri < 3; ri++) {
+        for (pages = 2; pages <= 3; pages++) {
+            for (xi = 0; xi < 2; xi++) {
+                pid_t pid = fork();
+                int status = 0;
+                if (pid == 0) {
+                    const int got = rows[ri] > 200 ? 2 : pages;
+                    int f;
+                    fake_third = 1;
+                    fake_st_rows = rows[ri];
+                    fake_mach.mch_cookie = 0;
+                    SDL_SetHint(STDL_SDL2_HINT_PAGES,
+                                pages == 2 ? "2" : "3");
+                    f = run(0xC0FFEEUL + (unsigned long)pages, xs[xi],
+                            xi == 1);
+                    if (fake_npages != got || fake_stride != 160 ||
+                        !fake_tall || page_rows != rows[ri]) {
+                        printf("FAIL %d rows, %d pages asked for\n",
+                               rows[ri], pages);
+                        f++;
+                    }
+                    _exit(f ? 1 : 0);
+                }
+                waitpid(pid, &status, 0);
+                runs++;
+                if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+                    printf("test_render_st: %d rows, %d pages, X 0x%X"
+                           " failed\n", rows[ri], pages, xs[xi]);
+                    total++;
+                }
+            }
+        }
+    }
+    if (total) {
+        printf("test_render_st: failed\n");
+        return 1;
+    }
+    printf("test_render_st: ok (%d ST screens)\n", runs);
+    /* then a TT's and a Falcon's, which this build must show as the
+     * other does */
+    return main256();
+}
+#endif
+
+#if !defined(__m68k__)
 static int child(int layout, int pages, unsigned x, int xconst)
 {
     int f;
@@ -703,7 +1016,11 @@ static int child(int layout, int pages, unsigned x, int xconst)
     return f;
 }
 
+#ifdef STDL_SDL2_ST
+static int main256(void)
+#else
 int main(void)
+#endif
 {
     static const char *names[] = { "TT", "Falcon VGA", "Falcon RGB" };
     static const unsigned xs[] = { 0, 0x70, 0x30 };
@@ -746,7 +1063,12 @@ int main(void)
     hold_on_exit("SDL2RCHK");             /* SDL2RCHK: the results stay on screen */
     /* the machine's own screen, its layout read back from the page */
     SDL_SetHint(STDL_SDL2_HINT_PAGES, STDL_SDL2_TEST_PAGES);
+#ifdef STDL_SDL2_ST
+    f = reduce_checks();
+    f += run(0xC0FFEEUL, 0x70, 1);
+#else
     f = run(0xC0FFEEUL, 0x70, 1);
+#endif
     printf("S2R: %s pages, %d failures\n", STDL_SDL2_TEST_PAGES, f);
     printf("S2R:done\n");
     SDL_Quit();

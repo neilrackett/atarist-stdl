@@ -458,6 +458,7 @@ clean:
 	rm -rf $(OBJDIR)
 	rm -f $(CMINILIB) $(LIB) $(EXAMPLES) $(BUNDLE)
 	rm -f $(SDL2LIB) $(SDL2CMINILIB) $(SDL2EXAMPLES)
+	rm -f $(SDL2STLIB) $(SDL2STCMINILIB) dist/SDL2ST.TOS
 	$(MAKE) -C tests/host clean
 	$(MAKE) -C addons/sdl2/tests clean
 

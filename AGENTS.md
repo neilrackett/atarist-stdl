@@ -1560,6 +1560,31 @@ and the rules below keep it from being anything else's.
   the nearest of 74,931 colours in Python took 14.8s, against 0.2.
   `test_bmp`'s `bmp8conv.py` checks each of bmp8's promises, and each
   was broken on purpose once and failed.
+- **The 68000 build for every machine is experimental, and stays out
+  of the 68020 one** (`make sdl2st`, `docs/sdl2.md`'s "An experimental build for every machine"; its ST
+  screen is for testing).
+  - Everything of it is under `STDL_SDL2_ST` or in `st.c`, built for
+    the 68000 into archives of its own; `internal.h` refuses the macro
+    on anything above a 68000.
+  - Its archive is the whole add-on for the 68000, the 68030's
+    conversion too, and chooses at `SDL_CreateWindow` (`st_on`): a TT
+    or a Falcon gets the 256-colour screen through the other build's
+    own code paths, an ST the 16-colour one. So an ST block in
+    `video.c` is `#ifdef STDL_SDL2_ST` / `if (st_on) { ... } else` /
+    `#endif` in front of the other build's statement, never an
+    `#else`: the one `#else` is the definitions at the top (`PLANES`,
+    `ROW0`, `ROWS`, `GOFF`, `CHECKED`). A block needs no `if (st_on)`
+    where its state is neutral on a TT or a Falcon (`ROW0` 0, `ROWS`
+    240, `stale` 0).
+  - A change to it leaves every object of `libstdl-sdl2.a` byte for
+    byte as it was (`video.c` shares the compositor through `PLANES`,
+    `ROW0` and `ROWS`, which are the old constants there): compare
+    them before and after, as the core's.
+  - `test_render_st` is its test: the same model as `test_render`
+    through the renderer's map for an ST's screens, then
+    `test_render`'s own TT and Falcon screens through this build. It
+    is not shipped and has no size budget; its example is the add-on's
+    demo built against it (`dist/SDL2ST.TOS`).
 - **A change a porter would meet goes into `docs/sdl2.md` and the
   `stdl-sdl2` skill** (`.claude/skills/stdl-sdl2/SKILL.md`) in the same
   change, as the core's API changes go into the `stdl` skill.

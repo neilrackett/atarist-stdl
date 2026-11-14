@@ -28,12 +28,14 @@ int SDL_InitSubSystem(Uint32 flags)
     if (STDL_Init(STDL_INIT_EVERYTHING) < 0) {
         return SDL_SetError("%s", STDL_GetError());
     }
+#ifndef STDL_SDL2_ST
     /* _MCH 2 is a TT and 3 a Falcon; an ST, an STE or a Mega STE has
      * no 256-colour screen, and an ST with a 68030 card runs this code
      * but has neither machine's modes */
-    if (STDL_GetMachineInfo()->mch_cookie < 0x00020000UL) {
+    if (STDL_SDL2_NO_256()) {
         return SDL_SetError("This program needs a TT or a Falcon");
     }
+#endif
     stdl_sdl2_inited |= flags & SDL_INIT_EVERYTHING;
     return 0;
 }

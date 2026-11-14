@@ -385,6 +385,121 @@ A program includes `SDL_stdl.h` itself:
 `SDL_stdl_bench.h` is not a supported call, and may change: it gives
 the present's conversion and flip times for a bench.
 
+## An experimental build for every machine
+
+`make sdl2st` builds the add-on a second time, for the 68000:
+`libstdl-sdl2-st.a` and `libstdl-sdl2-st-cmini.a`, and the demo as
+`dist/SDL2ST.TOS`. A program linked with it runs on every machine. On
+a TT or a Falcon it has the 256-colour screen and shows what the
+add-on built for them shows, frame for frame; on an ST, an STE or a
+Mega STE it has a 16-colour screen that is for testing (below). It is
+experimental: `make sdl2` does not build it, the archives a TT or a
+Falcon links have none of it, it is not in a release and has no size
+budget, no real machine has run it, and what it does may change.
+
+```
+STCMD_NO_TTY=1 stcmd make sdl2st
+m68k-atari-mint-gcc -m68000 -Werror=implicit-function-declaration \
+    -I$STDL/addons/sdl2/include/SDL2 -I$STDL/include -c game.c
+m68k-atari-mint-gcc -m68000 -o GAMEST.TOS game.o \
+    $STDL/libstdl-sdl2-st.a $STDL/libstdl.a
+```
+
+The program's source does not change: it is compiled for the 68000
+and linked against the other archive. The machine is asked at
+`SDL_CreateWindow` (`_MCH`, as `SDL_Init` asks it in the other build).
+
+- **On a TT or a Falcon it is the other build's screen**, through the
+  same compositor and the same assembler, which has no instruction a
+  68000 lacks. One port's game, built both ways, showed the same page
+  and colours at every one of a replay's 640 flips on a TT and on a
+  Falcon on VGA (Hatari). What differs is that the program and the
+  compositor are 68000 code, with a 32-bit multiply a library call:
+  that game's frames took 0-5% longer on a TT (18.67ms against 18.69,
+  21.87 against 20.76) and 6-7% on a Falcon (32.90 against 30.97,
+  43.01 against 40.33), the conversion's share 3.9ms against 3.1 and
+  7.5 against 6.0. A program for those machines alone still wants the
+  other build.
+
+- **None of it reaches the 68020 build.** Every line of it is under
+  `STDL_SDL2_ST`, which only `make sdl2st` defines, and
+  `internal.h` stops the build if that macro meets a compiler
+  targeting anything above a 68000. Adding it left all 66 of the
+  add-on's objects byte for byte as they were.
+
+### An ST's screen, for testing
+
+It is there to try a program's logic, input and sound where there is
+no TT or Falcon to hand, not to play it: the picture is a rough
+16-colour one and a whole screen takes an 8MHz ST 0.64s.
+
+- **The screen follows the first window's height**, as the mode is
+  set once a program. A window of up to 200 rows gets ST Low, all of it there. A taller one gets STDL's tall
+  screen (`STDL_RESPONSIVE_TALL`, `docs/responsive.md`): 240 rows with
+  an ST's bottom border open, so a 320x240 window is all there too.
+  That screen has two pages, the border's own, whatever
+  `STDL_SDL2_HINT_PAGES` says, and the border's rules apply
+  (`docs/overscan.md`: on a real machine disk access and a moving
+  mouse make it flicker). If the border cannot open the screen is ST
+  Low and shows the middle 200 rows of the add-on's 240. The mouse is
+  reported to match either way.
+- **The palette is reduced to 16 colours** each time it changes: 15
+  slots and black. The palette's colours start in one box, and the
+  box widest in any channel is cut at the middle of that channel until
+  there are 15; a slot shows the mean of its box. So up to 15 colours
+  beside black are shown exactly, and more are shared out by the
+  palette alone, with no count of the pixels using them. Register 0
+  is black, the border's on an ST, and takes the palette's blacks and
+  the border index, which needs no XOR here.
+- **A palette change can cost a screen.** Each page holds slots, not
+  colours, so when the reduction moves any colour to another slot the
+  next page drawn on is converted again whole, from a chunky copy of
+  the screen the renderer keeps (76.8K), and the other pages catch up
+  from it. The map in use
+  stays while it shows the new colours nearly as well as a new one
+  would (its error within a quarter of the new one's), and then only
+  the 16 registers change: a fade to black and back keeps one map.
+- **Where it differs from the TT's and Falcon's:**
+  - a present flips for a new map though nothing was drawn, and
+    `STDL_SDL2_StagePalette` presents when the map moves, what was
+    copied so far with it;
+  - `STDL_SDL2_GetRegisterColours` gives the 16 registers in its first
+    16 entries, and `STDL_SDL2_GetShownPage` the page's rows, 160
+    bytes each (32,000 bytes, or the tall screen's 38,400);
+  - `STDL_SDL2_HINT_CHECK` works, and compares the page's rows;
+  - sound needs an STE's DMA sound, as STDL's ring does: on a plain ST
+    `SDL_OpenAudio` fails;
+  - the add-on's size and libgcc checks (`sdl2check`) are not run on
+    it: on a 68000 a 32-bit multiply is a library call.
+- **What it costs** on ST Low (Hatari; an ST at 8MHz, a Mega STE at
+  16MHz with its cache; the tall screen's whole screen is a fifth more
+  rows, not timed):
+
+  | | ST | Mega STE |
+  |---|---|---|
+  | A whole 320x200 screen copied and presented | 644ms | 355ms |
+  | A 64x48 box | 54ms | 31ms |
+  | A palette change that keeps the map | 96ms | 49ms |
+  | A fade's step (256 colours, to black in 16) | 205ms | 110ms |
+  | A clear and its present | 121ms | 87ms |
+
+  The conversion is a table lookup a pixel in C, about 60 cycles; the
+  fade's step was 759ms on an ST before the map was kept.
+- **Tested** by `test_render_st` on the host (`make ci` runs it):
+  `test_render.c` built with `STDL_SDL2_ST`, the page shown against
+  the model's middle rows put through the renderer's map a pixel
+  at a time, on the tall screen's 240 rows, on 200 where the border
+  did not open and on a border cut short, with two pages and three
+  and border indices 0 and 0x70, and the reduction against what it
+  promises. Then it runs `test_render`'s 18 TT and Falcon screens
+  through this build, which must show them as the other does. Eleven
+  breakages of the ST path each failed it, and ten more of it as it
+  stands. `SDL2RCST` is the same on the machine (`test_render.c` says
+  how to build it), and passed against the real STDL on Hatari's ST,
+  tall, and on its TT and its Falcon on VGA; `SDL2ST.TOS` showed all
+  240 rows on an STE. The border has not been seen on
+  a real machine with this.
+
 ## Testing it
 
 - **Host tests (`addons/sdl2/tests`, run by `make ci`):**

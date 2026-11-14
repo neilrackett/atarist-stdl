@@ -19,6 +19,7 @@ extern int fake_flips, fake_waits, fake_stagings;
 extern STDL_Colour fake_regs[256];
 extern Uint8 *fake_page[3];
 extern long fake_stride, fake_margin;
+extern int fake_tall, fake_st_rows;
 extern STDL_MachineInfo fake_mach;
 
 /* input: STDL's events as the program's pump would take them */

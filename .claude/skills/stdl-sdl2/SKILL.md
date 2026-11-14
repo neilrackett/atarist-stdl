@@ -318,6 +318,36 @@ builds by them; take a frame budget from a real machine.
   on a machine. CPUCHK (`tests/hatari/cpuchk.c`) measures the factor,
   and `tests/hatari/sccmp.py` compares its log with Hatari's.
 
+## One binary for every machine (experimental)
+
+Experimental (`docs/sdl2.md`, "An experimental build for every machine"): `stcmd
+make sdl2st` in STDL builds `libstdl-sdl2-st.a` (and `-st-cmini.a`),
+the add-on for the 68000 and every machine. Compile the program
+`-m68000`, with no `-m68020-60 -msoft-float`, and link that archive
+in place of `libstdl-sdl2.a`; the source stays as it is. On a TT or a
+Falcon that binary shows what the 68020 build shows, frame for frame,
+0-7% slower in one port's game (68000 code); on an ST it has a
+16-colour screen for testing a program there, not for playing it:
+
+- The first window's height decides: up to 200 rows gets ST Low, a
+  taller one STDL's tall screen, 240 rows with the bottom border open
+  and two pages; on a real machine disk access and a moving mouse
+  flicker that border. Where it cannot open, ST Low shows the middle
+  200 rows.
+- 16 colours: the palette is cut into 15 slots and black each time it
+  changes, exact for up to 15 colours beside black, rough beyond.
+- Slow, by design: a whole screen 0.64s on an 8MHz ST and 0.36s on a
+  Mega STE, a 64x48 box 54ms and 31ms, a palette change 0.10s, or a
+  whole screen again when the colours move to other slots
+  (Hatari). A fade to black and back keeps its slots.
+- Sound needs an STE; a plain ST's `SDL_OpenAudio` fails.
+- Run it as an ST program: `MACHINE=st`, `ste` or `megaste` with an ST
+  TOS (the `stdl` skill's "Testing in Hatari").
+
+It is not built by `make sdl2` or shipped, no real machine has run
+it, and its code cannot reach the 68020 build: the build stops if `STDL_SDL2_ST` meets a compiler
+targeting more than a 68000.
+
 ## Rules for changing the add-on itself
 
 STDL's `AGENTS.md`, "The SDL2 add-on", has them: the core stays

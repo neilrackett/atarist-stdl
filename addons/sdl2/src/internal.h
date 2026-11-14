@@ -13,6 +13,18 @@
 #include "SDL.h"
 #include <stdl/stdl.h>
 
+/* The ST build (st.h) is for the 68000 and nothing above it: the
+ * add-on a TT or a Falcon runs is built for the 68020, and so can
+ * never have a line of it. */
+#if defined(STDL_SDL2_ST) && defined(__mc68020__)
+#error "STDL_SDL2_ST is the experimental ST build's (make sdl2st): -m68000 only"
+#endif
+
+/* _MCH 2 is a TT and 3 a Falcon: anything below has no 256-colour
+ * screen (init.c says what that leaves out) */
+#define STDL_SDL2_NO_256() \
+    (STDL_GetMachineInfo()->mch_cookie < 0x00020000UL)
+
 /* SDL_INIT_ bits granted, for SDL_WasInit */
 extern Uint32 stdl_sdl2_inited;
 

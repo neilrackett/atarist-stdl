@@ -19,6 +19,8 @@ tests/hatari/out/
 libstdl-cmini.a
 libstdl-sdl2.a
 libstdl-sdl2-cmini.a
+libstdl-sdl2-st.a
+libstdl-sdl2-st-cmini.a
 .DS_Store
 obj/
 tmp/

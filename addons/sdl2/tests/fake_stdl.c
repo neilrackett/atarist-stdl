@@ -27,6 +27,7 @@ int fake_flips, fake_waits, fake_stagings;
 STDL_Colour fake_regs[256];
 Uint8 *fake_page[3];
 long fake_stride, fake_margin;
+int fake_tall, fake_st_rows = 240;  /* TALL asked for; what it gives */
 STDL_MachineInfo fake_mach;
 
 static STDL_Surface surf;
@@ -48,10 +49,13 @@ int stdl_use_responsive(unsigned what, const struct stdl_resp_model *colour,
                         void (*st_tall)(int h),
                         const struct stdl_resp_banks *banks)
 {
-    (void)tall;
-    (void)st_tall;
     (void)banks;
-    /* the add-on asks for the colour and the display's height alone */
+    /* the add-on asks for the colour and the display's height alone;
+     * its ST build for the tall screen alone, an ST's border with it */
+    if (what == STDL_RESPONSIVE_TALL && tall && st_tall) {
+        fake_tall = 1;
+        return 0;
+    }
     return (what == (STDL_RESPONSIVE_COLOUR | STDL_RESPONSIVE_HEIGHT) &&
             colour) ? 0 : -1;
 }
@@ -80,26 +84,33 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
 {
     int i;
     (void)w;
-    (void)h;
-    (void)bpp;
-    fake_stride = fake_layout == FAKE_TT ? 640 : fake_layout == FAKE_RGB ? 384
-                                                                          : 320;
-    fake_margin = fake_layout == FAKE_RGB ? 32 : 0;
+    /* an ST's tall screen: the rows its border gives, two pages */
+    if (bpp == 4 && h > 200) {
+        h = fake_tall ? fake_st_rows : 200;
+        if (h > 200) {
+            flags &= ~STDL_TRIPLEBUF;
+        }
+    }
+    /* 8 planes of 240 rows as the layout has them, or an ST's four,
+     * 160 bytes a row, which the add-on's ST build asks for */
+    fake_stride = bpp == 4 ? 160 : fake_layout == FAKE_TT ? 640
+                : fake_layout == FAKE_RGB ? 384 : 320;
+    fake_margin = bpp != 4 && fake_layout == FAKE_RGB ? 32 : 0;
     fake_npages = ((flags & STDL_TRIPLEBUF) && fake_third) ? 3 : 2;
     for (i = 0; i < fake_npages; i++) {
-        fake_page[i] = (Uint8 *)calloc((size_t)fake_stride * 240, 1);
+        fake_page[i] = (Uint8 *)calloc((size_t)fake_stride * h, 1);
     }
     fake_shown = 0;
     back = 1;
     memset(&surf, 0, sizeof(surf));
     memset(&fmt, 0, sizeof(fmt));
-    fmt.BitsPerPixel = 8;
+    fmt.BitsPerPixel = (uint8_t)bpp;
     fmt.BytesPerPixel = 1;
     surf.format = &fmt;
     surf.w = 320;
-    surf.h = 240;
+    surf.h = (uint16_t)h;
     surf.stride = (uint16_t)fake_stride;
-    surf.planes = 8;
+    surf.planes = (uint8_t)bpp;
     surf.flags = STDL_SCREEN | STDL_DOUBLEBUF |
                  (fake_npages == 3 ? STDL_TRIPLEBUF : 0);
     surf.pixels = fake_page[back] + fake_margin;

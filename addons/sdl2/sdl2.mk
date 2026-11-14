@@ -209,7 +209,72 @@ dist/SDL2DEMO.TOS: examples/sdl2demo.c $(SDL2LIB) $(LIB) | dist
 
 sdl2: $(SDL2LIB) $(SDL2CMINILIB) sdl2check $(SDL2EXAMPLES)
 
--include $(SDL2OBJS:.o=.d) $(SDL2CMINIOBJS:.o=.d) $(SDL2XOBJS:.o=.d) \
-         $(SDL2XCMINIOBJS:.o=.d)
+# The ST build, experimental (docs/sdl2.md, "An experimental build for
+# every machine"): the whole add-on for the 68000, which on a TT
+# or a Falcon is the 256-colour screen as above and on an ST an ST's
+# screen in 16 colours reduced from the palette's 256. Archives of
+# their own, every object built for the 68000 with STDL_SDL2_ST, which
+# internal.h refuses on anything above one; `make sdl2` builds none of
+# this, the archives above have none of it, and nothing here is
+# shipped. st.c is the reduction and the four-plane conversion, beside
+# the 68030's (c2p.c, c2pany.c, c2px.c), whose assembler a 68000 runs
+# too. A program is compiled -m68000 and links libstdl-sdl2-st.a where
+# it linked libstdl-sdl2.a.
+SDL2STLIB      = libstdl-sdl2-st.a
+SDL2STCMINILIB = libstdl-sdl2-st-cmini.a
+SDL2STSRCS     = $(SDL2SRCS) $(SDL2DIR)/src/st.c
+SDL2STXOBJS      = $(SDL2XOBJS:.o=.st.o)
+SDL2STXCMINIOBJS = $(SDL2XOBJS:.o=.st.cmini.o)
+SDL2STOBJS      = $(patsubst %.c,$(OBJDIR)/%.st.o,$(SDL2STSRCS))
+SDL2STCMINIOBJS = $(patsubst %.c,$(OBJDIR)/%.st.cmini.o,$(SDL2STSRCS))
+SDL2ST_CPU      = -m68000 -DSTDL_SDL2_ST
+$(foreach o,$(SDL2_SIZE),$(OBJDIR)/$(SDL2DIR)/src/$(o).st.o \
+    $(OBJDIR)/$(SDL2DIR)/src/$(o).st.cmini.o): SDL2_CFLAGS += -Os
 
-.PHONY: sdl2 sdl2check
+$(SDL2STXOBJS): $(OBJDIR)/$(SDL2DIR)/src/c2px%.st.o: $(SDL2DIR)/src/c2px.c
+	@mkdir -p $(dir $@)
+	$(CC) $(SDL2_CFLAGS) $(SDL2ST_CPU) -DSTDL_SDL2_XS=$* -c -o $@ $<
+
+$(SDL2STXCMINIOBJS): $(OBJDIR)/$(SDL2DIR)/src/c2px%.st.cmini.o: \
+                     $(SDL2DIR)/src/c2px.c
+	@mkdir -p $(dir $@)
+	$(CC) $(SDL2_CFLAGS) $(SDL2ST_CPU) -I$(CMINI)/include \
+	    -DSTDL_SDL2_XS=$* -c -o $@ $<
+
+$(SDL2STOBJS): $(OBJDIR)/%.st.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(SDL2_CFLAGS) $(SDL2ST_CPU) -c -o $@ $<
+
+$(SDL2STCMINIOBJS): $(OBJDIR)/%.st.cmini.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(SDL2_CFLAGS) $(SDL2ST_CPU) -I$(CMINI)/include -c -o $@ $<
+
+$(SDL2STLIB): $(SDL2STOBJS) $(SDL2STXOBJS)
+	$(AR) rcs $@ $(SDL2STOBJS) $(SDL2STXOBJS)
+
+$(SDL2STCMINILIB): $(SDL2STCMINIOBJS) $(SDL2STXCMINIOBJS)
+	$(AR) rcs $@ $(SDL2STCMINIOBJS) $(SDL2STXCMINIOBJS)
+
+# the add-on's example as an ST runs it
+dist/SDL2ST.TOS: examples/sdl2demo.c $(SDL2STLIB) $(LIB) | dist
+	@mkdir -p $(OBJDIR)/examples
+	$(CC) $(filter-out -m68020-60 -msoft-float,$(SDL2_PROGFLAGS)) -m68000 \
+	    -c -o $(OBJDIR)/examples/sdl2demo.st.o $<
+	$(CC) -m68000 -o $@ $(OBJDIR)/examples/sdl2demo.st.o $(SDL2STLIB) \
+	    $(LIB) && $(STRIP) $@
+
+# no SDL_ link symbol here either. What keeps this code out of the
+# archives above is the #error in internal.h and st.c, not a check here.
+sdl2st: $(SDL2STLIB) $(SDL2STCMINILIB) dist/SDL2ST.TOS
+	@if $(CROSS)nm --defined-only $(SDL2STLIB) $(SDL2STCMINILIB) \
+	     | grep -E ' [A-Za-z] _SDL_'; then \
+	   echo "*** the SDL2 add-on's ST build defines SDL_ link symbols"; \
+	   exit 1; \
+	 fi
+
+-include $(SDL2OBJS:.o=.d) $(SDL2CMINIOBJS:.o=.d) $(SDL2XOBJS:.o=.d) \
+         $(SDL2XCMINIOBJS:.o=.d) $(SDL2STOBJS:.o=.d) \
+         $(SDL2STCMINIOBJS:.o=.d) $(SDL2STXOBJS:.o=.d) \
+         $(SDL2STXCMINIOBJS:.o=.d)
+
+.PHONY: sdl2 sdl2check sdl2st

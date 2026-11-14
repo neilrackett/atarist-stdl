@@ -39,6 +39,48 @@
 #define GROUPS    (SCREEN_W / 16)
 #define ALLGROUPS ((Uint32)((1UL << GROUPS) - 1))
 
+/*
+ * The ST build (st.h), experimental: the same screen of 320x240 and the
+ * same compositor on an ST's page, which has four planes, so a group
+ * is 8 bytes. A window of up to 200 rows gets ST Low, whose page shows
+ * the screen's middle 200 rows and not the 20 above and below. A
+ * taller one gets STDL's tall screen (stdl_responsive.h), 240 rows
+ * with an ST's bottom border open, and two pages, the border's own;
+ * if the border cannot open, ST Low. ROW0 and ROWS are what was got.
+ * The pixels go through a reduction of the palette to 16 colours
+ * (st.c), remade at the present after a palette change. When that
+ * moves any colour to another slot the pages are stale: the next one
+ * drawn on is converted again whole, from a chunky copy of the screen
+ * kept for that (the screen check's model), and the others catch up
+ * from it as from any frame.
+ */
+#ifdef STDL_SDL2_ST
+#include "st.h"
+/* One program for every machine: a TT or a Falcon gets the 256-colour
+ * screen and the 68030's conversion, as the add-on built for them
+ * gives it, and st_on is 0; an ST, an STE or a Mega STE gets the above.
+ * So what is a constant in the other build is read here. */
+static int st_on, st_rows = SCREEN_H;
+#define PLANES    (st_on ? 4 : 8)
+#define ROW0      ((SCREEN_H - st_rows) >> 1)
+#define ROWS      st_rows
+/* group g's bytes into a row, a shift so that no multiply is called */
+#define GOFF(g)   ((g) << (st_on ? 3 : 4))
+#define GLONGS(n) ((n) << (st_on ? 1 : 2))  /* and n groups in longs */
+/* an ST always keeps the model, to convert from, so the check's own
+ * page says whether the check is on; the other build keeps to the
+ * model, as its objects must not change */
+#define CHECKED(r) ((r)->scratch != NULL)
+#else
+#define PLANES    8
+#define ROW0      0
+#define ROWS      SCREEN_H
+#define GOFF(g)   ((g) * 16)
+#define GLONGS(n) ((n) * 4)
+#define CHECKED(r) ((r)->model != NULL)
+#endif
+#define GB        (2 * PLANES)  /* bytes a group */
+
 struct SDL_Window {
     int w, h;
     SDL_Renderer *renderer;
@@ -93,9 +135,17 @@ struct SDL_Renderer {
     Uint32 bpart[SCREEN_H];
     Uint16 bpix[SCREEN_H][GROUPS];
 
-    Uint8 *model;               /* the check's chunky screen */
-    Uint8 *scratch;             /* and its page */
+    Uint8 *model;               /* the check's chunky screen; on an ST
+                                 * always there, to convert from */
+    Uint8 *scratch;             /* and the check's page */
     STDL_SDL2_Check chk;
+
+#ifdef STDL_SDL2_ST
+    Uint8 map[256];             /* a colour's slot of the 16 */
+    Uint32 tab[256];            /* and the slot as the conversion has it */
+    int stale;                  /* the pages hold an older map's slots */
+    int regdirty;               /* the 16 colours are to be staged */
+#endif
 
     Uint32 tconv, tflip;
     SDL_Texture *textures;
@@ -151,17 +201,33 @@ SDL_Window *SDL_CreateWindow(const char *title, int x, int y, int w, int h,
         Uint32 vflags = (pages && strcmp(pages, "2") == 0)
                         ? STDL_DOUBLEBUF : STDL_TRIPLEBUF;
         STDL_Surface *s;
-        /* a constant, so that only these two options' code links */
-        if (STDL_UseResponsive(STDL_RESPONSIVE_COLOUR |
-                               STDL_RESPONSIVE_HEIGHT) < 0) {
-            SDL_SetError("No responsive screen: %s", STDL_GetError());
-            return NULL;
-        }
-        s = STDL_SetVideoMode(SCREEN_W, SCREEN_H, 8, vflags);
-        if (!s || s->format->BitsPerPixel != 8 || s->h != SCREEN_H) {
-            SDL_SetError("This program needs a TT or a Falcon with a colour"
-                         " monitor: %s", STDL_GetError());
-            return NULL;
+#ifdef STDL_SDL2_ST
+        st_on = STDL_SDL2_NO_256();
+        if (st_on) {
+            const int tall = h > 200 &&
+                             STDL_UseResponsive(STDL_RESPONSIVE_TALL) == 0;
+            s = STDL_SetVideoMode(SCREEN_W, tall ? SCREEN_H : 200, 4, vflags);
+            if (!s || s->format->BitsPerPixel != 4 || s->h < 200 ||
+                s->h > SCREEN_H) {
+                SDL_SetError("No ST screen: %s", STDL_GetError());
+                return NULL;
+            }
+            st_rows = s->h;
+        } else
+#endif
+        {
+            /* a constant, so that only these two options' code links */
+            if (STDL_UseResponsive(STDL_RESPONSIVE_COLOUR |
+                                   STDL_RESPONSIVE_HEIGHT) < 0) {
+                SDL_SetError("No responsive screen: %s", STDL_GetError());
+                return NULL;
+            }
+            s = STDL_SetVideoMode(SCREEN_W, SCREEN_H, 8, vflags);
+            if (!s || s->format->BitsPerPixel != 8 || s->h != SCREEN_H) {
+                SDL_SetError("This program needs a TT or a Falcon with a"
+                             " colour monitor: %s", STDL_GetError());
+                return NULL;
+            }
         }
         /* colours set before a flip are shown with its page */
         STDL_StagePalette(1);
@@ -214,6 +280,10 @@ void stdl_sdl2_screen_origin(int *x, int *y)
     } else {
         *x = *y = 0;
     }
+#ifdef STDL_SDL2_ST
+    /* the page starts at the screen's row ROW0 */
+    *y -= ROW0;
+#endif
 }
 
 void SDL_SetWindowTitle(SDL_Window *window, const char *title)
@@ -240,17 +310,44 @@ static int page_index(SDL_Renderer *r, Uint8 *pix)
     return 0;
 }
 
-/* the page being drawn on, cleared first if it is owed a clear */
+#ifdef STDL_SDL2_ST
+/* an ST page's rows all colour c, as the map has it now: a group's
+ * four plane words as two longs */
+static void st_fill(SDL_Renderer *r, Uint8 *pix, unsigned c)
+{
+    const unsigned v = r->map[c];
+    Uint8 pat[8];
+    int y, g, p;
+    for (p = 0; p < 4; p++) {
+        pat[2 * p] = pat[2 * p + 1] = (Uint8)((v >> p & 1) ? 0xFF : 0);
+    }
+    for (y = 0; y < ROWS; y++) {
+        Uint8 *d = pix + y * r->stride;
+        for (g = 0; g < GROUPS; g++, d += 8) {
+            memcpy(d, pat, 8);
+        }
+    }
+}
+#endif
+
+/* the page being drawn on, cleared first if it is owed a clear; where
+ * the screen's row 0 would be, as a page of the ST build's starts at
+ * row ROW0 */
 static Uint8 *back_page(SDL_Renderer *r)
 {
     Uint8 *pix = r->screen->pixels;
     int p = page_index(r, pix);
     r->cur = p;
     if (r->clear[p]) {
+#ifdef STDL_SDL2_ST
+        if (st_on) {
+            st_fill(r, pix, r->x);
+        } else
+#endif
         memset(pix - r->margin, 0, (size_t)r->stride * SCREEN_H);
         r->clear[p] = 0;
     }
-    return pix;
+    return pix - ROW0 * r->stride;
 }
 
 /* ------------------------------------------------------------------ */
@@ -285,13 +382,22 @@ SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, int index, Uint32 flags)
     r->flags = flags;
     r->screen = the_screen;
     r->stride = the_screen->stride;
-    /* a TT's 320x240 is TT Low's 480 lines, a row on two of them */
-    r->dbl = r->stride == 2 * SCREEN_W;
-    r->dp = r->dbl ? r->stride / 2 : r->stride;
-    /* a Falcon's RGB line is 384 pixels, the picture in its middle */
-    r->margin = (r->dp - SCREEN_W) / 2;
-    r->npages = (the_screen->flags & STDL_TRIPLEBUF) ? 3 : 2;
-    r->v = &stdl_sdl2_c2p_plain;
+#ifdef STDL_SDL2_ST
+    if (st_on) {
+        /* an ST's page: a line a row, no margin */
+        r->dp = r->stride;
+        r->npages = (the_screen->flags & STDL_TRIPLEBUF) ? 3 : 2;
+    } else
+#endif
+    {
+        /* a TT's 320x240 is TT Low's 480 lines, a row on two of them */
+        r->dbl = r->stride == 2 * SCREEN_W;
+        r->dp = r->dbl ? r->stride / 2 : r->stride;
+        /* a Falcon's RGB line is 384 pixels, the picture in its middle */
+        r->margin = (r->dp - SCREEN_W) / 2;
+        r->npages = (the_screen->flags & STDL_TRIPLEBUF) ? 3 : 2;
+        r->v = &stdl_sdl2_c2p_plain;
+    }
     r->by0 = SCREEN_H;
     r->by1 = -1;
     r->drawrgb.a = 255;
@@ -302,6 +408,25 @@ SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, int index, Uint32 flags)
         r->clear[0] = r->clear[1] = r->clear[2] = 1;
     }
     screen_used = 1;
+#ifdef STDL_SDL2_ST
+    if (st_on) {
+        /* the chunky screen always, to convert again after a new map;
+         * its page only for the check */
+        const int chk = SDL_GetHintBoolean(STDL_SDL2_HINT_CHECK, SDL_FALSE);
+        r->model = (Uint8 *)calloc(SCREEN_W * SCREEN_H, 1);
+        if (chk) {
+            r->scratch = (Uint8 *)malloc((size_t)r->stride * ROWS);
+            r->chk.first_row = -1;
+        }
+        if (!r->model || (chk && !r->scratch)) {
+            free(r->model);
+            free(r->scratch);
+            free(r);
+            SDL_OutOfMemory();
+            return NULL;
+        }
+    } else
+#endif
     if (SDL_GetHintBoolean(STDL_SDL2_HINT_CHECK, SDL_FALSE)) {
         r->model = (Uint8 *)malloc(SCREEN_W * SCREEN_H);
         r->scratch = (Uint8 *)malloc((size_t)r->stride * SCREEN_H);
@@ -406,11 +531,67 @@ static int pal_changed(const SDL_Renderer *r)
     return r->paldirty || (r->pal && r->pal->version != r->palver);
 }
 
+#ifdef STDL_SDL2_ST
+/* The palette as 16 colours and a map onto them. A map that moved
+ * leaves the pages stale and is a frame to show, drawn on or not; the
+ * colours wait for st_registers, just before the flip that shows a
+ * page converted for them. Says whether the map moved. */
+static int st_reduce(SDL_Renderer *r)
+{
+    const int moved = stdl_sdl2_st_update(r->pal ? r->pal->colors : NULL,
+                                          r->pal ? r->pal->ncolors : 0,
+                                          r->x, r->map, r->regs);
+    if (moved) {
+        stdl_sdl2_st_spread(r->map, r->tab);
+        r->stale = r->frame = 1;
+    }
+    r->palver = r->pal ? r->pal->version : 0;
+    r->paldirty = 0;
+    r->regdirty = 1;
+    return moved;
+}
+
+const Uint8 *stdl_sdl2_st_map(SDL_Renderer *renderer)
+{
+    return renderer->map;
+}
+
+static void st_registers(SDL_Renderer *r)
+{
+    STDL_Colour c[16];
+    int i;
+    for (i = 0; i < 16; i++) {
+        c[i].r = r->regs[i].r;
+        c[i].g = r->regs[i].g;
+        c[i].b = r->regs[i].b;
+        c[i].unused = 0;
+    }
+    STDL_SetColours(r->screen, c, 0, 16);
+    r->regdirty = 0;
+}
+
+/* a staging's colours on an ST: with a new map, a present */
+static void st_stage(SDL_Renderer *r)
+{
+    if (st_reduce(r)) {
+        SDL_RenderPresent(r);
+    } else {
+        st_registers(r);
+    }
+}
+#endif
+
 /* register i takes colour i ^ X, register 0 black when X is set */
 static void stage(SDL_Renderer *r)
 {
     STDL_Colour c[256];
     int i;
+#ifdef STDL_SDL2_ST
+    if (st_on) {
+        st_stage(r);
+        return;
+    }
+#endif
     for (i = 0; i < 256; i++) {
         const unsigned j = (unsigned)i ^ r->x;
         SDL_Color s = { 0, 0, 0, 255 };
@@ -613,6 +794,19 @@ static __attribute__((noinline)) void batch_any(SDL_Renderer *r, int sx,
  * frame), and a Falcon fetches every instruction of them from ST-RAM. */
 static void batch_add(SDL_Renderer *r, int sx, int sy, int w, int h)
 {
+#ifdef STDL_SDL2_ST
+    /* the rows the page has */
+    if (sy < ROW0) {
+        h -= ROW0 - sy;
+        sy = ROW0;
+    }
+    if (sy + h > ROW0 + ROWS) {
+        h = ROW0 + ROWS - sy;
+    }
+    if (h <= 0) {
+        return;
+    }
+#endif
     if (((sx | w) & 15) == 0) {
         const Uint32 whole = (Uint32)(((1UL << ((sx + w) >> 4)) - 1) &
                                       ~((1UL << (sx >> 4)) - 1));
@@ -640,10 +834,10 @@ static void catch_group(SDL_Renderer *r, Uint8 *d, int y, int g)
     if (!r->shown || !((r->owed[r->cur][y] & ~r->now[y]) >> g & 1)) {
         return;
     }
-    s = r->shown + y * r->stride + g * 16;
-    memcpy(d, s, 16);
+    s = r->shown + y * r->stride + GOFF(g);
+    memcpy(d, s, GB);
     if (r->dbl) {
-        memcpy(d + r->dp, s, 16);
+        memcpy(d + r->dp, s, GB);
     }
 }
 
@@ -651,15 +845,20 @@ static void merge_part(SDL_Renderer *r, Uint8 *back, int y, int g, Uint16 pm)
 {
     const SDL_Texture *t = r->bt;
     const Uint8 *srow = t->pixels + (y - r->bdy) * t->pitch - r->bdx + g * 16;
-    Uint8 *d = back + y * r->stride + g * 16;
+    Uint8 *d = back + y * r->stride + GOFF(g);
     Uint8 in[16], out[16];
     int i, p;
     catch_group(r, d, y, g);
     for (i = 0; i < 16; i++) {
         in[i] = (pm & (0x8000u >> i)) ? srow[i] : 0;
     }
+#ifdef STDL_SDL2_ST
+    if (st_on) {
+        stdl_sdl2_st_c2p(in, 16, out, GB, 1, 1, r->tab);
+    } else
+#endif
     stdl_sdl2_c2p_c(in, 16, out, 16, 1, 1, 0, r->x2, r->x0);
-    for (p = 0; p < 8; p++) {
+    for (p = 0; p < PLANES; p++) {
         const Uint16 w = (Uint16)((RD16(d + 2 * p) & ~pm) |
                                   (RD16(out + 2 * p) & pm));
         WR16(d + 2 * p, w);
@@ -685,6 +884,14 @@ static void convert_rows(SDL_Renderer *r, Uint8 *back, int y, int n, Uint32 m)
             m >>= 1;
             ge++;
         }
+#ifdef STDL_SDL2_ST
+        if (st_on) {
+            stdl_sdl2_st_c2p(t->pixels + (y - r->bdy) * t->pitch +
+                             (g * 16 - r->bdx), t->pitch,
+                             back + y * r->stride + GOFF(g), r->dp, ge - g,
+                             n, r->tab);
+        } else
+#endif
         stdl_sdl2_c2p(t->pixels + (y - r->bdy) * t->pitch + (g * 16 - r->bdx),
                       t->pitch, back + y * r->stride + g * 16, r->dp, ge - g,
                       n, r->dbl, r->v, r->x2, r->x0);
@@ -700,6 +907,14 @@ static void flush(SDL_Renderer *r)
         return;
     }
     back = back_page(r);
+#ifdef STDL_SDL2_ST
+    /* a stale page is converted whole at the present, this batch's
+     * pixels with it, from the chunky copy every copy went into */
+    if (r->stale) {
+        drop_batch(r);
+        return;
+    }
+#endif
     /* the partial groups first, the whole ones' bits not among them */
     for (y = r->by0; r->bparts && y <= r->by1; y++) {
         Uint32 pm = r->bpart[y];
@@ -758,20 +973,31 @@ int SDL_RenderClear(SDL_Renderer *renderer)
     }
     drop_batch(r);
     c = draw_index(r);
-    v = c ^ r->x;
-    for (p = 0; p < 8; p++) {
-        pat[2 * p] = pat[2 * p + 1] = (Uint8)((v >> p & 1) ? 0xFF : 0);
-    }
-    back = back_page(r);
-    for (y = 0; y < SCREEN_H; y++) {
-        Uint8 *line = back + y * r->stride;
-        for (g = 0; g < GROUPS; g++) {
-            memcpy(line + g * 16, pat, 16);
-            if (r->dbl) {
-                memcpy(line + r->dp + g * 16, pat, 16);
-            }
+#ifdef STDL_SDL2_ST
+    if (st_on) {
+        back = back_page(r);
+        st_fill(r, back + ROW0 * r->stride, c);
+        for (y = ROW0; y < ROW0 + ROWS; y++) {
+            r->now[y] = ALLGROUPS;
         }
-        r->now[y] = ALLGROUPS;
+    } else
+#endif
+    {
+        v = c ^ r->x;
+        for (p = 0; p < 8; p++) {
+            pat[2 * p] = pat[2 * p + 1] = (Uint8)((v >> p & 1) ? 0xFF : 0);
+        }
+        back = back_page(r);
+        for (y = 0; y < SCREEN_H; y++) {
+            Uint8 *line = back + y * r->stride;
+            for (g = 0; g < GROUPS; g++) {
+                memcpy(line + g * 16, pat, 16);
+                if (r->dbl) {
+                    memcpy(line + r->dp + g * 16, pat, 16);
+                }
+            }
+            r->now[y] = ALLGROUPS;
+        }
     }
     if (r->model) {
         memset(r->model, c, SCREEN_W * SCREEN_H);
@@ -925,12 +1151,12 @@ static void catch_up(SDL_Renderer *r, Uint8 *back)
     const Uint32 *owed = r->owed[r->cur], *now = r->now;
     const long stride = r->stride, odd = r->dp >> 2;
     const int dbl = r->dbl;
-    long off = 0;
+    long off = ROW0 * stride;
     int y;
     if (!shown || shown == back) {
         return;
     }
-    for (y = 0; y < SCREEN_H; y++, off += stride) {
+    for (y = ROW0; y < ROW0 + ROWS; y++, off += stride) {
         Uint32 m = owed[y] & ~now[y];
         int g = 0;
         while (m) {
@@ -946,9 +1172,9 @@ static void catch_up(SDL_Renderer *r, Uint8 *back)
                 m >>= 1;
                 ge++;
             }
-            s = (const Uint32 *)(const void *)(shown + off + g * 16);
-            d = (Uint32 *)(void *)(back + off + g * 16);
-            n = (ge - g) * 4;
+            s = (const Uint32 *)(const void *)(shown + off + GOFF(g));
+            d = (Uint32 *)(void *)(back + off + GOFF(g));
+            n = GLONGS(ge - g);
             if (dbl) {
                 do {
                     d[odd] = *s;
@@ -968,10 +1194,16 @@ static void catch_up(SDL_Renderer *r, Uint8 *back)
  * all */
 static void check(SDL_Renderer *r, const Uint8 *back)
 {
-    const size_t bytes = (size_t)r->stride * SCREEN_H;
-    const Uint8 *a = back - r->margin;
+    const size_t bytes = (size_t)r->stride * ROWS;
+    const Uint8 *a = back + ROW0 * r->stride - r->margin;
     size_t i;
     memset(r->scratch, 0, bytes);
+#ifdef STDL_SDL2_ST
+    if (st_on) {
+        stdl_sdl2_st_c2p(r->model + ROW0 * SCREEN_W, SCREEN_W, r->scratch,
+                         r->dp, GROUPS, ROWS, r->tab);
+    } else
+#endif
     stdl_sdl2_c2p_c(r->model, SCREEN_W, r->scratch + r->margin, r->dp,
                     GROUPS, SCREEN_H, r->dbl, r->x2, r->x0);
     r->chk.flips++;
@@ -979,7 +1211,7 @@ static void check(SDL_Renderer *r, const Uint8 *back)
         if (a[i] != r->scratch[i]) {
             if (!r->chk.bad) {
                 r->chk.first_flip = r->chk.flips;
-                r->chk.first_row = (int)(i / (size_t)r->stride);
+                r->chk.first_row = (int)(i / (size_t)r->stride) + ROW0;
             }
             r->chk.bad++;
             break;
@@ -996,6 +1228,22 @@ void SDL_RenderPresent(SDL_Renderer *renderer)
     if (!r) {
         return;
     }
+#ifdef STDL_SDL2_ST
+    if (st_on) {
+        /* the map first: what this frame converts goes through it */
+        if (pal_changed(r)) {
+            st_reduce(r);
+        }
+        if (!r->frame) {
+            if (r->regdirty) {
+                st_registers(r);
+            } else if (r->flags & SDL_RENDERER_PRESENTVSYNC) {
+                STDL_WaitVBL();
+            }
+            return;
+        }
+    } else
+#endif
     if (!r->frame) {
         if (pal_changed(r)) {
             stage(r);
@@ -1007,6 +1255,19 @@ void SDL_RenderPresent(SDL_Renderer *renderer)
     t0 = STDL_GetHz38400();
     flush(r);
     back = back_page(r);
+#ifdef STDL_SDL2_ST
+    if (r->stale) {
+        /* the whole page through the new map; the other pages then owe
+         * all of it, and catch up from this one as from any frame */
+        stdl_sdl2_st_c2p(r->model + ROW0 * SCREEN_W, SCREEN_W,
+                         back + ROW0 * r->stride, r->dp, GROUPS, ROWS,
+                         r->tab);
+        for (y = ROW0; y < ROW0 + ROWS; y++) {
+            r->now[y] = ALLGROUPS;
+        }
+        r->stale = 0;
+    } else
+#endif
     catch_up(r, back);
     for (q = 0; q < r->npages; q++) {
         Uint32 *o = r->owed[q];
@@ -1020,9 +1281,16 @@ void SDL_RenderPresent(SDL_Renderer *renderer)
     }
     memset(r->owed[r->cur], 0, sizeof(r->owed[r->cur]));
     memset(r->now, 0, sizeof(r->now));
-    if (r->model) {
+    if (CHECKED(r)) {
         check(r, back);
     }
+#ifdef STDL_SDL2_ST
+    if (st_on) {
+        if (r->regdirty) {
+            st_registers(r);
+        }
+    } else
+#endif
     if (pal_changed(r)) {
         stage(r);
     }
@@ -1043,6 +1311,18 @@ int STDL_SDL2_ClearScreenNow(SDL_Renderer *renderer)
         return SDL_InvalidParamError("renderer");
     }
     drop_batch(r);
+#ifdef STDL_SDL2_ST
+    /* colour X as the map has it now, which is what the chunky copy
+     * will say is there; a page cleared so is not stale */
+    if (st_on) {
+        if (r->shown) {
+            Uint8 *pix = (Uint8 *)r->shown + ROW0 * r->stride;
+            shown = page_index(r, pix);
+            st_fill(r, pix, r->x);
+        }
+        r->stale = 0;
+    } else
+#endif
     if (r->shown) {
         shown = page_index(r, (Uint8 *)r->shown);
         memset((Uint8 *)r->shown - r->margin, 0, (size_t)r->stride * SCREEN_H);
@@ -1067,10 +1347,12 @@ int STDL_SDL2_GetShownPage(SDL_Renderer *renderer, const Uint8 **base,
         return SDL_InvalidParamError("renderer");
     }
     if (base) {
-        *base = renderer->shown ? renderer->shown - renderer->margin : NULL;
+        *base = renderer->shown ? renderer->shown +
+                                  ROW0 * renderer->stride - renderer->margin
+                                : NULL;
     }
     if (bytes) {
-        *bytes = renderer->shown ? renderer->stride * SCREEN_H : 0;
+        *bytes = renderer->shown ? renderer->stride * ROWS : 0;
     }
     return 0;
 }
@@ -1080,7 +1362,7 @@ int STDL_SDL2_GetCheck(SDL_Renderer *renderer, STDL_SDL2_Check *check)
     if (!renderer || !check) {
         return SDL_InvalidParamError("renderer");
     }
-    if (!renderer->model) {
+    if (!CHECKED(renderer)) {
         return SDL_SetError("The screen check is off (STDL_SDL2_HINT_CHECK)");
     }
     *check = renderer->chk;

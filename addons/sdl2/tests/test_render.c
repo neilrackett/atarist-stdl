@@ -606,6 +606,41 @@ static void port_sequences(void)
         step++;
     }
 
+    /* boxes pushed again as they were, with a pixel changed, and after
+     * another buffer drew over them: the ST build converts only the
+     * groups that differ from what the screen has */
+    {
+        Tex *other = borrowed(256, 224, 256, 0);
+        for (i = 0; i < 30; i++) {
+            box.x = 16 * rndn(8);
+            box.w = 16 * (1 + rndn(8));
+            box.y = rndn(120);
+            box.h = 1 + rndn(100);
+            switch (rndn(4)) {
+            case 0:             /* one pixel of it */
+                layer->px[(box.y + rndn(box.h)) * 256 + box.x + rndn(box.w)]++;
+                break;
+            case 1:             /* a row of it */
+                fill_random(layer->px + (box.y + rndn(box.h)) * 256 + box.x,
+                            box.w);
+                break;
+            case 2:             /* the other buffer over a part first */
+                {
+                    SDL_Rect o = box;
+                    o.w = 16;
+                    o.h = 1 + rndn(box.h);
+                    copy(other, &o, &o);
+                }
+                break;
+            default:            /* nothing: as it was */
+                break;
+            }
+            copy(layer, &box, &box);
+            present();
+            step++;
+        }
+    }
+
     /* two buffers in one frame, the second over the first */
     title = borrowed(256, 224, 256, 0);
     for (i = 0; i < 10; i++) {
@@ -953,25 +988,32 @@ int main(void)
     /* the tall screen's 240 rows; 200 where the border cannot open,
      * which is ST Low's page and may have three; a border cut short */
     static const unsigned xs[] = { 0, 0x70 };
-    static const int rows[] = { 240, 200, 216 };
+    static const int rows[] = { 240, 200, 216, 0 };
     int ri, pages, xi, total = reduce_checks(), runs = 0;
-    for (ri = 0; ri < 3; ri++) {
+    for (ri = 0; ri < 4; ri++) {
         for (pages = 2; pages <= 3; pages++) {
             for (xi = 0; xi < 2; xi++) {
                 pid_t pid = fork();
                 int status = 0;
                 if (pid == 0) {
-                    const int got = rows[ri] > 200 ? 2 : pages;
+                    /* the last: the tall screen there, and the hint
+                     * against it */
+                    const int want_rows = rows[ri] ? rows[ri] : 200;
+                    const int got = want_rows > 200 ? 2 : pages;
                     int f;
                     fake_third = 1;
-                    fake_st_rows = rows[ri];
+                    fake_st_rows = rows[ri] ? rows[ri] : 240;
+                    if (!rows[ri]) {
+                        SDL_SetHint(STDL_SDL2_HINT_ST_TALL, "0");
+                    }
                     fake_mach.mch_cookie = 0;
                     SDL_SetHint(STDL_SDL2_HINT_PAGES,
                                 pages == 2 ? "2" : "3");
                     f = run(0xC0FFEEUL + (unsigned long)pages, xs[xi],
                             xi == 1);
                     if (fake_npages != got || fake_stride != 160 ||
-                        !fake_tall || page_rows != rows[ri]) {
+                        fake_tall != (rows[ri] != 0) ||
+                        page_rows != want_rows) {
                         printf("FAIL %d rows, %d pages asked for\n",
                                rows[ri], pages);
                         f++;

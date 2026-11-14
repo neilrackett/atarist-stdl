@@ -34,6 +34,13 @@ extern "C" {
  * flip, for testing; STDL_SDL2_GetCheck reads the result. */
 #define STDL_SDL2_HINT_CHECK "STDL_SDL2_CHECK"
 
+/* "0": in the experimental 68000 build (docs/sdl2.md), an ST's screen
+ * is ST Low whatever the window's height: 200 rows, the middle ones of
+ * a taller window, and three pages, where the tall screen's two make
+ * every present wait for the blank. Nothing on a TT or a Falcon, or in
+ * the build for them. Read by the first SDL_CreateWindow. */
+#define STDL_SDL2_HINT_ST_TALL "STDL_SDL2_ST_TALL"
+
 /* a file name: where SDL_Log writes, a line a message, from the first
  * message on. Unset, the log goes nowhere; never to the console (see
  * SDL_log.h). */

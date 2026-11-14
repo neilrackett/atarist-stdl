@@ -333,11 +333,18 @@ Falcon that binary shows what the 68020 build shows, frame for frame,
   taller one STDL's tall screen, 240 rows with the bottom border open
   and two pages; on a real machine disk access and a moving mouse
   flicker that border. Where it cannot open, ST Low shows the middle
-  200 rows.
+  200 rows. Two pages make every present wait for the blank;
+  `SDL_SetHint(STDL_SDL2_HINT_ST_TALL, "0")` keeps ST Low and its
+  three pages for a taller window.
+- Copy whole groups from an even address (x and width multiples of 16,
+  an even pitch): those copies are compared with what the screen has,
+  and only the groups that differ are converted, so pushing a block
+  again as it was costs a compare.
 - 16 colours: the palette is cut into 15 slots and black each time it
   changes, exact for up to 15 colours beside black, rough beyond.
-- Slow, by design: a whole screen 0.64s on an 8MHz ST and 0.36s on a
-  Mega STE, a 64x48 box 54ms and 31ms, a palette change 0.10s, or a
+- Slow, by design: a whole screen of new pixels 0.53s on an 8MHz ST and
+  0.31s on a Mega STE, a new 64x48 box 30ms and 17ms, a palette change
+  0.10s, or a
   whole screen again when the colours move to other slots
   (Hatari). A fade to black and back keeps its slots.
 - Sound needs an STE; a plain ST's `SDL_OpenAudio` fails.

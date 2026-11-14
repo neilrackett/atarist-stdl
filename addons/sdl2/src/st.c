@@ -221,23 +221,92 @@ int stdl_sdl2_st_update(const SDL_Color *col, int ncol, unsigned x,
 
 /*
  * The conversion. A slot's four bits are spread a byte each over a
- * long (stdl_sdl2_st_spread), so eight pixels shifted in one after
- * another leave each of the long's bytes a plane's eight pixels: a
- * group is two such longs, the first the high bytes of its four plane
- * words and the second the low ones, which is what movep writes. A
- * lookup a pixel and no merges, in gcc's C about 60 cycles a pixel.
+ * long, so the pixels of a byte of each plane ORed together, each
+ * shifted to its place, leave each of the long's bytes a plane's eight
+ * pixels: a group is two such longs, the first the high bytes of its
+ * four plane words and the second the low ones, which is what movep
+ * writes. The table has the spread four times over, shifted 3, 2, 1
+ * and 0 (stdl_sdl2_st_spread), so four pixels are four lookups and no
+ * shifts, and the next four go in after one shift by 4.
+ *
+ * On the machine the rows are assembler, with the C as its twin, which
+ * the host runs: gcc 4.6 built one table and a shift a pixel at about
+ * 60 cycles a pixel, a clear and a 16-bit index among them where the
+ * assembler has 40 (a clear, the byte, two adds for the index, the OR)
+ * and a shift every fourth. The test's own pixel-by-pixel conversion
+ * is what both are held to (test_render.c), on the machine too.
  */
 
 void stdl_sdl2_st_spread(const Uint8 *map, Uint32 *tab)
 {
-    int i;
+    int i, k;
     for (i = 0; i < 256; i++) {
         const Uint32 m = map[i];
-        tab[i] = (m & 1) << 24 | (m & 2) << 15 | (m & 4) << 6 | (m & 8) >> 3;
+        const Uint32 v = (m & 1) << 24 | (m & 2) << 15 | (m & 4) << 6 |
+                         (m & 8) >> 3;
+        for (k = 0; k < 4; k++) {
+            tab[k * 256 + i] = v << (3 - k);
+        }
     }
 }
 
-#define PIX(a, s) ((a) + (a) + tab[*(s)++])
+#ifdef __m68k__
+/* d0 and d2 the group's two longs, d1 the pixel's index, a2-a5 the four
+ * tables; d3 groups - 1, d6 the group count, d7 the rows, d4 and d5 what
+ * is left of each row's strides */
+#define ST_P(op, t) \
+    "	moveq	#0,%d1\n" \
+    "	move.b	(%a0)+,%d1\n" \
+    "	add.w	%d1,%d1\n" \
+    "	add.w	%d1,%d1\n" \
+    "	" op "	(" t ",%d1.w),"
+#define ST_L(r) \
+    ST_P("move.l", "%a2") r "\n" ST_P("or.l", "%a3") r "\n" \
+    ST_P("or.l", "%a4") r "\n" ST_P("or.l", "%a5") r "\n" \
+    "	lsl.l	#4," r "\n" \
+    ST_P("or.l", "%a2") r "\n" ST_P("or.l", "%a3") r "\n" \
+    ST_P("or.l", "%a4") r "\n" ST_P("or.l", "%a5") r "\n"
+
+__asm__(
+"	.text\n"
+"	.even\n"
+"	.globl	_stdl_sdl2_st_c2p\n"
+"_stdl_sdl2_st_c2p:\n"
+"	movem.l	%d2-%d7/%a2-%a5,-(%sp)\n"
+"	move.l	44(%sp),%a0\n"            /* src */
+"	move.l	48(%sp),%d4\n"            /* sp */
+"	move.l	52(%sp),%a1\n"            /* dst */
+"	move.l	56(%sp),%d5\n"            /* dp */
+"	move.l	60(%sp),%d3\n"            /* groups */
+"	move.l	64(%sp),%d7\n"            /* h */
+"	move.l	68(%sp),%a2\n"            /* tab */
+"	lea	1024(%a2),%a3\n"
+"	lea	1024(%a3),%a4\n"
+"	lea	1024(%a4),%a5\n"
+"	move.l	%d3,%d0\n"
+"	lsl.l	#3,%d0\n"
+"	sub.l	%d0,%d5\n"                /* dp - 8 * groups */
+"	add.l	%d0,%d0\n"
+"	sub.l	%d0,%d4\n"                /* sp - 16 * groups */
+"	subq.w	#1,%d3\n"
+"1:	move.w	%d3,%d6\n"
+"2:\n"
+ST_L("%d0")
+ST_L("%d2")
+"	movep.l	%d0,0(%a1)\n"
+"	movep.l	%d2,1(%a1)\n"
+"	addq.l	#8,%a1\n"
+"	dbra	%d6,2b\n"
+"	add.l	%d4,%a0\n"
+"	add.l	%d5,%a1\n"
+"	subq.l	#1,%d7\n"
+"	bne	1b\n"
+"	movem.l	(%sp)+,%d2-%d7/%a2-%a5\n"
+"	rts\n"
+);
+#else
+#define FOUR(s) (tab[(s)[0]] | tab[256 + (s)[1]] | tab[512 + (s)[2]] | \
+                 tab[768 + (s)[3]])
 
 void stdl_sdl2_st_c2p(const Uint8 *src, long sp, Uint8 *dst, long dp,
                       long groups, long h, const Uint32 *tab)
@@ -246,27 +315,9 @@ void stdl_sdl2_st_c2p(const Uint8 *src, long sp, Uint8 *dst, long dp,
         const Uint8 *s = src;
         Uint8 *d = dst;
         long g;
-        for (g = groups; g > 0; g--, d += 8) {
-            Uint32 a = tab[*s++], b;
-            a = PIX(a, s);
-            a = PIX(a, s);
-            a = PIX(a, s);
-            a = PIX(a, s);
-            a = PIX(a, s);
-            a = PIX(a, s);
-            a = PIX(a, s);
-            b = tab[*s++];
-            b = PIX(b, s);
-            b = PIX(b, s);
-            b = PIX(b, s);
-            b = PIX(b, s);
-            b = PIX(b, s);
-            b = PIX(b, s);
-            b = PIX(b, s);
-#ifdef __m68k__
-            __asm__ volatile("movep.l %0,0(%2)\n\tmovep.l %1,1(%2)"
-                             : : "d" (a), "d" (b), "a" (d) : "memory");
-#else
+        for (g = groups; g > 0; g--, s += 16, d += 8) {
+            const Uint32 a = FOUR(s) << 4 | FOUR(s + 4);
+            const Uint32 b = FOUR(s + 8) << 4 | FOUR(s + 12);
             d[0] = (Uint8)(a >> 24);
             d[2] = (Uint8)(a >> 16);
             d[4] = (Uint8)(a >> 8);
@@ -275,7 +326,7 @@ void stdl_sdl2_st_c2p(const Uint8 *src, long sp, Uint8 *dst, long dp,
             d[3] = (Uint8)(b >> 16);
             d[5] = (Uint8)(b >> 8);
             d[7] = (Uint8)b;
-#endif
         }
     }
 }
+#endif

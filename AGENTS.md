@@ -1571,9 +1571,9 @@ and the rules below keep it from being anything else's.
     or a Falcon gets the 256-colour screen through the other build's
     own code paths, an ST the 16-colour one. So an ST block in
     `video.c` is `#ifdef STDL_SDL2_ST` / `if (st_on) { ... } else` /
-    `#endif` in front of the other build's statement, never an
-    `#else`: the one `#else` is the definitions at the top (`PLANES`,
-    `ROW0`, `ROWS`, `GOFF`, `CHECKED`). A block needs no `if (st_on)`
+    `#endif` in front of the other build's statement. An `#else`
+    keeps the other build's statements as they were, where this build
+    replaces them (the definitions at the top, a present's rows). A block needs no `if (st_on)`
     where its state is neutral on a TT or a Falcon (`ROW0` 0, `ROWS`
     240, `stale` 0).
   - A change to it leaves every object of `libstdl-sdl2.a` byte for

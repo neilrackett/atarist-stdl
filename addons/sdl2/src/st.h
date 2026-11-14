@@ -40,11 +40,13 @@ Uint32 stdl_sdl2_st_fit(const SDL_Color *col, int ncol, unsigned x,
 int stdl_sdl2_st_update(const SDL_Color *col, int ncol, unsigned x,
                         Uint8 *map, SDL_Color *out);
 
-/* map as the conversion's table: a slot's four bits, a byte each */
+/* map as the conversion's table of 4 by 256 longs: a slot's four
+ * bits, a byte each, shifted 3, 2, 1 and 0 */
 void stdl_sdl2_st_spread(const Uint8 *map, Uint32 *tab);
 
 /* h rows of `groups` groups of 16 pixels from src, sp bytes a row,
- * through tab to four planes at dst, dp bytes a row, 8 bytes a group */
+ * through tab to four planes at dst, dp bytes a row, 8 bytes a group;
+ * at least one of each, 32,768 groups at most */
 void stdl_sdl2_st_c2p(const Uint8 *src, long sp, Uint8 *dst, long dp,
                       long groups, long h, const Uint32 *tab);
 

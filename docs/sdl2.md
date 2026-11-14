@@ -431,18 +431,30 @@ and linked against the other archive. The machine is asked at
 
 It is there to try a program's logic, input and sound where there is
 no TT or Falcon to hand, not to play it: the picture is a rough
-16-colour one and a whole screen takes an 8MHz ST 0.64s.
+16-colour one and a whole screen of new pixels takes an 8MHz ST 0.53s.
 
 - **The screen follows the first window's height**, as the mode is
-  set once a program. A window of up to 200 rows gets ST Low, all of it there. A taller one gets STDL's tall
-  screen (`STDL_RESPONSIVE_TALL`, `docs/responsive.md`): 240 rows with
-  an ST's bottom border open, so a 320x240 window is all there too.
-  That screen has two pages, the border's own, whatever
-  `STDL_SDL2_HINT_PAGES` says, and the border's rules apply
-  (`docs/overscan.md`: on a real machine disk access and a moving
-  mouse make it flicker). If the border cannot open the screen is ST
-  Low and shows the middle 200 rows of the add-on's 240. The mouse is
-  reported to match either way.
+  set once a program. A window of up to 200 rows gets ST Low, all of
+  it there. A taller one gets STDL's tall screen
+  (`STDL_RESPONSIVE_TALL`, `docs/responsive.md`): 240 rows with an ST's
+  bottom border open, so a 320x240 window is all there too. That
+  screen has two pages, the border's own, whatever
+  `STDL_SDL2_HINT_PAGES` says, so every present waits for the blank
+  (10ms a frame of one port's game on a Mega STE), and the border's
+  rules apply (`docs/overscan.md`: on a real machine disk access and a
+  moving mouse make it flicker). If the border cannot open the screen
+  is ST Low and shows the middle 200 rows of the add-on's 240. The
+  mouse is reported to match either way.
+  `SDL_SetHint(STDL_SDL2_HINT_ST_TALL, "0")` before the window keeps
+  ST Low whatever the height: the middle 200 rows, three pages and no
+  wait.
+- **Only what changed is converted.** A copy of whole groups (x and
+  width multiples of 16, pixels at an even address, an even pitch) is
+  compared with the chunky copy of the screen, a group at a time, and
+  only the groups that differ are converted. A program that pushes
+  the blocks it drew on, changed or not, pays a compare for most of
+  them: one port's game converted 6ms a frame on a Mega STE where it
+  had converted 20. Other copies are converted whole.
 - **The palette is reduced to 16 colours** each time it changes: 15
   slots and black. The palette's colours start in one box, and the
   box widest in any channel is cut at the middle of that channel until
@@ -469,6 +481,8 @@ no TT or Falcon to hand, not to play it: the picture is a rough
   - `STDL_SDL2_HINT_CHECK` works, and compares the page's rows;
   - sound needs an STE's DMA sound, as STDL's ring does: on a plain ST
     `SDL_OpenAudio` fails;
+  - a texture has at most 32,767 rows and bytes a row, as rows are
+    found with the 68000's 16-bit multiply;
   - the add-on's size and libgcc checks (`sdl2check`) are not run on
     it: on a 68000 a 32-bit multiply is a library call.
 - **What it costs** on ST Low (Hatari; an ST at 8MHz, a Mega STE at
@@ -477,24 +491,32 @@ no TT or Falcon to hand, not to play it: the picture is a rough
 
   | | ST | Mega STE |
   |---|---|---|
-  | A whole 320x200 screen copied and presented | 644ms | 355ms |
-  | A 64x48 box | 54ms | 31ms |
+  | A whole 320x200 screen, every pixel new | 529ms | 312ms |
+  | The same screen pushed again as it was | 161ms | 104ms |
+  | A 64x48 box, new | 30ms | 17ms |
   | A palette change that keeps the map | 96ms | 49ms |
   | A fade's step (256 colours, to black in 16) | 205ms | 110ms |
-  | A clear and its present | 121ms | 87ms |
+  | A clear and its present | 64ms | 49ms |
 
-  The conversion is a table lookup a pixel in C, about 60 cycles; the
-  fade's step was 759ms on an ST before the map was kept.
+  A present of little is held to the display's rate on three pages
+  (the box as it was: 19ms, a blank). The conversion is assembler, a
+  table lookup a pixel: 644ms a screen on an ST in gcc's C, 516 in
+  assembler with a table for each of four pixel places. A present went
+  through all 240 rows of its bookkeeping three times, 7ms on an ST
+  whatever was drawn, until it kept the rows a frame touched. The
+  fade's step was 759ms before the map was kept.
 - **Tested** by `test_render_st` on the host (`make ci` runs it):
   `test_render.c` built with `STDL_SDL2_ST`, the page shown against
   the model's middle rows put through the renderer's map a pixel
   at a time, on the tall screen's 240 rows, on 200 where the border
   did not open and on a border cut short, with two pages and three
   and border indices 0 and 0x70, and the reduction against what it
-  promises. Then it runs `test_render`'s 18 TT and Falcon screens
-  through this build, which must show them as the other does. Eleven
-  breakages of the ST path each failed it, and ten more of it as it
-  stands. `SDL2RCST` is the same on the machine (`test_render.c` says
+  promises, and ST Low by the hint. Then it runs `test_render`'s 18 TT
+  and Falcon screens through this build, which must show them as the
+  other does. Eleven breakages of the ST path each failed it, ten more
+  of it as it stood at v1.24.0, and fifteen of the changed-group
+  compare, the rows kept and the conversion's tables (a sixteenth,
+  a page's owed rows never cleared, only copies more). `SDL2RCST` is the same on the machine (`test_render.c` says
   how to build it), and passed against the real STDL on Hatari's ST,
   tall, and on its TT and its Falcon on VGA; `SDL2ST.TOS` showed all
   240 rows on an STE. The border has not been seen on

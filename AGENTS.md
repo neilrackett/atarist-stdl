@@ -1585,6 +1585,37 @@ and the rules below keep it from being anything else's.
     `test_render`'s own TT and Falcon screens through this build. It
     is not shipped and has no size budget; its example is the add-on's
     demo built against it (`dist/SDL2ST.TOS`).
+- **Tried and dropped, kept as an idea for a port that needs it: the
+  changed-group compare on a TT's and a Falcon's screen** (November
+  2026). The experimental 68000 build's ST screen compares each copy
+  of whole groups with a chunky copy of the screen and converts only
+  the groups that differ (`st_copy_changed`), which took one port's
+  conversion on a Mega STE from 20ms a frame to 6. The same compare on
+  the 256-colour path, behind a hint, measured with that port's game
+  in Hatari (compare off, then on):
+  - the conversion about halved on both machines (TT 3.1 to 1.7ms a
+    frame, Falcon 6.1 to 3.3);
+  - a frame of play barely moved: Falcon 31.28 to 29.99ms and 40.69
+    to 39.72 (2-4%), TT 18.67 to 18.71 and 20.77 to 20.43, where the
+    saving went into a longer wait for the blank;
+  - three cutscenes' work on a Falcon, every frame drawn, 32.5s to
+    31.6 (3%): two faster by 6-8%, one where every pixel moves 1.5%
+    slower;
+  - every flip showed what it showed without it, and `test_render`
+    passed with it off and on over all 18 screens.
+
+  It lost because the conversion there is already assembler and only
+  15-20% of that game's frame, where on an ST it was a quarter to a
+  third at 750 cycles a group; and the compare is not free, a read of
+  every pixel copied. It would have cost 76.8K for the chunky copy,
+  436 of the size budget's 680 bytes left, and the build's objects
+  their byte-for-byte match with the release. Worth trying again only
+  for a program that pushes far more unchanged pixels than that one
+  (whole-screen pushes of a mostly still picture), and then first in
+  the experimental build, whose `STDL_SDL2_ST` already compiles the
+  compare: the change was to let it run with `st_on` 0, `LONGS_AT` 0
+  on a 68020, and one `CHECKED` for both builds since the model then
+  exists without the check.
 - **A change a porter would meet goes into `docs/sdl2.md` and the
   `stdl-sdl2` skill** (`.claude/skills/stdl-sdl2/SKILL.md`) in the same
   change, as the core's API changes go into the `stdl` skill.

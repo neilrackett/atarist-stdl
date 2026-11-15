@@ -65,15 +65,16 @@ The calls it has:
 | Renderer | `SDL_CreateRenderer`, `SDL_DestroyRenderer`, `SDL_RenderSetLogicalSize`, `SDL_RenderGetLogicalSize`, `SDL_SetRenderDrawColor`, `SDL_RenderClear`, `SDL_RenderCopy`, `SDL_RenderPresent` |
 | Textures | `SDL_CreateTexture`, `SDL_CreateTextureFromSurface`, `SDL_DestroyTexture`, `SDL_UpdateTexture`, `SDL_LockTexture`, `SDL_UnlockTexture`, `SDL_QueryTexture` |
 | Palettes | `SDL_AllocPalette`, `SDL_SetPaletteColors`, `SDL_FreePalette` |
-| Events | `SDL_PollEvent`, `SDL_PumpEvents`, `SDL_WaitEvent`, `SDL_WaitEventTimeout`, `SDL_PushEvent`, `SDL_FlushEvent`, `SDL_FlushEvents`, `SDL_EventState`, `SDL_GetEventState`, `SDL_RegisterEvents` |
+| Events | `SDL_PollEvent`, `SDL_PumpEvents`, `SDL_WaitEvent`, `SDL_WaitEventTimeout`, `SDL_PushEvent`, `SDL_PeepEvents`, `SDL_FlushEvent`, `SDL_FlushEvents`, `SDL_EventState`, `SDL_GetEventState`, `SDL_RegisterEvents` |
 | Keyboard | `SDL_GetKeyboardState`, `SDL_GetModState`, `SDL_StartTextInput`, `SDL_StopTextInput`, `SDL_IsTextInputActive`, `SDL_GetScancodeFromKey`, `SDL_GetKeyFromScancode` |
-| Mouse | `SDL_GetMouseState`, `SDL_ShowCursor` (there is no cursor) |
-| Joystick | `SDL_NumJoysticks`, `SDL_JoystickNameForIndex`, `SDL_JoystickOpen`, `SDL_JoystickClose`, `SDL_JoystickName`, `SDL_JoystickInstanceID`, `SDL_JoystickNumAxes`, `SDL_JoystickNumButtons`, `SDL_JoystickNumHats`, `SDL_JoystickGetAxis`, `SDL_JoystickGetButton`, `SDL_JoystickGetHat`, `SDL_JoystickRumble`, `SDL_JoystickEventState` |
-| Game controller | `SDL_IsGameController`, `SDL_GameControllerOpen`, `SDL_GameControllerClose`, `SDL_GameControllerName`, `SDL_GameControllerNameForIndex`, `SDL_GameControllerGetAttached`, `SDL_GameControllerGetJoystick`, `SDL_GameControllerGetButton`, `SDL_GameControllerGetAxis`, `SDL_GameControllerRumble`, `SDL_GameControllerEventState` |
+| Mouse | `SDL_GetMouseState`, `SDL_GetRelativeMouseState`, `SDL_SetRelativeMouseMode`, `SDL_GetRelativeMouseMode`, `SDL_WarpMouseInWindow`, `SDL_ShowCursor` (there is no cursor) |
+| Joystick | `SDL_NumJoysticks`, `SDL_JoystickNameForIndex`, `SDL_JoystickOpen`, `SDL_JoystickClose`, `SDL_JoystickName`, `SDL_JoystickInstanceID`, `SDL_JoystickNumAxes`, `SDL_JoystickNumButtons`, `SDL_JoystickNumHats`, `SDL_JoystickGetAxis`, `SDL_JoystickGetButton`, `SDL_JoystickGetHat`, `SDL_JoystickRumble`, `SDL_JoystickEventState`, `SDL_JoystickGetDeviceGUID`, `SDL_JoystickGetGUID`, `SDL_JoystickGetGUIDString`, `SDL_JoystickGetGUIDFromString` |
+| Game controller | `SDL_IsGameController`, `SDL_GameControllerOpen`, `SDL_GameControllerClose`, `SDL_GameControllerName`, `SDL_GameControllerNameForIndex`, `SDL_GameControllerGetAttached`, `SDL_GameControllerGetJoystick`, `SDL_GameControllerGetButton`, `SDL_GameControllerGetAxis`, `SDL_GameControllerRumble`, `SDL_GameControllerEventState`, `SDL_GameControllerTypeForIndex`, `SDL_GameControllerGetType` |
 | Surfaces | `SDL_CreateRGBSurface`, `SDL_CreateRGBSurfaceWithFormat`, `SDL_CreateRGBSurfaceFrom`, `SDL_FreeSurface`, `SDL_SetSurfacePalette`, `SDL_LockSurface`, `SDL_UnlockSurface`, `SDL_SetColorKey`, `SDL_GetColorKey`, `SDL_SetClipRect`, `SDL_GetClipRect`, `SDL_FillRect`, `SDL_BlitSurface` (`SDL_UpperBlit`), `SDL_LoadBMP`, `SDL_LoadBMP_RW` (uncompressed, 1, 4 or 8 bits: below) |
 | Streams | `SDL_RWFromFile`, `SDL_RWFromFP`, `SDL_RWFromMem`, `SDL_RWFromConstMem`, `SDL_AllocRW`, `SDL_FreeRW`, `SDL_RWsize`, `SDL_RWseek`, `SDL_RWtell`, `SDL_RWread`, `SDL_RWwrite`, `SDL_RWclose`, `SDL_ReadU8`, `SDL_ReadLE16`/`BE16`/`LE32`/`BE32`, `SDL_WriteU8`, `SDL_WriteLE16`/`BE16`/`LE32`/`BE32` |
 | Log | `SDL_Log`, `SDL_LogVerbose`, `SDL_LogDebug`, `SDL_LogInfo`, `SDL_LogWarn`, `SDL_LogError`, `SDL_LogCritical`, `SDL_LogMessage`, `SDL_LogMessageV`, `SDL_LogSetPriority`, `SDL_LogSetAllPriority` |
 | Audio | `SDL_OpenAudio`, `SDL_OpenAudioDevice`, `SDL_PauseAudio`, `SDL_PauseAudioDevice`, `SDL_GetAudioStatus`, `SDL_GetAudioDeviceStatus`, `SDL_LockAudio`, `SDL_LockAudioDevice`, `SDL_UnlockAudio`, `SDL_UnlockAudioDevice`, `SDL_CloseAudio`, `SDL_CloseAudioDevice`, `SDL_QueueAudio`, `SDL_GetQueuedAudioSize`, `SDL_ClearQueuedAudio`, `SDL_MixAudio`, `SDL_MixAudioFormat`, `SDL_LoadWAV`, `SDL_LoadWAV_RW`, `SDL_FreeWAV`, `SDL_GetNumAudioDevices`, `SDL_GetAudioDeviceName`, `SDL_GetNumAudioDrivers`, `SDL_GetAudioDriver`, `SDL_GetCurrentAudioDriver` |
+| Byte order, paths | `SDL_BYTEORDER`, `SDL_Swap16`/`32`/`64`, `SDL_SwapLE16`/`32`/`64`, `SDL_SwapBE16`/`32`/`64` (`SDL_endian.h`), `SDL_GetBasePath`, `SDL_GetPrefPath` (`SDL_filesystem.h`: none, below) |
 | Clock, platform | `SDL_GetTicks`, `SDL_GetTicks64`, `SDL_Delay`, `SDL_GetPerformanceCounter`, `SDL_GetPerformanceFrequency` (38,400), `SDL_GetPlatform` ("Atari") |
 
 Every name is a macro onto a `stdl_sdl2_` link name, so the archive
@@ -139,7 +140,17 @@ All of these come from the machine:
   `SDL_TEXTINPUT` carries the ASCII character a key types; there is
   no `SDL_TEXTEDITING`. `KMOD_` values are SDL2's, which are STDL's.
 - **The mouse** is in the logical size's coordinates, measured from
-  its top left. There is no relative mode, wheel or cursor.
+  its top left. There is no wheel or cursor (`SDL_MOUSEWHEEL` and
+  its event are defined, so a program's handler compiles, and never
+  come).
+  `SDL_GetRelativeMouseState` gives the motion events' `xrel` and
+  `yrel` summed since it was last called (the IKBD's own deltas, so
+  they keep coming at the screen's edge), counted whether or not the
+  program takes the events or ignores them, as SDL2 counts them.
+  `SDL_SetRelativeMouseMode` is accepted and changes nothing: there is
+  no cursor to hide or desktop to keep the mouse in.
+  `SDL_WarpMouseInWindow` moves STDL's pointer, which sends a motion
+  event, as SDL2's does.
 - **Joysticks: STDL's, by the same numbers.** One, joystick 0 (the
   joystick port and an Xpad provider's pad 0), unless the program asks
   STDL for more: `STDL_SetNumJoysticks(n)` (`stdl_event.h`), called
@@ -164,6 +175,13 @@ All of these come from the machine:
   event, a device event included, and their changes sent, so its d-pad
   is the pad's hat or the joystick's directions; one that goes lets go
   of everything first, and comes back at rest.
+  A joystick's GUID, which programs keep in their settings to find
+  the same device again, is `"STDL"` and its index, zeros after:
+  `5354444c0000...` is joystick 0. STDL numbers joysticks by where they
+  come from, so a pad found behind one later leaves its GUID as it
+  was. The string calls are inline in `SDL_joystick.h`.
+  `SDL_GameControllerTypeForIndex` and `SDL_GameControllerGetType` say
+  `SDL_CONTROLLER_TYPE_UNKNOWN`: STDL does not know which pad it is.
   Rumble is each pad's own, takes the top 8 bits of each motor and at
   most 65,535ms. The code behind joysticks 1-5 is linked only where
   the program asks; the device events' call, which the first pump
@@ -175,6 +193,13 @@ All of these come from the machine:
   surface's palette is not the screen's, the renderer's is.
   `SDL_LoadBMP` reads 8-bit BMPs, and 1- and 4-bit ones as 8-bit, but
   not RLE or 16 to 32 bits (the next section).
+- **Byte order:** the swaps are inline (a rotate, or rotate, swap,
+  rotate), no call and no link symbol; on the 68000 family the
+  little-endian ones are the ones that swap.
+- **No base or preferences path.** `SDL_GetBasePath` and
+  `SDL_GetPrefPath` return NULL with the error set, as SDL2 does where
+  it cannot find one; a program then uses the current folder, which
+  TOS makes the program's own when it is started from the desktop.
 - **The log goes to a file or nowhere,** never to the console. On a TT
   a console write makes the next flip copy the whole page, and the
   text stays in the picture.

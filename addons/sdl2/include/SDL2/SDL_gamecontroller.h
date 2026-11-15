@@ -53,6 +53,19 @@ typedef enum {
     SDL_CONTROLLER_BUTTON_MAX
 } SDL_GameControllerButton;
 
+/* SDL2's kinds of controller: STDL's are none of them */
+typedef enum
+{
+    SDL_CONTROLLER_TYPE_UNKNOWN = 0,
+    SDL_CONTROLLER_TYPE_XBOX360,
+    SDL_CONTROLLER_TYPE_XBOXONE,
+    SDL_CONTROLLER_TYPE_PS3,
+    SDL_CONTROLLER_TYPE_PS4,
+    SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO,
+    SDL_CONTROLLER_TYPE_VIRTUAL,
+    SDL_CONTROLLER_TYPE_PS5
+} SDL_GameControllerType;
+
 #define SDL_IsGameController           stdl_sdl2_IsGameController
 #define SDL_GameControllerOpen         stdl_sdl2_GameControllerOpen
 #define SDL_GameControllerClose        stdl_sdl2_GameControllerClose
@@ -80,6 +93,23 @@ extern int SDL_GameControllerRumble(SDL_GameController *gamecontroller,
                                     Uint16 low, Uint16 high,
                                     Uint32 duration_ms);
 extern int SDL_GameControllerEventState(int state);
+
+#define SDL_GameControllerTypeForIndex stdl_sdl2_GameControllerTypeForIndex
+#define SDL_GameControllerGetType      stdl_sdl2_GameControllerGetType
+
+static __inline__ SDL_GameControllerType
+SDL_GameControllerTypeForIndex(int joystick_index)
+{
+    (void)joystick_index;
+    return SDL_CONTROLLER_TYPE_UNKNOWN;
+}
+
+static __inline__ SDL_GameControllerType
+SDL_GameControllerGetType(SDL_GameController *gamecontroller)
+{
+    (void)gamecontroller;
+    return SDL_CONTROLLER_TYPE_UNKNOWN;
+}
 
 #ifdef __cplusplus
 }

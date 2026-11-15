@@ -392,3 +392,23 @@ int SDL_GameControllerEventState(int state)
     }
     return pad_events;
 }
+
+/* ------------------------------------------------------------------ */
+/* GUIDs: "STDL" and the index, as SDL_joystick.h says (its            */
+/* strings are the header's, inline)                                 */
+
+SDL_JoystickGUID SDL_JoystickGetDeviceGUID(int device_index)
+{
+    SDL_JoystickGUID guid;
+    memset(&guid, 0, sizeof(guid));
+    if (there(device_index)) {
+        memcpy(guid.data, "STDL", 4);
+        guid.data[4] = (Uint8)device_index;
+    }
+    return guid;
+}
+
+SDL_JoystickGUID SDL_JoystickGetGUID(SDL_Joystick *joystick)
+{
+    return SDL_JoystickGetDeviceGUID(joystick ? joystick->index : -1);
+}

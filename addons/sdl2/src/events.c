@@ -37,6 +37,9 @@ static int textinput = 1;
 static Uint32 ignored[IGNORED];
 static int nignored;
 static Uint32 next_user = SDL_USEREVENT;
+/* the mouse's movement since SDL_GetRelativeMouseState last asked */
+static int rel_x, rel_y;
+static SDL_bool relative_mode;
 
 static int is_ignored(Uint32 type)
 {
@@ -98,6 +101,9 @@ static void mouse_event(const STDL_Event *se)
     stdl_sdl2_screen_origin(&ox, &oy);
     memset(&e, 0, sizeof(e));
     if (se->type == STDL_MOUSEMOTION) {
+        /* summed whether or not the program takes the events */
+        rel_x += se->motion.xrel;
+        rel_y += se->motion.yrel;
         e.type = SDL_MOUSEMOTION;
         e.motion.windowID = 1;
         e.motion.state = se->motion.state;
@@ -249,6 +255,41 @@ void SDL_FlushEvents(Uint32 minType, Uint32 maxType)
     qcount = n;
 }
 
+int SDL_PeepEvents(SDL_Event *events, int numevents, SDL_eventaction action,
+                   Uint32 minType, Uint32 maxType)
+{
+    int i, n = 0, kept = 0;
+    if (action == SDL_ADDEVENT) {
+        for (i = 0; i < numevents; i++) {
+            if (stdl_sdl2_push(&events[i]) < 0) {
+                break;
+            }
+            n++;
+        }
+        return n;
+    }
+    /* SDL_PEEKEVENT or SDL_GETEVENT: the queue in order, taking out what
+     * is got and closing the gaps */
+    for (i = 0; i < qcount; i++) {
+        const SDL_Event *e = &queue[(qhead + i) & (QUEUE - 1)];
+        if (n < numevents && e->type >= minType && e->type <= maxType) {
+            if (events) {
+                events[n] = *e;
+            }
+            n++;
+            if (action == SDL_GETEVENT) {
+                continue;
+            }
+        }
+        if (kept != i) {
+            queue[(qhead + kept) & (QUEUE - 1)] = *e;
+        }
+        kept++;
+    }
+    qcount = kept;
+    return n;
+}
+
 void SDL_FlushEvent(Uint32 type)
 {
     SDL_FlushEvents(type, type);
@@ -311,6 +352,37 @@ void SDL_StopTextInput(void)
 SDL_bool SDL_IsTextInputActive(void)
 {
     return textinput ? SDL_TRUE : SDL_FALSE;
+}
+
+Uint32 SDL_GetRelativeMouseState(int *x, int *y)
+{
+    if (x) {
+        *x = rel_x;
+    }
+    if (y) {
+        *y = rel_y;
+    }
+    rel_x = rel_y = 0;
+    return STDL_GetMouseState(NULL, NULL);
+}
+
+int SDL_SetRelativeMouseMode(SDL_bool enabled)
+{
+    relative_mode = enabled;
+    return 0;
+}
+
+SDL_bool SDL_GetRelativeMouseMode(void)
+{
+    return relative_mode;
+}
+
+void SDL_WarpMouseInWindow(SDL_Window *window, int x, int y)
+{
+    int ox, oy;
+    (void)window;
+    stdl_sdl2_screen_origin(&ox, &oy);
+    STDL_WarpMouse((uint16_t)(x + ox), (uint16_t)(y + oy));
 }
 
 Uint32 SDL_GetMouseState(int *x, int *y)

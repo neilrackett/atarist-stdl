@@ -114,6 +114,22 @@ typedef struct SDL_MouseButtonEvent {
     Sint32 x, y;
 } SDL_MouseButtonEvent;
 
+/* There is no wheel: the type and its event are here so a program's
+ * handler compiles, and none is ever sent. */
+typedef enum {
+    SDL_MOUSEWHEEL_NORMAL,
+    SDL_MOUSEWHEEL_FLIPPED
+} SDL_MouseWheelDirection;
+
+typedef struct SDL_MouseWheelEvent {
+    Uint32 type;
+    Uint32 timestamp;
+    Uint32 windowID;
+    Uint32 which;
+    Sint32 x, y;
+    Uint32 direction;
+} SDL_MouseWheelEvent;
+
 typedef struct SDL_JoyAxisEvent {
     Uint32 type;
     Uint32 timestamp;
@@ -199,6 +215,7 @@ typedef union SDL_Event {
     SDL_TextInputEvent text;
     SDL_MouseMotionEvent motion;
     SDL_MouseButtonEvent button;
+    SDL_MouseWheelEvent wheel;
     SDL_JoyAxisEvent jaxis;
     SDL_JoyHatEvent jhat;
     SDL_JoyButtonEvent jbutton;
@@ -210,6 +227,13 @@ typedef union SDL_Event {
     SDL_UserEvent user;
     Uint8 padding[56];
 } SDL_Event;
+
+typedef enum
+{
+    SDL_ADDEVENT,
+    SDL_PEEKEVENT,
+    SDL_GETEVENT
+} SDL_eventaction;
 
 #define SDL_QUERY   (-1)
 #define SDL_IGNORE  0
@@ -225,6 +249,7 @@ typedef union SDL_Event {
 #define SDL_FlushEvents       stdl_sdl2_FlushEvents
 #define SDL_EventState        stdl_sdl2_EventState
 #define SDL_RegisterEvents    stdl_sdl2_RegisterEvents
+#define SDL_PeepEvents        stdl_sdl2_PeepEvents
 
 extern void SDL_PumpEvents(void);
 extern int SDL_PollEvent(SDL_Event *event);
@@ -237,6 +262,13 @@ extern void SDL_FlushEvent(Uint32 type);
 extern void SDL_FlushEvents(Uint32 minType, Uint32 maxType);
 extern Uint8 SDL_EventState(Uint32 type, int state);
 extern Uint32 SDL_RegisterEvents(int numevents);
+/* The queue as it is, with no pump, as SDL2's: up to numevents of the
+ * types minType to maxType looked at (SDL_PEEKEVENT) or taken
+ * (SDL_GETEVENT) from its head, or events added (SDL_ADDEVENT, as
+ * SDL_PushEvent adds them). The number, or -1. */
+extern int SDL_PeepEvents(SDL_Event *events, int numevents,
+                          SDL_eventaction action, Uint32 minType,
+                          Uint32 maxType);
 
 #define SDL_GetEventState(type) SDL_EventState(type, SDL_QUERY)
 

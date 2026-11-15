@@ -25,6 +25,7 @@ extern STDL_MachineInfo fake_mach;
 /* input: STDL's events as the program's pump would take them */
 extern uint16_t fake_mod;
 extern int fake_mouse_x, fake_mouse_y;
+extern int fake_warp_x, fake_warp_y;
 extern uint8_t fake_mouse_buttons;
 extern int fake_repeat_delay, fake_repeat_interval, fake_unicode;
 extern int fake_rumble_low, fake_rumble_high, fake_rumble_ms, fake_rumbles;

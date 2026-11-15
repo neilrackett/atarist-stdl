@@ -71,6 +71,7 @@ static void numbers(void)
           SDL_CONTROLLER_BUTTON_MAX == 15 &&
           SDL_CONTROLLER_AXIS_TRIGGERRIGHT == 5);
     CHECK(sizeof(SDL_Event) == 56);
+    CHECK(SDL_MOUSEWHEEL == 0x403 && sizeof(SDL_MouseWheelEvent) == 28);
 }
 
 static void keymap(void)
@@ -238,6 +239,36 @@ static void mouse(void)
     CHECK(SDL_GetMouseState(&x, &y) == (SDL_BUTTON_LMASK | SDL_BUTTON_RMASK));
     CHECK(x == 40 && y == 0);
     CHECK(SDL_BUTTON(SDL_BUTTON_RIGHT) == 4);
+
+    /* relative motion: the deltas summed since the last ask, which
+     * resets them, whatever the mode */
+    drain();
+    {
+        int dx, dy;
+        SDL_GetRelativeMouseState(NULL, NULL);
+        CHECK(SDL_GetRelativeMouseMode() == SDL_FALSE);
+        CHECK(SDL_SetRelativeMouseMode(SDL_TRUE) == 0);
+        CHECK(SDL_GetRelativeMouseMode() == SDL_TRUE);
+        memset(&se, 0, sizeof(se));
+        se.type = STDL_MOUSEMOTION;
+        se.motion.xrel = 5;
+        se.motion.yrel = -2;
+        fake_event(&se);
+        se.motion.xrel = 7;
+        se.motion.yrel = -1;
+        fake_event(&se);
+        drain();
+        fake_mouse_buttons = SDL_BUTTON_LMASK;
+        CHECK(SDL_GetRelativeMouseState(&dx, &dy) == SDL_BUTTON_LMASK);
+        CHECK(dx == 12 && dy == -3);
+        CHECK(SDL_GetRelativeMouseState(&dx, &dy) == SDL_BUTTON_LMASK &&
+              dx == 0 && dy == 0);
+        SDL_SetRelativeMouseMode(SDL_FALSE);
+    }
+
+    /* a warp in the logical size's coordinates lands on the screen's */
+    SDL_WarpMouseInWindow(w, 10, 5);
+    CHECK(fake_warp_x == 10 && fake_warp_y == 25);
 
     SDL_DestroyWindow(w);
 }
@@ -683,6 +714,34 @@ static void queue(void)
     CHECK(SDL_PollEvent(NULL) == 1);
     CHECK(next().type == user);
 
+    /* SDL_PeepEvents: a peek leaves them, a get takes them, both in
+     * a range of types, and an add queues */
+    drain();
+    for (i = 0; i < 4; i++) {
+        memset(&e, 0, sizeof(e));
+        e.type = i & 1 ? user : SDL_KEYDOWN;
+        e.key.keysym.sym = i;
+        SDL_PushEvent(&e);
+    }
+    {
+        SDL_Event got[4];
+        CHECK(SDL_PeepEvents(got, 4, SDL_PEEKEVENT, user, user) == 2);
+        CHECK(got[0].type == user && got[1].type == user);
+        CHECK(SDL_PeepEvents(got, 1, SDL_GETEVENT, SDL_KEYDOWN, SDL_KEYUP)
+              == 1 && got[0].key.keysym.sym == 0);
+        CHECK(SDL_PeepEvents(NULL, 0, SDL_PEEKEVENT, SDL_FIRSTEVENT,
+                             SDL_LASTEVENT) >= 0);
+        CHECK(SDL_PeepEvents(got, 4, SDL_GETEVENT, SDL_FIRSTEVENT,
+                             SDL_LASTEVENT) == 3);
+        CHECK(got[0].type == user && got[1].type == SDL_KEYDOWN &&
+              got[1].key.keysym.sym == 2 && got[2].type == user);
+        memset(&e, 0, sizeof(e));
+        e.type = user;
+        CHECK(SDL_PeepEvents(&e, 1, SDL_ADDEVENT, 0, 0) == 1);
+        CHECK(next().type == user);
+        CHECK(next().type == 0);
+    }
+
     /* quit, and a wait that times out */
     memset(&se, 0, sizeof(se));
     se.type = STDL_QUIT;
@@ -704,6 +763,47 @@ static void queue(void)
  * a VBL (STDL_PumpEventsIfDue), and its drain of STDL's queue pumps
  * no more; SDL_PumpEvents and the waits pump whenever called.
  */
+/* the GUIDs: "STDL" and the index, and their strings */
+static void guids(void)
+{
+    SDL_JoystickGUID g, h;
+    char str[33], shortstr[9];
+    int i;
+
+    g = SDL_JoystickGetDeviceGUID(0);
+    CHECK(memcmp(g.data, "STDL", 4) == 0 && g.data[4] == 0);
+    for (i = 5; i < 16; i++) {
+        CHECK(g.data[i] == 0);
+    }
+    SDL_JoystickGetGUIDString(g, str, sizeof(str));
+    CHECK(strlen(str) == 32 && strncmp(str, "5354444c00", 10) == 0);
+    h = SDL_JoystickGetGUIDFromString(str);
+    CHECK(memcmp(g.data, h.data, 16) == 0);
+    h = SDL_JoystickGetGUIDFromString("5354444C");
+    CHECK(memcmp(h.data, "STDL", 4) == 0 && h.data[4] == 0);
+    SDL_JoystickGetGUIDString(g, shortstr, sizeof(shortstr));
+    CHECK(strcmp(shortstr, "5354444c") == 0);
+    g = SDL_JoystickGetDeviceGUID(99);
+    for (i = 0, h.data[0] = 0; i < 16; i++) {
+        h.data[0] |= g.data[i];
+    }
+    CHECK(h.data[0] == 0);
+    CHECK(SDL_GameControllerTypeForIndex(0) ==
+          SDL_CONTROLLER_TYPE_UNKNOWN);
+
+    /* the byte order's swaps */
+    CHECK(SDL_Swap16(0x1234) == 0x3412);
+    CHECK(SDL_Swap32(0x12345678UL) == 0x78563412UL);
+    CHECK(SDL_Swap64(0x0102030405060708ULL) == 0x0807060504030201ULL);
+    {
+        const Uint8 le[4] = { 0x78, 0x56, 0x34, 0x12 };
+        Uint32 v;
+        memcpy(&v, le, 4);
+        CHECK(SDL_SwapLE32(v) == 0x12345678UL);
+    }
+    CHECK(SDL_GetBasePath() == NULL && SDL_GetPrefPath("a", "b") == NULL);
+}
+
 static void beat(void)
 {
     SDL_Event e;
@@ -766,6 +866,7 @@ int main(void)
     joysticks();
     six();
     queue();
+    guids();
     beat();
     SDL_Quit();
     if (failures) {

@@ -133,7 +133,15 @@ $(SDL2CMINILIB): $(SDL2CMINIOBJS) $(SDL2XCMINIOBJS)
 # device events and without its copies of the axes. 28,688. Then 492
 # less when the conversion's loops lost the copy of the group before
 # them (c2p_asm.h): c2p.o 1,704 to 1,452, the largest variant
-# (c2pany.o) 940 to 704. 28,196.
+# (c2pany.o) 940 to 704. 28,196. Then 592 for the SDL2 calls one
+# port's compatibility layer had to supply itself, which any port of a
+# PC program meets: SDL_PeepEvents, the relative mouse (the IKBD's own
+# movement, summed as events are taken) and SDL_WarpMouseInWindow
+# (events.o 2,160 to 2,592), and the joysticks' GUIDs, which programs
+# keep in their settings (joystick.o 2,240 to 2,400; the GUIDs'
+# strings, the byte swaps, the controller type and the paths inline in
+# the headers, paid only by a program that calls them; the wheel's
+# event defined and never sent, no code). 28,788.
 # A TT or a Falcon has the room; the budget is there so that growth is
 # a decision, raised with its reason or not at all.
 SDL2_MAX = 28876

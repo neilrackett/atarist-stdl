@@ -27,6 +27,15 @@ extern "C" {
 typedef struct _SDL_Joystick SDL_Joystick;
 typedef Sint32 SDL_JoystickID;
 
+/* A joystick's GUID, which programs keep in their settings to find the
+ * same device again: "STDL" and the joystick's index, zeros after. STDL
+ * numbers its joysticks by where they come from (0 the joystick port and
+ * pad 0, 1 the mouse port...), so the index is the device: a pad found
+ * behind joystick 0 later leaves its GUID as it was. */
+typedef struct {
+    Uint8 data[16];
+} SDL_JoystickGUID;
+
 #define SDL_HAT_CENTERED  0x00
 #define SDL_HAT_UP        0x01
 #define SDL_HAT_RIGHT     0x02
@@ -54,6 +63,10 @@ typedef Sint32 SDL_JoystickID;
 #define SDL_JoystickGetHat        stdl_sdl2_JoystickGetHat
 #define SDL_JoystickRumble        stdl_sdl2_JoystickRumble
 #define SDL_JoystickEventState    stdl_sdl2_JoystickEventState
+#define SDL_JoystickGetDeviceGUID stdl_sdl2_JoystickGetDeviceGUID
+#define SDL_JoystickGetGUID       stdl_sdl2_JoystickGetGUID
+#define SDL_JoystickGetGUIDString stdl_sdl2_JoystickGetGUIDString
+#define SDL_JoystickGetGUIDFromString stdl_sdl2_JoystickGetGUIDFromString
 
 extern int SDL_NumJoysticks(void);
 extern const char *SDL_JoystickNameForIndex(int device_index);
@@ -71,6 +84,48 @@ extern Uint8 SDL_JoystickGetHat(SDL_Joystick *joystick, int hat);
 extern int SDL_JoystickRumble(SDL_Joystick *joystick, Uint16 low,
                               Uint16 high, Uint32 duration_ms);
 extern int SDL_JoystickEventState(int state);
+/* all zeros for a device that isn't there */
+extern SDL_JoystickGUID SDL_JoystickGetDeviceGUID(int device_index);
+extern SDL_JoystickGUID SDL_JoystickGetGUID(SDL_Joystick *joystick);
+
+/* A GUID as 32 hex digits and a 0, as much as cbGUID holds, and back:
+ * inline, so they cost only a program that calls them */
+static __inline__ void SDL_JoystickGetGUIDString(SDL_JoystickGUID guid,
+                                                 char *pszGUID, int cbGUID)
+{
+    int i;
+    if (!pszGUID || cbGUID <= 0) {
+        return;
+    }
+    for (i = 0; i < 16 && 2 * i + 2 < cbGUID; i++) {
+        pszGUID[2 * i] = "0123456789abcdef"[guid.data[i] >> 4];
+        pszGUID[2 * i + 1] = "0123456789abcdef"[guid.data[i] & 15];
+    }
+    pszGUID[2 * i] = 0;
+}
+
+static __inline__ SDL_JoystickGUID
+SDL_JoystickGetGUIDFromString(const char *pchGUID)
+{
+    SDL_JoystickGUID guid;
+    int i, d, nib[2];
+    for (i = 0; i < 16; i++) {
+        guid.data[i] = 0;
+    }
+    for (i = 0; pchGUID && i < 32 && pchGUID[i]; i++) {
+        const char c = (char)(pchGUID[i] | 0x20);
+        nib[i & 1] = (c >= '0' && c <= '9') ? c - '0'
+                   : (c >= 'a' && c <= 'f') ? c - 'a' + 10 : -1;
+        if (nib[i & 1] < 0) {
+            break;
+        }
+        if (i & 1) {
+            d = nib[0] << 4 | nib[1];
+            guid.data[i >> 1] = (Uint8)d;
+        }
+    }
+    return guid;
+}
 
 #ifdef __cplusplus
 }

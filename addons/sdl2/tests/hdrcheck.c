@@ -103,8 +103,27 @@ int stdl_sdl2_hdrcheck_rest(void)
     n += SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_A) +
          SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_LEFTX);
     SDL_GameControllerRumble(c, 0xFFFF, 0, 100);
+    n += (int)SDL_GameControllerGetType(c)
+         + (int)SDL_GameControllerTypeForIndex(0);
     SDL_GameControllerClose(c);
+    {
+        char guid[33];
+        SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(j), guid,
+                                  (int)sizeof(guid));
+        n += SDL_JoystickGetGUIDFromString(guid).data[4]
+             + SDL_JoystickGetDeviceGUID(0).data[5];
+    }
     SDL_JoystickClose(j);
+    n += SDL_PeepEvents(&e, 1, SDL_PEEKEVENT, SDL_KEYDOWN, SDL_KEYUP);
+    SDL_SetRelativeMouseMode(SDL_TRUE);
+    n += e.type == SDL_MOUSEWHEEL ? e.wheel.y : 0;
+    n += (int)SDL_GetRelativeMouseState(&x, &y)
+         + (int)SDL_GetRelativeMouseMode();
+    SDL_WarpMouseInWindow(NULL, 160, 100);
+    n += (int)SDL_SwapLE16((Uint16)n) + (int)SDL_SwapLE32((Uint32)n)
+         + (int)SDL_SwapBE32(SDL_Swap64(t) != 0);
+    SDL_free(SDL_GetPrefPath("org", "app"));
+    SDL_free(SDL_GetBasePath());
 
     s = SDL_CreateRGBSurface(SDL_SWSURFACE, 16, 16, 8, 0, 0, 0, 0);
     SDL_SetColorKey(s, SDL_TRUE, 0);

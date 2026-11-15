@@ -258,6 +258,14 @@ uint8_t STDL_GetMouseState(int *x, int *y)
     return fake_mouse_buttons;
 }
 
+int fake_warp_x = -1, fake_warp_y = -1;
+
+void STDL_WarpMouse(uint16_t x, uint16_t y)
+{
+    fake_warp_x = x;
+    fake_warp_y = y;
+}
+
 int STDL_EnableKeyRepeat(int delay, int interval)
 {
     fake_repeat_delay = delay;

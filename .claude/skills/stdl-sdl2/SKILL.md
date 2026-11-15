@@ -229,8 +229,19 @@ builds by them; take a frame budget from a real machine.
   SDL2 says devices plugged in and out.
 - **Keys** have SDL2's scancodes and key codes (saved key maps keep
   working); `SDL_TEXTINPUT` carries ASCII; no `SDL_TEXTEDITING`.
-- **The mouse** is in the logical size's coordinates; no relative
-  mode, wheel or cursor.
+- **The mouse** is in the logical size's coordinates; no wheel or
+  cursor. For mouse-look, `SDL_GetRelativeMouseState` sums the motion
+  events' deltas since the last call (the IKBD's own, so they keep
+  coming at the screen's edge); `SDL_SetRelativeMouseMode` is accepted
+  and changes nothing. A game that takes `xrel`/`yrel` from its own
+  motion events needs neither.
+- **Also there for ports' plumbing:** `SDL_PeepEvents`; the joystick
+  GUIDs (`"STDL"` and the index, so a saved GUID finds the same
+  joystick again, pad or not) and their strings; the controller type
+  (always `SDL_CONTROLLER_TYPE_UNKNOWN`); the byte-order swaps
+  (`SDL_endian.h`, inline); `SDL_GetBasePath` and `SDL_GetPrefPath`,
+  which return NULL, so the program falls back to the current folder,
+  the program's own when started from the desktop.
 - **Joysticks:** one, joystick 0 (the joystick port, or an Xpad pad),
   unless the program asks STDL for more, which it does directly beside
   the add-on: `STDL_SetNumJoysticks(2)` makes the mouse port joystick 1

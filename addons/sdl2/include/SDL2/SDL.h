@@ -19,6 +19,7 @@
 #define STDL_SDL2_SDL_H
 
 #include "SDL_stdinc.h"
+#include "SDL_endian.h"
 #include "SDL_error.h"
 #include "SDL_hints.h"
 #include "SDL_version.h"
@@ -36,6 +37,7 @@
 #include "SDL_rwops.h"
 #include "SDL_surface.h"
 #include "SDL_log.h"
+#include "SDL_filesystem.h"
 #include "SDL_platform.h"
 
 #ifdef __cplusplus

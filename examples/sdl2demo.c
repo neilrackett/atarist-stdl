@@ -13,7 +13,10 @@
  * boxes moving over it, and a ninth, made in a surface, that the arrow
  * keys, a pad's d-pad or the mouse move, with a tone while it moves
  * whose pitch follows its height. Esc, a click or the pad's Start ends
- * it, or thirty seconds.
+ * it, or thirty seconds. The mouse moves it as a game's mouse-look
+ * would, by the motion summed since the last frame
+ * (SDL_GetRelativeMouseState), not to the pointer: the deltas are the
+ * IKBD's own, so they keep coming with the pointer at the screen's edge.
  *
  * The pattern worth copying is in the frame loop: the screen keeps
  * what was drawn on it, so a frame copies only what changed - each
@@ -205,6 +208,7 @@ int main(int argc, char *argv[])
     me.y = (H - BOX) / 2;
     me.w = me.h = BOX;
     pad = SDL_GameControllerOpen(0);
+    SDL_SetRelativeMouseMode(SDL_TRUE);
 
     /* the tone; the demo goes on silent without it */
     SDL_zero(want);
@@ -243,9 +247,6 @@ int main(int argc, char *argv[])
                 (e.type == SDL_CONTROLLERBUTTONDOWN &&
                  e.cbutton.button == SDL_CONTROLLER_BUTTON_START)) {
                 quit = 1;
-            } else if (e.type == SDL_MOUSEMOTION) {
-                me.x = e.motion.x - BOX / 2;
-                me.y = e.motion.y - BOX / 2;
             }
 #ifdef SDL2DEMO_ST16
             else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_s) {
@@ -257,7 +258,14 @@ int main(int argc, char *argv[])
             }
 #endif
         }
-        /* held keys and buttons, read as they stand */
+        /* the mouse's motion since the last frame, then held keys and
+         * buttons, read as they stand */
+        {
+            int mx, my;
+            SDL_GetRelativeMouseState(&mx, &my);
+            me.x += mx;
+            me.y += my;
+        }
         me.x += 3 * (keys[SDL_SCANCODE_RIGHT] - keys[SDL_SCANCODE_LEFT]);
         me.y += 3 * (keys[SDL_SCANCODE_DOWN] - keys[SDL_SCANCODE_UP]);
         if (pad) {

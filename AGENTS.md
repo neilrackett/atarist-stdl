@@ -1483,8 +1483,9 @@ warnings** with the Makefile's `-Wall -Wextra`.
 
 An SDL2-shaped library for SDL2 programs on a stock TT or Falcon
 (`docs/sdl2.md`): byte-per-pixel textures converted into the
-responsive screen's eight planes. It is the one chunky part of STDL,
-and the rules below keep it from being anything else's.
+responsive screen's eight planes. It is the chunky part of STDL (the
+experimental SDL1 add-on, the next section, draws through it), and the
+rules below keep it from being anything else's.
 
 - **The core never meets it.**
   - `all`, `libstdl.a` and `libstdl-cmini.a` do not build, include or
@@ -1673,6 +1674,84 @@ and the rules below keep it from being anything else's.
 - **A change a porter would meet goes into `docs/sdl2.md` and the
   `stdl-sdl2` skill** (`.claude/skills/stdl-sdl2/SKILL.md`) in the same
   change, as the core's API changes go into the `stdl` skill.
+
+## The SDL1 add-on (`addons/sdl1/`), experimental
+
+SDL 1.2's 8-bit picture for an SDL 1.2 program not yet ported to planes
+(`docs/sdl1.md`): a thin layer (6.4K) over the SDL2 add-on's
+experimental 68000 build, for getting a program running on every
+machine before its drawing is rewritten. It is a prototyping tool, not
+a second way to ship on an ST; `make sdl1` builds it, and `all`, `make
+sdl2` and the release never do.
+
+- **Two SDLs' headers never meet in one file.** SDL 1.2's and SDL2's
+  give the same names to different things (`SDL_Surface`, `SDL_Rect`,
+  `SDL_Color`). `src/video.c` is written against the add-on's own
+  SDL 1.2 `SDL.h`, `src/bridge.c` against the SDL2 add-on's, and they
+  meet in `bridge.h`: ints, bytes and pointers. The make rules and the
+  host test's Makefile give each its own include path. Keep new code
+  on one side or the other.
+- **The half of SDL 1.2 that is no picture is the planar shim's,
+  shared, not copied.** `include/compat/SDL.h` was split for it
+  (November 2026): `SDL_shared.h` is types, events and keys, the
+  joystick, timers, the clock and audio, and each front end's `SDL.h`
+  says what an `SDL_Surface` is and maps the video calls
+  (`SDL_mixer_shared.h` likewise). The split left all 133 core objects
+  and all 127 example and test programs byte for byte as they were;
+  a change to the shared half is a change to both front ends, and is
+  checked the same way. A program on the add-on links `compat.o` for
+  its timers, `SDL_Delay` and joysticks, and `mixer.o` for `Mix_`.
+- **No `SDL_` link symbols**, as the SDL2 add-on: `libstdl.a`'s own are
+  the planar shim's, and a program on this add-on links that archive
+  too. Every video name is a macro onto `stdl_sdl1_`.
+- **The blits are its own, not the SDL2 add-on's.** SDL 1.2 maps
+  colours between two 8-bit surfaces whose palettes differ, and its
+  own tests count on it (testsprite never gives the screen its
+  sprite's palette); the SDL2 add-on's blit copies pixel values. So
+  `video.c` has SDL 1.2's clip and its palette map, kept by a version
+  number a surface (`format_version`, one run for them all). The SDL2
+  add-on gives the screen, the palette and the BMP loader.
+- **`STDL_SDL1_STRICT` and STDL's two pixel calls are the way out.**
+  The strict build renames a surface's `pixels`; `STDL_GetPixel` and
+  `STDL_PutPixel` are answered for the add-on's surfaces, so a line
+  moved onto them builds on both front ends. `dist/S1PORTED.TOS` is
+  the planar port of testsprite (`examples/testsprite.c`) built here,
+  strict, from the source `TSPRITE.TOS` is built from: keep it
+  building, as it is the proof that a ported source needs only its
+  include path changed.
+- **Its examples are SDL 1.2's tests byte for byte**
+  (`addons/sdl1/examples/testsprite.c`, `graywin.c`, from SDL 1.2's
+  `test/`, public domain): do not edit them. `args.c` gives them a
+  command line, and with `SDL1_RUN` and `SDL1_CHECK` an end and the
+  screen check.
+- **Console text is on the page, and the check says so.** On a TT and
+  a Falcon the check called a third of testsprite's flips unlike their
+  updates: the four lines it prints after the mode set, drawn by TOS
+  into the band above the 200-row picture on one page of three (the
+  first bad flip was at screen row 1). With its printing sent to a
+  file every flip agreed on an ST, an STE, a Mega STE, a TT and a
+  Falcon on VGA (Hatari). Before believing a bad flip, look at its row.
+- **A wrapper that runs before `SDL_Init` has no clock.** `args.c`
+  first added its timer before the test's `SDL_Init`: `SDL_AddTimer`
+  reads the 200Hz counter, in user mode there, and the program bus
+  errored at `$4BA` with nothing printed. It calls `SDL_Init` itself
+  first now.
+- **What it costs** (Hatari, SDL's testsprite, 16 sprites at 320x200):
+  2.3 frames a second on an ST or an STE, 4.2 on a Mega STE, 30.1 on a
+  TT, 15.1 on a Falcon on VGA. A program that calls a timer,
+  `SDL_Delay` or a joystick links `compat.o`, which brings `draw.o`
+  with it, 14K it never runs; splitting `compat.c`'s video calls from
+  the rest would save that, and is a core change nobody has needed yet.
+- **`test_sdl1` is its test** (`addons/sdl1/tests`, in `make ci`): a
+  pixel-at-a-time model of SDL 1.2's surfaces, and the screen on the
+  SDL2 add-on itself over its stand-in for STDL, the page shown
+  decoded and compared after every update. 35 deliberate breakages all
+  failed it, one only once the test modelled the screen surface's own
+  palette (a display-only palette change that also changed the
+  surface's). `make sdl1`'s checks (no `SDL_` symbols, the headers as
+  gnu99 and C++98, the strict build) were each broken once and failed.
+- **A change a porter would meet goes into `docs/sdl1.md`**, and the
+  `stdl` skill where it changes how a port starts.
 
 ## Shipping a change
 

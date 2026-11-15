@@ -416,6 +416,10 @@ dist/CHUNKY.TOS: examples/chunky.c $(LIB)
 # the core neither includes nor links it.
 include addons/sdl2/sdl2.mk
 
+# The SDL1 add-on's (`make sdl1`), experimental, on the SDL2 add-on's
+# experimental 68000 build: nothing above builds it either.
+include addons/sdl1/sdl1.mk
+
 # host-side unit tests: native clang + ASan, no cross toolchain
 # needed (run on the host, not through stcmd)
 test:
@@ -432,9 +436,11 @@ STCMD ?= STCMD_NO_TTY=1 stcmd
 ci:
 	$(MAKE) -C tests/host run CC=clang
 	$(MAKE) -C addons/sdl2/tests run CC=clang
+	$(MAKE) -C addons/sdl1/tests run CC=clang
 	$(STCMD) make
 	$(STCMD) make cmini
 	$(STCMD) make sdl2
+	$(STCMD) make sdl1
 	$(MAKE) bundle
 
 # The example binaries and the assets they load, in one zip for the
@@ -459,8 +465,10 @@ clean:
 	rm -f $(CMINILIB) $(LIB) $(EXAMPLES) $(BUNDLE)
 	rm -f $(SDL2LIB) $(SDL2CMINILIB) $(SDL2EXAMPLES)
 	rm -f $(SDL2STLIB) $(SDL2STCMINILIB) dist/SDL2ST.TOS
+	rm -f $(SDL1LIB) $(SDL1CMINILIB) $(SDL1EXAMPLES)
 	$(MAKE) -C tests/host clean
 	$(MAKE) -C addons/sdl2/tests clean
+	$(MAKE) -C addons/sdl1/tests clean
 
 # Run an example in Hatari (host-side): make run-TSPRITE
 run-%:

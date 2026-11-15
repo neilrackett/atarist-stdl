@@ -36,8 +36,17 @@ Porting SDL2 games to a stock TT or Falcon? STDL's optional SDL2 add-on
 changed each frame. The art comes in through SDL2's own `SDL_LoadBMP`, from
 8-bit BMPs that `stdlconv bmp8` makes sharing the screen's one palette.
 
-It is the one place STDL is chunky, it is never part of the core library, and
+It is where STDL is chunky, it is never part of the core library, and
 a program gets it only by asking for it.
+
+### SDL1 add-on, for the first day of a port (experimental)
+
+An SDL 1.2 program can run before any of it is ported: the SDL1 add-on
+(`addons/sdl1/`, [docs/sdl1.md](docs/sdl1.md)) gives it SDL 1.2's own 8-bit
+picture on every machine, through the SDL2 add-on, with the input, timers and
+sound of the planar shim it will move to. A strict build then lists the lines
+that touch pixels, which are the port. For trying a program, not for shipping
+one on an ST.
 
 ## What STDL does differently
 
@@ -98,6 +107,7 @@ it calls.
 | [docs/responsive.md](docs/responsive.md)           | 256 colours and 240 rows on a TT or a Falcon                              |
 | [docs/overscan.md](docs/overscan.md)               | borders and rasters on an ST                                              |
 | [docs/sdl2.md](docs/sdl2.md)                       | the SDL2 add-on for a TT or a Falcon                                      |
+| [docs/sdl1.md](docs/sdl1.md)                       | the SDL1 add-on: an SDL 1.2 program running before it is ported (experimental) |
 | [examples/README.md](examples/README.md)           | the example programs                                                      |
 | [docs/internals.md](docs/internals.md)             | how the library is put together, for contributors                         |
 | [docs/design-overview.md](docs/design-overview.md) | the original design sketch, kept for its reasoning                        |
@@ -111,6 +121,7 @@ it calls.
 | `src/`            | the library, one primitive or family per file                                                  |
 | `lib/xpad/`       | the Xpad controller submodule                                                                  |
 | `addons/sdl2/`    | the optional SDL2 add-on, built by `make sdl2`                                                 |
+| `addons/sdl1/`    | the experimental SDL1 add-on, built by `make sdl1`                                             |
 | `tools/`          | `stdlconv`, the asset converter (images, banks, Degas, WAV, MIDI and VGM to YM), and `libcalls.sh` |
 | `examples/`       | ported SDL 1.2 tests and STDL demos, with their assets (public domain)                         |
 | `tests/`          | host tests (`make test`) and on-target runners for Hatari                                      |

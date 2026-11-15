@@ -12,7 +12,9 @@ textures; the add-on converts only the 16-pixel groups each frame
 changed into the screen's eight interleaved planes. `docs/sdl2.md` is
 the reference; this file is how to use it well.
 
-It is the one chunky part of STDL and stays apart from the core:
+It is the chunky part of STDL and stays apart from the core (the
+experimental SDL1 add-on, `docs/sdl1.md`, draws SDL 1.2 programs
+through its 68000 build):
 `make` does not build it, `libstdl.a` does not contain it, and a
 program gets it only by naming its include path and linking its
 archive.

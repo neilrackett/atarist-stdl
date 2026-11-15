@@ -9,6 +9,12 @@ Porting an SDL2 program to a TT or a Falcon only? That is the SDL2
 add-on's job, not this shim's: [sdl2.md](sdl2.md). Its headers are
 separate, and must never meet this one's.
 
+Want the program running before any of it is ported? The experimental
+SDL1 add-on ([sdl1.md](sdl1.md)) runs it as it is, in SDL 1.2's own
+8-bit picture on every machine, with this shim's input, timers and
+sound; a strict build then lists the lines that touch pixels, and a
+program moved off them changes its include path to this shim's.
+
 ## Workflow
 
 1. Convert assets with `stdlconv`; verify visually in Hatari.

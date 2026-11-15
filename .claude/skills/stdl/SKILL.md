@@ -81,8 +81,32 @@ too (153.6K of ST RAM on a TT).
 (`addons/sdl2/`, `docs/sdl2.md`), and the `stdl-sdl2` skill
 (`.claude/skills/stdl-sdl2/SKILL.md`), which covers it: SDL2's window,
 renderer and INDEX8 textures on the 256-colour responsive screen, with
-its input, surfaces, streams, log and audio. It is the one chunky part
+its input, surfaces, streams, log and audio. It is the chunky part
 of STDL, kept apart from the core.
+
+**Want the SDL 1.2 program running before porting it?** The
+experimental SDL1 add-on (`addons/sdl1/`, `docs/sdl1.md`) runs it with
+its source as it is, in SDL 1.2's own 8-bit picture: 256 colours on a
+TT or a Falcon, 16 on an ST (slow there: a few frames a second, for
+seeing it run). Build with `-I$STDL/addons/sdl1/include/SDL1` in place
+of `include/compat`, `-m68000`, and link `libstdl-sdl1.a
+libstdl-sdl2-st.a libstdl.a` (`stcmd make sdl1` in STDL). Input,
+timers, `SDL_Delay`, audio and the mixer are the planar shim's own
+code, so they are done once. Then the move to planes:
+- `-DSTDL_SDL1_STRICT` renames a surface's `pixels`, so the build
+  lists every line that reads or writes them: those lines are the
+  drawing to rewrite (Porting workflow, step 3);
+- `STDL_GetPixel` and `STDL_PutPixel` work on its surfaces, so a line
+  moved onto them still runs there, and the program can be moved a
+  line at a time;
+- `STDL_SDL1_CountColours(screen, NULL)` says how many colours a
+  screen uses, against the 16 a planar port has;
+- when the strict build is clean, change the include path and the
+  archives to the planar shim's, and convert the art.
+
+It takes 8-bit programs of at most 320x240; text printed after the
+mode is set lands on the screen; and it is for the first days of a
+port, not for the port an ST user gets.
 
 **A TT- or Falcon-only SDL 1.2 port?** Use Atari SDL 1.2 (plain TOS, no
 MiNT): those machines have 256 colours, and TT line-doubles 320x240 so

@@ -30,6 +30,7 @@ Other targets:
 | ------------- | ----------------------------------------------------------------------------------------------------- |
 | `make cmini`  | `libstdl-cmini.a`, the library against libcmini's headers (below)                                   |
 | `make sdl2`   | the SDL2 add-on, only when asked: `libstdl-sdl2.a`, `libstdl-sdl2-cmini.a` and `dist/SDL2DEMO.TOS` ([sdl2.md](sdl2.md)) |
+| `make sdl1`   | the experimental SDL1 add-on, only when asked: `libstdl-sdl1.a`, the SDL2 add-on's 68000 build it draws through, and SDL 1.2's own tests as `dist/S1*.TOS` ([sdl1.md](sdl1.md)) |
 | `make test`   | the host test suite, natively with ASan: no cross toolchain needed                                    |
 | `make bundle` | `stdl-examples.zip`, the example binaries and their assets, as on the release page                    |
 | `make ci`     | everything CI runs, in order; run it on the host, not inside the container                            |

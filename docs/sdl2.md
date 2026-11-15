@@ -454,7 +454,9 @@ add-on built for them shows, frame for frame; on an ST, an STE or a
 Mega STE it has a 16-colour screen that is for testing (below). It is
 experimental: `make sdl2` does not build it, the archives a TT or a
 Falcon links have none of it, it is not in a release and has no size
-budget, no real machine has run it, and what it does may change.
+budget, no real machine has run it, and what it does may change. The
+experimental SDL1 add-on ([sdl1.md](sdl1.md)) draws through it: SDL
+1.2's 8-bit picture for a program not yet ported to planes.
 
 ```
 STCMD_NO_TTY=1 stcmd make sdl2st

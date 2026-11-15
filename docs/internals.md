@@ -158,7 +158,7 @@ line-locked timers can interrupt it.
   call (`libcallcheck`, `tools/libcalls.sh`), and on `overscan.c`
   growing a call into the rest of the library (`ovhostcheck`).
 - **CI** runs `make ci`: the host suites, the cross build, the libcmini
-  archive, the SDL2 add-on and the bundle.
+  archive, the SDL2 and SDL1 add-ons and the bundle.
 
 ## Apart from the core
 
@@ -169,5 +169,11 @@ line-locked timers can interrupt it.
   and flags, reaches STDL through public headers only, and leaves every
   core object unchanged ([sdl2.md](sdl2.md), and AGENTS.md's section on
   it).
+- **`addons/sdl1/`** is the experimental SDL1 add-on, on top of the
+  SDL2 add-on's 68000 build. Its SDL 1.2 half and its SDL2 half are
+  separate files that meet in a header of plain C types, as the two
+  SDLs' headers give the same names to different things; the half of
+  SDL 1.2 that is no picture it shares with the planar shim
+  (`include/compat/SDL_shared.h`) ([sdl1.md](sdl1.md)).
 - **`lib/xpad/`** is a submodule. The library takes its consumer half,
   and nothing under `lib/` is edited here.

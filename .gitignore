@@ -25,3 +25,10 @@ libstdl-sdl2-st-cmini.a
 obj/
 tmp/
 stdl-examples.zip
+libstdl-sdl1.a
+libstdl-sdl1-cmini.a
+addons/sdl1/tests/test_*
+!addons/sdl1/tests/test_*.c
+addons/sdl1/tests/obj/
+addons/sdl1/tests/objst/
+addons/sdl1/tests/*.dSYM/

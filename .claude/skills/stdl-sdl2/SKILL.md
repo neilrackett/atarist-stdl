@@ -198,6 +198,15 @@ builds by them; take a frame budget from a real machine.
 - **Round boxes out to 16-pixel groups** where the program can: a box
   of whole groups is an OR a row in the batch, one that starts or ends
   inside a group needs its partial groups merged under a pixel mask.
+- **Pixels drawn twice across (a game's low detail) convert 18%
+  faster** through `STDL_SDL2_RenderCopyPairs`: a whole frame 31.0 ->
+  25.6ms on a TT, 59.8 -> 48.8 on a Falcon; one port's low-detail
+  frame on a TT 68.2 -> 64.7ms, its view 288x144. Copy the half-width
+  view with it and everything drawn over it (messages, menus) with
+  `SDL_RenderCopy` as before: a group any ordinary copy touches is
+  converted whole, so text over the view stays sharp. The pixels must
+  still be in pairs when converted; the screen check
+  (`STDL_SDL2_HINT_CHECK`) catches any that are not.
 - **A TT writes every row to both of TT Low's lines**, so it is bound
   by its writes to ST-RAM. Its TT-RAM is fast: the add-on allocates
   textures and its working memory with `malloc`, which a program loaded

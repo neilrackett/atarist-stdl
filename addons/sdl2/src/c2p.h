@@ -60,6 +60,19 @@ void stdl_sdl2_c2p_c(const uint8_t *src, long sp, uint8_t *dst, long dp,
                      uint32_t x0);
 
 /*
+ * Pixel pairs (c2ppair.c): as stdl_sdl2_c2p for the variant of X that
+ * x2 and x0 make, for rows whose pixels 2i and 2i + 1 are the same;
+ * reached through the pointer stdl_sdl2_copy_pairs gives the renderer,
+ * so that only a program that asks for pairs links them. On the host,
+ * the C twin: the pixels the loops take of a group not in pairs (the
+ * first of each pair in its first half, the second in its second),
+ * converted.
+ */
+typedef void stdl_sdl2_c2pp_fn(const uint8_t *src, long sp, uint8_t *dst,
+                               long dp, long groups, long h, int dbl,
+                               uint32_t x2, uint32_t x0);
+
+/*
  * The XOR by X as two longs. After the merges planes 4 and 5 are one
  * long's high and low words, as the screen has them, and planes 6 and
  * 7 another's, so X's bits 4-7 are each a word of ones; X's low nibble

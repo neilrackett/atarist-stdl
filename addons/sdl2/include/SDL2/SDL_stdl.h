@@ -138,6 +138,26 @@ int STDL_SDL2_SetBorderIndex(SDL_Renderer *renderer, unsigned x)
 }
 
 /*
+ * SDL_RenderCopy for pixels that come in pairs: the program's word that
+ * in the copy, wherever it covers a whole 16-pixel group of the screen,
+ * the pixels at screen x and x + 1 (x even) are the same, as a program
+ * drawing at half the width (a game's low detail) has them. Those
+ * groups are converted from their 8 distinct pixels, 56 instructions a
+ * group against 74. A group is converted so only if every copy this
+ * frame made of it, before or after, was of pairs: an SDL_RenderCopy
+ * that reaches any of it - text drawn over the picture - has it
+ * converted whole. The pixels are read when converted (SDL_render.h),
+ * so they must still be in pairs then; ones that are not show one of
+ * each pair (the screen check, STDL_SDL2_HINT_CHECK, catches that).
+ * Linked only by a program that calls it (1.5K). In the experimental
+ * 68000 build, an ST's screen takes it as SDL_RenderCopy.
+ */
+extern int STDL_SDL2_RenderCopyPairs(SDL_Renderer *renderer,
+                                     SDL_Texture *texture,
+                                     const SDL_Rect *srcrect,
+                                     const SDL_Rect *dstrect);
+
+/*
  * The page on show cleared now, margins and all, with no flip; the
  * other pages are cleared when next drawn on, and what this frame had
  * copied is dropped. For a program that clears its screen without

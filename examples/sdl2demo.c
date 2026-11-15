@@ -21,7 +21,11 @@
  * The pattern worth copying is in the frame loop: the screen keeps
  * what was drawn on it, so a frame copies only what changed - each
  * box's old place from the background, then the box in its new one -
- * and the present converts only those groups of 16 pixels. Cycling
+ * and the present converts only those groups of 16 pixels. The
+ * background is drawn in pixel pairs (each shade two pixels wide), so
+ * its copies are STDL_SDL2_RenderCopyPairs, which converts a group of
+ * pairs in 56 instructions where any other takes 74, as a game's low
+ * detail would use it. Cycling
  * the colours changes no pixel at all: it is the palette, staged to
  * the blank that shows the frame. A program that clears and redraws
  * the whole screen every frame is right too, and pays for converting
@@ -177,7 +181,7 @@ int main(int argc, char *argv[])
 
     for (y = 0; y < H; y++) {
         for (x = 0; x < W; x++) {
-            bg[y * W + x] = (Uint8)((x + y * 2) % SHADES);
+            bg[y * W + x] = (Uint8)(((x & ~1) + y * 2) % SHADES);
         }
     }
     for (y = 0; y < BOX; y++) {
@@ -233,11 +237,11 @@ int main(int argc, char *argv[])
     }
 
     /* the first frame draws everything */
-    SDL_RenderCopy(ren, bgtex, NULL, NULL);
+    STDL_SDL2_RenderCopyPairs(ren, bgtex, NULL, NULL);
     start = SDL_GetTicks();
     while (!quit && !SDL_TICKS_PASSED(SDL_GetTicks(), start + 30000)) {
         /* where the ninth box was, before anything moves it */
-        SDL_RenderCopy(ren, bgtex, &me, &me);
+        STDL_SDL2_RenderCopyPairs(ren, bgtex, &me, &me);
         ox = me.x;
         oy = me.y;
         while (SDL_PollEvent(&e)) {
@@ -289,7 +293,7 @@ int main(int argc, char *argv[])
         SDL_UnlockAudioDevice(audio);
         for (i = 0; i < BOXES; i++) {
             /* the background back where the box was, then the box */
-            SDL_RenderCopy(ren, bgtex, &pos[i], &pos[i]);
+            STDL_SDL2_RenderCopyPairs(ren, bgtex, &pos[i], &pos[i]);
             pos[i].x += dx[i];
             pos[i].y += dy[i];
             if (pos[i].x < 0 || pos[i].x > W - BOX) {

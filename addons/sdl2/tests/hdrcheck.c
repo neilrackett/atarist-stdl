@@ -47,6 +47,7 @@ int stdl_sdl2_hdrcheck(void)
     SDL_SetRenderDrawColor(r, 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(r);
     SDL_RenderCopy(r, t, NULL, &box);
+    STDL_SDL2_RenderCopyPairs(r, t, &box, &box);
     SDL_RenderPresent(r);
     STDL_SDL2_GetShownPage(r, &base, &bytes);
     STDL_SDL2_GetCheck(r, &chk);

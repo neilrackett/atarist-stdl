@@ -12,6 +12,7 @@
 
 #include "SDL.h"
 #include <stdl/stdl.h>
+#include "c2p.h"
 
 /* The ST build (st.h) is for the 68000 and nothing above it: the
  * add-on a TT or a Falcon runs is built for the 68020, and so can
@@ -35,6 +36,27 @@ SDL_Keycode stdl_sdl2_keycode(unsigned sym);
 /* video.c: the screen position of the logical size's top left, which
  * the mouse is reported from */
 void stdl_sdl2_screen_origin(int *x, int *y);
+
+/*
+ * Pixel pairs (STDL_SDL2_RenderCopyPairs): c2ppair.c's side, which the
+ * renderer reaches through the pointer stdl_sdl2_copy_pairs gives it,
+ * so that a program that never asks for pairs links none of it. conv
+ * converts as stdl_sdl2_c2p does. mark notes a copy of h rows at sx, w
+ * wide, in the batch's masks from its first row: a pairs copy's whole
+ * groups go into pair[] where no other copy has reached them (whole[]
+ * less pair[], or part[]); any other copy takes back every group it
+ * touches.
+ */
+struct stdl_sdl2_pairs {
+    stdl_sdl2_c2pp_fn *conv;
+    void (*mark)(Uint32 *pair, const Uint32 *whole, const Uint32 *part,
+                 int h, int sx, int w, int pairing);
+};
+
+/* video.c: SDL_RenderCopy with its whole groups converted as pairs */
+int stdl_sdl2_copy_pairs(SDL_Renderer *r, SDL_Texture *texture,
+                         const SDL_Rect *srcrect, const SDL_Rect *dstrect,
+                         const struct stdl_sdl2_pairs *pairs);
 
 /* events.c: an event for the queue; 1, 0 ignored, -1 full */
 int stdl_sdl2_push(SDL_Event *e);

@@ -13,7 +13,9 @@
  * not.w, against the add-on's at X = 0x70; and the time of a whole
  * 320x240 frame each way, into ST-RAM as a page is, a TT's rows
  * doubled, and of a frame's worth of boxes two groups wide, a sprite's
- * box, against the C twin and the routine before.
+ * box, against the C twin and the routine before. Then the pixel
+ * pairs' loops (c2ppair.c) against their twin, on pixels not in pairs
+ * so that every one counts, and a whole frame's time as pairs.
  *
  *   STCMD_NO_TTY=1 stcmd make sdl2
  *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -std=gnu99 \
@@ -125,6 +127,30 @@ O_FUNC("s2c_old2", O_S2,
        "	move.l	60(%sp),%d7\n	lea	0(%a1,%d7.l),%a2\n",
        "	add.l	%d7,%d7\n")
 );
+
+/* the pixel pairs' loops (c2ppair.c), called as the renderer calls
+ * them through STDL_SDL2_RenderCopyPairs */
+extern stdl_sdl2_c2p_fn stdl_sdl2_c2pp_plain1, stdl_sdl2_c2pp_plain2,
+                        stdl_sdl2_c2pp_any1, stdl_sdl2_c2pp_any2;
+
+/* their twin: the pixels they take of a group (the first of each pair
+ * in its first half, the second in its second), converted */
+static void pairs_twin(const uint8_t *src, long sp, uint8_t *dst, long dp,
+                       long groups, long h, int dbl, uint32_t x2,
+                       uint32_t x0)
+{
+    for (; h > 0; h--, src += sp, dst += dbl ? dp << 1 : dp) {
+        long g;
+        for (g = 0; g < groups; g++) {
+            uint8_t in[16];
+            int i;
+            for (i = 0; i < 16; i++) {
+                in[i] = src[g * 16 + (i < 8 ? (i & ~1) : (i | 1))];
+            }
+            stdl_sdl2_c2p_c(in, 16, dst + g * 16, dp, 1, 1, dbl, x2, x0);
+        }
+    }
+}
 
 static unsigned long seed = 0x12345678UL;
 
@@ -249,6 +275,43 @@ int main(void)
            oldbad ? "differs from" : "matches", oldcases,
            oldbad ? " (see above)" : "");
 
+    /* the pair loops: X = 0's at X = 0, the run-time XOR's at every X */
+    cases = bad = 0;
+    for (any = 0; any < 2; any++)
+    for (dbl = 0; dbl < 2; dbl++)
+    for (xi = 0; xi < (any ? 16 : 1); xi++)
+    for (gi = 0; gi < 6; gi++)
+    for (hi = 0; hi < 2; hi++)
+    for (oi = 0; oi < 3; oi++) {
+        uint32_t x2, x0;
+        const unsigned x = (unsigned)xi << 4;
+        long g = gs[gi], h = hs[hi];
+        stdl_sdl2_c2p_fn *f = any ? (dbl ? stdl_sdl2_c2pp_any2
+                                         : stdl_sdl2_c2pp_any1)
+                                  : (dbl ? stdl_sdl2_c2pp_plain2
+                                         : stdl_sdl2_c2pp_plain1);
+        stdl_sdl2_c2p_xor(x, &x2, &x0);
+        memset(a, 0x5A, PAGE);
+        memset(b, 0x5A, PAGE);
+        f(src + offs[oi], W + 7, a + 32, W, g, h, x2, x0);
+        pairs_twin(src + offs[oi], W + 7, b + 32, W, g, h, dbl, x2, x0);
+        cases++;
+        if (differ(a, b)) {
+            if (bad < 4) {
+                printf("S2C: PAIRS MISMATCH %s dbl %d X %u groups %ld"
+                       " rows %ld source +%ld\n", any ? "any" : "plain",
+                       dbl, x, g, h, offs[oi]);
+            }
+            bad++;
+        }
+    }
+    if (bad) {
+        printf("S2C: the pair loops differ from their twin in %ld of %ld"
+               " cases\n", bad, cases);
+    } else {
+        printf("S2C: the pair loops match their twin, %ld cases\n", cases);
+    }
+
     /* a whole frame, 20 groups by 240 rows, each way */
     for (dbl = 0; dbl < 2; dbl++) {
         enum { FRAMES = 10 };
@@ -284,6 +347,37 @@ int main(void)
         printf("S2C: a 320x240 frame%s, ms: X = 0 %s, X = 0x70 fixed %s,"
                " at run time %s, the routine before %s\n",
                dbl ? " on two lines" : "", m0, m70, many, mold);
+    }
+    /* a whole frame as pairs, against the same frame whole */
+    for (dbl = 0; dbl < 2; dbl++) {
+        enum { FRAMES = 10 };
+        uint32_t x2, x0, t0, t1, t2, t3;
+        char mw[16], mp[16], many[16];
+        int f;
+        stdl_sdl2_c2p_xor(0, &x2, &x0);
+        t0 = STDL_GetHz38400();
+        for (f = 0; f < FRAMES; f++) {
+            stdl_sdl2_c2p(src, W, a, W, W / 16, H, dbl,
+                          &stdl_sdl2_c2p_plain, x2, x0);
+        }
+        t1 = STDL_GetHz38400();
+        for (f = 0; f < FRAMES; f++) {
+            (dbl ? stdl_sdl2_c2pp_plain2 : stdl_sdl2_c2pp_plain1)
+                (src, W, a, W, W / 16, H, x2, x0);
+        }
+        t2 = STDL_GetHz38400();
+        stdl_sdl2_c2p_xor(0x70, &x2, &x0);
+        for (f = 0; f < FRAMES; f++) {
+            (dbl ? stdl_sdl2_c2pp_any2 : stdl_sdl2_c2pp_any1)
+                (src, W, a, W, W / 16, H, x2, x0);
+        }
+        t3 = STDL_GetHz38400();
+        ms(mw, t1 - t0, FRAMES);
+        ms(mp, t2 - t1, FRAMES);
+        ms(many, t3 - t2, FRAMES);
+        printf("S2C: a 320x240 frame%s, ms: whole %s, as pairs %s, pairs"
+               " at run time %s\n", dbl ? " on two lines" : "", mw, mp,
+               many);
     }
     /* the same frame as boxes two groups wide and 240 rows high */
     for (dbl = 0; dbl < 2; dbl++) {

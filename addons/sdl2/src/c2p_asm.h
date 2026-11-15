@@ -167,4 +167,64 @@
              "	move.l	%sp,%a2\n", \
              "	move.l	%a1,%a2\n	adda.l	92(%sp),%a2\n", C2P_DRAIN2)
 
+/*
+ * Pixel pairs (c2ppair.c, STDL_SDL2_RenderCopyPairs): a group whose
+ * pixels come in pairs, 2i and 2i + 1 the same, has 8 distinct ones.
+ * Two byte merges gather them into d0 and d1 (each long's even bytes
+ * with the third and fourth longs' odd ones), three merges and the
+ * 16-bit exchange transpose those 64 bits, and each bit is doubled by
+ * merging a long with a copy of itself: 56 instructions a group
+ * against 74. The planes come out as d1 (0 and 1), d0 (2 and 3), d3 (4
+ * and 5) and d2 (6 and 7), so X's tail is on d3 and d2. Of pixels that
+ * are not in pairs it takes the first of each pair in the group's
+ * first half and the second in its second half (c2ppair.c's C twin
+ * does the same). The steps' roles were found by simulating the
+ * instructions against a reference conversion.
+ */
+#define C2P_DOUBLE(z, b) \
+    "	move.l	" z ",%d7\n" \
+    "	lsr.l	#1,%d7\n" \
+    "	eor.l	" z ",%d7\n" \
+    "	and.l	#0x55555555,%d7\n" \
+    "	move.l	" z "," b "\n" \
+    "	eor.l	%d7," b "\n" \
+    "	add.l	%d7,%d7\n" \
+    "	eor.l	%d7," z "\n"
+#define C2P_PGROUP(S1, S2, S3, S4, S5, S6, S7, S8, T) \
+    "	move.l	(%a0)+,%d0\n" \
+    "	move.l	(%a0)+,%d1\n" \
+    "	move.l	(%a0)+,%d2\n" \
+    "	move.l	(%a0)+,%d3\n" \
+    "	eor.l	%d0,%d2\n" \
+    "	and.l	%d5,%d2\n" \
+    "	eor.l	%d2,%d0\n" S1 \
+    "	eor.l	%d1,%d3\n" \
+    "	and.l	%d5,%d3\n" \
+    "	eor.l	%d3,%d1\n" S2 \
+    C2P_M(4, "lsl.l	#4,%d7", "%d0", "%d1", "%d4") S3 \
+    C2P_M(1, "add.l	%d7,%d7", "%d0", "%d1", "#0x55555555") S4 \
+    C2P_W("%d0", "%d1") S5 \
+    C2P_M(2, "lsl.l	#2,%d7", "%d0", "%d1", "#0x33333333") S6 \
+    C2P_DOUBLE("%d0", "%d2") S7 \
+    C2P_DOUBLE("%d1", "%d3") S8 \
+    T \
+    "	move.l	%d1,%a3\n" \
+    "	move.l	%d0,%a4\n" \
+    "	move.l	%d3,%a5\n" \
+    "	move.l	%d2,%a6\n"
+#define C2P_PG1(T) C2P_PGROUP("", C2P_S1("%a3"), "", C2P_S1("%a4"), \
+                              "", C2P_S1("%a5"), "", C2P_S1("%a6"), T)
+#define C2P_PG2(T) C2P_PGROUP(C2P_S1("%a3"), C2P_S2("%a3"), \
+                              C2P_S1("%a4"), C2P_S2("%a4"), \
+                              C2P_S1("%a5"), C2P_S2("%a5"), \
+                              C2P_S1("%a6"), C2P_S2("%a6"), T)
+
+/* a variant's two pair loops, named PREFIX1 and PREFIX2, with tail T */
+#define C2P_PPAIR(prefix, T) \
+    "	.text\n" \
+    C2P_FUNC(prefix "1", C2P_PG1(T), "", "", "", C2P_DRAIN1) \
+    C2P_FUNC(prefix "2", C2P_PG2(T), "	add.l	%d0,%d0\n", \
+             "	move.l	%sp,%a2\n", \
+             "	move.l	%a1,%a2\n	adda.l	92(%sp),%a2\n", C2P_DRAIN2)
+
 #endif /* STDL_SDL2_C2P_ASM_H */

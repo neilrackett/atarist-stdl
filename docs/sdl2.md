@@ -362,6 +362,38 @@ took 40.36 and 70.37.
 A frame that changes a tenth of the screen pays about a tenth of that,
 plus the copies its pages missed.
 
+### Pixel pairs
+
+A program that draws at half the width - a game's low detail, each
+pixel twice - can say so: `STDL_SDL2_RenderCopyPairs` is
+`SDL_RenderCopy` with the program's word that, in the groups the copy
+covers whole, the pixels at screen x and x + 1 (x even) are the same.
+Those groups are converted from their 8 distinct pixels, 56
+instructions a group against 74 (the loops 178-204 bytes in the
+cache):
+
+| A whole 320x240 frame, ms | whole | as pairs, X = 0 | as pairs, X at run time |
+|---|---|---|---|
+| TT (rows on two lines) | 31.03 | 25.60 | 27.82 |
+| Falcon on VGA | 59.80 | 48.80 | 53.02 |
+
+A group is converted as pairs only if every copy of it before the
+present (or before a copy from another texture) was a pairs copy that
+covered it whole. Anything else drawn over the picture - a game's
+messages, its menu - is copied with `SDL_RenderCopy`, and the groups
+that copy touches are converted whole, whichever came first. That is
+the whole of the bookkeeping: copy the view as pairs and everything
+else as before.
+
+The pixels are read when converted, so they must be in pairs then.
+Ones that are not show one of each pair (the first in a group's first
+half, the second in its second); the screen check
+(`STDL_SDL2_HINT_CHECK`) finds every such frame. Only a program that
+calls it links the pair loops and their bookkeeping (1,584 bytes); every
+program pays 324 bytes for the batch's mask of them. A fixed border
+index takes the run-time XOR's pair loops. In the experimental 68000
+build, an ST's screen takes a pairs copy as any other.
+
 Every time here is Hatari's. A real TT takes 2.3 times as long as
 Hatari's TT over the same compiled code, and 3.0 to 3.9 times over
 copies into ST-RAM, where the conversion writes (2026-11-13, TOS 3.06
@@ -402,6 +434,7 @@ A program includes `SDL_stdl.h` itself:
 | `STDL_SDL2_SetRenderDrawIndex` | the clear colour as an index |
 | `STDL_SDL2_CreateTextureFrom` | a texture over the program's own pixels, no copy |
 | `STDL_SDL2_SetBorderIndex` | the border index, above |
+| `STDL_SDL2_RenderCopyPairs` | `SDL_RenderCopy` for pixels in pairs, converted at 56 instructions a group against 74: "Pixel pairs", above |
 | `STDL_SDL2_ClearScreenNow` | the page on show cleared at once, margins and all, with no flip, the others when next drawn on. For a program that clears its screen without presenting a frame |
 | `STDL_SDL2_StagePalette` | the colours staged now, with no present: a fade's steps |
 | `STDL_SDL2_GetRegisterColours` | the 256 colours as last staged, in register order |

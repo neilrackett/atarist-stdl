@@ -511,6 +511,37 @@ static void copy(const Tex *t, const SDL_Rect *src, const SDL_Rect *dst)
     }
 }
 
+/* Pixel pairs: the copy's pixels made pairs on the screen (x and
+ * x + 1 the same, x even; the logical size's x is on a group, so its
+ * own x's parity is the screen's), then copied with
+ * STDL_SDL2_RenderCopyPairs, so the screen is the copy's as any. Made
+ * after a present, with the batch empty: the pixels are read when
+ * converted. */
+static void copy_pairs(Tex *t, const SDL_Rect *s, const SDL_Rect *d)
+{
+    int m, got, i, j;
+    for (j = 0; j < s->h; j++) {
+        const int ty = s->y + j;
+        if (ty < 0 || ty >= t->h) {
+            continue;
+        }
+        for (i = 1; i < s->w; i++) {
+            const int tx = s->x + i;
+            if (((d->x + i) & 1) && tx > 0 && tx < t->w) {
+                t->px[ty * t->pitch + tx] = t->px[ty * t->pitch + tx - 1];
+            }
+        }
+    }
+    m = model_copy(t, s, d);
+    got = STDL_SDL2_RenderCopyPairs(R, t->t, s, d);
+    if (m < 0) {
+        CHECK(got == -1);
+    } else {
+        CHECK(got == 0);
+        drawn |= m;
+    }
+}
+
 static void clear_index(Uint8 c)
 {
     STDL_SDL2_SetRenderDrawIndex(R, c);
@@ -905,6 +936,15 @@ static void random_run(long steps)
                 copy(t, &s, &d);
                 break;
             }
+        } else if (what < 47) {
+            /* pixel pairs, then more copies over them before the
+             * present, as a game's HUD over its low-detail view */
+            present();
+            random_rect(&s, t->w, t->h);
+            d = s;
+            d.x = rndn(lw) - 3;
+            d.y = rndn(lh) - 3;
+            copy_pairs(t, &s, &d);
         } else if (what < 50) {
             if (!t->borrowed) {
                 update(t);
@@ -988,6 +1028,70 @@ static void make_textures(void)
     borrowed(320, 240, 320, 0);
 }
 
+/* flips the add-on's own check is to find unlike its model */
+static Uint32 lies;
+
+/*
+ * Pairs' rule: a group is converted as pairs only if every copy of it
+ * in the batch was a pairs copy. The whole screen in pairs but for one
+ * group, whose pixels are not, copied as pairs with that group copied
+ * again as any, after and then before, shows the group as it is; then
+ * as pairs alone, it shows what the loops take of it (the C twin's
+ * pixels: the first of each pair in the group's first half, the second
+ * in its second), which the add-on's own check finds unlike.
+ */
+static void pairs_rules(void)
+{
+    Tex *t = &tex[3];               /* borrowed, 320x240 */
+    SDL_Rect all, spot;
+    int k, y, x;
+    CHECK(SDL_RenderSetLogicalSize(R, 0, 0) == 0);
+    model_place(320, 240);
+    all.x = all.y = 0;
+    all.w = 320;
+    all.h = 240;
+    spot.x = 33;
+    spot.y = 10;
+    spot.w = 1;
+    spot.h = 6;
+    for (k = 0; k < 3; k++) {
+        present();
+        for (y = 0; y < 240; y++) {
+            for (x = 0; x < 320; x += 2) {
+                t->px[y * t->pitch + x + 1] = t->px[y * t->pitch + x];
+            }
+        }
+        for (y = spot.y; y < spot.y + spot.h; y++) {
+            Uint8 *g = t->px + y * t->pitch + 32;
+            g[1] = (Uint8)(g[0] ^ 0x55);        /* the first half's */
+            g[8] = (Uint8)(g[9] ^ 0xAA);        /* the second half's */
+        }
+        if (k == 0) {
+            CHECK(STDL_SDL2_RenderCopyPairs(R, t->t, &all, &all) == 0);
+            CHECK(SDL_RenderCopy(R, t->t, &spot, &spot) == 0);
+        } else if (k == 1) {
+            CHECK(SDL_RenderCopy(R, t->t, &spot, &spot) == 0);
+            CHECK(STDL_SDL2_RenderCopyPairs(R, t->t, &all, &all) == 0);
+        } else {
+            CHECK(STDL_SDL2_RenderCopyPairs(R, t->t, &all, &all) == 0);
+        }
+        model_copy(t, &all, &all);
+        drawn = 1;
+#ifdef STDL_SDL2_ST
+        if (!is_st)
+#endif
+        if (k == 2) {
+            /* the loops' pixels where they are not pairs */
+            for (y = spot.y; y < spot.y + spot.h; y++) {
+                model[y + yoff][32 + 1 + xoff] = model[y + yoff][32 + xoff];
+                model[y + yoff][32 + 8 + xoff] = model[y + yoff][32 + 9 + xoff];
+            }
+            lies++;
+        }
+        present();
+    }
+}
+
 /* one screen: returns the failures */
 static int run(unsigned long s, unsigned x, int xconst)
 {
@@ -1047,10 +1151,11 @@ static int run(unsigned long s, unsigned x, int xconst)
     few_colours();
     port_sequences();
     random_run(1500);
+    pairs_rules();
     {
         STDL_SDL2_Check chk;
         CHECK(STDL_SDL2_GetCheck(R, &chk) == 0);
-        CHECK(chk.bad == 0);
+        CHECK(chk.bad == lies);
         CHECK(chk.flips > 100);
     }
     return failures;

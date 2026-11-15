@@ -21,7 +21,8 @@ SDL2CMINILIB = libstdl-sdl2-cmini.a
 
 SDL2SRCS      = $(SDL2DIR)/src/init.c $(SDL2DIR)/src/error.c \
                 $(SDL2DIR)/src/hints.c $(SDL2DIR)/src/c2p.c \
-                $(SDL2DIR)/src/c2pany.c $(SDL2DIR)/src/palette.c \
+                $(SDL2DIR)/src/c2pany.c $(SDL2DIR)/src/c2ppair.c \
+                $(SDL2DIR)/src/palette.c \
                 $(SDL2DIR)/src/timer.c $(SDL2DIR)/src/video.c \
                 $(SDL2DIR)/src/events.c $(SDL2DIR)/src/keymap.c \
                 $(SDL2DIR)/src/joystick.c $(SDL2DIR)/src/surface.c \
@@ -142,9 +143,18 @@ $(SDL2CMINILIB): $(SDL2CMINIOBJS) $(SDL2XCMINIOBJS)
 # strings, the byte swaps, the controller type and the paths inline in
 # the headers, paid only by a program that calls them; the wheel's
 # event defined and never sent, no code). 28,788.
+#
+# Raised 28876 -> 30784 on 2026-11-15, by 1,908 bytes for pixel pairs
+# (STDL_SDL2_RenderCopyPairs): c2ppair.o's loops, the C twin's absence
+# on the machine and the batch's marking, 1,584, linked only by a
+# program that calls it; and 324 in video.o that every program has,
+# the batch's second mask, tested at each copy and given a pass of its
+# own at the flush. A low-detail game's view converted as pairs, 56
+# instructions a group against 74: one port's low-detail frame on a TT
+# 3.5ms faster, 68.2 -> 64.7 (Hatari). 30,696.
 # A TT or a Falcon has the room; the budget is there so that growth is
 # a decision, raised with its reason or not at all.
-SDL2_MAX = 28876
+SDL2_MAX = 30784
 
 # The checks a build of the add-on must pass:
 # - no SDL_ link symbol in either archive (SDL_stdinc.h says why);
@@ -191,8 +201,8 @@ sdl2check: $(SDL2LIB) $(SDL2CMINILIB)
 	   END { for (n in s) { d = e[n] - s[n]; c++; \
 	           if (d <= 0 || d > 240) { bad = 1; \
 	             print "*** " n ": " d " bytes of loop, past the 240 that sit in the 68030 instruction cache" } } \
-	         if (c < 34) { bad = 1; \
-	           print "*** " c + 0 " conversion loops measured, 34 expected" } \
+	         if (c < 38) { bad = 1; \
+	           print "*** " c + 0 " conversion loops measured, 38 expected" } \
 	         exit bad }'
 	@calls=`sh tools/libcalls.sh $(SDL2OBJS) $(SDL2XOBJS)` || exit 1; \
 	 if [ -n "$$calls" ]; then \

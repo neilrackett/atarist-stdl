@@ -162,6 +162,10 @@ struct SDL_Renderer {
     Uint32 bwhole[SCREEN_H];
     Uint32 bpart[SCREEN_H];
     Uint16 bpix[SCREEN_H][GROUPS];
+    Uint32 bpair[SCREEN_H];     /* whole groups only pairs copies made */
+    int bpaired;                /* any in this batch */
+    int pairing;                /* the copy being made is of pairs */
+    const struct stdl_sdl2_pairs *pairs;    /* c2ppair.c's side */
 
     Uint8 *model;               /* the check's chunky screen; on an ST
                                  * always there, to convert from */
@@ -503,6 +507,7 @@ static void drop_batch(SDL_Renderer *r)
     int y;
     for (y = r->by0; y <= r->by1; y++) {
         r->bwhole[y] = 0;
+        r->bpair[y] = 0;
         if (r->bpart[y]) {
             memset(r->bpix[y], 0, sizeof(r->bpix[y]));
             r->bpart[y] = 0;
@@ -511,6 +516,7 @@ static void drop_batch(SDL_Renderer *r)
     r->by0 = SCREEN_H;
     r->by1 = -1;
     r->bparts = 0;
+    r->bpaired = 0;
     r->bt = NULL;
 }
 
@@ -1078,6 +1084,12 @@ static void batch_add(SDL_Renderer *r, int sx, int sy, int w, int h)
         return;
     }
 #endif
+    /* pixel pairs, once the batch has a pairs copy (c2ppair.c) */
+    if (r->pairing | r->bpaired) {
+        r->pairs->mark(r->bpair + sy, r->bwhole + sy, r->bpart + sy, h, sx,
+                       w, r->pairing);
+        r->bpaired |= r->pairing;
+    }
     if (((sx | w) & 15) == 0) {
         const Uint32 whole = (Uint32)(((1UL << ((sx + w) >> 4)) - 1) &
                                       ~((1UL << (sx >> 4)) - 1));
@@ -1139,34 +1151,52 @@ static void merge_part(SDL_Renderer *r, Uint8 *back, int y, int g, Uint16 pm)
     }
 }
 
-/* n rows from y whose whole groups are m, a run of groups a call */
-static void convert_rows(SDL_Renderer *r, Uint8 *back, int y, int n, Uint32 m)
+/* n rows from y whose whole groups are m, a run of groups a call;
+ * those of p, within m, as pixel pairs */
+static void convert_rows(SDL_Renderer *r, Uint8 *back, int y, int n, Uint32 m,
+                         Uint32 p)
 {
     const SDL_Texture *t = r->bt;
-    int g = 0;
-    while (m) {
-        int ge;
-        while (!(m & 1)) {
-            m >>= 1;
-            g++;
-        }
-        ge = g;
-        while (m & 1) {
-            m >>= 1;
-            ge++;
-        }
+    int pair;
+    for (pair = 0; pair < 2; pair++) {
+        Uint32 k = pair ? p : m & ~p;
+        int g = 0;
+        while (k) {
+            int ge;
+            while (!(k & 1)) {
+                k >>= 1;
+                g++;
+            }
+            ge = g;
+            while (k & 1) {
+                k >>= 1;
+                ge++;
+            }
 #ifdef STDL_SDL2_ST
-        if (st_on) {
-            stdl_sdl2_st_c2p(t->pixels + MUL(y - r->bdy, t->pitch) +
-                             (g * 16 - r->bdx), t->pitch,
-                             back + MUL(y, r->stride) + GOFF(g), r->dp,
-                             ge - g, n, ST_TABS(r, y));
-        } else
+            if (st_on) {
+                stdl_sdl2_st_c2p(t->pixels + MUL(y - r->bdy, t->pitch) +
+                                 (g * 16 - r->bdx), t->pitch,
+                                 back + MUL(y, r->stride) + GOFF(g), r->dp,
+                                 ge - g, n, ST_TABS(r, y));
+            } else
 #endif
-        stdl_sdl2_c2p(t->pixels + MUL(y - r->bdy, t->pitch) + (g * 16 - r->bdx),
-                      t->pitch, back + MUL(y, r->stride) + g * 16, r->dp, ge - g,
-                      n, r->dbl, r->v, r->x2, r->x0);
-        g = ge;
+            {
+                const Uint8 *src = t->pixels + MUL(y - r->bdy, t->pitch) +
+                                   (g * 16 - r->bdx);
+                Uint8 *dst = back + MUL(y, r->stride) + g * 16;
+                if (pair) {
+                    r->pairs->conv(src, t->pitch, dst, r->dp, ge - g, n,
+                                   r->dbl, r->x2, r->x0);
+                } else {
+                    stdl_sdl2_c2p(src, t->pitch, dst, r->dp, ge - g, n,
+                                  r->dbl, r->v, r->x2, r->x0);
+                }
+            }
+            g = ge;
+        }
+        if (!p) {
+            break;
+        }
     }
 }
 
@@ -1207,27 +1237,33 @@ static void flush(SDL_Renderer *r)
         r->bpart[y] = 0;
     }
     r->bparts = 0;
-    /* then runs of rows with the same whole groups, one call a run */
+    /* then runs of rows with the same whole groups, one call a run;
+     * with pairs in the batch, the same pairs too, their groups through
+     * their own loops */
     for (y = r->by0; y <= r->by1; ) {
         const Uint32 m = r->bwhole[y];
+        const Uint32 p = r->bpaired ? r->bpair[y] & m : 0;
         int y2 = y + 1, i;
         if (!m) {
             y++;
             continue;
         }
-        while (y2 <= r->by1 && r->bwhole[y2] == m) {
+        while (y2 <= r->by1 && r->bwhole[y2] == m &&
+               (!r->bpaired || (r->bpair[y2] & m) == p)) {
             y2++;
         }
-        convert_rows(r, back, y, y2 - y, m);
+        convert_rows(r, back, y, y2 - y, m, p);
         for (i = y; i < y2; i++) {
             r->now[i] |= m;
             r->bwhole[i] = 0;
+            r->bpair[i] = 0;
         }
         NOW_ROWS(r, y, y2 - 1);
         y = y2;
     }
     r->by0 = SCREEN_H;
     r->by1 = -1;
+    r->bpaired = 0;
     r->bt = NULL;
 }
 
@@ -1506,6 +1542,27 @@ int SDL_RenderCopy(SDL_Renderer *renderer, SDL_Texture *texture,
     }
     r->frame = r->drawn = 1;
     return 0;
+}
+
+int stdl_sdl2_copy_pairs(SDL_Renderer *r, SDL_Texture *texture,
+                         const SDL_Rect *srcrect, const SDL_Rect *dstrect,
+                         const struct stdl_sdl2_pairs *pairs)
+{
+    int ret;
+    /* no renderer: SDL_RenderCopy's error; an ST's screen has its own
+     * conversion, which takes pairs as any */
+    if (!r
+#ifdef STDL_SDL2_ST
+        || st_on
+#endif
+        ) {
+        return SDL_RenderCopy(r, texture, srcrect, dstrect);
+    }
+    r->pairs = pairs;
+    r->pairing = 1;
+    ret = SDL_RenderCopy(r, texture, srcrect, dstrect);
+    r->pairing = 0;
+    return ret;
 }
 
 /* the groups the page owes and this frame did not draw, from the page

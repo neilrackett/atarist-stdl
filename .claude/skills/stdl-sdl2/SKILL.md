@@ -351,7 +351,9 @@ Falcon that binary shows what the 68020 build shows, frame for frame,
   from its 256 to 16 slots and their colours, from the next present. A
   new map converts the screen again; new colours under the same map (a
   fade's steps) and palette changes are 16 registers. A NULL map hands
-  the choice back.
+  the choice back. `SDL2ST16.TOS` (`examples/sdl2demo.c` with
+  `SDL2DEMO_ST16`) shows it: a map made once, the 16 given again as
+  the palette cycles.
 - Slow, by design: a whole screen of new pixels 0.74s on an 8MHz ST and
   0.42s on a Mega STE, a new 64x48 box 41ms and 23ms, a palette change
   that keeps the maps 42ms and 22ms, or a

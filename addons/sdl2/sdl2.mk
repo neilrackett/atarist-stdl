@@ -265,7 +265,16 @@ dist/SDL2ST.TOS: examples/sdl2demo.c $(SDL2STLIB) $(LIB) | dist
 
 # no SDL_ link symbol here either. What keeps this code out of the
 # archives above is the #error in internal.h and st.c, not a check here.
-sdl2st: $(SDL2STLIB) $(SDL2STCMINILIB) dist/SDL2ST.TOS
+# and with the program's own 16 colours on an ST
+# (STDL_SDL2_SetSTColours, sdl2demo.c's SDL2DEMO_ST16)
+dist/SDL2ST16.TOS: examples/sdl2demo.c $(SDL2STLIB) $(LIB) | dist
+	@mkdir -p $(OBJDIR)/examples
+	$(CC) $(filter-out -m68020-60 -msoft-float,$(SDL2_PROGFLAGS)) -m68000 \
+	    -DSDL2DEMO_ST16 -c -o $(OBJDIR)/examples/sdl2demo.st16.o $<
+	$(CC) -m68000 -o $@ $(OBJDIR)/examples/sdl2demo.st16.o $(SDL2STLIB) \
+	    $(LIB) && $(STRIP) $@
+
+sdl2st: $(SDL2STLIB) $(SDL2STCMINILIB) dist/SDL2ST.TOS dist/SDL2ST16.TOS
 	@if $(CROSS)nm --defined-only $(SDL2STLIB) $(SDL2STCMINILIB) \
 	     | grep -E ' [A-Za-z] _SDL_'; then \
 	   echo "*** the SDL2 add-on's ST build defines SDL_ link symbols"; \

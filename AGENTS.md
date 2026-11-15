@@ -1621,7 +1621,10 @@ and the rules below keep it from being anything else's.
     (`paldirty`). `test_render` gives, gives the same map with new
     colours and gives back at random (`st_give`), and expects all of
     that (`tgiven`, `tgnew`): breaking each of twelve parts of it on
-    purpose failed the test.
+    purpose failed the test. Its example is the demo built once more,
+    `SDL2ST16.TOS` (`SDL2DEMO_ST16` in `sdl2demo.c`, `make sdl2st`),
+    whose code under that macro leaves `SDL2DEMO.TOS` and `SDL2ST.TOS`
+    byte for byte as they were.
   - Check the machine as well as the host: the count's first
     assembler stored 0xFF (`st`) where `st_mark` stores 1, which every
     use of the colours seen took as the same, and the host's C twin

@@ -389,7 +389,8 @@ the present's conversion and flip times for a bench.
 
 `make sdl2st` builds the add-on a second time, for the 68000:
 `libstdl-sdl2-st.a` and `libstdl-sdl2-st-cmini.a`, and the demo as
-`dist/SDL2ST.TOS`. A program linked with it runs on every machine. On
+`dist/SDL2ST.TOS`, and again as `dist/SDL2ST16.TOS`, which gives its
+own 16 colours on an ST (below). A program linked with it runs on every machine. On
 a TT or a Falcon it has the 256-colour screen and shows what the
 add-on built for them shows, frame for frame; on an ST, an STE or a
 Mega STE it has a 16-colour screen that is for testing (below). It is
@@ -488,7 +489,12 @@ no TT or Falcon to hand, not to play it: the picture is a rough
   with an ST version of its own, gives the map from its 256 to the 16
   slots and the slots' colours, and the add-on shows them as given from
   the next present or staging, until a NULL map hands the choice back.
-  Nothing is counted or noted meanwhile.
+  Nothing is counted or noted meanwhile. `SDL2ST16.TOS`
+  (`examples/sdl2demo.c` built with `SDL2DEMO_ST16`) is the pattern:
+  its map made once, eight bands of its cycling background's shades,
+  seven of its boxes' and black, each slot's colour its band's middle
+  entry given again as the palette cycles; S switches between those
+  and the add-on's own.
   - A new map is a screen converted again, and with the checkerboard
     its second slots are made then, from the colours given and the
     palette as it is. Under the same map new colours, as at a fade's

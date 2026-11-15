@@ -31,6 +31,18 @@
  *
  * Built by `make sdl2`: compiled -m68020-60 -msoft-float, linked
  * against the 68000 libraries, whose 68020 ones assume an FPU.
+ *
+ * `make sdl2st` builds it twice more against the add-on's experimental
+ * 68000 build, which runs on an ST too: SDL2ST as it is, its 16
+ * colours made by the add-on from those on screen, and SDL2ST16
+ * (SDL2DEMO_ST16), which gives the add-on 16 of its own
+ * (STDL_SDL2_SetSTColours), as a program with an ST version of its own
+ * would. Its map from the 256 entries to the 16 slots is made once:
+ * black, eight bands of the background's shades, seven of the boxes'.
+ * Each slot then shows its band's middle entry as the palette cycles,
+ * so the cycling is the 16 registers given again, and the map never
+ * moves. S switches between those and the add-on's own; on a TT or a
+ * Falcon the call says no, and it is SDL2DEMO.
  */
 
 #include "SDL.h"
@@ -42,6 +54,44 @@
 #define BOX    24
 #define SHADES 224              /* 0-223; the boxes 224-239, 240- unused */
 #define RATE   12517            /* a DMA rate */
+
+#ifdef SDL2DEMO_ST16
+/* An ST's 16 colours of the program's own: entry i's slot, made once,
+ * and each slot's middle entry, whose colour the slot shows */
+static Uint8 st_map[256], st_rep[16];
+
+static void st_bands(void)
+{
+    int i, s, first[16], count[16];
+    for (s = 0; s < 16; s++) {
+        first[s] = count[s] = 0;
+    }
+    for (i = 0; i < 256; i++) {
+        s = i < SHADES ? 1 + i * 8 / SHADES
+          : i < SHADES + 16 ? 9 + (i - SHADES) * 7 / 16
+          : 0;
+        st_map[i] = (Uint8)s;
+        if (!count[s]++) {
+            first[s] = i;
+        }
+    }
+    for (s = 0; s < 16; s++) {
+        st_rep[s] = (Uint8)(first[s] + (count[s] - 1) / 2);
+    }
+}
+
+/* the 16 as the palette stands, under the same map; 0 where there is
+ * no ST screen to give them to */
+static int st_give(SDL_Renderer *ren, const SDL_Palette *pal)
+{
+    SDL_Color c[16];
+    int s;
+    for (s = 0; s < 16; s++) {
+        c[s] = pal->colors[st_rep[s]];
+    }
+    return STDL_SDL2_SetSTColours(ren, st_map, c) == 0;
+}
+#endif
 
 /* the tone's phase step a sample, 16.16 of a cycle; 0 is silence */
 static Uint32 tone_step, tone_phase;
@@ -74,6 +124,9 @@ int main(int argc, char *argv[])
     int dx[BOXES], dy[BOXES];
     Uint32 start;
     int x, y, i, ox, oy, quit = 0;
+#ifdef SDL2DEMO_ST16
+    int own;
+#endif
     (void)argc;
     (void)argv;
 
@@ -114,6 +167,10 @@ int main(int argc, char *argv[])
     }
     SDL_SetPaletteColors(pal, c, 0, 256);
     STDL_SDL2_SetRenderPalette(ren, pal);
+#ifdef SDL2DEMO_ST16
+    st_bands();
+    own = st_give(ren, pal);
+#endif
 
     for (y = 0; y < H; y++) {
         for (x = 0; x < W; x++) {
@@ -190,6 +247,15 @@ int main(int argc, char *argv[])
                 me.x = e.motion.x - BOX / 2;
                 me.y = e.motion.y - BOX / 2;
             }
+#ifdef SDL2DEMO_ST16
+            else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_s) {
+                /* the program's 16, or the add-on's own (a NULL map) */
+                own = !own;
+                if (!own) {
+                    STDL_SDL2_SetSTColours(ren, NULL, NULL);
+                }
+            }
+#endif
         }
         /* held keys and buttons, read as they stand */
         me.x += 3 * (keys[SDL_SCANCODE_RIGHT] - keys[SDL_SCANCODE_LEFT]);
@@ -236,6 +302,11 @@ int main(int argc, char *argv[])
             c[i] = pal->colors[(i + 1) % SHADES];
         }
         SDL_SetPaletteColors(pal, c, 0, SHADES);
+#ifdef SDL2DEMO_ST16
+        if (own) {
+            own = st_give(ren, pal);
+        }
+#endif
         SDL_RenderPresent(ren);
     }
 

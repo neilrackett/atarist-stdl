@@ -503,7 +503,11 @@ warnings** with the Makefile's `-Wall -Wextra`.
   - The MFP's monitor bit (GPIP 7) is the TT's mono test: a TT shows ST
     High on its colour monitor (refused for nothing before), and with
     a mono monitor and a TT High desktop the old library switched to
-    ST Low and Hatari reset in a loop.
+    ST Low and Hatari reset in a loop. The DMA sound's play line is
+    XORed into that bit, so while a sample plays it reads inverted:
+    a program that opened STDL's voices before its screen was refused
+    as a mono monitor's (November 2026). The test XORs the play bit
+    (`$FF8901` bit 0) back out.
   - CACR reads 0x3111 on both (data cache on); a Falcon's BLiTTER is
     not used, and BLITCHK there was faster without it anyway (215ms
     against 275).

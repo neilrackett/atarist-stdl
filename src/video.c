@@ -561,9 +561,14 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
          * of 640x480 in 16 colours): its monitor is VgetMonitor's to
          * say. A TT shows ST High on its colour monitor as well, and
          * TT High (6) only on a mono one: the MFP's monitor-detect
-         * bit (GPIP 7, clear for mono) says which it has. */
+         * bit (GPIP 7, clear for mono) says which it has. The DMA
+         * sound's play line is XORed into that bit, so while a sample
+         * plays (STDL's voices, or a program's own, started before the
+         * screen) it reads inverted: undo that with the play bit. */
         if (stdl_is_falcon() ? VgetMonitor() == MON_MONO
-            : stdl_is_tt() ? (*(volatile uint8_t *)0xFFFFFA01UL & 0x80) == 0
+            : stdl_is_tt() ? ((*(volatile uint8_t *)0xFFFFFA01UL
+                               ^ (*(volatile uint8_t *)0xFFFF8901UL << 7))
+                              & 0x80) == 0
                            : stdl.old_rez == 2) {
             STDL_SetError("monochrome monitor: low resolution "
                           "unavailable (mono support is post-v1)");

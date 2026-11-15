@@ -47,12 +47,15 @@
  * taller one gets STDL's tall screen (stdl_responsive.h), 240 rows
  * with an ST's bottom border open, and two pages, the border's own;
  * if the border cannot open, ST Low. ROW0 and ROWS are what was got.
- * The pixels go through a reduction of the palette to 16 colours
- * (st.c), remade at the present after a palette change. When that
- * moves any colour to another slot the pages are stale: the next one
- * drawn on is converted again whole, from a chunky copy of the screen
- * kept for that (the screen check's model), and the others catch up
- * from it as from any frame.
+ * The pixels go through a reduction of the palette to 16 colours, made
+ * from the colours on the page (st.c): two maps, a colour's first slot
+ * and its second, which a checkerboard by the screen's x + y mixes. The
+ * maps are judged again at a present after a palette change or a colour
+ * on the page that was not there before, and made again when they no
+ * longer fit. When they move the pages are stale: the next one drawn on
+ * is converted again whole, from a chunky copy of the screen kept for
+ * that (the screen check's model), and the others catch up from it as
+ * from any frame.
  */
 #ifdef STDL_SDL2_ST
 #include "st.h"
@@ -66,6 +69,10 @@ static int st_on, st_rows = SCREEN_H;
 #define ROWS      st_rows
 /* group g's bytes into a row, a shift so that no multiply is called */
 #define GOFF(g)   ((g) << (st_on ? 3 : 4))
+/* the conversion's tables for the screen's row y and the row after:
+ * even rows show a colour's first slot at an even x, odd rows at an
+ * odd x */
+#define ST_TABS(r, y) (r)->tab[(y) & 1], (r)->tab[~(y) & 1]
 #define GLONGS(n) ((n) << (st_on ? 1 : 2))  /* and n groups in longs */
 /* a row or a texture's row times a stride: the 68000's own multiply,
  * where a 32-bit one is a library call (textures keep to 16 bits) */
@@ -162,9 +169,14 @@ struct SDL_Renderer {
     STDL_SDL2_Check chk;
 
 #ifdef STDL_SDL2_ST
-    Uint8 map[256];             /* a colour's slot of the 16 */
-    Uint32 tab[4 * 256];        /* and the slots as the conversion has them */
-    int stale;                  /* the pages hold an older map's slots */
+    struct stdl_sdl2_st_maps maps;  /* a colour's two slots of the 16 */
+    Uint32 tab[2][4 * 256];     /* as the conversion has them: even
+                                 * rows' tables, and odd rows' */
+    int bits;                   /* a channel as the machine shows it */
+    int dither;                 /* a checkerboard of two slots (st.h) */
+    int stale;                  /* the pages hold older maps' slots */
+    Uint8 seen[256];            /* colours on the page since the count */
+    int fresh;                  /* and one there that was not before */
     int ny0, ny1;               /* the rows of now that are set */
     int oy0[3], oy1[3];         /* and of each page's owed */
     int regdirty;               /* the 16 colours are to be staged */
@@ -336,24 +348,23 @@ static int page_index(SDL_Renderer *r, Uint8 *pix)
 }
 
 #ifdef STDL_SDL2_ST
-/* an ST page's rows all colour c, as the map has it now: a group's
- * four plane words as two longs */
+/* an ST page's rows all colour c, as the maps have it now: a group of
+ * it through the conversion's own tables, for a row of the page's
+ * first row's parity and one of the other, so that the checkerboard is
+ * the conversion's and not written out again here */
 static void st_fill(SDL_Renderer *r, Uint8 *pix, unsigned c)
 {
-    const unsigned v = r->map[c];
-    Uint8 pat[8];
-    Uint32 p01, p23;
-    int y, g, p;
-    for (p = 0; p < 4; p++) {
-        pat[2 * p] = pat[2 * p + 1] = (Uint8)((v >> p & 1) ? 0xFF : 0);
-    }
-    memcpy(&p01, pat, 4);
-    memcpy(&p23, pat + 4, 4);
+    Uint8 px[16];
+    Uint32 pat[4];
+    int y, g;
+    memset(px, (int)c, sizeof(px));
+    stdl_sdl2_st_c2p(px, 0, (Uint8 *)pat, 8, 1, 2, ST_TABS(r, ROW0));
     for (y = 0; y < ROWS; y++) {
+        const Uint32 lo = pat[(y & 1) << 1], hi = pat[((y & 1) << 1) + 1];
         Uint32 *d = (Uint32 *)(void *)(pix + MUL(y, r->stride));
         for (g = GROUPS; g > 0; g--) {
-            *d++ = p01;
-            *d++ = p23;
+            *d++ = lo;
+            *d++ = hi;
         }
     }
 }
@@ -419,6 +430,8 @@ SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, int index, Uint32 flags)
     if (st_on) {
         /* an ST's page: a line a row, no margin */
         r->dp = r->stride;
+        r->bits = STDL_GetMachineInfo()->is_ste ? 4 : 3;
+        r->dither = SDL_GetHintBoolean(STDL_SDL2_HINT_ST_DITHER, SDL_TRUE);
         r->npages = (the_screen->flags & STDL_TRIPLEBUF) ? 3 : 2;
     } else
 #endif
@@ -446,7 +459,7 @@ SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, int index, Uint32 flags)
     screen_used = 1;
 #ifdef STDL_SDL2_ST
     if (st_on) {
-        /* the chunky screen always, to convert again after a new map;
+        /* the chunky screen always, to convert again after new maps;
          * its page only for the check */
         const int chk = SDL_GetHintBoolean(STDL_SDL2_HINT_CHECK, SDL_FALSE);
         r->model = (Uint8 *)calloc(SCREEN_W * SCREEN_H, 1);
@@ -609,17 +622,136 @@ static int pal_changed(const SDL_Renderer *r)
 }
 
 #ifdef STDL_SDL2_ST
-/* The palette as 16 colours and a map onto them. A map that moved
- * leaves the pages stale and is a frame to show, drawn on or not; the
- * colours wait for st_registers, just before the flip that shows a
- * page converted for them. Says whether the map moved. */
+/*
+ * The colours on the page. The reduction is made from them (st.c says
+ * why), so the renderer keeps which it has seen: counted from the
+ * chunky copy of the screen, then each colour a copy or a clear puts
+ * on the page noted as it goes there, which says when one comes that
+ * was not (fresh). A colour that goes stays noted until the next
+ * count, which is made only when a palette change has left the maps
+ * not fitting, as a room's change does: the count is a pass over the
+ * page, and a fade's steps keep their maps and so never pay it.
+ */
+/* 1 if a group's 16 pixels are all colours seen: the check for every
+ * group a copy changes, so on the machine 16 lookups and no branch,
+ * about 22 cycles a pixel, where gcc's loop took 60 */
+static __inline__ int st_seen16(const Uint8 *seen, const Uint8 *p)
+{
+#ifdef __m68k__
+    unsigned long v;
+    Uint8 all = 1;
+    __asm__("moveq	#0,%1\n"
+            ".rept	16\n"
+            "	move.b	(%2)+,%1\n"
+            "	and.b	0(%3,%1.w),%0\n"
+            ".endr"
+            : "+d"(all), "=&d"(v), "+a"(p)
+            : "a"(seen)
+            : "cc");
+    return all;
+#else
+    Uint8 all = 1;
+    int k;
+    for (k = 0; k < 16; k++) {
+        all &= seen[p[k]];
+    }
+    return all;
+#endif
+}
+
+/* colours marked seen, fresh if one was not */
+static void st_mark(SDL_Renderer *r, const Uint8 *p, int n)
+{
+    Uint8 *seen = r->seen;
+    int k;
+    for (k = 0; k < n; k++) {
+        if (!seen[p[k]]) {
+            seen[p[k]] = 1;
+            r->fresh = 1;
+        }
+    }
+}
+
+/* n pixels put on the page: 16 at a time through st_seen16, marked only
+ * where one is a colour not seen */
+static void st_note(SDL_Renderer *r, const Uint8 *p, int n)
+{
+    for (; n >= 16; n -= 16, p += 16) {
+        if (!st_seen16(r->seen, p)) {
+            st_mark(r, p, 16);
+        }
+    }
+    if (n > 0) {
+        st_mark(r, p, n);
+    }
+}
+
+
+/* the colours on the page, from the chunky copy: on the machine 16
+ * pixels a pass with the index's top bits cleared once, about 22
+ * cycles a pixel, where gcc's loop took 57 (a count 228ms on a Mega
+ * STE, 11 of them in one cutscene). A colour seen is 1, as st_mark
+ * makes it: an st, 0xFF, broke the test on the machine alone. */
+static void st_count(SDL_Renderer *r)
+{
+    const Uint8 *p = r->model + MUL(ROW0, SCREEN_W);
+    Uint8 *seen = r->seen;
+    long n = MUL(ROWS, SCREEN_W) >> 4;
+    memset(seen, 0, sizeof(r->seen));
+#ifdef __m68k__
+    {
+        unsigned long v;
+        __asm__ volatile("moveq	#0,%1\n"
+                         "1:\n"
+                         ".rept	16\n"
+                         "	move.b	(%2)+,%1\n"
+                         "	move.b	%4,0(%3,%1.w)\n"
+                         ".endr\n"
+                         "	subq.l	#1,%0\n"
+                         "	bne.s	1b"
+                         : "+d"(n), "=&d"(v), "+a"(p)
+                         : "a"(seen), "d"(1)
+                         : "cc", "memory");
+    }
+#else
+    for (; n > 0; n--, p += 16) {
+        int k;
+        for (k = 0; k < 16; k++) {
+            seen[p[k]] = 1;
+        }
+    }
+#endif
+}
+
+/* The palette as 16 colours and two maps onto them, at a palette change
+ * or a colour seen that was not: the maps kept if they fit, else made
+ * again, from a fresh count after a palette change. Only then: after a
+ * colour comes, what has been seen is what the page shows and the
+ * colours gone since the count, which the next palette change drops,
+ * so a program that never changes its palette keeps every colour it
+ * has shown and its maps drift toward the palette's as a whole. A count
+ * at every remake would cost a pass over the page each time (90-105ms
+ * on a Mega STE) and was not measured as better for a game that
+ * changes its palette with its rooms. Maps that moved leave the pages
+ * stale and are a frame to show, drawn on or not; the colours wait for
+ * st_registers, just before the flip that shows a page converted for
+ * them. Says whether the maps moved. */
 static int st_reduce(SDL_Renderer *r)
 {
-    const int moved = stdl_sdl2_st_update(r->pal ? r->pal->colors : NULL,
-                                          r->pal ? r->pal->ncolors : 0,
-                                          r->x, r->map, r->regs);
+    const SDL_Color *col = r->pal ? r->pal->colors : NULL;
+    const int ncol = r->pal ? r->pal->ncolors : 0;
+    int moved = 0;
+    if (!stdl_sdl2_st_keep(col, ncol, r->x, r->bits, r->seen, &r->maps,
+                           r->regs)) {
+        if (pal_changed(r)) {
+            st_count(r);
+        }
+        moved = stdl_sdl2_st_remake(col, ncol, r->x, r->bits, r->dither,
+                                    r->seen, &r->maps, r->regs);
+    }
+    r->fresh = 0;
     if (moved) {
-        stdl_sdl2_st_spread(r->map, r->tab);
+        stdl_sdl2_st_spread(r->maps.a, r->maps.b, r->tab[0]);
         r->stale = r->frame = 1;
     }
     r->palver = r->pal ? r->pal->version : 0;
@@ -628,9 +760,14 @@ static int st_reduce(SDL_Renderer *r)
     return moved;
 }
 
-const Uint8 *stdl_sdl2_st_map(SDL_Renderer *renderer)
+const struct stdl_sdl2_st_maps *stdl_sdl2_st_view(SDL_Renderer *renderer,
+                                                  int *bits, int *dither,
+                                                  const Uint8 **seen)
 {
-    return renderer->map;
+    *bits = renderer->bits;
+    *dither = renderer->dither;
+    *seen = renderer->seen;
+    return &renderer->maps;
 }
 
 static void st_registers(SDL_Renderer *r)
@@ -647,7 +784,7 @@ static void st_registers(SDL_Renderer *r)
     r->regdirty = 0;
 }
 
-/* a staging's colours on an ST: with a new map, a present */
+/* a staging's colours on an ST: with new maps, a present */
 static void st_stage(SDL_Renderer *r)
 {
     if (st_reduce(r)) {
@@ -931,7 +1068,7 @@ static void merge_part(SDL_Renderer *r, Uint8 *back, int y, int g, Uint16 pm)
     }
 #ifdef STDL_SDL2_ST
     if (st_on) {
-        stdl_sdl2_st_c2p(in, 16, out, GB, 1, 1, r->tab);
+        stdl_sdl2_st_c2p(in, 16, out, GB, 1, 1, ST_TABS(r, y));
     } else
 #endif
     stdl_sdl2_c2p_c(in, 16, out, 16, 1, 1, 0, r->x2, r->x0);
@@ -966,7 +1103,7 @@ static void convert_rows(SDL_Renderer *r, Uint8 *back, int y, int n, Uint32 m)
             stdl_sdl2_st_c2p(t->pixels + MUL(y - r->bdy, t->pitch) +
                              (g * 16 - r->bdx), t->pitch,
                              back + MUL(y, r->stride) + GOFF(g), r->dp,
-                             ge - g, n, r->tab);
+                             ge - g, n, ST_TABS(r, y));
         } else
 #endif
         stdl_sdl2_c2p(t->pixels + MUL(y - r->bdy, t->pitch) + (g * 16 - r->bdx),
@@ -1056,6 +1193,7 @@ int SDL_RenderClear(SDL_Renderer *renderer)
     if (st_on) {
         back = back_page(r);
         st_fill(r, back + ROW0 * r->stride, c);
+        st_mark(r, &c, 1);
         for (y = ROW0; y < ROW0 + ROWS; y++) {
             r->now[y] = ALLGROUPS;
         }
@@ -1144,6 +1282,9 @@ static int st_copy_changed(SDL_Renderer *r, const SDL_Texture *t, int tx,
                 d[1] = s[1];
                 d[2] = s[2];
                 d[3] = s[3];
+                if (!st_seen16(r->seen, (const Uint8 *)d)) {
+                    st_mark(r, (const Uint8 *)d, 16);
+                }
                 mask |= bit;
             }
         }
@@ -1173,6 +1314,12 @@ static __attribute__((noinline)) void model_copy(SDL_Renderer *r,
     for (row = 0; row < h; row++) {
         memcpy(r->model + (sy + row) * SCREEN_W + sx,
                t->pixels + (ty + row) * t->pitch + tx, (size_t)w);
+#ifdef STDL_SDL2_ST
+        /* what the page shows of it */
+        if (st_on && sy + row >= ROW0 && sy + row < ROW0 + ROWS) {
+            st_note(r, r->model + MUL(sy + row, SCREEN_W) + sx, w);
+        }
+#endif
     }
 }
 
@@ -1363,7 +1510,7 @@ static void check(SDL_Renderer *r, const Uint8 *back)
 #ifdef STDL_SDL2_ST
     if (st_on) {
         stdl_sdl2_st_c2p(r->model + ROW0 * SCREEN_W, SCREEN_W, r->scratch,
-                         r->dp, GROUPS, ROWS, r->tab);
+                         r->dp, GROUPS, ROWS, ST_TABS(r, ROW0));
     } else
 #endif
     stdl_sdl2_c2p_c(r->model, SCREEN_W, r->scratch + r->margin, r->dp,
@@ -1392,8 +1539,8 @@ void SDL_RenderPresent(SDL_Renderer *renderer)
     }
 #ifdef STDL_SDL2_ST
     if (st_on) {
-        /* the map first: what this frame converts goes through it */
-        if (pal_changed(r)) {
+        /* the maps first: what this frame converts goes through them */
+        if (pal_changed(r) || r->fresh) {
             st_reduce(r);
         }
         if (!r->frame) {
@@ -1419,11 +1566,11 @@ void SDL_RenderPresent(SDL_Renderer *renderer)
     back = back_page(r);
 #ifdef STDL_SDL2_ST
     if (r->stale) {
-        /* the whole page through the new map; the other pages then owe
+        /* the whole page through the new maps; the other pages then owe
          * all of it, and catch up from this one as from any frame */
         stdl_sdl2_st_c2p(r->model + ROW0 * SCREEN_W, SCREEN_W,
                          back + ROW0 * r->stride, r->dp, GROUPS, ROWS,
-                         r->tab);
+                         ST_TABS(r, ROW0));
         for (y = ROW0; y < ROW0 + ROWS; y++) {
             r->now[y] = ALLGROUPS;
         }
@@ -1480,14 +1627,16 @@ int STDL_SDL2_ClearScreenNow(SDL_Renderer *renderer)
     }
     drop_batch(r);
 #ifdef STDL_SDL2_ST
-    /* colour X as the map has it now, which is what the chunky copy
+    /* colour X as the maps have it now, which is what the chunky copy
      * will say is there; a page cleared so is not stale */
     if (st_on) {
+        const Uint8 x = (Uint8)r->x;
         if (r->shown) {
             Uint8 *pix = (Uint8 *)r->shown + ROW0 * r->stride;
             shown = page_index(r, pix);
             st_fill(r, pix, r->x);
         }
+        st_mark(r, &x, 1);
         r->stale = 0;
     } else
 #endif

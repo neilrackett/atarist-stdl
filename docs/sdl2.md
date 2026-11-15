@@ -431,7 +431,7 @@ and linked against the other archive. The machine is asked at
 
 It is there to try a program's logic, input and sound where there is
 no TT or Falcon to hand, not to play it: the picture is a rough
-16-colour one and a whole screen of new pixels takes an 8MHz ST 0.53s.
+16-colour one and a whole screen of new pixels takes an 8MHz ST 0.74s.
 
 - **The screen follows the first window's height**, as the mode is
   set once a program. A window of up to 200 rows gets ST Low, all of
@@ -455,22 +455,45 @@ no TT or Falcon to hand, not to play it: the picture is a rough
   the blocks it drew on, changed or not, pays a compare for most of
   them: one port's game converted 6ms a frame on a Mega STE where it
   had converted 20. Other copies are converted whole.
-- **The palette is reduced to 16 colours** each time it changes: 15
-  slots and black. The palette's colours start in one box, and the
+- **The 16 colours are made from the colours on the screen**, not
+  from the palette as a whole: 15 slots and black. A program's
+  palette has many colours its picture does not show, and every one
+  took a share of the 16. The colours seen start in one box, and the
   box widest in any channel is cut at the middle of that channel until
-  there are 15; a slot shows the mean of its box. So up to 15 colours
-  beside black are shown exactly, and more are shared out by the
-  palette alone, with no count of the pixels using them. Register 0
-  is black, the border's on an ST, and takes the palette's blacks and
-  the border index, which needs no XOR here.
+  there are 15; a slot shows the mean of its box, as the machine shows
+  it (8 levels a channel on an ST, 16 on an STE). Up to 15 colours on
+  screen beside black are so shown exactly, and a colour not on screen
+  goes to the nearest slot until it is. Register 0 is black, the
+  border's on an ST, and takes the palette's blacks and the border
+  index, which needs no XOR here.
+  - **Which colours are on screen**: counted from the chunky copy of
+    the screen when a palette change has left the maps not fitting (a
+    room's change, a new picture), then each colour a copy or a clear
+    brings noted as it comes: a group a copy changes is checked, 16
+    lookups. A colour that goes stays noted until the next count, so a
+    program that never changes its palette keeps every colour it has
+    shown, and its 16 tend toward those of the palette as a whole.
+  - **A checkerboard**, on by default: a colour between two of the 16
+    is shown as both, pixel about, where the mix is nearer than either
+    alone by enough to be worth the pattern. On a sharp display the
+    pattern shows; `SDL_SetHint(STDL_SDL2_HINT_ST_DITHER, "0")` before
+    the renderer turns it off.
+  - **What it bought**, scored on the host over 15 frames of one
+    port's game against the 256 colours a TT showed (the error a pixel
+    after a 2x2 average): the palette as a whole 84 on an ST and 83 on
+    an STE, the colours on screen 47 and 26, with the checkerboard 38
+    and 23 (`st.c` has what else was tried and scored worse).
 - **A palette change can cost a screen.** Each page holds slots, not
-  colours, so when the reduction moves any colour to another slot the
-  next page drawn on is converted again whole, from a chunky copy of
-  the screen the renderer keeps (76.8K), and the other pages catch up
-  from it. The map in use
-  stays while it shows the new colours nearly as well as a new one
-  would (its error within a quarter of the new one's), and then only
-  the 16 registers change: a fade to black and back keeps one map.
+  colours, so when the maps move the next page drawn on is converted
+  again whole, from a chunky copy of the screen the renderer keeps
+  (76.8K), and the other pages catch up from it. The maps in use stay
+  while they show the colours on screen nearly as well as they did
+  when made (their error within a quarter of what it was), measured
+  against the slots' own means rather than the machine's levels, so a
+  fade to black and back keeps them at every step. Colours that come
+  on screen later can move them too: one port's game made them again
+  4 times in a replay of 638 frames, once for its room and three times
+  as colours came.
 - **Where it differs from the TT's and Falcon's:**
   - a present flips for a new map though nothing was drawn, and
     `STDL_SDL2_StagePalette` presents when the map moves, what was
@@ -491,32 +514,39 @@ no TT or Falcon to hand, not to play it: the picture is a rough
 
   | | ST | Mega STE |
   |---|---|---|
-  | A whole 320x200 screen, every pixel new | 529ms | 312ms |
-  | The same screen pushed again as it was | 161ms | 104ms |
-  | A 64x48 box, new | 30ms | 17ms |
-  | A palette change that keeps the map | 96ms | 49ms |
-  | A fade's step (256 colours, to black in 16) | 205ms | 110ms |
-  | A clear and its present | 64ms | 49ms |
+  | A whole 320x200 screen, every pixel new | 743ms | 415ms |
+  | The same screen pushed again as it was | 162ms | 105ms |
+  | A 64x48 box, new | 41ms | 23ms |
+  | A palette change that keeps the maps | 42ms | 22ms |
+  | A fade's step (256 colours, to black in 16) | 135ms | 73ms |
+  | A new palette: a count, new maps, the screen again | 1,000ms | 566ms |
+  | A clear and its present | 68ms | 50ms |
 
   A present of little is held to the display's rate on three pages
   (the box as it was: 19ms, a blank). The conversion is assembler, a
   table lookup a pixel: 644ms a screen on an ST in gcc's C, 516 in
-  assembler with a table for each of four pixel places. A present went
-  through all 240 rows of its bookkeeping three times, 7ms on an ST
-  whatever was drawn, until it kept the rows a frame touched. The
-  fade's step was 759ms before the map was kept.
+  assembler with a table for each of four pixel places. Checking each
+  changed group for colours not seen is what makes new pixels dearer
+  (529ms a screen and 30ms a box before it): in one port's play, 3ms of
+  a Mega STE's 58ms frame. Checking only a group's longs that changed
+  was slower. A present went through all 240 rows of its bookkeeping
+  three times, 7ms on an ST whatever was drawn, until it kept the rows
+  a frame touched. The fade's step was 759ms before the map was kept.
 - **Tested** by `test_render_st` on the host (`make ci` runs it):
   `test_render.c` built with `STDL_SDL2_ST`, the page shown against
-  the model's middle rows put through the renderer's map a pixel
+  the model's middle rows put through the renderer's two maps a pixel
   at a time, on the tall screen's 240 rows, on 200 where the border
   did not open and on a border cut short, with two pages and three
   and border indices 0 and 0x70, and the reduction against what it
   promises, and ST Low by the hint. Then it runs `test_render`'s 18 TT
   and Falcon screens through this build, which must show them as the
   other does. Eleven breakages of the ST path each failed it, ten more
-  of it as it stood at v1.24.0, and fifteen of the changed-group
-  compare, the rows kept and the conversion's tables (a sixteenth,
-  a page's owed rows never cleared, only copies more). `SDL2RCST` is the same on the machine (`test_render.c` says
+  of it as it stood at v1.24.0, fifteen of the changed-group compare,
+  the rows kept and the conversion's tables (a sixteenth, a page's
+  owed rows never cleared, only copies more), and seventeen of the
+  colours seen and the reduction: the test notes what its own model
+  shows, counts it where the renderer should, and expects the
+  renderer's colours seen, maps and registers from that. `SDL2RCST` is the same on the machine (`test_render.c` says
   how to build it), and passed against the real STDL on Hatari's ST,
   tall, and on its TT and its Falcon on VGA; `SDL2ST.TOS` showed all
   240 rows on an STE. The border has not been seen on

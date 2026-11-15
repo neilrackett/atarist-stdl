@@ -1580,8 +1580,33 @@ and the rules below keep it from being anything else's.
     byte as it was (`video.c` shares the compositor through `PLANES`,
     `ROW0` and `ROWS`, which are the old constants there): compare
     them before and after, as the core's.
+  - Its ST screen's 16 colours are made from the colours on the page
+    (st.c's comment has the score that chose it, and what was tried
+    and scored worse). The renderer keeps which it has seen: counted
+    from the chunky copy after a palette change the maps no longer fit,
+    then noted as copies bring them (`st_note`, `st_mark`, `st_seen16`, 16
+    lookups a changed group in assembler, 3ms of one port's 58ms frame
+    on a Mega STE). The test keeps its own, from its model, and expects
+    the renderer's: a change to when the renderer notes or counts is a
+    change to `st_eval` in `test_render.c` as well. The maps' error is
+    measured against the slots' own means, not the machine's levels,
+    which made the maps again at 9 of a fade's 16 steps on an ST.
+  - Tried and dropped (November 2026): a hint to switch at any time to
+    the colours from the palette as a whole, the old and cheaper way,
+    for cutscenes, whose palette changes at most frames. One port's
+    cutscenes did 3% less work with it on a Mega STE, one scene 4% more
+    (the fit over all 256 colours costs more than over the few on
+    screen), and their colours went flat. It took a public hint, a
+    counter of hint changes in hints.c, mode state in the renderer and
+    its model in the test, for a switch no port used. What stayed is
+    the count in assembler, twice as fast.
+  - Check the machine as well as the host: the count's first
+    assembler stored 0xFF (`st`) where `st_mark` stores 1, which every
+    use of the colours seen took as the same, and the host's C twin
+    could not show; only SDL2RCST's comparison of the colours seen, on
+    an ST, failed.
   - `test_render_st` is its test: the same model as `test_render`
-    through the renderer's map for an ST's screens, then
+    through the renderer's two maps for an ST's screens, then
     `test_render`'s own TT and Falcon screens through this build. It
     is not shipped and has no size budget; its example is the add-on's
     demo built against it (`dist/SDL2ST.TOS`).

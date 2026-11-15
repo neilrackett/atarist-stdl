@@ -41,6 +41,13 @@ extern "C" {
  * the build for them. Read by the first SDL_CreateWindow. */
 #define STDL_SDL2_HINT_ST_TALL "STDL_SDL2_ST_TALL"
 
+/* "0": in the experimental 68000 build, an ST's 16 colours with no
+ * checkerboard: each of the palette's colours is shown as one of the
+ * 16, where by default a colour between two of them is shown as the
+ * two, pixel about. For a display sharp enough to show the pattern.
+ * Read by SDL_CreateRenderer. */
+#define STDL_SDL2_HINT_ST_DITHER "STDL_SDL2_ST_DITHER"
+
 /* a file name: where SDL_Log writes, a line a message, from the first
  * message on. Unset, the log goes nowhere; never to the console (see
  * SDL_log.h). */

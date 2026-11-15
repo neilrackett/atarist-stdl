@@ -340,11 +340,15 @@ Falcon that binary shows what the 68020 build shows, frame for frame,
   an even pitch): those copies are compared with what the screen has,
   and only the groups that differ are converted, so pushing a block
   again as it was costs a compare.
-- 16 colours: the palette is cut into 15 slots and black each time it
-  changes, exact for up to 15 colours beside black, rough beyond.
-- Slow, by design: a whole screen of new pixels 0.53s on an 8MHz ST and
-  0.31s on a Mega STE, a new 64x48 box 30ms and 17ms, a palette change
-  0.10s, or a
+- 16 colours: 15 slots and black made from the colours on screen, not
+  the whole palette, so up to 15 on screen beside black are exact; a
+  checkerboard of two slots stands in for a colour between them (on by
+  default; `STDL_SDL2_HINT_ST_DITHER` "0" turns it off). Colours are
+  counted after a palette change that no longer fits and noted as
+  copies bring them.
+- Slow, by design: a whole screen of new pixels 0.74s on an 8MHz ST and
+  0.42s on a Mega STE, a new 64x48 box 41ms and 23ms, a palette change
+  that keeps the maps 42ms and 22ms, or a
   whole screen again when the colours move to other slots
   (Hatari). A fade to black and back keeps its slots.
 - Sound needs an STE; a plain ST's `SDL_OpenAudio` fails.

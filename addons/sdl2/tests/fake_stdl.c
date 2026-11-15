@@ -117,6 +117,11 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
     return &surf;
 }
 
+STDL_Surface *STDL_GetVideoSurface(void)
+{
+    return &surf;
+}
+
 void STDL_Flip(void)
 {
     fake_shown = back;

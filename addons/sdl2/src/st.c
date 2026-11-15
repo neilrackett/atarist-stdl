@@ -5,8 +5,8 @@
  *
  * The ST build's own parts (st.h): the palette's 256 colours reduced
  * to an ST's 16, and 8-bit pixels converted through that reduction
- * into ST Low's four interleaved planes. For testing a program on an
- * ST, not for playing it there: only libstdl-sdl2-st.a has this
+ * into four interleaved planes. For testing a program on an ST, not
+ * for playing it there: only libstdl-sdl2-st.a has this
  * object, built for the 68000, and the add-on a TT or a Falcon runs
  * has none of it.
  */
@@ -18,18 +18,100 @@
 #endif
 
 /*
- * The reduction: a cut at the midpoint. The colours start in one box;
- * the box widest in any channel is cut in two at the middle of that
- * channel, until there are 15 or none is wider than a colour. A box's
- * slot shows the mean of its colours. Slot 0 is black, the border's
- * register on an ST, and takes the palette's blacks and the border
- * index. No colour is weighed by how much of the picture uses it, as
- * that would mean counting pixels: this reads the palette alone, 256
- * entries a few times over.
+ * The reduction: the palette's colours as 16, made from the colours on
+ * the screen (seen) and not from the palette as a whole. A program's
+ * palette has many colours its picture does not show (another room's,
+ * entries never used), and every one of them took a share of the 16:
+ * over 15 frames of one port's game, the error after a 2x2 average
+ * fell from 84 to 47 on an ST and from 83 to 26 on an STE when only
+ * the colours on screen took part (score made on the host from frames
+ * the 030 build dumped, against the 256 colours a TT showed).
  *
- * Up to 15 colours beside black each get a slot of their own, since a
- * box of two colours can always be cut.
+ * - The cut: the colours seen start in one box, and the box widest in
+ *   any channel is cut in two at that channel's middle, until there
+ *   are 15 or none is wider than a colour. Up to 15 colours beside
+ *   black so each get a slot of their own. A slot's colour is the mean
+ *   of its colours, then the nearest the machine shows, 3 bits a
+ *   channel on an ST and 4 on an STE (bits; anything else as it is).
+ * - A colour not seen goes to the nearest slot, so that one drawn
+ *   before the next reduction is shown as near as the 16 allow.
+ * - Slot 0 is black, the border's register on an ST, and takes the
+ *   palette's blacks, the border index and every index past the
+ *   palette.
+ * - The second slot, b[], for the checkerboard (dither): the
+ *   slot whose mix with the first, half and half, is nearest the
+ *   colour, if any is nearer than the first alone by more than an
+ *   eighth of the two slots' own distance, which keeps a harsh pattern
+ *   for where it earns its place. Without the flag, the first again.
+ *   Over the same 15 frames, 47 to 38 on an ST and 26 to 23 on an STE.
+ *
+ * Tried and left out, by the same score over the first two frames:
+ * colours snapped to the machine's levels before the cut (an ST worse,
+ * 41 to 95), the channels weighted red 2, green 4, blue 1 (worse on
+ * both, 41 to 56 and 11 to 26), and refining the cut by moving each
+ * colour to the nearest slot (no change at all).
  */
+
+static Uint8 snaps[2][256];     /* 3 bits and 4: a channel as shown */
+static int snaps_made;
+
+static const Uint8 *snap_for(int bits)
+{
+    if (!snaps_made) {
+        int v;
+        for (v = 0; v < 256; v++) {
+            /* the nearest of 8 levels, of 16 */
+            snaps[0][v] = (Uint8)(((v * 7 + 127) / 255) * 255 / 7);
+            snaps[1][v] = (Uint8)(((v * 15 + 127) / 255) * 17);
+        }
+        snaps_made = 1;
+    }
+    return bits == 3 ? snaps[0] : bits == 4 ? snaps[1] : NULL;
+}
+
+static __inline__ unsigned absdiff(unsigned a, unsigned b)
+{
+    return a > b ? a - b : b - a;
+}
+
+static __inline__ unsigned dist(const SDL_Color *p, const SDL_Color *q)
+{
+    return absdiff(p->r, q->r) + absdiff(p->g, q->g) + absdiff(p->b, q->b);
+}
+
+/* half and half of two colours, as a checkerboard of them shows */
+static __inline__ SDL_Color mix(const SDL_Color *p, const SDL_Color *q)
+{
+    SDL_Color m;
+    m.r = (Uint8)((p->r + q->r + 1u) >> 1);
+    m.g = (Uint8)((p->g + q->g + 1u) >> 1);
+    m.b = (Uint8)((p->b + q->b + 1u) >> 1);
+    m.a = 255;
+    return m;
+}
+
+/* entry i is a colour: inside the palette, not the border index x, not
+ * black; anything else is slot 0 */
+static __inline__ int colour(const SDL_Color *col, int ncol, unsigned x,
+                             int i)
+{
+    return i < ncol && !(x && (unsigned)i == x) &&
+           (col[i].r | col[i].g | col[i].b) != 0;
+}
+
+/* the colours that take part, those seen (all with no seen), as a list
+ * of their indices */
+static int in_use(const SDL_Color *col, int ncol, unsigned x,
+                  const Uint8 *seen, Uint8 *list)
+{
+    int i, n = 0;
+    for (i = 0; i < ncol; i++) {
+        if ((!seen || seen[i]) && colour(col, ncol, x, i)) {
+            list[n++] = (Uint8)i;
+        }
+    }
+    return n;
+}
 
 struct box {
     int start, count;
@@ -85,20 +167,159 @@ static void measure(struct box *b, const Uint8 *idx, const SDL_Color *col)
     }
 }
 
-Uint32 stdl_sdl2_st_reduce(const SDL_Color *col, int ncol, unsigned x,
-                         Uint8 *map, SDL_Color *out)
+/* each slot's colour the mean of the colours in use whose first slot
+ * it is (raw), and as the machine shows it (c); slot 0 and a slot of
+ * none black. A quotient fits 16 bits, so the 68000's divide does it,
+ * where a 32-bit one is a library call. */
+static void means(const SDL_Color *col, const Uint8 *list, int n,
+                  const Uint8 *a, int bits, SDL_Color *raw, SDL_Color *c)
 {
-    Uint8 idx[256];
-    struct box box[15];
-    int n = 0, nbox = 0, i, k;
+    const Uint8 *sn = snap_for(bits);
+    unsigned sum[16][3], cnt[16];
+    int i, k;
+    memset(sum, 0, sizeof(sum));
+    memset(cnt, 0, sizeof(cnt));
+    for (i = 0; i < n; i++) {
+        const SDL_Color *w = &col[list[i]];
+        const unsigned s = a[list[i]];
+        sum[s][0] += w->r;
+        sum[s][1] += w->g;
+        sum[s][2] += w->b;
+        cnt[s]++;
+    }
+    for (k = 0; k < 16; k++) {
+        const unsigned m = cnt[k];
+        raw[k].r = raw[k].g = raw[k].b = 0;
+        raw[k].a = 255;
+        if (k && m) {
+            raw[k].r = (Uint8)STDL_DivU16(sum[k][0] + m / 2, m);
+            raw[k].g = (Uint8)STDL_DivU16(sum[k][1] + m / 2, m);
+            raw[k].b = (Uint8)STDL_DivU16(sum[k][2] + m / 2, m);
+        }
+        c[k] = raw[k];
+        if (sn) {
+            c[k].r = sn[c[k].r];
+            c[k].g = sn[c[k].g];
+            c[k].b = sn[c[k].b];
+        }
+    }
+}
 
-    memset(map, 0, 256);
-    for (i = 0; i < ncol && i < 256; i++) {
-        if ((x && (unsigned)i == x) || !(col[i].r | col[i].g | col[i].b)) {
+/* each colour not seen to the nearest slot, the lowest of equals; a
+ * channel at a time, as a slot whose first channels are already as far
+ * as the best cannot be nearer */
+static void nearest(const SDL_Color *col, int ncol, unsigned x,
+                    const Uint8 *seen, const SDL_Color *c, Uint8 *a)
+{
+    int i, k;
+    if (!seen) {
+        return;
+    }
+    for (i = 0; i < ncol; i++) {
+        const SDL_Color *w = &col[i];
+        unsigned best, bk = 0;
+        if (seen[i] || !colour(col, ncol, x, i)) {
             continue;
         }
-        idx[n++] = (Uint8)i;
+        best = (unsigned)w->r + w->g + w->b;
+        for (k = 1; k < 16 && best; k++) {
+            unsigned d = absdiff(w->r, c[k].r);
+            if (d >= best) {
+                continue;
+            }
+            d += absdiff(w->g, c[k].g);
+            if (d >= best) {
+                continue;
+            }
+            d += absdiff(w->b, c[k].b);
+            if (d < best) {
+                best = d;
+                bk = (unsigned)k;
+            }
+        }
+        a[i] = (Uint8)bk;
     }
+}
+
+/* every colour's second slot, with the checkerboard; the first again
+ * without it, and 0 for anything not a colour. A pair's mix and the
+ * penalty for its pattern, an eighth of the two slots' distance, are
+ * made once for the 256 pairs rather than at each of up to 3,840
+ * candidates; a pair whose penalty alone is as far as the best cannot
+ * win, and a slot's pair with itself has a penalty nothing beats. */
+static void seconds(const SDL_Color *col, int ncol, unsigned x,
+                    const SDL_Color *c, const Uint8 *a, Uint8 *b,
+                    int dither)
+{
+    SDL_Color mid[16][16];
+    Uint16 pen[16][16];
+    int i, k;
+    memcpy(b, a, 256);
+    if (!dither) {
+        return;
+    }
+    for (i = 0; i < 16; i++) {
+        for (k = 0; k < 16; k++) {
+            mid[i][k] = mix(&c[i], &c[k]);
+            pen[i][k] = i == k ? 0xFFFF : (Uint16)(dist(&c[i], &c[k]) >> 3);
+        }
+    }
+    for (i = 0; i < ncol; i++) {
+        const SDL_Color *w = &col[i];
+        const int p = a[i];
+        unsigned best;
+        if (!colour(col, ncol, x, i)) {
+            continue;
+        }
+        best = dist(w, &c[p]);
+        for (k = 0; k < 16 && best; k++) {
+            unsigned d;
+            if (pen[p][k] >= best) {
+                continue;
+            }
+            d = dist(w, &mid[p][k]) + pen[p][k];
+            if (d < best) {
+                best = d;
+                b[i] = (Uint8)k;
+            }
+        }
+    }
+}
+
+/* how far the colours in use are from the mix of their two slots, as
+ * a share of those colours' own size, so that the same picture dimmed
+ * has the same figure: 256ths of a 16th. The slots' colours are their
+ * means as they are, not the machine's levels, which says how well the
+ * maps fit and not how the machine rounds: by the levels, a fade to
+ * black in 16 over a ramp made the maps again at 9 of its steps on an
+ * ST, a whole screen converted each time, its error growing as the
+ * colours neared the darkest levels. */
+static Uint32 error(const SDL_Color *col, const Uint8 *list, int n,
+                    const SDL_Color *raw, const Uint8 *a, const Uint8 *b)
+{
+    Uint32 err = 0, size = 0;
+    int i;
+    for (i = 0; i < n; i++) {
+        const SDL_Color *w = &col[list[i]];
+        const SDL_Color m = mix(&raw[a[list[i]]], &raw[b[list[i]]]);
+        err += dist(w, &m);
+        size += (Uint32)w->r + w->g + w->b;
+    }
+    return (err << 8) / ((size >> 4) + 1);
+}
+
+Uint32 stdl_sdl2_st_reduce(const SDL_Color *col, int ncol, unsigned x,
+                           int bits, int dither, const Uint8 *seen,
+                           Uint8 *a, Uint8 *b, SDL_Color *out)
+{
+    SDL_Color c[16], raw[16];
+    Uint8 idx[256];
+    struct box box[15];
+    int n, nbox = 0, i, k;
+
+    ncol = ncol < 0 ? 0 : ncol > 256 ? 256 : ncol;
+    n = in_use(col, ncol, x, seen, idx);
+    memset(a, 0, 256);
     if (n) {
         box[0].start = 0;
         box[0].count = n;
@@ -106,22 +327,22 @@ Uint32 stdl_sdl2_st_reduce(const SDL_Color *col, int ncol, unsigned x,
         nbox = 1;
     }
     while (nbox && nbox < 15) {
-        struct box *b = &box[0], *nb = &box[nbox];
+        struct box *bx = &box[0], *nb = &box[nbox];
         int mid, lo, hi;
         for (k = 1; k < nbox; k++) {
-            if (box[k].hi - box[k].lo > b->hi - b->lo) {
-                b = &box[k];
+            if (box[k].hi - box[k].lo > bx->hi - bx->lo) {
+                bx = &box[k];
             }
         }
-        if (b->hi == b->lo) {
+        if (bx->hi == bx->lo) {
             break;
         }
         /* lo < mid <= hi, so neither half is empty */
-        mid = (b->lo + b->hi + 1) >> 1;
-        lo = b->start;
-        hi = b->start + b->count - 1;
+        mid = (bx->lo + bx->hi + 1) >> 1;
+        lo = bx->start;
+        hi = bx->start + bx->count - 1;
         while (lo <= hi) {
-            if (channel(&col[idx[lo]], b->axis) < mid) {
+            if (channel(&col[idx[lo]], bx->axis) < mid) {
                 lo++;
             } else {
                 const Uint8 t = idx[lo];
@@ -130,92 +351,78 @@ Uint32 stdl_sdl2_st_reduce(const SDL_Color *col, int ncol, unsigned x,
             }
         }
         nb->start = lo;
-        nb->count = b->start + b->count - lo;
-        b->count = lo - b->start;
-        measure(b, idx, col);
+        nb->count = bx->start + bx->count - lo;
+        bx->count = lo - bx->start;
+        measure(bx, idx, col);
         measure(nb, idx, col);
         nbox++;
     }
     for (k = 0; k < nbox; k++) {
         for (i = box[k].start; i < box[k].start + box[k].count; i++) {
-            map[idx[i]] = (Uint8)(k + 1);
+            a[idx[i]] = (Uint8)(k + 1);
         }
     }
-    return stdl_sdl2_st_fit(col, ncol, x, map, out);
+    /* idx is the colours in use still, in another order */
+    means(col, idx, n, a, bits, raw, c);
+    nearest(col, ncol, x, seen, c, a);
+    seconds(col, ncol, x, c, a, b, dither);
+    memcpy(out, c, sizeof(c));
+    return error(col, idx, n, raw, a, b);
 }
 
-static unsigned absdiff(unsigned a, unsigned b)
+Uint32 stdl_sdl2_st_fit(const SDL_Color *col, int ncol, unsigned x, int bits,
+                        const Uint8 *seen, const Uint8 *a, const Uint8 *b,
+                        SDL_Color *out)
 {
-    return a > b ? a - b : b - a;
-}
-
-Uint32 stdl_sdl2_st_fit(const SDL_Color *col, int ncol, unsigned x,
-                        const Uint8 *map, SDL_Color *out)
-{
-    unsigned sum[16][3], cnt[16];
-    Uint32 err = 0;
-    int i, k;
-    if (ncol > 256) {
-        ncol = 256;
-    }
-    memset(sum, 0, sizeof(sum));
-    memset(cnt, 0, sizeof(cnt));
-    for (i = 0; i < ncol; i++) {
-        const unsigned s = map[i];
-        sum[s][0] += col[i].r;
-        sum[s][1] += col[i].g;
-        sum[s][2] += col[i].b;
-        cnt[s]++;
-    }
-    memset(out, 0, 16 * sizeof(*out));
-    for (k = 0; k < 16; k++) {
-        const unsigned n = cnt[k];
-        out[k].a = 255;
-        if (k && n) {
-            out[k].r = (Uint8)((sum[k][0] + n / 2) / n);
-            out[k].g = (Uint8)((sum[k][1] + n / 2) / n);
-            out[k].b = (Uint8)((sum[k][2] + n / 2) / n);
-        }
-    }
-    for (i = 0; i < ncol; i++) {
-        const SDL_Color *o = &out[map[i]];
-        if (x && (unsigned)i == x) {
-            continue;
-        }
-        err += absdiff(col[i].r, o->r) + absdiff(col[i].g, o->g) +
-               absdiff(col[i].b, o->b);
-    }
-    return err;
+    SDL_Color c[16], raw[16];
+    Uint8 idx[256];
+    int n;
+    ncol = ncol < 0 ? 0 : ncol > 256 ? 256 : ncol;
+    n = in_use(col, ncol, x, seen, idx);
+    means(col, idx, n, a, bits, raw, c);
+    memcpy(out, c, sizeof(c));
+    return error(col, idx, n, raw, a, b);
 }
 
 /*
- * A palette change. A new map means every page converted again, a
- * whole screen each (video.c), where new colours through the old map
- * are 16 registers; and a fade's steps, the same colours scaled, are
- * rarely cut quite alike, as a colour a step from a cut's middle
- * falls on its other side. So the map in use stays while it shows
- * the new colours nearly as well as the one made for them: its error
- * within a quarter of the new one's, each the colours' distances from
- * their slots' means, a channel at a time. An ST took 0.76s a step of
- * a fade to black in 16 over a ramp of 256 colours when every step
- * moved the map (Hatari, 8MHz).
+ * A palette change, or colours seen that were not. A new map means
+ * every page converted again, a whole screen (video.c), where new
+ * colours through the old map are 16 registers; and a fade's steps,
+ * the same colours dimmed, are rarely cut quite alike, as a colour a
+ * step from a cut's middle falls on its other side. So the maps in use
+ * stay while they show the colours seen nearly as well as they showed
+ * those they were made for: their error within a quarter of what it
+ * was then (m->made), and a little for rounding. That is one pass over
+ * the colours in use where making new maps to compare with was the
+ * whole reduction. An ST took 0.76s a step of a fade to black in 16
+ * over a ramp of 256 colours when every step moved the map (Hatari,
+ * 8MHz).
  */
-int stdl_sdl2_st_update(const SDL_Color *col, int ncol, unsigned x,
-                        Uint8 *map, SDL_Color *out)
+int stdl_sdl2_st_keep(const SDL_Color *col, int ncol, unsigned x, int bits,
+                      const Uint8 *seen, const struct stdl_sdl2_st_maps *m,
+                      SDL_Color *out)
 {
-    Uint8 fresh[256];
-    SDL_Color kept[16];
-    Uint32 efresh, ekept;
-    efresh = stdl_sdl2_st_reduce(col, ncol, x, fresh, out);
-    if (memcmp(fresh, map, sizeof(fresh)) == 0) {
+    Uint32 e;
+    if (!m->made_valid) {
         return 0;
     }
-    ekept = stdl_sdl2_st_fit(col, ncol, x, map, kept);
-    if (ekept <= efresh + efresh / 4) {
-        memcpy(out, kept, sizeof(kept));
+    e = stdl_sdl2_st_fit(col, ncol, x, bits, seen, m->a, m->b, out);
+    return e <= m->made + (m->made >> 2) + 2;
+}
+
+int stdl_sdl2_st_remake(const SDL_Color *col, int ncol, unsigned x, int bits,
+                        int dither, const Uint8 *seen,
+                        struct stdl_sdl2_st_maps *m, SDL_Color *out)
+{
+    Uint8 a[256], b[256];
+    m->made = stdl_sdl2_st_reduce(col, ncol, x, bits, dither, seen, a, b,
+                                  out);
+    m->made_valid = 1;
+    if (memcmp(a, m->a, sizeof(a)) == 0 && memcmp(b, m->b, sizeof(b)) == 0) {
         return 0;
     }
-    memcpy(map, fresh, sizeof(fresh));
+    memcpy(m->a, a, sizeof(a));
+    memcpy(m->b, b, sizeof(b));
     return 1;
 }
 
@@ -229,6 +436,12 @@ int stdl_sdl2_st_update(const SDL_Color *col, int ncol, unsigned x,
  * and 0 (stdl_sdl2_st_spread), so four pixels are four lookups and no
  * shifts, and the next four go in after one shift by 4.
  *
+ * The checkerboard costs the loop nothing: there are two such tables,
+ * one for the rows where a pixel at an even x shows its first slot
+ * and one at an odd x its second, the other for the rows between, and
+ * the tables for a pixel's place already tell an even x from an odd
+ * one, a group starting on an even one. The rows take them in turn.
+ *
  * On the machine the rows are assembler, with the C as its twin, which
  * the host runs: gcc 4.6 built one table and a shift a pixel at about
  * 60 cycles a pixel, a clear and a 16-bit index among them where the
@@ -237,15 +450,20 @@ int stdl_sdl2_st_update(const SDL_Color *col, int ncol, unsigned x,
  * is what both are held to (test_render.c), on the machine too.
  */
 
-void stdl_sdl2_st_spread(const Uint8 *map, Uint32 *tab)
+static Uint32 spread(Uint32 m)
+{
+    return (m & 1) << 24 | (m & 2) << 15 | (m & 4) << 6 | (m & 8) >> 3;
+}
+
+void stdl_sdl2_st_spread(const Uint8 *a, const Uint8 *b, Uint32 *tab)
 {
     int i, k;
     for (i = 0; i < 256; i++) {
-        const Uint32 m = map[i];
-        const Uint32 v = (m & 1) << 24 | (m & 2) << 15 | (m & 4) << 6 |
-                         (m & 8) >> 3;
+        const Uint32 va = spread(a[i]), vb = spread(b[i]);
         for (k = 0; k < 4; k++) {
-            tab[k * 256 + i] = v << (3 - k);
+            /* an even row: the first slot at an even x */
+            tab[k * 256 + i] = ((k & 1) ? vb : va) << (3 - k);
+            tab[1024 + k * 256 + i] = ((k & 1) ? va : vb) << (3 - k);
         }
     }
 }
@@ -279,17 +497,17 @@ __asm__(
 "	move.l	56(%sp),%d5\n"            /* dp */
 "	move.l	60(%sp),%d3\n"            /* groups */
 "	move.l	64(%sp),%d7\n"            /* h */
-"	move.l	68(%sp),%a2\n"            /* tab */
-"	lea	1024(%a2),%a3\n"
-"	lea	1024(%a3),%a4\n"
-"	lea	1024(%a4),%a5\n"
+"	move.l	68(%sp),%a2\n"            /* this row's tables; 72: the next's */
 "	move.l	%d3,%d0\n"
 "	lsl.l	#3,%d0\n"
 "	sub.l	%d0,%d5\n"                /* dp - 8 * groups */
 "	add.l	%d0,%d0\n"
 "	sub.l	%d0,%d4\n"                /* sp - 16 * groups */
 "	subq.w	#1,%d3\n"
-"1:	move.w	%d3,%d6\n"
+"1:	lea	1024(%a2),%a3\n"
+"	lea	1024(%a3),%a4\n"
+"	lea	1024(%a4),%a5\n"
+"	move.w	%d3,%d6\n"
 "2:\n"
 ST_L("%d0")
 ST_L("%d2")
@@ -299,6 +517,9 @@ ST_L("%d2")
 "	dbra	%d6,2b\n"
 "	add.l	%d4,%a0\n"
 "	add.l	%d5,%a1\n"
+"	move.l	72(%sp),%d0\n"            /* the two rows' tables change places */
+"	move.l	%a2,72(%sp)\n"
+"	move.l	%d0,%a2\n"
 "	subq.l	#1,%d7\n"
 "	bne	1b\n"
 "	movem.l	(%sp)+,%d2-%d7/%a2-%a5\n"
@@ -309,10 +530,12 @@ ST_L("%d2")
                  tab[768 + (s)[3]])
 
 void stdl_sdl2_st_c2p(const Uint8 *src, long sp, Uint8 *dst, long dp,
-                      long groups, long h, const Uint32 *tab)
+                      long groups, long h, const Uint32 *tab,
+                      const Uint32 *next)
 {
     for (; h > 0; h--, src += sp, dst += dp) {
         const Uint8 *s = src;
+        const Uint32 *row = tab;
         Uint8 *d = dst;
         long g;
         for (g = groups; g > 0; g--, s += 16, d += 8) {
@@ -327,6 +550,8 @@ void stdl_sdl2_st_c2p(const Uint8 *src, long sp, Uint8 *dst, long dp,
             d[5] = (Uint8)(b >> 8);
             d[7] = (Uint8)b;
         }
+        tab = next;
+        next = row;
     }
 }
 #endif

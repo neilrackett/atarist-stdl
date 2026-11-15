@@ -46,11 +46,12 @@
  * the host: the tall screen's 240 rows, 200 where the border did not
  * open and 216 for one cut short, with two pages and three and border
  * indices 0 and 0x70): the page shown must be the model's middle rows put
- * through the renderer's map of the palette onto 16 colours, a pixel
- * at a time, and a present flips when that map has moved though
- * nothing was drawn. The map and the registers must be what the
- * reduction (st.c) makes of the palette, and the reduction is checked
- * for what it promises before the runs. On an ST:
+ * through the renderer's two maps of the palette onto 16 colours, the
+ * first where the screen's x + y is even, a pixel at a time, and a
+ * present flips when the maps have moved though nothing was drawn. The
+ * test notes the colours its model shows and expects the renderer's
+ * colours seen, maps and registers from them (st_eval), and the
+ * reduction is checked for what it promises before the runs. On an ST:
  *
  *   STCMD_NO_TTY=1 stcmd make sdl2st
  *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -std=gnu99 -m68000 \
@@ -121,8 +122,33 @@ typedef struct {
     int borrowed;
 } Tex;
 
-static Tex tex[8];
+static Tex tex[12];
 static int ntex;
+
+#ifdef STDL_SDL2_ST
+/* On an ST, the colours the page has shown since the renderer last
+ * counted them, as the renderer should have them (video.c's seen),
+ * noted as the model is drawn; whether one came that was not there;
+ * whether the palette changed; and the rows the page has. The rules
+ * for when the renderer counts and makes its maps are st_eval's. */
+static Uint8 tseen[256];
+static int tfresh, tpal;
+/* an ST's screen, and the rows of the screen its page has: set when
+ * the window is made, from the screen STDL set up */
+static int is_st, page_rows = 240;
+#define PROW0 ((240 - page_rows) / 2)
+
+static void note(int y, Uint8 v)
+{
+    if (is_st && y >= PROW0 && y < PROW0 + page_rows && !tseen[v]) {
+        tseen[v] = 1;
+        tfresh = 1;
+    }
+}
+#define NOTE(y, v) note(y, v)
+#else
+#define NOTE(y, v) ((void)0)
+#endif
 
 static void model_place(int w, int h)
 {
@@ -163,6 +189,7 @@ static int model_copy(const Tex *t, const SDL_Rect *src, const SDL_Rect *dst)
                 continue;
             }
             model[ly + yoff][lx + xoff] = t->px[ty * t->pitch + tx];
+            NOTE(ly + yoff, model[ly + yoff][lx + xoff]);
             any = 1;
         }
     }
@@ -172,6 +199,7 @@ static int model_copy(const Tex *t, const SDL_Rect *src, const SDL_Rect *dst)
 static void model_fill(Uint8 c)
 {
     memset(model, c, sizeof(model));
+    NOTE(PROW0, c);
 }
 
 /* ------------------------------------------------------------------ */
@@ -183,20 +211,24 @@ static long want_bytes;
 #ifdef STDL_SDL2_ST
 /* the ST build: an ST's 16-colour page, or on a TT or a Falcon the
  * 256-colour one, as the other build has it */
-static int is_st;
-static int page_rows = 240;
 #define PAGE_ROWS page_rows
 
 /* the page's rows, the screen's middle ones, through the renderer's
  * map, four planes */
 static void expect_page_st(long stride)
 {
-    const Uint8 *map = stdl_sdl2_st_map(R);
+    int bits, dither;
+    const Uint8 *rseen;
+    const struct stdl_sdl2_st_maps *m = stdl_sdl2_st_view(R, &bits, &dither,
+                                                          &rseen);
+    const int row0 = PROW0;
     int x, y, p;
     memset(want, 0, (size_t)want_bytes);
     for (y = 0; y < page_rows; y++) {
         for (x = 0; x < 320; x++) {
-            const unsigned v = map[model[y + (240 - page_rows) / 2][x]];
+            /* the first slot where the screen's x + y is even */
+            const Uint8 i = model[y + row0][x];
+            const unsigned v = ((x + y + row0) & 1) ? m->b[i] : m->a[i];
             Uint8 *grp = want + y * stride + (x >> 4) * 8;
             for (p = 0; p < 4; p++) {
                 if (v >> p & 1) {
@@ -254,7 +286,7 @@ static void check_shown(void)
         want = (Uint8 *)malloc((size_t)bytes);
     }
 #ifdef STDL_SDL2_ST
-    page_rows = is_st ? (int)(bytes / 160) : 240;
+    CHECK(!is_st || bytes == 160L * page_rows);
 #endif
     stride_ = bytes / PAGE_ROWS;
     dbl_ = stride_ == 640;
@@ -279,45 +311,70 @@ static void check_shown(void)
 }
 
 #ifdef STDL_SDL2_ST
-/* the map the palette has now, and whether it is the renderer's */
-static Uint8 now_map[256];
-static SDL_Color now_regs[16];
+/* the maps the renderer should have, and its 16 colours */
+static struct stdl_sdl2_st_maps want_maps;
 
-static int map_moved(void)
+/*
+ * What the renderer does at a present after a palette change or a
+ * colour seen that was not, and at every staging: the maps kept if
+ * they fit the palette and the colours seen, else made again, from the
+ * colours on the page counted afresh if the palette changed. Says
+ * whether a map moved, for which the renderer flips.
+ */
+static int st_eval(void)
 {
-    if (!is_st) {
-        return 0;
+    int bits, dither, moved = 0, x, y;
+    const Uint8 *rseen;
+    SDL_Color regs[16];
+    want_maps = *stdl_sdl2_st_view(R, &bits, &dither, &rseen);
+    CHECK(memcmp(rseen, tseen, sizeof(tseen)) == 0);
+    if (!stdl_sdl2_st_keep(pal->colors, pal->ncolors, X, bits, tseen,
+                           &want_maps, regs)) {
+        if (tpal) {
+            memset(tseen, 0, sizeof(tseen));
+            for (y = PROW0; y < PROW0 + page_rows; y++) {
+                for (x = 0; x < 320; x++) {
+                    tseen[model[y][x]] = 1;
+                }
+            }
+        }
+        moved = stdl_sdl2_st_remake(pal->colors, pal->ncolors, X, bits, dither,
+                                    tseen, &want_maps, regs);
     }
-    memcpy(now_map, stdl_sdl2_st_map(R), 256);
-    return stdl_sdl2_st_update(pal->colors, pal->ncolors, X, now_map,
-                               now_regs);
+    tpal = tfresh = 0;
+    return moved;
 }
 
-/* registers and map: what the palette as last staged makes of them */
+/* the maps the renderer has are what st_eval made, it has seen what the
+ * model has shown, and its registers are the maps' colours over the
+ * palette and the colours seen */
 static void check_registers_st(void)
 {
     const SDL_Color *regs = STDL_SDL2_GetRegisterColours(R);
-    int i, bad = 0;
-    bad += map_moved();
+    int bits, dither, i, bad = 0;
+    const Uint8 *rseen;
+    const struct stdl_sdl2_st_maps *m = stdl_sdl2_st_view(R, &bits, &dither,
+                                                          &rseen);
+    SDL_Color want[16];
+    CHECK(memcmp(m->a, want_maps.a, 256) == 0);
+    CHECK(memcmp(m->b, want_maps.b, 256) == 0);
+    CHECK(m->made == want_maps.made && m->made_valid == want_maps.made_valid);
+    CHECK(memcmp(rseen, tseen, sizeof(tseen)) == 0);
+    stdl_sdl2_st_fit(pal->colors, pal->ncolors, X, bits, tseen, m->a, m->b,
+                     want);
     for (i = 0; i < 16; i++) {
-        if (regs[i].r != now_regs[i].r || regs[i].g != now_regs[i].g ||
-            regs[i].b != now_regs[i].b) {
+        if (regs[i].r != want[i].r || regs[i].g != want[i].g ||
+            regs[i].b != want[i].b) {
             bad++;
         }
 #ifndef __m68k__
-        if (fake_regs[i].r != now_regs[i].r ||
-            fake_regs[i].g != now_regs[i].g ||
-            fake_regs[i].b != now_regs[i].b) {
+        if (fake_regs[i].r != want[i].r || fake_regs[i].g != want[i].g ||
+            fake_regs[i].b != want[i].b) {
             bad++;
         }
 #endif
     }
     CHECK(bad == 0);
-}
-#else
-static int map_moved(void)
-{
-    return 0;
 }
 #endif
 
@@ -358,8 +415,12 @@ static void present(void)
 #ifndef __m68k__
     const int flips = fake_flips;
 #endif
+#ifdef STDL_SDL2_ST
     /* the ST build flips for a new map alone */
-    drawn |= map_moved();
+    if (is_st && (tpal || tfresh)) {
+        drawn |= st_eval();
+    }
+#endif
     SDL_RenderPresent(R);
     STDL_SDL2_GetShownPage(R, &base, &bytes);
     if (drawn) {
@@ -426,7 +487,11 @@ static void clear_now(void)
  * presents all the same when the map has moved. */
 static void stage_now(void)
 {
-    const int moved = map_moved();
+#ifdef STDL_SDL2_ST
+    const int moved = is_st ? st_eval() : 0;
+#else
+    const int moved = 0;
+#endif
 #ifndef __m68k__
     const int flips = fake_flips;
 #endif
@@ -457,6 +522,9 @@ static void random_colours(int n)
         c[i].a = 255;
     }
     SDL_SetPaletteColors(pal, c, first, n);
+#ifdef STDL_SDL2_ST
+    tpal = 1;
+#endif
 }
 
 /* ------------------------------------------------------------------ */
@@ -569,6 +637,44 @@ static void random_rect(SDL_Rect *r, int maxw, int maxh)
 
 /* ------------------------------------------------------------------ */
 /* the run                                                             */
+
+/* Textures of few colours, then others. On an ST the maps are made
+ * from the colours on the page: counted after the palette change, here
+ * the clear's colour alone, then noted as copies bring others, whole
+ * groups and parts of groups, and the same again bringing none. */
+static void few_colours(void)
+{
+    Tex *t = borrowed(320, 240, 320, 0);
+    SDL_Rect box;
+    int i, k;
+    clear_index(0);
+    random_colours(256);
+    present();
+    for (k = 0; k < 8; k++) {
+        const int base = rndn(240);
+        for (i = 0; i < 320 * 240; i++) {
+            t->px[i] = (Uint8)(base + rndn(12));
+        }
+        box.x = 16 * rndn(16);
+        box.w = 16 * (1 + rndn(4));
+        box.y = rndn(200);
+        box.h = 1 + rndn(40);
+        copy(t, &box, &box);
+        if (k & 1) {
+            box.x += 3;
+            box.w = 5;
+            copy(t, &box, &box);
+        }
+        present();
+        copy(t, &box, &box);
+        present();
+        if (k == 5) {
+            random_colours(12);
+            present();
+        }
+        step++;
+    }
+}
 
 static void port_sequences(void)
 {
@@ -840,6 +946,14 @@ static int run(unsigned long s, unsigned x, int xconst)
     CHECK(STDL_SDL2_SetRenderPalette(R, pal) == 0);
     model_fill((Uint8)X);
     model_place(320, 240);
+#ifdef STDL_SDL2_ST
+    /* the page's rows, and the colours from here on noted */
+    memset(&want_maps, 0, sizeof(want_maps));
+    memset(tseen, 0, sizeof(tseen));
+    tfresh = 0;
+    tpal = 1;
+    page_rows = is_st ? STDL_GetVideoSurface()->h : 240;
+#endif
     {
         const Uint8 *base;
         long bytes;
@@ -852,6 +966,7 @@ static int run(unsigned long s, unsigned x, int xconst)
     copy(&tex[0], NULL, NULL);
     CHECK(STDL_SDL2_SetBorderIndex(R, 0x10) == -1);   /* drawn on now */
     present();
+    few_colours();
     port_sequences();
     random_run(1500);
     {
@@ -864,113 +979,229 @@ static int run(unsigned long s, unsigned x, int xconst)
 }
 
 #ifdef STDL_SDL2_ST
-/* what the reduction promises (st.h) */
+/* what the reduction promises (st.h): as an ST shows colours, an STE
+ * and as they are */
+static const int bitses[] = { 3, 4, 8 };
+static int dist3(const SDL_Color *o, const SDL_Color *c)
+{
+    return abs(o->r - c->r) + abs(o->g - c->g) + abs(o->b - c->b);
+}
+
+static int mixed(const SDL_Color *o, int a, int b, const SDL_Color *c)
+{
+    return abs((o[a].r + o[b].r + 1) / 2 - c->r) +
+           abs((o[a].g + o[b].g + 1) / 2 - c->g) +
+           abs((o[a].b + o[b].b + 1) / 2 - c->b);
+}
+
+static int level(int v, int bits)
+{
+    const int top = bits == 3 ? 7 : bits == 4 ? 15 : 255;
+    return ((v * top + 127) / 255) * 255 / top;
+}
+
 static int reduce_checks(void)
 {
     SDL_Color c[256], few[16], out[16];
-    Uint8 map[256];
-    int i, k, ch, used[16];
+    Uint8 a[256], b[256], seen[256];
+    int i, k, ch;
     failures = 0;
     seed = 0x5EED;
-    /* 15 colours and black, anywhere among the 256: each shown
-     * exactly, whichever one channel tells them apart */
-    for (ch = 0; ch < 4; ch++) {
+    /* 15 colours and black, anywhere among the 256: each shown exactly,
+     * whichever one channel tells them apart, and none mixed, with the
+     * checkerboard and without; then the same 15 seen among 241 others
+     * not seen, which change nothing */
+    for (ch = 0; ch < 16; ch++) {
+        const int others = ch >= 8;
         memset(few, 0, sizeof(few));
         for (k = 1; k < 16; k++) {
             const Uint8 apart = (Uint8)(k * 16), same = 200;
-            few[k].r = ch == 0 ? apart : ch == 3 ? (Uint8)(1 + rndn(255))
-                                                 : same;
-            few[k].g = ch == 1 ? apart : ch == 3 ? (Uint8)rnd() : same;
-            few[k].b = ch == 2 || ch == 3 ? apart : same;
+            const int w = ch & 3;
+            few[k].r = w == 0 ? apart : w == 3 ? (Uint8)(1 + rndn(255)) : same;
+            few[k].g = w == 1 ? apart : w == 3 ? (Uint8)rnd() : same;
+            few[k].b = w == 2 || w == 3 ? apart : same;
         }
+        memset(seen, 0, sizeof(seen));
         for (i = 0; i < 256; i++) {
-            c[i] = few[rndn(16)];
+            if (!others || i < 15) {
+                c[i] = few[others ? i + 1 : rndn(16)];
+                seen[i] = 1;
+            } else {
+                c[i].r = (Uint8)rnd();
+                c[i].g = (Uint8)rnd();
+                c[i].b = (Uint8)rnd();
+            }
         }
-        stdl_sdl2_st_reduce(c, 256, 0, map, out);
+        stdl_sdl2_st_reduce(c, 256, 0, 8, (ch & 4) != 0,
+                            others ? seen : NULL, a, b, out);
         for (i = 0; i < 256; i++) {
-            const SDL_Color o = out[map[i]];
-            CHECK(map[i] < 16);
+            const SDL_Color o = out[a[i]];
+            CHECK(a[i] < 16);
+            if (!seen[i]) {
+                continue;
+            }
+            CHECK(b[i] == a[i]);
             CHECK(o.r == c[i].r && o.g == c[i].g && o.b == c[i].b);
-            CHECK((map[i] == 0) == !(c[i].r | c[i].g | c[i].b));
+            CHECK((a[i] == 0) == !(c[i].r | c[i].g | c[i].b));
         }
     }
-    /* any 256: slot 0 black and only black's and X's, every other slot
-     * used and the mean of its colours; a short palette's rest slot 0 */
-    for (k = 0; k < 20; k++) {
-        const unsigned x = (k & 1) ? 0x70 : 0;
-        const int n = k < 10 ? 256 : 1 + rndn(256);
+    /* any 256, as an ST shows them, an STE, and as they are, all seen or
+     * some: slot 0 black, with black's, X's and what is past a short
+     * palette; every slot's colour the machine's nearest to the mean of
+     * the colours seen whose first slot it is; a colour not seen at the
+     * nearest slot; a second slot only where the mix is nearer than the
+     * first alone, and none without the flag */
+    for (k = 0; k < 72; k++) {
+        const int bits = bitses[k % 3];
+        const int dither = k & 1;
+        const unsigned x = (k & 2) ? 0x70 : 0;
+        const int n = (k & 4) ? 1 + rndn(256) : 256;
+        const int part = (k & 8) ? 1 + rndn(4) : 0;    /* 1 in part seen */
         unsigned sum[16][3], cnt[16];
+        Uint32 made;
+        int mixes = 0, nseen = 0;
         for (i = 0; i < 256; i++) {
             c[i].r = (Uint8)rnd();
             c[i].g = (Uint8)rnd();
             c[i].b = (Uint8)rnd();
+            seen[i] = (Uint8)(!part || rndn(part) == 0);
         }
         c[5].r = c[5].g = c[5].b = 0;
-        stdl_sdl2_st_reduce(c, n, x, map, out);
-        memset(used, 0, sizeof(used));
+        made = stdl_sdl2_st_reduce(c, n, x, bits, dither, part ? seen : NULL,
+                                   a, b, out);
         memset(sum, 0, sizeof(sum));
         memset(cnt, 0, sizeof(cnt));
         CHECK(!(out[0].r | out[0].g | out[0].b));
         for (i = 0; i < 256; i++) {
-            const int black = i >= n || !(c[i].r | c[i].g | c[i].b) ||
-                              (x && (unsigned)i == x);
-            CHECK(map[i] < 16);
-            CHECK((map[i] == 0) == black);
-            used[map[i]] = 1;
-            sum[map[i]][0] += c[i].r;
-            sum[map[i]][1] += c[i].g;
-            sum[map[i]][2] += c[i].b;
-            cnt[map[i]]++;
+            const int gone = i >= n || (x && (unsigned)i == x) ||
+                             !(c[i].r | c[i].g | c[i].b);
+            CHECK(a[i] < 16 && b[i] < 16);
+            if (gone) {
+                CHECK(a[i] == 0 && b[i] == 0);
+                continue;
+            }
+            if (seen[i]) {
+                sum[a[i]][0] += c[i].r;
+                sum[a[i]][1] += c[i].g;
+                sum[a[i]][2] += c[i].b;
+                cnt[a[i]]++;
+                nseen++;
+            } else {
+                int j;
+                for (j = 0; j < 16; j++) {
+                    CHECK(dist3(&out[a[i]], &c[i]) <= dist3(&out[j], &c[i]));
+                }
+            }
+            mixes += b[i] != a[i];
+            if (dither) {
+                /* the second slot the nearest mix with the first, by
+                 * more than an eighth of the two slots' distance, the
+                 * lowest of equals; the first if none is */
+                int j, best = dist3(&out[a[i]], &c[i]), bk = a[i];
+                for (j = 0; j < 16 && best; j++) {
+                    const int d = mixed(out, a[i], j, &c[i]) +
+                                  dist3(&out[a[i]], &out[j]) / 8;
+                    if (j != a[i] && d < best) {
+                        best = d;
+                        bk = j;
+                    }
+                }
+                CHECK(b[i] == bk);
+            }
+        }
+        CHECK(dither ? (nseen < 64 || mixes > 0) : mixes == 0);
+        /* the error returned: the colours seen against the mix of their
+         * two slots' means as they are (not the machine's levels), as a
+         * share of those colours' size, 256ths of a 16th */
+        {
+            Uint32 err = 0, size = 0;
+            SDL_Color raw[16];
+            memset(raw, 0, sizeof(raw));
+            for (i = 1; i < 16; i++) {
+                if (cnt[i]) {
+                    raw[i].r = (Uint8)((sum[i][0] + cnt[i] / 2) / cnt[i]);
+                    raw[i].g = (Uint8)((sum[i][1] + cnt[i] / 2) / cnt[i]);
+                    raw[i].b = (Uint8)((sum[i][2] + cnt[i] / 2) / cnt[i]);
+                }
+            }
+            for (i = 0; i < n; i++) {
+                if (!seen[i] || (x && (unsigned)i == x) ||
+                    !(c[i].r | c[i].g | c[i].b)) {
+                    continue;
+                }
+                err += (Uint32)mixed(raw, a[i], b[i], &c[i]);
+                size += (Uint32)c[i].r + c[i].g + c[i].b;
+            }
+            CHECK(made == (err << 8) / ((size >> 4) + 1));
         }
         for (i = 1; i < 16; i++) {
-            if (n >= 64) {
-                CHECK(used[i]);
-            }
             if (cnt[i]) {
-                CHECK(out[i].r == (sum[i][0] + cnt[i] / 2) / cnt[i]);
-                CHECK(out[i].g == (sum[i][1] + cnt[i] / 2) / cnt[i]);
-                CHECK(out[i].b == (sum[i][2] + cnt[i] / 2) / cnt[i]);
+                CHECK(out[i].r == level((int)((sum[i][0] + cnt[i] / 2) / cnt[i]), bits));
+                CHECK(out[i].g == level((int)((sum[i][1] + cnt[i] / 2) / cnt[i]), bits));
+                CHECK(out[i].b == level((int)((sum[i][2] + cnt[i] / 2) / cnt[i]), bits));
+            } else if (nseen >= 64) {
+                CHECK(0);       /* every slot used where there is enough */
             }
         }
     }
-    /* a palette change: the map stays for the same colours, for a
-     * fade's steps, at black and on the way back, its colours the kept
-     * map's means; it moves for other colours */
-    {
+    /* the maps kept and made again: kept for the same colours, for a
+     * fade's steps, at black and on the way back, and when a colour not
+     * seen changes; their colours the kept maps' over the colours seen;
+     * made again for other colours */
+    for (ch = 0; ch < 12; ch++) {
+        /* as an ST, an STE and as they are: the levels a fade's last
+         * steps fall between must not make the maps again */
+        const int bits = bitses[ch >> 2];
+        const int dither = ch & 1;
+        const Uint8 *sn = (ch & 2) ? seen : NULL;
+        struct stdl_sdl2_st_maps m, kept;
         SDL_Color f[256], want_c[16];
-        Uint8 kept[256];
         int moved = 0;
         for (i = 0; i < 256; i++) {
             c[i].r = (Uint8)i;
             c[i].g = (Uint8)(i * 7);
             c[i].b = (Uint8)(255 - i);
+            seen[i] = (Uint8)(i & 1);
         }
-        memset(map, 0, sizeof(map));
-        CHECK(stdl_sdl2_st_update(c, 256, 0, map, out) == 1);
-        CHECK(stdl_sdl2_st_update(c, 256, 0, map, out) == 0);
-        memcpy(kept, map, sizeof(kept));
-        for (k = 14; k >= 4; k--) {
+        memset(&m, 0, sizeof(m));
+        CHECK(!stdl_sdl2_st_keep(c, 256, 0, bits, sn, &m, out));
+        CHECK(stdl_sdl2_st_remake(c, 256, 0, bits, dither, sn, &m, out) == 1);
+        CHECK(stdl_sdl2_st_keep(c, 256, 0, bits, sn, &m, out));
+        kept = m;
+        for (k = 14; k >= 1; k--) {
             for (i = 0; i < 256; i++) {
                 f[i].r = (Uint8)(c[i].r * k / 15);
                 f[i].g = (Uint8)(c[i].g * k / 15);
                 f[i].b = (Uint8)(c[i].b * k / 15);
             }
-            moved += stdl_sdl2_st_update(f, 256, 0, map, out);
+            if (!stdl_sdl2_st_keep(f, 256, 0, bits, sn, &m, out)) {
+                moved += stdl_sdl2_st_remake(f, 256, 0, bits, dither, sn, &m, out);
+            }
         }
         CHECK(moved == 0);
-        CHECK(memcmp(kept, map, sizeof(kept)) == 0);
-        stdl_sdl2_st_fit(f, 256, 0, kept, want_c);
+        CHECK(memcmp(kept.a, m.a, 256) == 0 && memcmp(kept.b, m.b, 256) == 0);
+        stdl_sdl2_st_fit(f, 256, 0, bits, sn, kept.a, kept.b, want_c);
         CHECK(memcmp(want_c, out, sizeof(want_c)) == 0);
         memset(f, 0, sizeof(f));
-        CHECK(stdl_sdl2_st_update(f, 256, 0, map, out) == 0);
-        CHECK(stdl_sdl2_st_update(c, 256, 0, map, out) == 0);
-        CHECK(memcmp(kept, map, sizeof(kept)) == 0);
+        CHECK(stdl_sdl2_st_keep(f, 256, 0, bits, sn, &m, out));
+        CHECK(stdl_sdl2_st_keep(c, 256, 0, bits, sn, &m, out));
+        if (sn) {
+            /* a colour not seen, changed: the same fit, the same colours */
+            SDL_Color before[16];
+            Uint32 e0, e1;
+            e0 = stdl_sdl2_st_fit(c, 256, 0, bits, sn, m.a, m.b, before);
+            memcpy(f, c, sizeof(f));
+            f[2].r ^= 0x80;
+            e1 = stdl_sdl2_st_fit(f, 256, 0, bits, sn, m.a, m.b, out);
+            CHECK(e0 == e1 && memcmp(before, out, sizeof(out)) == 0);
+        }
         for (i = 0; i < 256; i++) {
             f[i].r = (Uint8)rnd();
             f[i].g = (Uint8)rnd();
             f[i].b = (Uint8)rnd();
         }
-        CHECK(stdl_sdl2_st_update(f, 256, 0, map, out) == 1);
+        CHECK(!stdl_sdl2_st_keep(f, 256, 0, bits, sn, &m, out));
+        CHECK(stdl_sdl2_st_remake(f, 256, 0, bits, dither, sn, &m, out) == 1);
     }
     if (failures) {
         printf("test_render_st: the reduction failed\n");
@@ -1007,6 +1238,13 @@ int main(void)
                         SDL_SetHint(STDL_SDL2_HINT_ST_TALL, "0");
                     }
                     fake_mach.mch_cookie = 0;
+                    /* an STE's 4 bits with three pages asked for, an
+                     * ST's 3 with two; no checkerboard on the 200 rows
+                     * of a border that did not open */
+                    fake_mach.is_ste = pages == 3;
+                    if (ri == 1) {
+                        SDL_SetHint(STDL_SDL2_HINT_ST_DITHER, "0");
+                    }
                     SDL_SetHint(STDL_SDL2_HINT_PAGES,
                                 pages == 2 ? "2" : "3");
                     f = run(0xC0FFEEUL + (unsigned long)pages, xs[xi],

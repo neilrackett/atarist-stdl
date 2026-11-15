@@ -137,10 +137,18 @@ static int tfresh, tpal;
  * the window is made, from the screen STDL set up */
 static int is_st, page_rows = 240;
 #define PROW0 ((240 - page_rows) / 2)
+/* the program's own map and colours (STDL_SDL2_SetSTColours): while
+ * they are given nothing is noted or counted, and a new map's second
+ * slots are made at the next evaluation; given back, the renderer
+ * counts at the next one */
+static int tgiven, tgnew;
+static Uint8 tgmap[256];
+static SDL_Color tgcol[16];
 
 static void note(int y, Uint8 v)
 {
-    if (is_st && y >= PROW0 && y < PROW0 + page_rows && !tseen[v]) {
+    if (is_st && !tgiven && y >= PROW0 && y < PROW0 + page_rows &&
+        !tseen[v]) {
         tseen[v] = 1;
         tfresh = 1;
     }
@@ -328,8 +336,16 @@ static int st_eval(void)
     SDL_Color regs[16];
     want_maps = *stdl_sdl2_st_view(R, &bits, &dither, &rseen);
     CHECK(memcmp(rseen, tseen, sizeof(tseen)) == 0);
-    if (!stdl_sdl2_st_keep(pal->colors, pal->ncolors, X, bits, tseen,
-                           &want_maps, regs)) {
+    if (tgiven) {
+        if (tgnew) {
+            Uint8 b[256];
+            stdl_sdl2_st_seconds(pal->colors, pal->ncolors, X, tgcol, tgmap,
+                                 b, dither);
+            moved = stdl_sdl2_st_use(&want_maps, tgmap, b);
+            tgnew = 0;
+        }
+    } else if (!stdl_sdl2_st_keep(pal->colors, pal->ncolors, X, bits, tseen,
+                                  &want_maps, regs)) {
         if (tpal) {
             memset(tseen, 0, sizeof(tseen));
             for (y = PROW0; y < PROW0 + page_rows; y++) {
@@ -360,8 +376,12 @@ static void check_registers_st(void)
     CHECK(memcmp(m->b, want_maps.b, 256) == 0);
     CHECK(m->made == want_maps.made && m->made_valid == want_maps.made_valid);
     CHECK(memcmp(rseen, tseen, sizeof(tseen)) == 0);
-    stdl_sdl2_st_fit(pal->colors, pal->ncolors, X, bits, tseen, m->a, m->b,
-                     want);
+    if (tgiven) {
+        memcpy(want, tgcol, sizeof(want));
+    } else {
+        stdl_sdl2_st_fit(pal->colors, pal->ncolors, X, bits, tseen, m->a,
+                         m->b, want);
+    }
     for (i = 0; i < 16; i++) {
         if (regs[i].r != want[i].r || regs[i].g != want[i].g ||
             regs[i].b != want[i].b) {
@@ -375,6 +395,45 @@ static void check_registers_st(void)
 #endif
     }
     CHECK(bad == 0);
+}
+
+/* The program's map and colours given, the same map again with new
+ * colours, or (give 0) given back, all evaluated at the next present
+ * or staging: a map unlike the maps in use is made into them, colours
+ * alone go to the registers. */
+static void st_give(int give, int same)
+{
+    int bits, dither, i;
+    const Uint8 *rseen;
+    Uint8 map[256];
+    SDL_Color col[16];
+    if (!give) {
+        CHECK(STDL_SDL2_SetSTColours(R, NULL, NULL) == 0);
+        if (tgiven) {
+            /* the maps made again, from a count */
+            CHECK(!stdl_sdl2_st_view(R, &bits, &dither, &rseen)->made_valid);
+            tgiven = tgnew = 0;
+            tpal = 1;
+        }
+        return;
+    }
+    for (i = 0; i < 256; i++) {
+        map[i] = (same && tgiven) ? tgmap[i] : (Uint8)rnd();
+        tgmap[i] = (Uint8)(map[i] & 15);
+    }
+    for (i = 0; i < 16; i++) {
+        col[i].r = (Uint8)rnd();
+        col[i].g = (Uint8)rnd();
+        col[i].b = (Uint8)rnd();
+        col[i].a = 7;
+        tgcol[i] = col[i];
+        tgcol[i].a = 255;
+    }
+    CHECK(STDL_SDL2_SetSTColours(R, map, col) == 0);
+    tgnew |= !tgiven ||
+             memcmp(tgmap, stdl_sdl2_st_view(R, &bits, &dither, &rseen)->a,
+                    sizeof(tgmap)) != 0;
+    tgiven = tpal = 1;
 }
 #endif
 
@@ -672,6 +731,13 @@ static void few_colours(void)
             random_colours(12);
             present();
         }
+#ifdef STDL_SDL2_ST
+        /* the program's colours for a while, new colours coming on
+         * screen meanwhile, then the add-on's own again */
+        if (is_st && (k == 2 || k == 6)) {
+            st_give(k == 2, 0);
+        }
+#endif
         step++;
     }
 }
@@ -895,6 +961,17 @@ static void random_run(long steps)
                 CHECK(SDL_RenderSetLogicalSize(R, w, h) == 0);
                 model_place(w, h);
             }
+        } else if (what < 91) {
+#ifdef STDL_SDL2_ST
+            /* the program's own 16 colours, the same map again with new
+             * colours, or the add-on's own again */
+            if (is_st) {
+                const int k = rndn(4);
+                st_give(k != 0, k == 1);
+            } else {
+                CHECK(STDL_SDL2_SetSTColours(R, NULL, NULL) == -1);
+            }
+#endif
         } else {
             present();
         }
@@ -952,6 +1029,7 @@ static int run(unsigned long s, unsigned x, int xconst)
     memset(tseen, 0, sizeof(tseen));
     tfresh = 0;
     tpal = 1;
+    tgiven = tgnew = 0;
     page_rows = is_st ? STDL_GetVideoSurface()->h : 240;
 #endif
     {

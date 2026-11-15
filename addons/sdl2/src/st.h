@@ -55,6 +55,17 @@ int stdl_sdl2_st_keep(const SDL_Color *col, int ncol, unsigned x, int bits,
                       const Uint8 *seen, const struct stdl_sdl2_st_maps *m,
                       SDL_Color *out);
 
+/* second slots for first slots a and 16 colours c over a palette, as
+ * the reduction makes them (b is a without dither): for maps a program
+ * gives (STDL_SDL2_SetSTColours) */
+void stdl_sdl2_st_seconds(const SDL_Color *col, int ncol, unsigned x,
+                          const SDL_Color *c, const Uint8 *a, Uint8 *b,
+                          int dither);
+
+/* maps a and b in m's place; 1 when they moved */
+int stdl_sdl2_st_use(struct stdl_sdl2_st_maps *m, const Uint8 *a,
+                     const Uint8 *b);
+
 /* new maps from the palette and the colours seen; 1 when a map moved */
 int stdl_sdl2_st_remake(const SDL_Color *col, int ncol, unsigned x, int bits,
                         int dither, const Uint8 *seen,

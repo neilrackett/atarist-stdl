@@ -177,6 +177,10 @@ struct SDL_Renderer {
     int stale;                  /* the pages hold older maps' slots */
     Uint8 seen[256];            /* colours on the page since the count */
     int fresh;                  /* and one there that was not before */
+    int given;                  /* the program's map and colours
+                                 * (STDL_SDL2_SetSTColours), in regs */
+    Uint8 gmap[256];            /* and its map's first slots */
+    int gnew;                   /* a map not yet made into the maps */
     int ny0, ny1;               /* the rows of now that are set */
     int oy0[3], oy1[3];         /* and of each page's owed */
     int regdirty;               /* the 16 colours are to be staged */
@@ -732,17 +736,33 @@ static void st_count(SDL_Renderer *r)
  * has shown and its maps drift toward the palette's as a whole. A count
  * at every remake would cost a pass over the page each time (90-105ms
  * on a Mega STE) and was not measured as better for a game that
- * changes its palette with its rooms. Maps that moved leave the pages
- * stale and are a frame to show, drawn on or not; the colours wait for
- * st_registers, just before the flip that shows a page converted for
- * them. Says whether the maps moved. */
+ * changes its palette with its rooms. A program's own map and colours
+ * (STDL_SDL2_SetSTColours) take the place of all that, the second
+ * slots made when the map is new: made again at each change of the
+ * palette or the 16, they moved at a fade's steps and at most of a
+ * cutscene's frames, each move a whole screen converted again, where
+ * an ST without the add-on writes 16 registers. Maps that
+ * moved leave the pages stale and are a frame to show, drawn on or
+ * not; the colours wait for st_registers, just before the flip that
+ * shows a page converted for them. Says whether the maps moved. */
 static int st_reduce(SDL_Renderer *r)
 {
     const SDL_Color *col = r->pal ? r->pal->colors : NULL;
     const int ncol = r->pal ? r->pal->ncolors : 0;
     int moved = 0;
-    if (!stdl_sdl2_st_keep(col, ncol, r->x, r->bits, r->seen, &r->maps,
-                           r->regs)) {
+    if (r->given) {
+        /* the program's map, its second slots from the colours it gave
+         * over the palette as they are now; under the same map new
+         * colours or a new palette are the registers alone */
+        if (r->gnew) {
+            Uint8 b[256];
+            stdl_sdl2_st_seconds(col, ncol, r->x, r->regs, r->gmap, b,
+                                 r->dither);
+            moved = stdl_sdl2_st_use(&r->maps, r->gmap, b);
+            r->gnew = 0;
+        }
+    } else if (!stdl_sdl2_st_keep(col, ncol, r->x, r->bits, r->seen,
+                                  &r->maps, r->regs)) {
         if (pal_changed(r)) {
             st_count(r);
         }
@@ -768,6 +788,43 @@ const struct stdl_sdl2_st_maps *stdl_sdl2_st_view(SDL_Renderer *renderer,
     *dither = renderer->dither;
     *seen = renderer->seen;
     return &renderer->maps;
+}
+
+int STDL_SDL2_SetSTColours(SDL_Renderer *renderer, const Uint8 *map,
+                           const SDL_Color *colours)
+{
+    SDL_Renderer *r = renderer;
+    int i;
+    if (!r) {
+        return SDL_InvalidParamError("renderer");
+    }
+    if (!st_on) {
+        return SDL_SetError("The 16 colours are an ST's screen's");
+    }
+    if (!map) {
+        /* the add-on's own again: new maps from a count */
+        if (r->given) {
+            r->given = r->gnew = 0;
+            r->maps.made_valid = 0;
+            r->paldirty = 1;
+        }
+        return 0;
+    }
+    if (!colours) {
+        return SDL_InvalidParamError("colours");
+    }
+    for (i = 0; i < 256; i++) {
+        r->gmap[i] = (Uint8)(map[i] & 15);
+    }
+    for (i = 0; i < 16; i++) {
+        r->regs[i] = colours[i];
+        r->regs[i].a = 255;
+    }
+    /* a new map made into the maps and the colours to the registers,
+     * at the next present or staging */
+    r->gnew |= !r->given || memcmp(r->gmap, r->maps.a, sizeof(r->gmap));
+    r->given = r->paldirty = 1;
+    return 0;
 }
 
 static void st_registers(SDL_Renderer *r)
@@ -1193,7 +1250,9 @@ int SDL_RenderClear(SDL_Renderer *renderer)
     if (st_on) {
         back = back_page(r);
         st_fill(r, back + ROW0 * r->stride, c);
-        st_mark(r, &c, 1);
+        if (!r->given) {
+            st_mark(r, &c, 1);
+        }
         for (y = ROW0; y < ROW0 + ROWS; y++) {
             r->now[y] = ALLGROUPS;
         }
@@ -1282,7 +1341,7 @@ static int st_copy_changed(SDL_Renderer *r, const SDL_Texture *t, int tx,
                 d[1] = s[1];
                 d[2] = s[2];
                 d[3] = s[3];
-                if (!st_seen16(r->seen, (const Uint8 *)d)) {
+                if (!r->given && !st_seen16(r->seen, (const Uint8 *)d)) {
                     st_mark(r, (const Uint8 *)d, 16);
                 }
                 mask |= bit;
@@ -1316,7 +1375,8 @@ static __attribute__((noinline)) void model_copy(SDL_Renderer *r,
                t->pixels + (ty + row) * t->pitch + tx, (size_t)w);
 #ifdef STDL_SDL2_ST
         /* what the page shows of it */
-        if (st_on && sy + row >= ROW0 && sy + row < ROW0 + ROWS) {
+        if (st_on && !r->given && sy + row >= ROW0 &&
+            sy + row < ROW0 + ROWS) {
             st_note(r, r->model + MUL(sy + row, SCREEN_W) + sx, w);
         }
 #endif
@@ -1636,7 +1696,9 @@ int STDL_SDL2_ClearScreenNow(SDL_Renderer *renderer)
             shown = page_index(r, pix);
             st_fill(r, pix, r->x);
         }
-        st_mark(r, &x, 1);
+        if (!r->given) {
+            st_mark(r, &x, 1);
+        }
         r->stale = 0;
     } else
 #endif

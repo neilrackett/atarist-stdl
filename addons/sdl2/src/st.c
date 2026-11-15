@@ -241,6 +241,12 @@ static void nearest(const SDL_Color *col, int ncol, unsigned x,
     }
 }
 
+/* the palette's colours the reduction takes, 256 at most */
+static int palette_size(int ncol)
+{
+    return ncol < 0 ? 0 : ncol > 256 ? 256 : ncol;
+}
+
 /* every colour's second slot, with the checkerboard; the first again
  * without it, and 0 for anything not a colour. A pair's mix and the
  * penalty for its pattern, an eighth of the two slots' distance, are
@@ -286,6 +292,25 @@ static void seconds(const SDL_Color *col, int ncol, unsigned x,
     }
 }
 
+void stdl_sdl2_st_seconds(const SDL_Color *col, int ncol, unsigned x,
+                          const SDL_Color *c, const Uint8 *a, Uint8 *b,
+                          int dither)
+{
+    seconds(col, palette_size(ncol), x, c, a, b, dither);
+}
+
+int stdl_sdl2_st_use(struct stdl_sdl2_st_maps *m, const Uint8 *a,
+                     const Uint8 *b)
+{
+    if (memcmp(a, m->a, sizeof(m->a)) == 0 &&
+        memcmp(b, m->b, sizeof(m->b)) == 0) {
+        return 0;
+    }
+    memcpy(m->a, a, sizeof(m->a));
+    memcpy(m->b, b, sizeof(m->b));
+    return 1;
+}
+
 /* how far the colours in use are from the mix of their two slots, as
  * a share of those colours' own size, so that the same picture dimmed
  * has the same figure: 256ths of a 16th. The slots' colours are their
@@ -317,7 +342,7 @@ Uint32 stdl_sdl2_st_reduce(const SDL_Color *col, int ncol, unsigned x,
     struct box box[15];
     int n, nbox = 0, i, k;
 
-    ncol = ncol < 0 ? 0 : ncol > 256 ? 256 : ncol;
+    ncol = palette_size(ncol);
     n = in_use(col, ncol, x, seen, idx);
     memset(a, 0, 256);
     if (n) {
@@ -377,7 +402,7 @@ Uint32 stdl_sdl2_st_fit(const SDL_Color *col, int ncol, unsigned x, int bits,
     SDL_Color c[16], raw[16];
     Uint8 idx[256];
     int n;
-    ncol = ncol < 0 ? 0 : ncol > 256 ? 256 : ncol;
+    ncol = palette_size(ncol);
     n = in_use(col, ncol, x, seen, idx);
     means(col, idx, n, a, bits, raw, c);
     memcpy(out, c, sizeof(c));
@@ -418,12 +443,7 @@ int stdl_sdl2_st_remake(const SDL_Color *col, int ncol, unsigned x, int bits,
     m->made = stdl_sdl2_st_reduce(col, ncol, x, bits, dither, seen, a, b,
                                   out);
     m->made_valid = 1;
-    if (memcmp(a, m->a, sizeof(a)) == 0 && memcmp(b, m->b, sizeof(b)) == 0) {
-        return 0;
-    }
-    memcpy(m->a, a, sizeof(a));
-    memcpy(m->b, b, sizeof(b));
-    return 1;
+    return stdl_sdl2_st_use(m, a, b);
 }
 
 /*

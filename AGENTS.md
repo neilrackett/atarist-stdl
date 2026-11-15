@@ -1600,6 +1600,26 @@ and the rules below keep it from being anything else's.
     counter of hint changes in hints.c, mode state in the renderer and
     its model in the test, for a switch no port used. What stayed is
     the count in assembler, twice as fast.
+  - A program can give its own 16 and the map onto them
+    (`STDL_SDL2_SetSTColours`, November 2026), for a port whose ST
+    version already chooses them: one port's game fed it from its ST
+    version's palette, and every frame of a replay and of eight
+    cutscenes on an STE showed that version's 16 colours, where the
+    colours on screen had made other ones each time a screen changed.
+    The call only records (`gmap`, `regs`, and `gnew` when the map is
+    not the one in use); at the next present or staging `st_reduce`
+    makes a new map's second slots (`stdl_sdl2_st_seconds`), and under
+    the same map new colours or a palette change are the registers
+    alone, as on the port's ST version. The first version made the
+    second slots again at every call and palette change: by its code
+    20-60ms each on an 8MHz ST, and they moved at a fade's last, black
+    step and at most cutscene frames, each move a whole screen
+    converted again (0.3-0.5s). While given nothing is noted or
+    counted; given back, the maps are made again from a count
+    (`paldirty`). `test_render` gives, gives the same map with new
+    colours and gives back at random (`st_give`), and expects all of
+    that (`tgiven`, `tgnew`): breaking each of twelve parts of it on
+    purpose failed the test.
   - Check the machine as well as the host: the count's first
     assembler stored 0xFF (`st`) where `st_mark` stores 1, which every
     use of the colours seen took as the same, and the host's C twin

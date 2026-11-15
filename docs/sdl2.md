@@ -483,6 +483,26 @@ no TT or Falcon to hand, not to play it: the picture is a rough
     after a 2x2 average): the palette as a whole 84 on an ST and 83 on
     an STE, the colours on screen 47 and 26, with the checkerboard 38
     and 23 (`st.c` has what else was tried and scored worse).
+- **A program's own 16** (`STDL_SDL2_SetSTColours(renderer, map,
+  colours)`): a program that already chooses an ST's colours, a port
+  with an ST version of its own, gives the map from its 256 to the 16
+  slots and the slots' colours, and the add-on shows them as given from
+  the next present or staging, until a NULL map hands the choice back.
+  Nothing is counted or noted meanwhile.
+  - A new map is a screen converted again, and with the checkerboard
+    its second slots are made then, from the colours given and the
+    palette as it is. Under the same map new colours, as at a fade's
+    steps, and palette changes are the 16 registers, as on an ST
+    without the add-on, so the program gives the 16 again when they
+    change. Second slots made again at each change of the palette or
+    the 16 moved at a fade's last, black step and at most of a
+    cutscene's frames, each move a screen converted again.
+  - The colours on screen change with what the screen shows, so the
+    same room could come out in other colours from one visit to the
+    next. One port's game, fed from its ST version's palette, showed
+    that version's colours on every screen, with nothing counted or
+    noted: 2-4% less a frame in play on an STE and a Mega STE, and 8%
+    less work in its cutscenes on a Mega STE.
 - **A palette change can cost a screen.** Each page holds slots, not
   colours, so when the maps move the next page drawn on is converted
   again whole, from a chunky copy of the screen the renderer keeps
@@ -496,8 +516,8 @@ no TT or Falcon to hand, not to play it: the picture is a rough
   as colours came.
 - **Where it differs from the TT's and Falcon's:**
   - a present flips for a new map though nothing was drawn, and
-    `STDL_SDL2_StagePalette` presents when the map moves, what was
-    copied so far with it;
+    `STDL_SDL2_StagePalette` presents when the maps move, the add-on's
+    or the program's, what was copied so far with it;
   - `STDL_SDL2_GetRegisterColours` gives the 16 registers in its first
     16 entries, and `STDL_SDL2_GetShownPage` the page's rows, 160
     bytes each (32,000 bytes, or the tall screen's 38,400);

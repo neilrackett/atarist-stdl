@@ -345,7 +345,13 @@ Falcon that binary shows what the 68020 build shows, frame for frame,
   checkerboard of two slots stands in for a colour between them (on by
   default; `STDL_SDL2_HINT_ST_DITHER` "0" turns it off). Colours are
   counted after a palette change that no longer fits and noted as
-  copies bring them.
+  copies bring them, so they move with what is on screen. A program
+  with its own way to choose an ST's 16 (a port's ST version) gives
+  them instead, `STDL_SDL2_SetSTColours(ren, map, colours)`: the map
+  from its 256 to 16 slots and their colours, from the next present. A
+  new map converts the screen again; new colours under the same map (a
+  fade's steps) and palette changes are 16 registers. A NULL map hands
+  the choice back.
 - Slow, by design: a whole screen of new pixels 0.74s on an 8MHz ST and
   0.42s on a Mega STE, a new 64x48 box 41ms and 23ms, a palette change
   that keeps the maps 42ms and 22ms, or a

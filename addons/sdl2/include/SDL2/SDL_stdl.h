@@ -48,6 +48,26 @@ extern "C" {
  * Read by SDL_CreateRenderer. */
 #define STDL_SDL2_HINT_ST_DITHER "STDL_SDL2_ST_DITHER"
 
+/*
+ * In the experimental 68000 build (libstdl-sdl2-st.a) on an ST: the
+ * program's own 16 colours and the map onto them, in place of the
+ * add-on's, for a program that has a way of its own to choose them (a
+ * port's ST version's). map[i] is palette index i's slot, 0-15, and
+ * colours[] the 16 slots' colours, which go to the registers. Both take
+ * effect at the next present or STDL_SDL2_StagePalette. A new map is a
+ * whole screen converted again; with the checkerboard
+ * (STDL_SDL2_HINT_ST_DITHER) its colours also get second slots, made
+ * then from these colours and the palette as it is. Under the same map,
+ * new colours, as at a fade's steps, and palette changes are the 16
+ * registers alone, as on an ST without the add-on. While they are
+ * given the add-on counts and checks nothing. A NULL map hands the
+ * colours back to the add-on, which makes its own from a count at the
+ * next present. -1 on a TT's or a Falcon's screen; in the build for
+ * them there is no such call.
+ */
+extern int STDL_SDL2_SetSTColours(SDL_Renderer *renderer, const Uint8 *map,
+                                  const SDL_Color *colours);
+
 /* a file name: where SDL_Log writes, a line a message, from the first
  * message on. Unset, the log goes nowhere; never to the console (see
  * SDL_log.h). */

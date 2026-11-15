@@ -739,8 +739,8 @@ static void st_count(SDL_Renderer *r)
  * changes its palette with its rooms. A program's own map and colours
  * (STDL_SDL2_SetSTColours) take the place of all that, the second
  * slots made when the map is new: made again at each change of the
- * palette or the 16, they moved at a fade's steps and at most of a
- * cutscene's frames, each move a whole screen converted again, where
+ * palette or the 16, they would move at a fade's last step, all its
+ * colours black, and a move is a whole screen converted again, where
  * an ST without the add-on writes 16 registers. Maps that
  * moved leave the pages stale and are a frame to show, drawn on or
  * not; the colours wait for st_registers, just before the flip that

@@ -495,8 +495,10 @@ no TT or Falcon to hand, not to play it: the picture is a rough
     steps, and palette changes are the 16 registers, as on an ST
     without the add-on, so the program gives the 16 again when they
     change. Second slots made again at each change of the palette or
-    the 16 moved at a fade's last, black step and at most of a
-    cutscene's frames, each move a screen converted again.
+    the 16, as first written, would move at a fade's last step, where
+    every colour is black and each second slot falls back to its
+    first, and a move is the whole screen converted again; that
+    version was replaced before it was run.
   - The colours on screen change with what the screen shows, so the
     same room could come out in other colours from one visit to the
     next. One port's game, fed from its ST version's palette, showed

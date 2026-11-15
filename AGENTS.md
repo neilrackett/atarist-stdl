@@ -1610,11 +1610,13 @@ and the rules below keep it from being anything else's.
     not the one in use); at the next present or staging `st_reduce`
     makes a new map's second slots (`stdl_sdl2_st_seconds`), and under
     the same map new colours or a palette change are the registers
-    alone, as on the port's ST version. The first version made the
-    second slots again at every call and palette change: by its code
-    20-60ms each on an 8MHz ST, and they moved at a fade's last, black
-    step and at most cutscene frames, each move a whole screen
-    converted again (0.3-0.5s). While given nothing is noted or
+    alone, as on the port's ST version. A first version made the
+    second slots again at every call and palette change, which a review
+    costed from its code at 20-60ms each on an 8MHz ST (an estimate,
+    not timed); at a fade's last step, every colour black, each second
+    slot falls back to its first, so the maps would move there and the
+    whole screen be converted again. It was replaced before it was
+    run. While given nothing is noted or
     counted; given back, the maps are made again from a count
     (`paldirty`). `test_render` gives, gives the same map with new
     colours and gives back at random (`st_give`), and expects all of

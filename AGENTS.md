@@ -1683,6 +1683,13 @@ and the rules below keep it from being anything else's.
   porting a game reads the headers first. Check it the cheap way
   before committing: grep the new symbol across `docs/ README.md
   .claude/` and see it come back.
+- **A release's number says whether the interface moved.** A release
+  that adds to or changes the external interface - a call, a hint, a
+  macro or constant, a type or a field, an event, a file format, in
+  `include/` or an add-on's headers - is a minor bump (v1.26.0 added
+  `STDL_SDL2_SetSTColours`); anything that does not - a fix, speed,
+  docs, examples, tests, the build - is a patch bump. A release is an
+  annotated `v*` tag on `main`'s tip (above).
 - **A change to a released call can go in a minor release when the
   build catches every old use** - a call with the old arguments that no
   longer compiles, or a name that is gone and no longer links - and is

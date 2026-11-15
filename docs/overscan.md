@@ -150,6 +150,18 @@ hardware words a frame ahead, `STDL_ShowRasters(keep)` with each flip,
 `STDL_CloseRasters()` when done. They carry the same Timer C prefix as
 the borders, which keeps them steady while TOS's 200Hz tick runs.
 
+A TT runs them too, in ST Low, which it shows with every line drawn
+twice. Whether its Timer B then counts a picture line once or twice
+has not been measured on the machine - Hatari, which times a TT's
+video as an STE's, counts it once - so each open there counts a
+frame's events over three frames and steps in whichever it found;
+`lines` stays picture lines, at most 127 if it counted two. A TT's
+responsive screen (TT Low, `responsive.md`) and a Falcon are refused:
+Hatari gives their 240 or 480 lines the 200 events of an ST's frame,
+so nothing there could be checked. With the Hatari fork's TT palette
+change (each line converted with the palette it had) a TT shows them
+in emulation; a stock Hatari shows one colour.
+
 ## A program that runs the machine itself
 
 A program that runs the machine itself - its own interrupts, its own

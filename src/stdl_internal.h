@@ -88,6 +88,8 @@ extern volatile uint8_t stdl_host_vidbase[2];
 /* the MFP's registers by offset from $FFFFFA00, and two vectors */
 extern volatile uint8_t stdl_host_mfp[0x30];
 extern volatile uint32_t stdl_host_vec_tb, stdl_host_vec_tc;
+/* Timer B events in a TT's frame, as raster.c would count them */
+extern uint16_t stdl_host_tt_events;
 extern volatile uint8_t stdl_host_ym_sel;
 extern volatile uint8_t stdl_host_ym[16];
 extern volatile uint8_t stdl_host_conterm;

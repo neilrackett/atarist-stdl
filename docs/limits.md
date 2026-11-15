@@ -57,8 +57,10 @@ stop trying and redesign instead.
   port whose layer keeps a priority plane in its mask: 1.5K. 8-plane
   tilesets followed, 1.5K, so that a bank's 256-colour art covers
   every kind of picture a bank holds.
-* Borders, STE hardware scrolling and rasters need an ST, STE or Mega
-  STE's video timing and are refused on a TT or a Falcon. A Falcon's
+* Borders and STE hardware scrolling need an ST, STE or Mega STE's
+  video timing and are refused on a TT or a Falcon. Rasters run on a
+  TT in ST Low, where each open counts a frame's Timer B events first,
+  and are refused on a Falcon and on a TT's responsive screen. A Falcon's
   BLiTTER is not used (the 68030's data cache does not see its
   writes).
   `STDL_OpenInput` gives a program the events without the mode, on

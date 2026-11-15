@@ -40,8 +40,9 @@ believing any frame-rate claim.
 Low: the display rate is measured there (music keeps its tempo at
 their 60Hz), a Falcon plays 6258Hz sound at 12517 (`STDL_PlaySample`
 from a copy), its crossbar is routed and put back, the desktop's mode
-and colours come back at exit, and borders, hardware scrolling and
-rasters are refused. A 68030 also has hardware 32-bit multiply and
+and colours come back at exit, and borders and hardware scrolling are
+refused. Rasters run on a TT in ST Low (not its responsive screen) and
+are refused on a Falcon. A 68030 also has hardware 32-bit multiply and
 divide, so most of the cost notes below do not apply there.
 
 **Making an ST game better on a TT or a Falcon?** Ask for each thing
@@ -1489,7 +1490,11 @@ first.
   borders' as well, so rasters and an open border refuse each
   other. The terminate path puts the vectors back, which a
   hand-rolled raster handler leaves pointing into freed memory.
-  While open, the two registers are the table's. `examples/rasters.c`.
+  While open, the two registers are the table's. On a TT in ST Low
+  each open counts a frame's Timer B events first (three frames),
+  since whether it counts a line of its doubled picture once or twice
+  is unmeasured, and steps in them; a TT's responsive screen and a
+  Falcon refuse. `examples/rasters.c`.
 - Palette changes on the frame boundary: `STDL_StagePalette(1)`
   holds every change made through `STDL_SetPalette`,
   `STDL_SetColours`, `STDL_FadeTo` and the SDL shim's

@@ -32,9 +32,17 @@ extern "C" {
  * and so colours the bottom border too. Returns the number of entries a frame (200 / lines +
  * 1), or -1 with STDL_GetError() set: no video mode, a bad argument,
  * no VBL slot, a border open - Timer B, which this runs on, is
- * the borders' too, and each refuses while the other holds it - or a
- * TT or Falcon, whose doubled lines Timer B counts in a way nobody has
- * measured on the machines.
+ * the borders' too, and each refuses while the other holds it - a
+ * Falcon, or a TT's responsive screen.
+ *
+ * A TT runs them in ST Low, the 200-line screen it shows each line of
+ * twice. Whether its Timer B counts a picture line once or twice has
+ * not been measured on the machine (Hatari counts it once), so each
+ * open there counts a frame's events, three frames' wait, and steps
+ * in whichever it found: `lines` is picture lines either way, at most
+ * 127 if it counted two. A TT's responsive screen (TT Low) and a
+ * Falcon are refused: Hatari gives their 240 or 480 lines the 200
+ * events of an ST's frame, so nothing there could be checked.
  *
  * Timer B counts displayed lines and interrupts every `lines` of them
  * to write the next entry. Measured on a plain ST (RASTCHK), with

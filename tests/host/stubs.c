@@ -67,6 +67,7 @@ void STDL_CloseBottomBorder(void)
 /* the YM2149 as a register file, and the console-attributes byte */
 volatile uint8_t stdl_host_mfp[0x30];
 volatile uint32_t stdl_host_vec_tb, stdl_host_vec_tc;
+uint16_t stdl_host_tt_events = 200;
 void (*stdl_shutdown_rasters)(void);
 uint8_t stdl_timerb_owner;
 volatile uint8_t stdl_host_ym_sel;

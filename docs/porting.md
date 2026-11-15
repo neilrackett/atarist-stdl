@@ -450,10 +450,12 @@ truncates colours to the low N bits rather than rejecting them. See
     colour registers come back at exit; the monitor,
     not `Getrez()`, says whether it is mono (a TT shows ST High on
     colour, TT High only on mono).
-  - **Refused there:** borders, hardware scrolling and rasters (Timer B
-    counts their doubled lines in a way not yet measured on the
-    machines). A Falcon's BLiTTER is left alone: the 68030's data cache
-    does not see its writes.
+  - **Refused there:** borders and hardware scrolling, and rasters on
+    a Falcon. A TT runs rasters in ST Low, each open counting a frame's
+    Timer B events first, as whether it counts a line of its doubled
+    picture once or twice is not yet measured on the machine
+    ([overscan.md](overscan.md#rasters)). A Falcon's BLiTTER is left
+    alone: the 68030's data cache does not see its writes.
   `tests/hatari/ttchk.c` and `tests/hatari/falcchk.c` check all of it.
 * **Many copies of one sprite**: `STDL_BlitSprites` draws a list of
   positions and frames in one call, and `STDL_DirtyWholeGroups(1)`

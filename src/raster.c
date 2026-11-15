@@ -19,6 +19,16 @@
  * to 5 inside that handler, and Timer B (MFP channel 8, above Timer
  * C's 5) is taken through it.
  *
+ * A TT shows ST Low on its VGA monitor with each line drawn twice, and
+ * whether its Timer B counts a picture line once or both of its lines
+ * has not been measured on the machine; Hatari, which times a TT's
+ * video as an STE's, counts it once. So an open on a TT counts a
+ * frame's events and takes the step in them: about 200 is one a
+ * line, about 400 two, and the step is doubled. A TT's own modes (a
+ * responsive screen's TT Low) and a Falcon are still refused: Hatari
+ * gives their 480 lines the 200 events of an ST's frame, so nothing
+ * there could be checked.
+ *
  * Programs used to write all of this themselves, and two things
  * went wrong that a library can prevent: Timer B is also what an
  * open border runs on, and nothing stopped both claiming it; and the
@@ -57,6 +67,7 @@ static uint8_t open_;
 uint16_t *volatile stdl_rast_ptr;
 volatile int16_t stdl_rast_reg1, stdl_rast_reg2;
 uint32_t stdl_rast_oldtc;
+volatile uint16_t stdl_rast_events;     /* tt_count's */
 
 static uint32_t old_tb;
 static uint8_t old_ier, old_imr;
@@ -107,6 +118,7 @@ static void (*const isr0k[16])(void) = {
     stdl_rast_isr0_14, stdl_rast_isr0_15
 };
 void stdl_rast_tc(void);
+void stdl_rast_count(void);
 
 /*
  * The handlers. The registers' addresses are words, sign-extended by
@@ -186,6 +198,13 @@ RAST_ISR0K(9, "0xffff8252") RAST_ISR0K(10, "0xffff8254")
 RAST_ISR0K(11, "0xffff8256") RAST_ISR0K(12, "0xffff8258")
 RAST_ISR0K(13, "0xffff825a") RAST_ISR0K(14, "0xffff825c")
 RAST_ISR0K(15, "0xffff825e")
+/* a TT's frame counted: one an event */
+"    .even\n"
+"    .globl _stdl_rast_count\n"
+"_stdl_rast_count:\n"
+"    addq.w #1,_stdl_rast_events\n"
+"    move.b #0xFE,0xfffffa0f.w\n"
+"    rte\n"
 /* Timer C prefix: TOS's handler opened to Timer B, as overscan.c's */
 "    .even\n"
 "    .globl _stdl_rast_tc\n"
@@ -199,6 +218,7 @@ RAST_ISR0K(15, "0xffff825e")
 #define ISR0  ((uint32_t)(uintptr_t)stdl_rast_isr0)
 #define ISR0K(k) ((uint32_t)(uintptr_t)isr0k[k])
 #define TC    ((uint32_t)(uintptr_t)stdl_rast_tc)
+#define COUNT ((uint32_t)(uintptr_t)stdl_rast_count)
 #else
 /* the host has no MFP: the vectors are tokens the tests read */
 #define ISR1  1u
@@ -206,7 +226,50 @@ RAST_ISR0K(15, "0xffff825e")
 #define ISR0  4u
 #define ISR0K(k) (0x100u + (k))
 #define TC    3u
+#define COUNT 5u
 #endif
+
+/* A TT's Timer B events in a frame of its ST Low: an event a line
+ * counted from one VBL to the next, Timer B left as it was found.
+ * 1 for about 200, 2 for about 400; 0 if it counts nothing like a
+ * picture's lines. Three frames, at each open. */
+static uint8_t tt_count(void)
+{
+    const uint32_t vec = VEC_TB;
+    const uint8_t ier = (uint8_t)(MFP_IERA & 0x01);
+    const uint8_t imr = (uint8_t)(MFP_IMRA & 0x01);
+    uint16_t sr, n;
+
+    STDL_WaitVBL();
+    sr = stdl_int_off();
+    MFP_TBCR = 0;
+    VEC_TB = COUNT;
+    MFP_TBDR = 1;
+    MFP_TBCR = 8;
+    MFP_IERA |= 0x01;
+    MFP_IMRA |= 0x01;
+    stdl_int_restore(sr);
+    STDL_WaitVBL();
+    stdl_rast_events = 0;
+    STDL_WaitVBL();
+#ifdef __m68k__
+    n = stdl_rast_events;
+#else
+    n = stdl_host_tt_events;            /* the tests' frame */
+#endif
+    sr = stdl_int_off();
+    MFP_TBCR = 0;
+    MFP_IPRA &= (uint8_t)~0x01;
+    MFP_ISRA &= (uint8_t)~0x01;
+    MFP_IERA = (uint8_t)((MFP_IERA & ~0x01) | ier);
+    MFP_IMRA = (uint8_t)((MFP_IMRA & ~0x01) | imr);
+    VEC_TB = vec;
+    stdl_int_restore(sr);
+    if (n < 150 || n > 500) {
+        return 0;
+    }
+    return n > 300 ? 2 : 1;
+}
 
 /* Before the picture: the first entry by hand, the count restarted.
  * Every frame, so a frame that ran long cannot carry its position
@@ -269,14 +332,15 @@ int STDL_OpenRasters(int lines, int reg1, int reg2)
         STDL_SetError("no video mode set");
         return -1;
     }
-    if (stdl.mach.mch_cookie >= 0x00020000UL) {
-        /* Timer B counts the lines a TT or a Falcon shows, doubled on
-         * their monitors, and nobody has measured on the machines how
-         * many it sees in a frame: Hatari, which times their video as
-         * an STE's, cannot say. The table is 200 a frame, so refused
-         * there, as the borders are */
-        STDL_SetError("rasters need an ST, STE or Mega STE (not a TT "
-                      "or Falcon)");
+    if (stdl.mach.mch_cookie >= 0x00020000UL && !stdl_is_tt()) {
+        /* a Falcon's VIDEL lines: see the top of the file */
+        STDL_SetError("rasters need an ST, STE, Mega STE or TT (not a "
+                      "Falcon)");
+        return -1;
+    }
+    if (stdl_is_tt() && stdl_resp_screen != NULL) {
+        STDL_SetError("rasters on a TT need its ST Low screen, not a "
+                      "responsive one");
         return -1;
     }
     if (stdl_timerb_owner == STDL_TB_BORDER) {
@@ -292,6 +356,20 @@ int STDL_OpenRasters(int lines, int reg1, int reg2)
         reg2 = -1;
     }
     step = (uint8_t)lines;
+    if (stdl_is_tt()) {
+        const uint8_t tt_x = tt_count();
+
+        if (tt_x == 0) {
+            STDL_SetError("Timer B does not count this TT's lines");
+            return -1;
+        }
+        if (lines * tt_x > 255) {
+            STDL_SetError("raster step over 127 on a TT counting both "
+                          "of a line's two");
+            return -1;
+        }
+        step = (uint8_t)(lines * tt_x);
+    }
     /* an entry for the picture's top, one for each interrupt - the
      * last, at the end of the picture, colours the bottom border */
     entries = STDL_DivU16(PICTURE_LINES, (unsigned)lines) + 1;

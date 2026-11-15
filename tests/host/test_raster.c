@@ -15,7 +15,11 @@
  *  - the program never being handed the table the VBL or the current
  *    frame reads, and each new one starting as a copy of the last
  *    shown;
- *  - closing and the terminate path putting back what was there.
+ *  - closing and the terminate path putting back what was there;
+ *  - a TT: the step in the Timer B events its frame was counted at
+ *    (200, one a line, or 400, two), Timer B left as it was found by
+ *    the count, and a Falcon, a TT's responsive screen and a count
+ *    like no picture's refused.
  */
 #include <stdio.h>
 #include <string.h>
@@ -197,6 +201,54 @@ int main(void)
               (unsigned long)stdl_rast_oldtc);
         STDL_CloseRasters();
         CHECK(stdl_host_vec_tc == tos, "Timer C not back to TOS's");
+    }
+
+    /* a TT, its ST Low counted at one event a line, then two */
+    {
+        const uint32_t mch = stdl.mach.mch_cookie;
+
+        stdl.mach.mch_cookie = 0x00020000UL;
+        stdl_host_tt_events = 200;
+        n = STDL_OpenRasters(4, 0, -1);
+        CHECK(n == 51, "%d entries every 4 lines on a TT", n);
+        fire();
+        CHECK(stdl_host_mfp[0x21] == 4, "TT at 200: step %u, not 4",
+              stdl_host_mfp[0x21]);
+        STDL_CloseRasters();
+        CHECK(stdl_host_vec_tb == 0x1111
+              && (stdl_host_mfp[0x07] & 0x41) == 0x40
+              && (stdl_host_mfp[0x13] & 0x41) == 0x40,
+              "the count or the close left Timer B changed");
+
+        stdl_host_tt_events = 400;
+        n = STDL_OpenRasters(4, 0, -1);
+        CHECK(n == 51, "%d entries every 4 lines, TT at 400", n);
+        fire();
+        CHECK(stdl_host_mfp[0x21] == 8, "TT at 400: step %u, not 8",
+              stdl_host_mfp[0x21]);
+        STDL_CloseRasters();
+        CHECK(STDL_OpenRasters(128, 0, -1) == -1,
+              "a step of 128 doubled past the timer's 255");
+        CHECK(STDL_OpenRasters(127, 0, -1) == 2, "a step of 127 refused");
+        STDL_CloseRasters();
+
+        stdl_host_tt_events = 0;
+        CHECK(STDL_OpenRasters(4, 0, -1) == -1,
+              "opened on a TT whose Timer B counted nothing");
+        stdl_host_tt_events = 200;
+        {
+            STDL_Surface resp;
+
+            stdl_resp_screen = &resp;
+            CHECK(STDL_OpenRasters(4, 0, -1) == -1,
+                  "opened over a TT's responsive screen");
+            stdl_resp_screen = NULL;
+        }
+        stdl.mach.mch_cookie = 0x00030000UL;
+        CHECK(STDL_OpenRasters(4, 0, -1) == -1, "opened on a Falcon");
+        CHECK(slots() == 0 && stdl_timerb_owner == 0,
+              "a refusal kept a VBL slot or Timer B");
+        stdl.mach.mch_cookie = mch;
     }
 
     if (failures) {

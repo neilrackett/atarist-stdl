@@ -20,14 +20,16 @@
  * C's 5) is taken through it.
  *
  * A TT shows ST Low on its VGA monitor with each line drawn twice, and
- * whether its Timer B counts a picture line once or both of its lines
- * has not been measured on the machine; Hatari, which times a TT's
- * video as an STE's, counts it once. So an open on a TT counts a
- * frame's events and takes the step in them: about 200 is one a
- * line, about 400 two, and the step is doubled. A TT's own modes (a
- * responsive screen's TT Low) and a Falcon are still refused: Hatari
- * gives their 480 lines the 200 events of an ST's frame, so nothing
- * there could be checked.
+ * its Timer B counts a picture line once: 199-200 events a frame on a
+ * TT, as in ST Medium, where TT Low counts each of its 480 lines
+ * (TTCOUNT, November 2026). Hatari, which times a TT's video as an
+ * STE's, counts ST Low the same. An open on a TT still counts a
+ * frame's events and takes the step in them, as the check that the
+ * count is a picture's: about 200 is one a line, about 400 two, and
+ * the step is doubled. A TT's own modes (a responsive screen's TT Low)
+ * and a Falcon are still refused: stock Hatari gives TT Low's 480 lines
+ * the 200 events of an ST's frame (the Hatari fork counts 480), and a
+ * Falcon's count has not been measured.
  *
  * Programs used to write all of this themselves, and two things
  * went wrong that a library can prevent: Timer B is also what an

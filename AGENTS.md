@@ -517,7 +517,15 @@ console, unless `STDL_UseBanner(0)` came first.
   - Timer B counted 200 events a frame on every machine, but Hatari
     times a TT's and a Falcon's video as an STE's, so that settles
     nothing; rasters are refused there until someone counts on the
-    machines.
+    machines. A real TT has since been counted (TTCOUNT, five frames
+    each, November 2026): 199-200 in ST Low and ST Medium, 478-480 in
+    TT Low, an event for each line it shows of its own modes and for
+    each picture line of ST Low, which its monitor draws twice. So
+    ST Low's rasters run there at a step of a line, as in Hatari,
+    and TT Low's would need a step of two lines a row. Stock Hatari
+    counts 200 there; the Hatari fork counts 480 (its d1a926cf),
+    so TT Low rasters can be tried in it. A Falcon has not been
+    counted.
   - `$FF8240` lands in TT register 0-15 of `$FF8400` (bank 0), so an
     ST Low palette is right on a TT already; but a TT Low desktop uses
     all 256 registers. Writing the desktop's EgetShift word back after

@@ -36,13 +36,14 @@ extern "C" {
  * Falcon, or a TT's responsive screen.
  *
  * A TT runs them in ST Low, the 200-line screen it shows each line of
- * twice. Whether its Timer B counts a picture line once or twice has
- * not been measured on the machine (Hatari counts it once), so each
- * open there counts a frame's events, three frames' wait, and steps
- * in whichever it found: `lines` is picture lines either way, at most
- * 127 if it counted two. A TT's responsive screen (TT Low) and a
- * Falcon are refused: Hatari gives their 240 or 480 lines the 200
- * events of an ST's frame, so nothing there could be checked.
+ * twice. Its Timer B counts a picture line once, 200 events a frame,
+ * measured on the machine (Hatari counts the same). Each open there
+ * still counts a frame's events, three frames' wait, as a check, and
+ * steps in whichever it found: `lines` is picture lines either way, at
+ * most 127 if it counted two. A TT's responsive screen (TT Low) and a
+ * Falcon are refused for now: a TT counts TT Low's 480 lines, which
+ * stock Hatari gives the 200 events of an ST's frame (the Hatari fork
+ * counts 480), and a Falcon's count has not been measured.
  *
  * Timer B counts displayed lines and interrupts every `lines` of them
  * to write the next entry. Measured on a plain ST (RASTCHK), with

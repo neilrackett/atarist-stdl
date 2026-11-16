@@ -1407,6 +1407,11 @@ first.
   keys tone slots 0-8 for you; `STDL_OplReset` at start and end, from
   the main line, which opens the device for you.
   `examples/opldemo.c`.
+- The banner: a program's first `STDL_Init` writes one line to the
+  console before any mode is set, `STDL v1.30.0 |
+  neilrackett.com/atarist`, the version the release tag the library
+  was built at. `STDL_UseBanner(0)` before `STDL_Init` (or `SDL_Init`)
+  leaves it out; leave it in unless the program has a reason.
 - Mega STE speed: `STDL_Init` takes the machine to 16MHz with its
   cache. Change it only while any border is closed - opening one
   measures the flick's instruction costs on the machine, so a

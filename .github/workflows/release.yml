@@ -44,6 +44,11 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
+          # the tags too: the banner's version is the tag the tree is
+          # at (the Makefile's STDL_VERSION), and a run started by hand
+          # is on a branch, whose checkout would have none
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Install the Atari ST toolkit
         # Through GitHub's API (gh), with the plain download as the

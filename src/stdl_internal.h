@@ -312,6 +312,7 @@ extern STDL_Surface stdl_screen;
 
 void stdl_palette_apply_hw(void);       /* program all 16 registers  */
 void stdl_events_install(void);
+void stdl_banner(void);                 /* banner.c: STDL_Init's line */
 void stdl_events_remove(void);
 void stdl_time_init(void);
 STDL_Sprite *stdl_sprite_preshift(STDL_Sprite *spr);

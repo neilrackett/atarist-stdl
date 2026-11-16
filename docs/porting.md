@@ -130,6 +130,12 @@ program moved off them changes its include path to this shim's.
   with the cache. Use it to compare speeds inside one binary rather
   than believing two builds: `examples/blitchk.c` does. Change
   speed with any border closed ([overscan.md](overscan.md)).
+* **The banner**: a program's first `STDL_Init` writes one line to the
+  console, as TOS has the screen before any mode is set:
+  `STDL v1.30.0 | neilrackett.com/atarist`. `STDL_UseBanner(0)` before
+  `STDL_Init` (or `SDL_Init`, which calls it) leaves the line out. The
+  version is the release tag the library was built at, with a + for a
+  tree past its tag ([building.md](building.md)).
 
 7. Verify on plain ST at 8MHz - the correctness floor, and the
    machine the port is for. The blitter, DMA audio, hardware

@@ -31,6 +31,29 @@ copied from `examples/assets/`; `make bundle` zips them for the
 release page). The build must stay at **zero
 warnings** with the Makefile's `-Wall -Wextra`.
 
+**The banner** (`src/banner.c`, `STDL_UseBanner`): a program's first
+`STDL_Init` writes `STDL v1.30.0 | neilrackett.com/atarist` to the
+console, unless `STDL_UseBanner(0)` came first.
+- **Its version is the tag, asked of git** (`STDL_VERSION` in the
+  Makefile, `git describe`), so the version is still in annotated tags
+  and nowhere else. `obj/version.h` is rewritten only when it changes,
+  and `banner.o` alone includes it. A tree past its tag says so with a
+  `+`; one git cannot describe has no version in its line.
+- **A git worktree built in the container has no version**: its `.git`
+  points at a repository outside what the container sees. Pass
+  `STDL_VERSION=` when a worktree's build has to show one.
+- **`release.yml` fetches the tags**: a run started by hand is on a
+  branch, whose shallow checkout has none.
+- **It is an object of its own**, so a release changes that object and
+  no other: a port comparing its binary across a move to a newer STDL
+  finds the version's bytes there. A comparison of the core's objects
+  before and after a change (the add-ons' rule) is made with the same
+  `STDL_VERSION`.
+- **Only the machine writes it.** `tests/hatari/bannchk.c` says how to
+  check it: one line however often the program inits, none with
+  `STDL_UseBanner(0)`, seen on Hatari's STE and TT.
+- The line's text is the maintainer's.
+
 ## Verification expectations
 
 - **Pixel paths first**: `make test` (native clang + ASan, no

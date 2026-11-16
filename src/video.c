@@ -484,6 +484,7 @@ int STDL_Init(uint32_t flags)
     if (stdl.initialised) {
         return 0;
     }
+    stdl_banner();
     memset(&stdl, 0, sizeof(stdl));
     /* -1 is "never changed": left at 0, every program that inits
      * without a video mode wrote 60Hz into the sync register on its

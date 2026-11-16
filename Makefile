@@ -46,7 +46,7 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/spritebatch.c src/responsive.c src/planes8.c src/planes8ex.c \
           src/planes8tile.c src/asset8.c src/tall4.c src/tallst.c \
           src/hz38400.c src/rowcopy.c src/planes8row.c src/overlap.c \
-          src/overlap4.c src/overlap8.c
+          src/overlap4.c src/overlap8.c src/banner.c
 # Objects live under obj/, mirroring each source's own path. Sources
 # now come from two places, this repo and the xpad submodule, and
 # building beside the source would drop .o files inside lib/xpad. The
@@ -295,6 +295,25 @@ $(LIB): $(LIBOBJS)
 $(OBJDIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+# The start-up banner's version (src/banner.c): the release tag this
+# tree is at, asked of git, as STDL keeps its version in annotated tags
+# and nowhere else. A tree past its tag gets the tag and a +, and one
+# git cannot describe (an archive of the source, no git) no version.
+# The header is written only when the version changes, so a new tag
+# rebuilds banner.o and nothing else.
+STDL_VERSION ?= $(shell git -c safe.directory='*' describe --tags \
+                  --match 'v[0-9]*' 2>/dev/null | \
+                  sed -E 's/-[0-9]+-g[0-9a-f]+$$/+/')
+$(OBJDIR)/version.h: FORCE
+	@mkdir -p $(OBJDIR)
+	@printf '#define STDL_BANNER_VERSION "%s"\n' \
+	    '$(if $(STDL_VERSION), $(STDL_VERSION))' > $@.tmp; \
+	 cmp -s $@.tmp $@ || mv $@.tmp $@; rm -f $@.tmp
+FORCE:
+$(OBJDIR)/src/banner.o $(OBJDIR)/src/banner.cmini.o: $(OBJDIR)/version.h
+$(OBJDIR)/src/banner.o $(OBJDIR)/src/banner.cmini.o: \
+    CFLAGS += -include $(OBJDIR)/version.h
 
 # for size, in every program asking for the colour: the 8-plane blit
 # flags, a rare path (planes8ex.c says why), and the 8-plane tiles,

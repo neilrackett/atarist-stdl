@@ -90,7 +90,14 @@ git submodule update --init --recursive      # STDL's own submodule, lib/xpad
   agree. A release's prebuilt `libstdl-cmini.a` needs that release's
   headers anyway.
 - **A tag:** it says which release the game is on, and moving to the
-  next one is a commit of its own that can be measured.
+  next one is a commit of its own that can be measured. The line
+  `STDL_Init` writes to the console (`STDL v1.30.0 |
+  neilrackett.com/atarist`, [porting.md](porting.md)) takes its
+  version from it: STDL's Makefile asks git which tag the tree is at,
+  so build the library through that Makefile, inside the clone or the
+  submodule. A tree git cannot describe (an archive of the source)
+  gets the line with no version; `make STDL_VERSION=v1.30.0` says it
+  by hand.
 - **`extern/`:** it keeps STDL apart from the game's own sources, so a
   glob over `src/` never picks up STDL's files, and a reader can see
   what is vendored.

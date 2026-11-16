@@ -48,7 +48,9 @@ add-on's headers stop the build if they meet it.
 - **STDL itself is still there.** A program may call STDL directly
   beside the add-on: its input, its voices, its clock. `SDL_Init`
   calls `STDL_Init`, which does nothing if the program called it
-  first. `SDL_Quit` is `STDL_Quit`, which ends both.
+  first. `SDL_Quit` is `STDL_Quit`, which ends both. `STDL_Init`
+  writes STDL's one-line banner to the console;
+  `STDL_UseBanner(0)` before `SDL_Init` leaves it out.
 
 `examples/sdl2demo.c` (`SDL2DEMO.TOS`) is a plain SDL2 program on the
 add-on, and the pattern to copy.

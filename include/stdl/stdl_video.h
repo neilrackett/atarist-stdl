@@ -26,6 +26,20 @@ int  STDL_Init(uint32_t flags);
 void STDL_Quit(void);
 
 /*
+ * A program's first STDL_Init writes a line to the console as TOS has
+ * it then, before any mode is set, saying whose library this is:
+ *
+ *     STDL v1.30.0 | neilrackett.com/atarist
+ *
+ * STDL_UseBanner(0) before it (and before SDL_Init, in the SDL 1.2
+ * shim and the add-ons, which call STDL_Init) leaves the line out.
+ * 1 = show it (the default), 0 = leave it out, -1 = query. Returns the
+ * previous setting. The version is the release the library was built
+ * from, with a + for a tree past its tag.
+ */
+int  STDL_UseBanner(int on);
+
+/*
  * v1 always selects 320x200, 4 planes, 16 colours; w/h/bpp are
  * accepted for source compatibility and ignored.  Honoured flags:
  * STDL_DOUBLEBUF and STDL_TRIPLEBUF.  Returns the screen surface

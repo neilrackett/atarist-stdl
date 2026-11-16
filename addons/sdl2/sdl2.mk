@@ -152,9 +152,17 @@ $(SDL2CMINILIB): $(SDL2CMINIOBJS) $(SDL2XCMINIOBJS)
 # own at the flush. A low-detail game's view converted as pairs, 56
 # instructions a group against 74: one port's low-detail frame on a TT
 # 3.5ms faster, 68.2 -> 64.7 (Hatari). 30,696.
+#
+# Raised 30784 -> 30988 on 2026-11-16, by the 204 that 292 in video.o
+# passed it: the rows a frame drew on and each page owes kept as
+# ranges, as the experimental 68000 build kept them, so that a present
+# reads and clears those rows of the masks and not all 240 of four of
+# them. One mechanism for both builds; little time on a 68030, where
+# one port's frame of play went from 11.64ms of work to 11.52 on a TT
+# and from 22.89 to 22.80 on a Falcon (Hatari). 30,988.
 # A TT or a Falcon has the room; the budget is there so that growth is
 # a decision, raised with its reason or not at all.
-SDL2_MAX = 30784
+SDL2_MAX = 30988
 
 # The checks a build of the add-on must pass:
 # - no SDL_ link symbol in either archive (SDL_stdinc.h says why);

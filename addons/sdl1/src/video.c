@@ -26,7 +26,6 @@ typedef struct {
     SDL_PixelFormat fmt;
     SDL_Palette pal;
     SDL_Color colours[256];
-    int own;                    /* the pixels are freed with it */
     unsigned int from, to;      /* the versions the map is for */
     int same;                   /* no colour moves: the pixels as they are */
     Uint8 map[256];
@@ -48,10 +47,15 @@ static int eight(int depth)
     return 1;
 }
 
-/* over pixels, or (NULL) with a block of its own, zeroed */
+/* over pixels, or (NULL) with a block of its own, zeroed, its rows a
+ * multiple of 4 bytes as SDL 1.2's are. The pixels are freed with it
+ * unless it is marked SDL_PREALLOC, as in SDL 1.2. */
 static SDL_Surface *make(void *pixels, int w, int h, int pitch)
 {
     surf_t *t;
+    if (!pixels) {
+        pitch = (w + 3) & ~3;
+    }
     if (w < 1 || h < 1 || w > 32767 || h > 32767 || pitch < w ||
         pitch > 65535) {
         STDL_SetError("A surface of that size cannot be made");
@@ -60,7 +64,6 @@ static SDL_Surface *make(void *pixels, int w, int h, int pitch)
     t = (surf_t *)calloc(1, sizeof(*t));
     if (t && !pixels) {
         pixels = calloc((size_t)h, (size_t)pitch);
-        t->own = 1;
     }
     if (!t || !pixels) {
         free(t);
@@ -89,9 +92,7 @@ SDL_Surface *SDL_CreateRGBSurface(Uint32 flags, int width, int height,
                                   Uint32 Bmask, Uint32 Amask)
 {
     (void)flags; (void)Rmask; (void)Gmask; (void)Bmask; (void)Amask;
-    /* rows a multiple of 4 bytes, as SDL 1.2's */
-    return eight(depth) ? make(NULL, width, height, (width + 3) & ~3)
-                        : NULL;
+    return eight(depth) ? make(NULL, width, height, 0) : NULL;
 }
 
 SDL_Surface *SDL_CreateRGBSurfaceFrom(void *pixels, int width, int height,
@@ -114,11 +115,10 @@ SDL_Surface *SDL_CreateRGBSurfaceFrom(void *pixels, int width, int height,
 
 static void destroy(SDL_Surface *surface)
 {
-    surf_t *t = (surf_t *)surface;
-    if (t && t->own) {
+    if (surface && !(surface->flags & SDL_PREALLOC)) {
         free(surface->STDL_SDL1_PIXELS);
     }
-    free(t);
+    free(surface);
 }
 
 void SDL_FreeSurface(SDL_Surface *surface)
@@ -139,7 +139,6 @@ SDL_Surface *SDL_LoadBMP(const char *file)
         free(pixels);
         return NULL;
     }
-    ((surf_t *)s)->own = 1;
     /* SDL_Color's four bytes are the bridge's */
     memcpy(s->format->palette->colors, colours, (size_t)n * 4);
     s->format->palette->ncolors = n;
@@ -175,7 +174,8 @@ static Uint8 nearest(const SDL_Color *pal, int n, const SDL_Color *c)
 static const Uint8 *map_for(SDL_Surface *src, const SDL_Surface *dst)
 {
     surf_t *t = (surf_t *)src;
-    if (src == dst) {
+    /* one version: one palette's colours (SDL_DisplayFormat's copies) */
+    if (src == dst || src->format_version == dst->format_version) {
         return NULL;
     }
     if (t->from != src->format_version || t->to != dst->format_version) {
@@ -252,9 +252,7 @@ int SDL_SetColorKey(SDL_Surface *surface, Uint32 flag, Uint32 key)
 SDL_Surface *SDL_DisplayFormat(SDL_Surface *surface)
 {
     SDL_Surface *d;
-    const Uint8 *map, *s;
-    Uint8 *o;
-    int x, y;
+    Uint32 keyed;
     if (!surface) {
         return NULL;
     }
@@ -262,7 +260,7 @@ SDL_Surface *SDL_DisplayFormat(SDL_Surface *surface)
         STDL_SetError("No video mode has been set");
         return NULL;
     }
-    d = make(NULL, surface->w, surface->h, (surface->w + 3) & ~3);
+    d = make(NULL, surface->w, surface->h, 0);
     if (!d) {
         return NULL;
     }
@@ -272,19 +270,13 @@ SDL_Surface *SDL_DisplayFormat(SDL_Surface *surface)
     /* and their version: the same colours, so a map made for the
      * screen serves this one until either's palette changes */
     d->format_version = screen->format_version;
-    map = map_for(surface, screen);
-    s = (const Uint8 *)surface->STDL_SDL1_PIXELS;
-    o = (Uint8 *)d->STDL_SDL1_PIXELS;
-    for (y = 0; y < surface->h; y++, s += surface->pitch, o += d->pitch) {
-        if (map) {
-            for (x = 0; x < surface->w; x++) {
-                o[x] = map[s[x]];
-            }
-        } else {
-            memcpy(o, s, (size_t)surface->w);
-        }
-    }
-    if (surface->flags & SDL_SRCCOLORKEY) {
+    /* every pixel, the key's too: a blit without the key */
+    keyed = surface->flags & SDL_SRCCOLORKEY;
+    surface->flags &= ~SDL_SRCCOLORKEY;
+    SDL_UpperBlit(surface, NULL, d, NULL);
+    surface->flags |= keyed;
+    if (keyed) {
+        const Uint8 *map = map_for(surface, d);
         const Uint8 key = (Uint8)surface->format->colorkey;
         d->flags |= SDL_SRCCOLORKEY;
         d->format->colorkey = map ? map[key] : key;
@@ -346,7 +338,14 @@ int SDL_FillRect(SDL_Surface *dst, SDL_Rect *dstrect, Uint32 color)
     } else if (!cut(dstrect, &dst->clip_rect, dstrect)) {
         return 0;
     }
-    o = (Uint8 *)dst->STDL_SDL1_PIXELS + dstrect->y * dst->pitch + dstrect->x;
+    o = (Uint8 *)dst->STDL_SDL1_PIXELS +
+        STDL_MulU16(dstrect->y, dst->pitch) + dstrect->x;
+    if (dstrect->w == dst->pitch) {
+        /* whole rows are one block: the library's fill has a start-up
+         * a row would pay 200 times a screen */
+        memset(o, (int)(color & 0xFF), STDL_MulU16(dstrect->h, dst->pitch));
+        return 0;
+    }
     for (y = 0; y < dstrect->h; y++, o += dst->pitch) {
         memset(o, (int)(color & 0xFF), dstrect->w);
     }
@@ -360,7 +359,7 @@ int SDL_UpperBlit(SDL_Surface *src, SDL_Rect *srcrect, SDL_Surface *dst,
     const SDL_Rect *clip;
     const Uint8 *map, *s;
     Uint8 *o;
-    int sx, sy, w, h, d, x, y;
+    int sx, sy, w, h, d, x, y, sp, dp;
     if (!src || !dst) {
         STDL_SetError("SDL_UpperBlit: passed a NULL surface");
         return -1;
@@ -426,29 +425,52 @@ int SDL_UpperBlit(SDL_Surface *src, SDL_Rect *srcrect, SDL_Surface *dst,
     dstrect->h = (Uint16)h;
 
     map = map_for(src, dst);
-    s = (const Uint8 *)src->STDL_SDL1_PIXELS + sy * src->pitch + sx;
-    o = (Uint8 *)dst->STDL_SDL1_PIXELS + dstrect->y * dst->pitch + dstrect->x;
+    sp = src->pitch;
+    dp = dst->pitch;
+    s = (const Uint8 *)src->STDL_SDL1_PIXELS + STDL_MulU16(sy, sp) + sx;
+    o = (Uint8 *)dst->STDL_SDL1_PIXELS + STDL_MulU16(dstrect->y, dp) +
+        dstrect->x;
     if (!map && !(src->flags & SDL_SRCCOLORKEY)) {
+        if (w == sp && w == dp) {
+            /* whole rows are one block, whichever way it moves */
+            memmove(o, s, STDL_MulU16(h, w));
+            return 0;
+        }
         /* rows as they are; from the bottom where a surface is moved
          * down onto itself, and memmove for along a row */
-        int sp = src->pitch, dp = dst->pitch;
         if (src == dst && o > s) {
-            s += (h - 1) * sp;
-            o += (h - 1) * dp;
+            s += STDL_MulU16(h - 1, sp);
+            o += STDL_MulU16(h - 1, dp);
             sp = -sp;
             dp = -dp;
         }
         for (y = 0; y < h; y++, s += sp, o += dp) {
             memmove(o, s, (size_t)w);
         }
-    } else {
-        const int keyed = (src->flags & SDL_SRCCOLORKEY) != 0;
-        const Uint8 key = (Uint8)src->format->colorkey;
-        for (y = 0; y < h; y++, s += src->pitch, o += dst->pitch) {
+    } else if (!(src->flags & SDL_SRCCOLORKEY)) {
+        for (y = 0; y < h; y++, s += sp, o += dp) {
             for (x = 0; x < w; x++) {
-                const Uint8 v = s[x];
-                if (!keyed || v != key) {
-                    o[x] = map ? map[v] : v;
+                o[x] = map[s[x]];
+            }
+        }
+    } else {
+        /* a loop for each: gcc 4.6 leaves a test of the map in the
+         * pixel loop */
+        const Uint8 key = (Uint8)src->format->colorkey;
+        for (y = 0; y < h; y++, s += sp, o += dp) {
+            if (map) {
+                for (x = 0; x < w; x++) {
+                    const Uint8 v = s[x];
+                    if (v != key) {
+                        o[x] = map[v];
+                    }
+                }
+            } else {
+                for (x = 0; x < w; x++) {
+                    const Uint8 v = s[x];
+                    if (v != key) {
+                        o[x] = v;
+                    }
                 }
             }
         }
@@ -463,14 +485,15 @@ void STDL_PutPixel(SDL_Surface *dst, int x, int y, Uint8 col)
     if (dst && x >= dst->clip_rect.x && y >= dst->clip_rect.y &&
         x < dst->clip_rect.x + dst->clip_rect.w &&
         y < dst->clip_rect.y + dst->clip_rect.h) {
-        ((Uint8 *)dst->STDL_SDL1_PIXELS)[y * dst->pitch + x] = col;
+        ((Uint8 *)dst->STDL_SDL1_PIXELS)[STDL_MulU16(y, dst->pitch) + x] = col;
     }
 }
 
 Uint8 STDL_GetPixel(const SDL_Surface *src, int x, int y)
 {
     return (src && x >= 0 && y >= 0 && x < src->w && y < src->h)
-           ? ((const Uint8 *)src->STDL_SDL1_PIXELS)[y * src->pitch + x] : 0;
+           ? ((const Uint8 *)src->STDL_SDL1_PIXELS)[STDL_MulU16(y, src->pitch) + x]
+           : 0;
 }
 
 int STDL_SDL1_CountColours(const SDL_Surface *surface, Uint8 *used)
@@ -509,24 +532,24 @@ SDL_Surface *SDL_SetVideoMode(int width, int height, int bpp, Uint32 flags)
         STDL_SetError("The SDL1 add-on's screen is 8 bits a pixel");
         return NULL;
     }
-    if (width < 1 || height < 1 || width > 320 || height > 240) {
+    if (!SDL_VideoModeOK(width, height, 8, flags)) {
         STDL_SetError("The SDL1 add-on's screen is at most 320x240");
         return NULL;
     }
     /* an even pitch at an even address: the SDL2 add-on compares such
      * rows a group at a time */
-    s = make(NULL, width, height, (width + 3) & ~3);
+    s = make(NULL, width, height, 0);
     if (!s) {
         return NULL;
     }
-    if (stdl_sdl1_br_open(s->STDL_SDL1_PIXELS, width, height, s->pitch) < 0) {
+    if (stdl_sdl1_br_open(s->STDL_SDL1_PIXELS, width, height, s->pitch,
+                          &ox, &oy) < 0) {
         destroy(s);
         return NULL;
     }
     /* the texture over the old screen's pixels has gone */
     destroy(old);
     screen = s;
-    stdl_sdl1_br_origin(&ox, &oy);
     s->flags = SDL_SWSURFACE | SDL_HWPALETTE | (flags & SDL_FULLSCREEN);
     /* SDL 1.2's palette for a new 8-bit screen: 3 bits of red, 3 of
      * green, 2 of blue, each spread over 0-255 */

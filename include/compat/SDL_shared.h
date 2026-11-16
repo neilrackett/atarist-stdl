@@ -77,6 +77,11 @@ typedef int              SDLMod;
 #define SDL_DOUBLEBUF   0x40000000u
 #define SDL_FULLSCREEN  0x80000000u
 
+/* no surface of either front end needs a lock */
+#define SDL_LockSurface(s)     ((void)(s), 0)
+#define SDL_UnlockSurface(s)   ((void)(s))
+#define SDL_MUSTLOCK(s)        (0)
+
 #define SDL_LOGPAL  0x01
 #define SDL_PHYSPAL 0x02
 

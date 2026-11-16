@@ -51,10 +51,6 @@ static __inline__ void SDL_UpdateRect(SDL_Surface *s, Sint32 x, Sint32 y,
     STDL_UpdateRects(1, &r);
 }
 
-#define SDL_LockSurface(s)     ((void)(s), 0)
-#define SDL_UnlockSurface(s)   ((void)(s))
-#define SDL_MUSTLOCK(s)        (0)
-
 #define SDL_FreeSurface        STDL_FreeSurface
 #define SDL_BlitSurface        STDL_BlitSurface
 #define SDL_SetColors(s, c, f, n) STDL_SetColours((s), (c), (f), (n))

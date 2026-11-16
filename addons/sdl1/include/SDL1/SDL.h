@@ -120,10 +120,6 @@ void SDL_UpdateRect(SDL_Surface *screen, Sint32 x, Sint32 y, Uint32 w,
                     Uint32 h);
 int  SDL_Flip(SDL_Surface *screen);
 
-#define SDL_LockSurface(s)   ((void)(s), 0)
-#define SDL_UnlockSurface(s) ((void)(s))
-#define SDL_MUSTLOCK(s)      (0)
-
 /* depth 8 only (0 is 8); the masks are not read. A new surface's
  * palette is black, as SDL 1.2's. */
 SDL_Surface *SDL_CreateRGBSurface(Uint32 flags, int width, int height,

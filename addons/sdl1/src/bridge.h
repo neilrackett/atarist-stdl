@@ -15,10 +15,10 @@
 
 /* The screen: a window and renderer the first time, then a logical
  * size of w by h and a texture over the caller's pixels (no copy).
- * -1 with STDL's error set. */
-int  stdl_sdl1_br_open(void *pixels, int w, int h, int pitch);
-/* where the picture's top left is on STDL's screen, for the mouse */
-void stdl_sdl1_br_origin(int *x, int *y);
+ * *ox, *oy: where the picture's top left is on STDL's screen, for the
+ * mouse. -1 with STDL's error set. */
+int  stdl_sdl1_br_open(void *pixels, int w, int h, int pitch, int *ox,
+                       int *oy);
 /* a box of the screen's pixels to the display, then the present */
 void stdl_sdl1_br_push(int x, int y, int w, int h);
 void stdl_sdl1_br_present(void);
@@ -34,7 +34,7 @@ int  stdl_sdl1_br_check(unsigned long *flips, unsigned long *bad);
 
 /* A BMP's pixels into a block the caller frees, pitch bytes a row,
  * and its palette, 4 bytes a colour (256 at most). The SDL2 add-on's
- * loader; the name is tried in upper case too. NULL with STDL's error
+ * loader; the file's name is tried in upper case too. NULL with STDL's error
  * set. */
 void *stdl_sdl1_br_bmp(const char *file, int *w, int *h, int *pitch,
                        unsigned char *colours, int *ncolours);

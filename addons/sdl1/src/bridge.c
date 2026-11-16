@@ -22,7 +22,6 @@ static SDL_Window *win;
 static SDL_Renderer *ren;
 static SDL_Palette *pal;
 static SDL_Texture *tex;
-static int ox, oy;
 static unsigned border;
 
 static int fail(void)
@@ -31,7 +30,8 @@ static int fail(void)
     return -1;
 }
 
-int stdl_sdl1_br_open(void *pixels, int w, int h, int pitch)
+int stdl_sdl1_br_open(void *pixels, int w, int h, int pitch, int *ox,
+                      int *oy)
 {
     int sx, sy, lx, ly;
     if (!ren) {
@@ -66,15 +66,9 @@ int stdl_sdl1_br_open(void *pixels, int w, int h, int pitch)
      * which is measured from the logical size's top left */
     STDL_GetMouseState(&sx, &sy);
     SDL_GetMouseState(&lx, &ly);
-    ox = sx - lx;
-    oy = sy - ly;
+    *ox = sx - lx;
+    *oy = sy - ly;
     return 0;
-}
-
-void stdl_sdl1_br_origin(int *x, int *y)
-{
-    *x = ox;
-    *y = oy;
 }
 
 void stdl_sdl1_br_push(int x, int y, int w, int h)
@@ -135,14 +129,25 @@ void *stdl_sdl1_br_bmp(const char *file, int *w, int *h, int *pitch,
     SDL_Surface *s = SDL_LoadBMP(file);
     Uint8 *pixels;
     int i, n;
-    if (!s) {
-        /* GEMDOS names are upper case, a ported program's seldom */
+    if (!s && strlen(file) < 128) {
+        /* GEMDOS names are upper case, a ported program's seldom: the
+         * file's name again in upper case, the directories as they
+         * are, as the core's loaders try it (stdl_fopen_ci) */
         char up[128];
-        for (i = 0; file[i] && i < (int)sizeof(up) - 1; i++) {
-            up[i] = (char)toupper((unsigned char)file[i]);
+        int base = 0;
+        for (i = 0; file[i]; i++) {
+            up[i] = file[i];
+            if (file[i] == '/' || file[i] == '\\') {
+                base = i + 1;
+            }
         }
         up[i] = 0;
-        s = SDL_LoadBMP(up);
+        for (i = base; up[i]; i++) {
+            up[i] = (char)toupper((unsigned char)up[i]);
+        }
+        if (strcmp(up, file) != 0) {
+            s = SDL_LoadBMP(up);
+        }
     }
     if (!s) {
         fail();
@@ -160,13 +165,8 @@ void *stdl_sdl1_br_bmp(const char *file, int *w, int *h, int *pitch,
     *pitch = s->pitch;
     n = s->format->palette ? s->format->palette->ncolors : 0;
     n = n > 256 ? 256 : n;
-    for (i = 0; i < n; i++) {
-        const SDL_Color *c = &s->format->palette->colors[i];
-        colours[4 * i] = c->r;
-        colours[4 * i + 1] = c->g;
-        colours[4 * i + 2] = c->b;
-        colours[4 * i + 3] = 0;
-    }
+    /* SDL2's SDL_Color is the four bytes, as stdl_sdl1_br_colours has it */
+    memcpy(colours, s->format->palette->colors, (size_t)n * 4);
     *ncolours = n;
     SDL_FreeSurface(s);
     return pixels;

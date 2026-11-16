@@ -141,7 +141,7 @@ take those two as an order of magnitude. On an ST it is for seeing a
 program run, not for playing it.
 
 A program on it is larger than its planar port: `S1SPRITE.TOS` is
-225,542 bytes against `TSPRITE.TOS`'s 187,213 (mintlib is 104K of
+225,446 bytes against `TSPRITE.TOS`'s 187,213 (mintlib is 104K of
 each). The add-on is 6.4K, the SDL2 add-on's 68000 build 33K, and STDL
 58K, 18K of it the 8-plane routines a TT and a Falcon draw with. A
 program that calls `SDL_Delay`, a timer or a joystick links the planar

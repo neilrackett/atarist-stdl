@@ -200,6 +200,7 @@ typedef int              SDLMod;
 #define SDLK_KP_MINUS    STDLK_KP_MINUS
 #define SDLK_KP_PLUS     STDLK_KP_PLUS
 #define SDLK_KP_ENTER    STDLK_KP_ENTER
+#define SDLK_KP_EQUALS   STDLK_KP_EQUALS
 #define SDLK_UP        STDLK_UP
 #define SDLK_DOWN      STDLK_DOWN
 #define SDLK_RIGHT     STDLK_RIGHT
@@ -239,6 +240,117 @@ typedef int              SDLMod;
 #define SDLK_PRINT     STDLK_PRINT
 #define SDLK_UNDO      STDLK_UNDO
 #define SDLK_LAST      STDLK_LAST
+/*
+ * SDL 1.2's other key names, at its values, so that a program's key
+ * tables and switches build as they are. No key of an Atari keyboard
+ * sends one: a key whose character is outside ASCII is SDLK_UNKNOWN,
+ * told apart by its scancode.
+ */
+#define SDLK_LSUPER    311
+#define SDLK_RSUPER    312
+#define SDLK_MODE      313
+#define SDLK_COMPOSE   314
+#define SDLK_SYSREQ    317
+#define SDLK_BREAK     318
+#define SDLK_MENU      319
+#define SDLK_POWER     320
+#define SDLK_EURO      321
+#define SDLK_WORLD_0 160
+#define SDLK_WORLD_1 161
+#define SDLK_WORLD_2 162
+#define SDLK_WORLD_3 163
+#define SDLK_WORLD_4 164
+#define SDLK_WORLD_5 165
+#define SDLK_WORLD_6 166
+#define SDLK_WORLD_7 167
+#define SDLK_WORLD_8 168
+#define SDLK_WORLD_9 169
+#define SDLK_WORLD_10 170
+#define SDLK_WORLD_11 171
+#define SDLK_WORLD_12 172
+#define SDLK_WORLD_13 173
+#define SDLK_WORLD_14 174
+#define SDLK_WORLD_15 175
+#define SDLK_WORLD_16 176
+#define SDLK_WORLD_17 177
+#define SDLK_WORLD_18 178
+#define SDLK_WORLD_19 179
+#define SDLK_WORLD_20 180
+#define SDLK_WORLD_21 181
+#define SDLK_WORLD_22 182
+#define SDLK_WORLD_23 183
+#define SDLK_WORLD_24 184
+#define SDLK_WORLD_25 185
+#define SDLK_WORLD_26 186
+#define SDLK_WORLD_27 187
+#define SDLK_WORLD_28 188
+#define SDLK_WORLD_29 189
+#define SDLK_WORLD_30 190
+#define SDLK_WORLD_31 191
+#define SDLK_WORLD_32 192
+#define SDLK_WORLD_33 193
+#define SDLK_WORLD_34 194
+#define SDLK_WORLD_35 195
+#define SDLK_WORLD_36 196
+#define SDLK_WORLD_37 197
+#define SDLK_WORLD_38 198
+#define SDLK_WORLD_39 199
+#define SDLK_WORLD_40 200
+#define SDLK_WORLD_41 201
+#define SDLK_WORLD_42 202
+#define SDLK_WORLD_43 203
+#define SDLK_WORLD_44 204
+#define SDLK_WORLD_45 205
+#define SDLK_WORLD_46 206
+#define SDLK_WORLD_47 207
+#define SDLK_WORLD_48 208
+#define SDLK_WORLD_49 209
+#define SDLK_WORLD_50 210
+#define SDLK_WORLD_51 211
+#define SDLK_WORLD_52 212
+#define SDLK_WORLD_53 213
+#define SDLK_WORLD_54 214
+#define SDLK_WORLD_55 215
+#define SDLK_WORLD_56 216
+#define SDLK_WORLD_57 217
+#define SDLK_WORLD_58 218
+#define SDLK_WORLD_59 219
+#define SDLK_WORLD_60 220
+#define SDLK_WORLD_61 221
+#define SDLK_WORLD_62 222
+#define SDLK_WORLD_63 223
+#define SDLK_WORLD_64 224
+#define SDLK_WORLD_65 225
+#define SDLK_WORLD_66 226
+#define SDLK_WORLD_67 227
+#define SDLK_WORLD_68 228
+#define SDLK_WORLD_69 229
+#define SDLK_WORLD_70 230
+#define SDLK_WORLD_71 231
+#define SDLK_WORLD_72 232
+#define SDLK_WORLD_73 233
+#define SDLK_WORLD_74 234
+#define SDLK_WORLD_75 235
+#define SDLK_WORLD_76 236
+#define SDLK_WORLD_77 237
+#define SDLK_WORLD_78 238
+#define SDLK_WORLD_79 239
+#define SDLK_WORLD_80 240
+#define SDLK_WORLD_81 241
+#define SDLK_WORLD_82 242
+#define SDLK_WORLD_83 243
+#define SDLK_WORLD_84 244
+#define SDLK_WORLD_85 245
+#define SDLK_WORLD_86 246
+#define SDLK_WORLD_87 247
+#define SDLK_WORLD_88 248
+#define SDLK_WORLD_89 249
+#define SDLK_WORLD_90 250
+#define SDLK_WORLD_91 251
+#define SDLK_WORLD_92 252
+#define SDLK_WORLD_93 253
+#define SDLK_WORLD_94 254
+#define SDLK_WORLD_95 255
 
 #define KMOD_NONE   STDL_KMOD_NONE
 #define KMOD_LSHIFT STDL_KMOD_LSHIFT
@@ -288,9 +400,19 @@ typedef struct {
 /* ---------------------------------------------------------------- */
 /* API mapping                                                      */
 
-#define SDL_Init(flags)        STDL_Init(flags)
-#define SDL_InitSubSystem(f)   STDL_Init(f)
-#define SDL_Quit               STDL_Quit
+/*
+ * STDL has no subsystems: SDL_Init brings up everything whatever it is
+ * asked for, and only SDL_Quit (STDL_Quit) puts the machine back.
+ * SDL_QuitSubSystem stops nothing, so the screen, the keyboard and
+ * supervisor mode stay the library's after it. What these keep is the
+ * flags, for SDL_WasInit: those asked for and not since quit, all of
+ * them for 0.
+ */
+int    SDL_Init(Uint32 flags);
+#define SDL_InitSubSystem      SDL_Init
+void   SDL_QuitSubSystem(Uint32 flags);
+Uint32 SDL_WasInit(Uint32 flags);
+void   SDL_Quit(void);
 #define SDL_GetError()         ((char *)STDL_GetError())
 
 #define SDL_MapRGB(fmt, r, g, b) ((Uint32)STDL_MapRGB((fmt), (r), (g), (b)))
@@ -312,11 +434,15 @@ typedef struct {
 #define SDL_memcpy   memcpy
 #define SDL_malloc   malloc
 #define SDL_free     free
+/* the C library's variables ("NAME=value"; -1 for anything else).
+ * STDL reads none, so one set to choose SDL's driver or to centre its
+ * window changes nothing */
+#define SDL_getenv   getenv
+int SDL_putenv(const char *variable);
 
 /* window-manager stubs: always fullscreen, no cursor drawn */
 #define SDL_WM_SetCaption(title, icon) ((void)0)
 #define SDL_WM_ToggleFullScreen(s)     ((void)(s), 1)
-#define SDL_QuitSubSystem(flags)       ((void)(flags))
 
 #define SDL_ENABLE  1
 #define SDL_DISABLE 0

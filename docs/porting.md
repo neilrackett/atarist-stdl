@@ -149,6 +149,8 @@ program moved off them changes its include path to this shim's.
 | SDL 1.2 | STDL | Notes |
 |---|---|---|
 | `SDL_Init` / `SDL_Quit` | `STDL_Init` / `STDL_Quit` | enters supervisor mode for the program's lifetime |
+| `SDL_InitSubSystem` / `SDL_QuitSubSystem` / `SDL_WasInit` | compat | there are no subsystems: everything starts at `SDL_Init` and only `SDL_Quit` puts the machine back. These keep the flags a program asked for, which `SDL_WasInit` answers |
+| `SDL_getenv` / `SDL_putenv` | the C library | STDL reads no variable, so one set to choose SDL's driver or to centre its window changes nothing |
 | `SDL_SetVideoMode` | `STDL_SetVideoMode` | w/h/bpp ignored, always 320x200x4, unless the program asked for a responsive option (`stdl_responsive.h`): then bpp 8 is the colour and h over 200 the tall screen |
 | `SDL_BlitSurface` | `STDL_BlitSurface` | full SDL semantics incl. dstrect writeback |
 | `SDL_FillRect` | wrapper | colour is a palette index, not mapped RGB |
@@ -161,7 +163,7 @@ program moved off them changes its include path to this shim's.
 | `SDL_SetColorKey` | `STDL_SetColourKey` | builds the transparency mask (a snapshot); key >= 16 = use the existing mask, no scan - for surfaces whose transparency is built during decode |
 | `SDL_LoadBMP` | `STDL_LoadBMP` | uncompressed 1/4/8bpp, max 16 colours |
 | `SDL_SetColors` / `SDL_SetPalette` | palette module | `SDL_LOGPAL` / `SDL_PHYSPAL` honoured; `STDL_StagePalette(1)` lands changes in the vertical blank |
-| events / keysyms / `SDL_GetKeyState` | event module | numbering matches SDL 1.2; the keyboard is taken at `STDL_SetVideoMode`, or by `STDL_OpenInput` for a program that sets no mode. `SDL_PollEvent` pumps once a VBL and otherwise only takes from the queue, so a drain loop is one pump a frame; `SDL_PumpEvents` and `SDL_WaitEvent` always pump |
+| events / keysyms / `SDL_GetKeyState` | event module | numbering matches SDL 1.2, and its names for keys an Atari keyboard has not got are there for a program's tables (`SDLK_WORLD_0` to `95`, `SDLK_MODE`, `SDLK_LSUPER`...), never sent; the keyboard is taken at `STDL_SetVideoMode`, or by `STDL_OpenInput` for a program that sets no mode. `SDL_PollEvent` pumps once a VBL and otherwise only takes from the queue, so a drain loop is one pump a frame; `SDL_PumpEvents` and `SDL_WaitEvent` always pump |
 | `SDL_GetTicks` / `SDL_Delay` | time module | 200Hz clock: 5ms resolution |
 | `SDL_AddTimer` / `SDL_SetTimer` | compat | cooperative: callbacks fire inside `SDL_Delay` and `SDL_PollEvent`, once a 200Hz tick at most |
 | `SDL_OpenAudio` / `SDL_LoadWAV` | `STDL_Audio` | STE DMA; cooperative refill, 2% of an 8MHz STE plus your callback when it writes signed 8-bit at a DMA rate straight into the ring; other formats are converted at every refill (13% for unsigned 8-bit mono at 12517Hz, 48% for 16-bit stereo at 22050); PCM WAVs only (`stdlconv wav`) |
@@ -441,6 +443,24 @@ truncates colours to the low N bits rather than rejecting them. See
   scribble over low-res screen RAM. Fine for tests, not for games.
 * **Arguments**: programs launched from the desktop get no argv;
   make sure defaults are sensible.
+* **Supervisor mode, from `SDL_Init` to `SDL_Quit`**: a program's own
+  `Super(0)` pairs come out wrong there. `Super(0)` is a toggle, which
+  leaves supervisor mode when called in it, and the next read of low
+  memory is a bus error. After `SDL_Init`, read the 200Hz counter at
+  `$4BA` as it is, or call `SDL_GetTicks`. A timer added before
+  `SDL_Init` is that bus error too.
+* **Only `SDL_Quit` gives the machine back**: the screen, the
+  keyboard and supervisor mode stay the library's after
+  `SDL_QuitSubSystem(SDL_INIT_VIDEO)`. A program that prints after
+  closing its video, as an error exit does, calls `SDL_CloseAudio`,
+  then `SDL_Quit`, then prints. `exit` and a crash put the desktop
+  back as well.
+* **A long frame starves the sound**: `SDL_OpenAudio`'s callback runs
+  where the program pumps (`SDL_PollEvent`, `SDL_WaitEvent`,
+  `SDL_Delay`), never from an interrupt, and its ring replays what it
+  has when a pump comes more than 150ms after the last. Where a frame
+  takes longer, call `SDL_PollEvent(NULL)` from inside its long
+  loops: it costs little when nothing is due.
 * **A TT or a Falcon runs an STE program**, in ST Low, and the
   library covers where they differ:
   - **Rate.** Their display rate is not the sync register's, so it is

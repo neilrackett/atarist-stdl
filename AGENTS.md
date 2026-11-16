@@ -39,6 +39,10 @@ console, unless `STDL_UseBanner(0)` came first.
   and nowhere else. `obj/version.h` is rewritten only when it changes,
   and `banner.o` alone includes it. A tree past its tag says so with a
   `+`; one git cannot describe has no version in its line.
+- **A submodule built from inside itself has no version either**:
+  `stcmd` started in a game's `extern/stdl` mounts that directory
+  alone, and the submodule's repository is in the game's `.git`. Start
+  it in the game's directory (`docs/building.md`).
 - **A git worktree built in the container has no version**: its `.git`
   points at a repository outside what the container sees. Pass
   `STDL_VERSION=` when a worktree's build has to show one.
@@ -1772,6 +1776,27 @@ sdl2` and the release never do.
 - **No `SDL_` link symbols**, as the SDL2 add-on: `libstdl.a`'s own are
   the planar shim's, and a program on this add-on links that archive
   too. Every video name is a macro onto `stdl_sdl1_`.
+- **`SDL_Init` and `SDL_putenv` are objects of their own**
+  (`compatinit.c`, 64 bytes; `compatenv.c`), not `compat.c`'s: every
+  program on either front end calls `SDL_Init`, and `compat.o` brings
+  `draw.o`. `SDL_Init`, `SDL_QuitSubSystem` and `SDL_Quit` were macros
+  onto STDL's until a program on this add-on asked `SDL_WasInit`
+  whether its sound was up (November 2026): they keep the flags asked
+  for and nothing else, as STDL has no subsystems. Adding them left
+  every core object's code as it was (`compat.o`'s two static tables
+  are numbered ten higher, its instructions the same). `SDL_putenv` is
+  on `setenv`, the one call mintlib and libcmini both have, and a
+  function because `-std=c++98` hides `putenv`.
+- **What the first real program on it found is in `docs/sdl1.md`**
+  ("What a program meets on its first day", "A 68030 build"): one
+  port's 3D game, which drew straight into the screen surface and
+  flipped. Its own figures in Hatari, not checked here: 6.8 frames a
+  second on a TT as 68030 code over `libstdl-sdl2.a` against 5.8 on
+  the SDL 1.2 port for the machine, 2.2 against 1.9 on a Falcon on
+  VGA. It missed `SDL_WasInit`, `SDL_putenv`, `SDLK_WORLD_63` and
+  `SDLK_MODE`, so the shared header now has SDL 1.2's key names an
+  Atari keyboard has no key for, at SDL's numbers and never sent. Its
+  sound has not been listened to.
 - **The blits are its own, not the SDL2 add-on's.** SDL 1.2 maps
   colours between two 8-bit surfaces whose palettes differ, and its
   own tests count on it (testsprite never gives the screen its

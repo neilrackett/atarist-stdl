@@ -29,7 +29,9 @@ m68k-atari-mint-gcc -m68000 -o GAME.TOS game.o $STDL/libstdl-sdl1.a \
 - **Its include path in place of `include/compat`,** never beside it:
   both have an `SDL.h`, and each stops the build if it meets the
   other. `SDL_mixer.h` is there too.
-- **Compiled for the 68000,** as it is for every machine.
+- **Compiled for the 68000,** as it is for every machine. A TT and
+  Falcon build of the program can be 68030 code: "A 68030 build",
+  below.
 - **libcmini:** `libstdl-sdl1-cmini.a` with `libstdl-sdl2-st-cmini.a`
   and `libstdl-cmini.a` ([building.md](building.md)).
 - **A call it has not got is a compile error,** as in the planar shim.
@@ -39,6 +41,33 @@ Its examples are SDL 1.2's own test programs, byte for byte
 program has not got): `S1SPRITE.TOS` is `testsprite.c`, and
 `S1GRAY.TOS` is `graywin.c`, which writes the screen surface's pixels
 itself.
+
+## A 68030 build
+
+The archives are 68000 code, which a 68030 runs, and a program's own
+68020 or 68030 objects link against them. Three ways, each run in
+Hatari on the machines named, with SDL's testsprite and the screen
+check on, every flip right:
+
+| The program's objects | Linked with | Run on |
+|---|---|---|
+| `-m68030 -m68881` | `libstdl-sdl1.a libstdl-sdl2-st.a libstdl.a` | a TT |
+| `-m68030 -m68881` | `libstdl-sdl1.a libstdl-sdl2.a libstdl.a` | a TT, a Falcon with a 68882; 25K smaller than the first |
+| `-m68020-60 -msoft-float`, linked `-m68000` | `libstdl-sdl1.a libstdl-sdl2.a libstdl.a` | a TT, a stock Falcon |
+
+- **`libstdl-sdl2.a` is the SDL2 add-on's own TT and Falcon build**
+  (`stcmd make sdl2`), under this layer in place of its 68000 build.
+  It has no ST screen: on an ST its `SDL_SetVideoMode` fails ("This
+  program needs a TT or a Falcon"), where 68030 code would not have
+  run either.
+- **Objects built with `-m68881` link the toolchain's 68020-60 C
+  library**, which will not start on a machine with no FPU ("requires
+  a 68881"), a stock Falcon among them. The third row needs none: the
+  68000 C library, and the 68020's instructions in the program alone
+  ([sdl2.md](sdl2.md), "Using it").
+- **STDL's archives are soft-float.** Nothing of theirs returns a
+  float, which is where the two conventions differ, so they link with
+  FPU code as they are.
 
 ## From here to planes
 
@@ -84,9 +113,19 @@ examples/testsprite.c` is what the port changed.
 | Drawing | `SDL_BlitSurface` (`SDL_UpperBlit`), `SDL_FillRect`, `SDL_SetColorKey`, `SDL_SetClipRect`, `SDL_GetClipRect` |
 | Colours | `SDL_SetColors`, `SDL_SetPalette` (`SDL_LOGPAL`, `SDL_PHYSPAL`), `SDL_MapRGB`, `SDL_GetRGB` |
 | The mouse | `SDL_PollEvent`, `SDL_WaitEvent`, `SDL_GetMouseState`, `SDL_WarpMouse`, measured from the picture |
-| Everything else | the planar shim's, unchanged: events and keys, `SDL_Joystick*`, `SDL_AddTimer` and `SDL_SetTimer`, `SDL_Delay`, `SDL_GetTicks`, `SDL_OpenAudio` and the `Mix_` calls ([porting.md](porting.md), "What maps directly") |
+| Everything else | the planar shim's, unchanged: `SDL_Init`, `SDL_InitSubSystem`, `SDL_QuitSubSystem`, `SDL_WasInit`, `SDL_Quit`, events and keys, `SDL_Joystick*`, `SDL_AddTimer` and `SDL_SetTimer`, `SDL_Delay`, `SDL_GetTicks`, `SDL_OpenAudio`, `SDL_getenv`, `SDL_putenv` and the `Mix_` calls ([porting.md](porting.md), "What maps directly") |
 | STDL's, for the move | `STDL_GetPixel`, `STDL_PutPixel` on its surfaces |
 | Its own | `STDL_SDL1_CountColours`, `STDL_SDL1_SetHint`, `STDL_SDL1_SetBorderIndex`, `STDL_SDL1_GetCheck` |
+
+`STDL_SDL1_SetHint` takes the SDL2 add-on's hints before the first
+`SDL_SetVideoMode` ([sdl2.md](sdl2.md) says what each does):
+`STDL_SDL1_HINT_PAGES`, `STDL_SDL1_HINT_ST_TALL`,
+`STDL_SDL1_HINT_ST_DITHER`, `STDL_SDL1_HINT_CHECK` and
+`STDL_SDL1_HINT_COMPARE`. The last is for a TT or a Falcon, as an ST's
+screen always compares: an update converts only the 16-pixel groups
+whose pixels changed. It pays where most of what a program updates is
+as it was (a menu, a status bar, `SDL_Flip` of a screen that mostly
+stood still), and costs a read of every pixel where all of it moved.
 
 Every video name is a macro onto a `stdl_sdl1_` link name, as
 `libstdl.a`'s own `SDL_Flip`, `SDL_FillRect` and the rest are the
@@ -123,6 +162,46 @@ planar shim's.
 - **No cursor**, alpha, gamma or `SDL_SaveBMP`; timers and audio are
   cooperative, as in the planar shim.
 
+## What a program meets on its first day
+
+These are the planar shim's too ([porting.md](porting.md),
+"ST-specific gotchas"), and a program on this add-on meets them
+first. One port's 3D game found each of them.
+
+- **Set the mode before taking the memory.** The screen's pages have
+  to be ST-RAM: about 460K on a TT (three pages of 153.6K), 230-280K
+  on a Falcon, 64K more than the desktop's on an ST. From `malloc`
+  come a 64K screen surface and, on an ST or with the compare or the
+  check, a 77K copy of the screen. A program that takes all the free
+  memory for its own heap calls `SDL_SetVideoMode` first. Where a
+  third page does not fit there are two, and nothing says so.
+- **Only `SDL_Quit` gives the machine back.** `SDL_QuitSubSystem`
+  stops nothing. To print after the picture, as a program's error
+  exit does: `SDL_CloseAudio`, `SDL_Quit`, then print. `exit` and a
+  crash put the desktop back too.
+- **The program is in supervisor mode from `SDL_Init` to
+  `SDL_Quit`,** so its own `Super(0)` pairs come out wrong: `Super(0)`
+  is a toggle, which leaves supervisor mode when called in it, and
+  the next read of low memory is a bus error. After `SDL_Init`, read
+  the 200Hz counter at `$4BA` as it is, or call `SDL_GetTicks`.
+- **Sound is fed where the program pumps,** never from an interrupt:
+  `SDL_PollEvent` (`SDL_PollEvent(NULL)` too), `SDL_WaitEvent`,
+  `SDL_Delay` and `STDL_PumpEvents`, not `SDL_Flip` or
+  `SDL_UpdateRect`. The ring wants it every 150ms, and replays what
+  it has when it comes later. A frame on an ST can take several times
+  that, so call `SDL_PollEvent(NULL)` from inside the frame's long
+  loops, every few rows or columns: it costs little when nothing is
+  due. `SDL_LockAudio` is empty, rightly, as the callback never
+  interrupts the program.
+- **A rate the DMA sound has not got is resampled**: 11025Hz plays at
+  12517, the callback still given what it asked for. Signed 8 bits at
+  a DMA rate (6258, 12517, 25033 or 50066Hz) is the cheap one
+  ([porting.md](porting.md), "What maps directly"). A plain ST has no
+  DMA sound: `SDL_OpenAudio` fails there, and the program runs silent.
+- **Draw into the screen surface, not into a buffer copied to it,**
+  and update what changed (`SDL_UpdateRects`) where the program knows
+  it: `SDL_Flip` hands over the whole screen.
+
 ## What it costs
 
 SDL's testsprite, 16 sprites on a 320x200 screen, in Hatari
@@ -141,7 +220,7 @@ take those two as an order of magnitude. On an ST it is for seeing a
 program run, not for playing it.
 
 A program on it is larger than its planar port: `S1SPRITE.TOS` is
-225,446 bytes against `TSPRITE.TOS`'s 187,213 (mintlib is 104K of
+225,656 bytes against `TSPRITE.TOS`'s 187,423 (mintlib is 104K of
 each). The add-on is 6.4K, the SDL2 add-on's 68000 build 33K, and STDL
 58K, 18K of it the 8-plane routines a TT and a Falcon draw with. A
 program that calls `SDL_Delay`, a timer or a joystick links the planar

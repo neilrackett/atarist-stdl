@@ -1444,6 +1444,50 @@ static void repeat_beat(void)
     CHECK(repeats(20) == 1);
 }
 
+/* the shim's SDL_Quit ends in this; the machine's is video.c's */
+static int quits;
+
+void STDL_Quit(void)
+{
+    quits++;
+}
+
+/* SDL 1.2's start and stop keep the flags a program asked for; its
+ * key names STDL has no key for are at SDL's values, inside the key
+ * state's array; SDL_putenv sets the C library's variable */
+static void shim_start_stop(void)
+{
+    CHECK(SDL_WasInit(0) == 0);
+    CHECK(SDL_WasInit(SDL_INIT_VIDEO) == 0);
+    CHECK(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) == 0);
+    CHECK(SDL_WasInit(0) == (SDL_INIT_VIDEO | SDL_INIT_TIMER));
+    CHECK(SDL_WasInit(SDL_INIT_AUDIO) == 0);
+    CHECK(SDL_WasInit(SDL_INIT_AUDIO | SDL_INIT_VIDEO) == SDL_INIT_VIDEO);
+    CHECK(SDL_InitSubSystem(SDL_INIT_AUDIO) == 0);
+    CHECK(SDL_WasInit(SDL_INIT_AUDIO) == SDL_INIT_AUDIO);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    CHECK(SDL_WasInit(0) == (SDL_INIT_AUDIO | SDL_INIT_TIMER));
+    CHECK(quits == 0);
+    SDL_Quit();
+    CHECK(quits == 1);
+    CHECK(SDL_WasInit(0) == 0);
+
+    CHECK(SDLK_WORLD_0 == 160 && SDLK_WORLD_63 == 223
+          && SDLK_WORLD_95 == 255);
+    CHECK(SDLK_KP_EQUALS == 272 && SDLK_LSUPER == 311 && SDLK_MODE == 313
+          && SDLK_COMPOSE == 314 && SDLK_SYSREQ == 317 && SDLK_EURO == 321);
+    CHECK(SDLK_EURO < SDLK_LAST);
+
+    CHECK(SDL_getenv("STDL_T_VAR") == NULL);
+    CHECK(SDL_putenv("STDL_T_VAR=a=b") == 0);
+    CHECK(SDL_getenv("STDL_T_VAR") != NULL
+          && strcmp(SDL_getenv("STDL_T_VAR"), "a=b") == 0);
+    CHECK(SDL_putenv("STDL_T_VAR=") == 0);
+    CHECK(SDL_getenv("STDL_T_VAR") != NULL
+          && *SDL_getenv("STDL_T_VAR") == '\0');
+    CHECK(SDL_putenv("STDL_T_VAR") == -1 && SDL_putenv("=x") == -1);
+}
+
 static void run(const char *name, void (*fn)(void))
 {
     pid_t pid;
@@ -1495,6 +1539,7 @@ int main(int argc, char **argv)
     run("key repeat's own beat", repeat_beat);
     run("device events, asked for", devices);
     run("axes and hats, read", readers);
+    run("the shim's start and stop", shim_start_stop);
     if (failures) {
         fprintf(stderr, "test_joystick: FAILED\n");
         return 1;

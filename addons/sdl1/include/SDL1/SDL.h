@@ -213,6 +213,7 @@ Uint8 STDL_GetPixel(const SDL_Surface *src, int x, int y);
  */
 #define STDL_SDL1_HINT_PAGES     "STDL_SDL2_PAGES"
 #define STDL_SDL1_HINT_CHECK     "STDL_SDL2_CHECK"
+#define STDL_SDL1_HINT_COMPARE   "STDL_SDL2_COMPARE"
 #define STDL_SDL1_HINT_ST_TALL   "STDL_SDL2_ST_TALL"
 #define STDL_SDL1_HINT_ST_DITHER "STDL_SDL2_ST_DITHER"
 int STDL_SDL1_SetHint(const char *name, const char *value);

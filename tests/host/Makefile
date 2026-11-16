@@ -122,7 +122,9 @@ test_joystick:  $(SRC)/event.c $(SRC)/joysticks.c \
                 $(SRC)/mouse.c $(SRC)/joymerge.c $(SRC)/joydev.c \
                 $(SRC)/joyread.c $(SRC)/stdl_xpad.c $(XPADSRC)/xpad.c \
                 $(XPADSRC)/xpad_provider.c \
-                $(SRC)/compat.c $(XPADSRC)/xpad.h fakeos/mint/osbind.h
+                $(SRC)/compat.c $(SRC)/compatinit.c $(SRC)/compatenv.c \
+                $(XPADSRC)/xpad.h \
+                fakeos/mint/osbind.h
 test_opl:       $(SRC)/ym.c $(SRC)/tone.c $(SRC)/sfx.c $(SRC)/opl.c
 
 # Runs every binary in TESTS rather than a second hand-kept list:

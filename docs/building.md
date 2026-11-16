@@ -97,7 +97,10 @@ git submodule update --init --recursive      # STDL's own submodule, lib/xpad
   so build the library through that Makefile, inside the clone or the
   submodule. A tree git cannot describe (an archive of the source)
   gets the line with no version; `make STDL_VERSION=v1.30.0` says it
-  by hand.
+  by hand. So does a build where git cannot see the repository: a
+  submodule's is in the game's `.git`, so start `stcmd` in the game's
+  directory (`stcmd make -C extern/stdl ...`), not inside the
+  submodule, where the container would hold STDL's files alone.
 - **`extern/`:** it keeps STDL apart from the game's own sources, so a
   glob over `src/` never picks up STDL's files, and a reader can see
   what is vendored.

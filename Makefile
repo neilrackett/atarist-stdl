@@ -32,7 +32,7 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/palette.c src/event.c src/time.c src/dirty.c src/dirtybg.c \
           src/sprite.c src/tileset.c src/text.c src/shapes.c \
           src/asset.c \
-          src/compat.c src/bmp.c \
+          src/compat.c src/compatinit.c src/compatenv.c src/bmp.c \
           src/audio.c src/cursor.c src/music.c src/mixer.c \
           src/sfx.c src/degas.c src/ym.c src/blitter.c \
           src/planes.c src/vbl.c src/indexed.c src/drawchar.c \

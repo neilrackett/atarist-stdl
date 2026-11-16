@@ -104,6 +104,16 @@ code, so they are done once. Then the move to planes:
 - when the strict build is clean, change the include path and the
   archives to the planar shim's, and convert the art.
 
+What a program meets there first (`docs/sdl1.md`, "What a program
+meets on its first day"): set the mode before taking all the memory
+(the pages are ST-RAM); only `SDL_Quit` gives the machine back, so an
+error exit is `SDL_CloseAudio`, `SDL_Quit`, then print; the program is
+in supervisor mode from `SDL_Init`, so its own `Super(0)` pairs leave
+it and bus-error; sound is fed where the program pumps, every 150ms,
+so a slow frame calls `SDL_PollEvent(NULL)` from its long loops. A TT
+and Falcon build can be 68030 code over `libstdl-sdl2.a` ("A 68030
+build").
+
 It takes 8-bit programs of at most 320x240; text printed after the
 mode is set lands on the screen; and it is for the first days of a
 port, not for the port an ST user gets.
@@ -1877,6 +1887,22 @@ What a program written against an older STDL changes to build against
 a newer one, newest release first. A release that changes a call
 already released says so here, with what a caller changes; the build
 finds every old use.
+
+### v1.31.0: SDL 1.2's start and stop, and names a program met
+
+New in the SDL 1.2 shim and the SDL1 add-on, with nothing to change:
+`SDL_WasInit`, `SDL_getenv`, `SDL_putenv`, SDL 1.2's key names an
+Atari keyboard has no key for (`SDLK_WORLD_0` to `95`, `SDLK_MODE`,
+`SDLK_COMPOSE`, `SDLK_LSUPER`, `SDLK_RSUPER`, `SDLK_SYSREQ`,
+`SDLK_BREAK`, `SDLK_MENU`, `SDLK_POWER`, `SDLK_EURO`,
+`SDLK_KP_EQUALS`), and the add-on's `STDL_SDL1_HINT_COMPARE`.
+
+A program that wrote its own while the shim had none (a `SDL_WasInit`
+that returned a flag, an empty `SDL_putenv`, a `#define SDLK_MODE`)
+takes it out: a function of the program's by one of those names stops
+the build, and a macro of its own still builds and hides the shim's.
+`SDL_Init`, `SDL_QuitSubSystem` and `SDL_Quit` are functions where
+they were macros onto STDL's; their callers change nothing.
 
 ### v1.23.0: joysticks, more of them and named so
 

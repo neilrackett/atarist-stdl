@@ -34,6 +34,18 @@ extern "C" {
  * flip, for testing; STDL_SDL2_GetCheck reads the result. */
 #define STDL_SDL2_HINT_CHECK "STDL_SDL2_CHECK"
 
+/* "1": copies compared. The renderer keeps a chunky copy of the screen,
+ * compares each copy of whole 16-pixel groups with it and converts only
+ * the groups that differ: for a program that copies what it drew on,
+ * changed or not (an engine pushing its dirty blocks, most of them a
+ * sprite drawn again as it was). The compare reads every pixel copied,
+ * so a program whose copies are all new pixels pays for it and gains
+ * nothing, and a texture's pixels are read at the copy as well as when
+ * converted. 76.8K; without the memory, no compare. An ST's screen in
+ * the experimental 68000 build always compares. Read by
+ * SDL_CreateRenderer. */
+#define STDL_SDL2_HINT_COMPARE "STDL_SDL2_COMPARE"
+
 /* "0": in the experimental 68000 build (docs/sdl2.md), an ST's screen
  * is ST Low whatever the window's height: 200 rows, the middle ones of
  * a taller window, and three pages, where the tall screen's two make

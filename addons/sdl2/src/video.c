@@ -77,10 +77,6 @@ static int st_on, st_rows = SCREEN_H;
 /* a row or a texture's row times a stride: the 68000's own multiply,
  * where a 32-bit one is a library call (textures keep to 16 bits) */
 #define MUL(a, b) STDL_MulS16((int)(a), (int)(b))
-/* an ST always keeps the model, to convert from, so the check's own
- * page says whether the check is on; the other build keeps to the
- * model, as its objects must not change */
-#define CHECKED(r) ((r)->scratch != NULL)
 #else
 #define PLANES    8
 #define ROW0      0
@@ -88,9 +84,11 @@ static int st_on, st_rows = SCREEN_H;
 #define GOFF(g)   ((g) * 16)
 #define GLONGS(n) ((n) * 4)
 #define MUL(a, b) ((a) * (b))
-#define CHECKED(r) ((r)->model != NULL)
 #endif
 #define GB        (2 * PLANES)  /* bytes a group */
+/* the chunky copy of the screen is there for more than the check, so
+ * the check's own page says whether the check is on */
+#define CHECKED(r) ((r)->scratch != NULL)
 /* The rows this frame drew on, a to b: a present reads and clears
  * those of now, and of each page's owed the rows it owes, and no
  * others. Going through all 240 rows of now and of each page's owed
@@ -164,9 +162,12 @@ struct SDL_Renderer {
     int pairing;                /* the copy being made is of pairs */
     const struct stdl_sdl2_pairs *pairs;    /* c2ppair.c's side */
 
-    Uint8 *model;               /* the check's chunky screen; on an ST
-                                 * always there, to convert from */
-    Uint8 *scratch;             /* and the check's page */
+    Uint8 *model;               /* the chunky copy of the screen: what
+                                 * copies are compared with, the check
+                                 * converts and an ST converts again */
+    int compare;                /* copies of whole groups are compared
+                                 * with it (copy_changed) */
+    Uint8 *scratch;             /* the check's page */
     STDL_SDL2_Check chk;
 
 #ifdef STDL_SDL2_ST
@@ -497,38 +498,35 @@ SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, int index, Uint32 flags)
         r->clear[0] = r->clear[1] = r->clear[2] = 1;
     }
     screen_used = 1;
-#ifdef STDL_SDL2_ST
-    if (st_on) {
-        /* the chunky screen always, to convert again after new maps;
-         * its page only for the check */
+    {
+        /* The chunky copy of the screen: an ST's always, to convert
+         * again after new maps and to compare copies with; a TT's or a
+         * Falcon's for the compare or the check. It starts at 0 as the
+         * pages do, the colour X is converted to. The check has a page
+         * of its own besides. The compare is a hint: without the
+         * memory for the copy there is none. */
         const int chk = SDL_GetHintBoolean(STDL_SDL2_HINT_CHECK, SDL_FALSE);
-        r->model = (Uint8 *)calloc(SCREEN_W * SCREEN_H, 1);
+        int cmp = SDL_GetHintBoolean(STDL_SDL2_HINT_COMPARE, SDL_FALSE);
+        int must = chk;
+#ifdef STDL_SDL2_ST
+        must |= st_on;
+        cmp |= st_on;
+#endif
+        if (must || cmp) {
+            r->model = (Uint8 *)calloc(SCREEN_W * SCREEN_H, 1);
+        }
         if (chk) {
             r->scratch = (Uint8 *)malloc((size_t)r->stride * ROWS);
             r->chk.first_row = -1;
         }
-        if (!r->model || (chk && !r->scratch)) {
+        if (must && (!r->model || (chk && !r->scratch))) {
             free(r->model);
             free(r->scratch);
             free(r);
             SDL_OutOfMemory();
             return NULL;
         }
-    } else
-#endif
-    if (SDL_GetHintBoolean(STDL_SDL2_HINT_CHECK, SDL_FALSE)) {
-        r->model = (Uint8 *)malloc(SCREEN_W * SCREEN_H);
-        r->scratch = (Uint8 *)malloc((size_t)r->stride * SCREEN_H);
-        if (!r->model || !r->scratch) {
-            free(r->model);
-            free(r->scratch);
-            free(r);
-            SDL_OutOfMemory();
-            return NULL;
-        }
-        /* the pages start at 0, the colour X is converted to */
-        memset(r->model, 0, SCREEN_W * SCREEN_H);
-        r->chk.first_row = -1;
+        r->compare = cmp && r->model;
     }
     window->renderer = r;
     return r;
@@ -1311,36 +1309,40 @@ int SDL_RenderClear(SDL_Renderer *renderer)
     return 0;
 }
 
+/* a 68000's longs are at even addresses; the host's test of that build
+ * refuses as it does */
 #ifdef STDL_SDL2_ST
-#ifdef __m68k__
-#define ST_LONGS_AT 1           /* a 68000's longs: any even address */
+#define LONGS_AT 1
 #else
-#define ST_LONGS_AT 3
+#define LONGS_AT 0
 #endif
 
 /*
- * An ST's copy of whole groups: each group of the box is compared with
- * the chunky copy of the screen, and only those that differ go into
- * the copy and into the batch. A group the screen already has needs no
- * conversion on any page: the page drawn on has it or owes it, and
- * what it owes it takes from the page last shown (catch_up). A
- * program that pushes the blocks it drew on, changed or not, pushes
- * many it only drew again as they were, and a compare is four longs
- * against a conversion's 750 cycles. 0 for a box this does not take
- * (a part of a group, or pixels at an odd address), which goes the
- * usual way.
+ * A copy of whole groups, compared: each group of the box is compared
+ * with the chunky copy of the screen, and only those that differ go
+ * into the copy and into the batch. A group the screen already has
+ * needs no conversion on any page: the page drawn on has it or owes
+ * it, and what it owes it takes from the page last shown (catch_up).
+ * A program that pushes the blocks it drew on, changed or not, pushes
+ * many it only drew again as they were (three in four of one game's),
+ * and a compare is four longs, some 70 cycles a group on a 68030,
+ * against a conversion; on an ST, against a conversion's 750. 0 for a
+ * box this does not take (a part of a group, pixel pairs, a 68000's
+ * pixels at an odd address), which goes the usual way.
  */
-static int st_copy_changed(SDL_Renderer *r, const SDL_Texture *t, int tx,
-                           int ty, int sx, int sy, int w, int h)
+static int copy_changed(SDL_Renderer *r, const SDL_Texture *t, int tx, int ty,
+                        int sx, int sy, int w, int h)
 {
-    const Uint32 *s, *m;
+    const Uint8 *s;
+    Uint8 *m;
     long sskip;
     int g0, ng, y;
-    if (((sx | w) & 15) ||
-        (((unsigned long)t->pixels + (unsigned long)tx) & ST_LONGS_AT) ||
-        ((unsigned long)t->pitch & ST_LONGS_AT)) {
+    if (((sx | w) & 15) || r->pairing || r->bpaired ||
+        (((unsigned long)t->pixels + (unsigned long)tx) & LONGS_AT) ||
+        ((unsigned long)t->pitch & LONGS_AT)) {
         return 0;
     }
+#ifdef STDL_SDL2_ST
     /* the rows the page has; the others are never shown or read */
     if (sy < ROW0) {
         h -= ROW0 - sy;
@@ -1353,29 +1355,77 @@ static int st_copy_changed(SDL_Renderer *r, const SDL_Texture *t, int tx,
     if (h <= 0) {
         return 1;
     }
+#endif
     g0 = sx >> 4;
     ng = w >> 4;
-    s = (const Uint32 *)(const void *)(t->pixels + MUL(ty, t->pitch) + tx);
-    m = (const Uint32 *)(const void *)(r->model + MUL(sy, SCREEN_W) + sx);
+    s = t->pixels + MUL(ty, t->pitch) + tx;
+    m = r->model + MUL(sy, SCREEN_W) + sx;
     sskip = t->pitch - w;
     for (y = sy; y < sy + h; y++) {
         Uint32 bit = 1UL << g0, mask = 0;
-        int g;
-        for (g = ng; g > 0; g--, s += 4, m += 4, bit <<= 1) {
-            if (s[0] != m[0] || s[1] != m[1] || s[2] != m[2] ||
-                s[3] != m[3]) {
-                Uint32 *d = (Uint32 *)(void *)m;
-                d[0] = s[0];
-                d[1] = s[1];
-                d[2] = s[2];
-                d[3] = s[3];
-                if (!r->given && !st_seen16(r->seen, (const Uint8 *)d)) {
-                    st_mark(r, (const Uint8 *)d, 16);
-                }
+        int g = ng;
+#ifdef __m68k__
+        /* a group that differs is copied from the long that did, the
+         * ones before it being the same already */
+        __asm__ volatile (
+            "1:  cmpm.l (%[s])+,(%[m])+\n"
+            "    bne.s 2f\n"
+            "    cmpm.l (%[s])+,(%[m])+\n"
+            "    bne.s 3f\n"
+            "    cmpm.l (%[s])+,(%[m])+\n"
+            "    bne.s 4f\n"
+            "    cmpm.l (%[s])+,(%[m])+\n"
+            "    bne.s 5f\n"
+            "6:  add.l %[bit],%[bit]\n"
+            "    subq.l #1,%[g]\n"
+            "    bne.s 1b\n"
+            "    bra.s 7f\n"
+            "2:  move.l -4(%[s]),-4(%[m])\n"
+            "    move.l (%[s])+,(%[m])+\n"
+            "    move.l (%[s])+,(%[m])+\n"
+            "    move.l (%[s])+,(%[m])+\n"
+            "    or.l %[bit],%[mask]\n"
+            "    bra.s 6b\n"
+            "3:  move.l -4(%[s]),-4(%[m])\n"
+            "    move.l (%[s])+,(%[m])+\n"
+            "    move.l (%[s])+,(%[m])+\n"
+            "    or.l %[bit],%[mask]\n"
+            "    bra.s 6b\n"
+            "4:  move.l -4(%[s]),-4(%[m])\n"
+            "    move.l (%[s])+,(%[m])+\n"
+            "    or.l %[bit],%[mask]\n"
+            "    bra.s 6b\n"
+            "5:  move.l -4(%[s]),-4(%[m])\n"
+            "    or.l %[bit],%[mask]\n"
+            "    bra.s 6b\n"
+            "7:\n"
+            : [s] "+a" (s), [m] "+a" (m), [bit] "+d" (bit),
+              [mask] "+d" (mask), [g] "+d" (g)
+            : : "cc", "memory");
+#else
+        do {
+            if (memcmp(s, m, 16)) {
+                memcpy(m, s, 16);
                 mask |= bit;
             }
-        }
+            s += 16;
+            m += 16;
+            bit += bit;
+        } while (--g);
+#endif
         if (mask) {
+#ifdef STDL_SDL2_ST
+            /* an ST's colours seen: the changed groups', now the copy's */
+            if (st_on && !r->given) {
+                const Uint8 *p = m - w;
+                Uint32 k = mask >> g0;
+                for (; k; k >>= 1, p += 16) {
+                    if ((k & 1) && !st_seen16(r->seen, p)) {
+                        st_mark(r, p, 16);
+                    }
+                }
+            }
+#endif
             r->bwhole[y] |= mask;
             if (y < r->by0) {
                 r->by0 = y;
@@ -1384,14 +1434,13 @@ static int st_copy_changed(SDL_Renderer *r, const SDL_Texture *t, int tx,
                 r->by1 = y;
             }
         }
-        s = (const Uint32 *)(const void *)((const Uint8 *)s + sskip);
-        m = (const Uint32 *)(const void *)((const Uint8 *)m + (SCREEN_W - w));
+        s += sskip;
+        m += SCREEN_W - w;
     }
     return 1;
 }
-#endif
 
-/* the check's model: the box as the screen should have it */
+/* the chunky copy of the screen: the box as the screen should have it */
 static __attribute__((noinline)) void model_copy(SDL_Renderer *r,
                                                  const SDL_Texture *t,
                                                  int tx, int ty, int sx,
@@ -1523,10 +1572,7 @@ int SDL_RenderCopy(SDL_Renderer *renderer, SDL_Texture *texture,
     r->bt = texture;
     r->bdx = dx;
     r->bdy = dy;
-#ifdef STDL_SDL2_ST
-    if (!st_on || !st_copy_changed(r, texture, s->x, s->y, sx, sy, w, h))
-#endif
-    {
+    if (!r->compare || !copy_changed(r, texture, s->x, s->y, sx, sy, w, h)) {
         batch_add(r, sx, sy, w, h);
         if (r->model) {
             model_copy(r, texture, s->x, s->y, sx, sy, w, h);

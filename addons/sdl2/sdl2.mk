@@ -160,9 +160,15 @@ $(SDL2CMINILIB): $(SDL2CMINIOBJS) $(SDL2XCMINIOBJS)
 # them. One mechanism for both builds; little time on a 68030, where
 # one port's frame of play went from 11.64ms of work to 11.52 on a TT
 # and from 22.89 to 22.80 on a Falcon (Hatari). 30,988.
+#
+# Raised 30988 -> 31300 on 2026-11-16, by 312 in video.o for copies
+# compared (STDL_SDL2_HINT_COMPARE): the compare's loop and the chunky
+# copy of the screen kept without the check. That port's frame of
+# play, three groups in four of its pushes on screen already, 11.60ms
+# to 9.90 on a TT and 22.84 to 19.57 on a Falcon. 31,300.
 # A TT or a Falcon has the room; the budget is there so that growth is
 # a decision, raised with its reason or not at all.
-SDL2_MAX = 30988
+SDL2_MAX = 31300
 
 # The checks a build of the add-on must pass:
 # - no SDL_ link symbol in either archive (SDL_stdinc.h says why);

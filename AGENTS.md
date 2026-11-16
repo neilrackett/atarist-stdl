@@ -1640,37 +1640,74 @@ rules below keep it from being anything else's.
     `test_render`'s own TT and Falcon screens through this build. It
     is not shipped and has no size budget; its example is the add-on's
     demo built against it (`dist/SDL2ST.TOS`).
-- **Tried and dropped, kept as an idea for a port that needs it: the
-  changed-group compare on a TT's and a Falcon's screen** (November
-  2026). The experimental 68000 build's ST screen compares each copy
-  of whole groups with a chunky copy of the screen and converts only
-  the groups that differ (`st_copy_changed`), which took one port's
-  conversion on a Mega STE from 20ms a frame to 6. The same compare on
-  the 256-colour path, behind a hint, measured with that port's game
-  in Hatari (compare off, then on):
-  - the conversion about halved on both machines (TT 3.1 to 1.7ms a
-    frame, Falcon 6.1 to 3.3);
-  - a frame of play barely moved: Falcon 31.28 to 29.99ms and 40.69
-    to 39.72 (2-4%), TT 18.67 to 18.71 and 20.77 to 20.43, where the
-    saving went into a longer wait for the blank;
-  - three cutscenes' work on a Falcon, every frame drawn, 32.5s to
-    31.6 (3%): two faster by 6-8%, one where every pixel moves 1.5%
-    slower;
-  - every flip showed what it showed without it, and `test_render`
-    passed with it off and on over all 18 screens.
-
-  It lost because the conversion there is already assembler and only
-  15-20% of that game's frame, where on an ST it was a quarter to a
-  third at 750 cycles a group; and the compare is not free, a read of
-  every pixel copied. It would have cost 76.8K for the chunky copy,
-  436 of the size budget's 680 bytes left, and the build's objects
-  their byte-for-byte match with the release. Worth trying again only
-  for a program that pushes far more unchanged pixels than that one
-  (whole-screen pushes of a mostly still picture), and then first in
-  the experimental build, whose `STDL_SDL2_ST` already compiles the
-  compare: the change was to let it run with `st_on` 0, `LONGS_AT` 0
-  on a 68020, and one `CHECKED` for both builds since the model then
-  exists without the check.
+- **Copies compared (`STDL_SDL2_HINT_COMPARE`, `copy_changed`), and
+  the rows a present reads** (November 2026). One function in both
+  builds compares each copy of whole groups with the renderer's chunky
+  copy of the screen and batches only the groups that differ: an ST's
+  screen always, a TT's or a Falcon's by the hint.
+  - **The chunky copy (`model`) is the renderer's, not the check's.**
+    The compare reads and writes it, the check converts it, an ST's
+    stale page is converted from it. Every copy, clear and border
+    index keeps it right wherever it exists (`if (r->model)`),
+    compared or not, and `CHECKED` asks for the check's own page
+    (`scratch`).
+  - **Its tests.** `test_render` runs every TT and Falcon screen with
+    the hint off and on, a third of the latter without the add-on's
+    own check, when the chunky copy exists and the check's page does
+    not: a `CHECKED` that asked for the model failed those six screens
+    and no others. `SDL2RCHC` is `SDL2RCHK` with the hint
+    (`-DSTDL_SDL2_TEST_COMPARE`), and the only test of the compare's
+    assembler, which the host builds as its C twin: with a changed
+    group left unmarked in the assembler alone it failed 99 times on
+    Hatari's TT. It passed there with two pages and three and on a
+    Falcon on VGA and RGB, and `SDL2RCST` with the hint on a TT and a
+    Falcon, through the 68000 build. Six breakages of the compare each
+    failed a host test (a changed group not marked, the copy not
+    taken, a partial copy not put in the chunky copy, the model for
+    `CHECKED`, pairs compared, an ST's colours not noted), and three
+    of the rows' ranges.
+  - **Measured** with one port's game in Hatari, which pushes every
+    8x8 block it drew on, three groups in four of them on screen
+    already in play (217 pushed a frame and 57 changed, in one
+    session). Over ten recorded sessions, the compare off and on in
+    one binary:
+    - a frame's work 11.60ms to 9.90 on a TT and 22.84 to 19.57 on a
+      Falcon on VGA, 14% less on both;
+    - the add-on's share of it (the push less its flip) 4.38ms to 2.72
+      and 8.70 to 5.49;
+    - nothing in the one session where over half the groups pushed
+      had changed (a Falcon's 27.38ms to 27.54);
+    - eight cutscenes' work, every frame drawn, 24.4s to 23.5 on a TT
+      and 50.4s to 48.8 on a Falcon: 13% less in the scene with most
+      to do, 6% more in a short one, 2% more in one where every pixel
+      moves;
+    - every flip of the ten sessions and every frame of the eight
+      scenes showed what it showed without the compare.
+  - **Judge it by a frame's work, not its time.** On a TT the work
+    saved turns into a longer wait for the blank in `STDL_Flip`: its
+    frames took 18.35ms with the compare off and 18.36 with it on.
+    Take the flip's time out (`SDL_stdl_bench.h`).
+  - **It was tried once before and dropped**, at 1.3ms of that port's
+    31ms frame on a Falcon, where this one saves 3.3. That attempt's
+    code was not kept. Its compare was C, which costs about 110 cycles
+    a group in Hatari against the assembler's 70, half a millisecond
+    of the difference; the rest is not accounted for.
+  - **The rows a present reads** went into both builds with it: the
+    rows this frame drew on and each page owes, kept as ranges
+    (`NOW_ROWS`, `oy0`/`oy1`, `frame_rows`), where the 68020 build had
+    gone through all 240 rows of `now` and of each page's `owed` at
+    every present. That is 7ms of an 8MHz 68000's present and very
+    little of a 68030's: the same port's frame went from 11.64ms of
+    work to 11.52 on a TT and from 22.89 to 22.80 on a Falcon. It is
+    there as one mechanism for both builds, for 292 bytes.
+  - **Tried in its place:** the box round a copy's changed groups, and
+    a row's run from its first changed group to its last, where the
+    compare sets a bit a changed group. All three took the same time
+    within a replay's noise, and the bit converts least.
+  - **Not done:** a present after copies that changed nothing still
+    flips. `test_render` expects a flip for every copy, and to expect
+    otherwise its model would have to know which copies the compare
+    takes, the compositor's own arithmetic.
 - **A change a porter would meet goes into `docs/sdl2.md` and the
   `stdl-sdl2` skill** (`.claude/skills/stdl-sdl2/SKILL.md`) in the same
   change, as the core's API changes go into the `stdl` skill.

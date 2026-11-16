@@ -338,6 +338,46 @@ sent each eight-row band's changed blocks as a box of its own made 16
 copies a frame, and sending bands that need the same blocks as one box
 took that to 9.5 and the copies from 1.09ms a frame to 0.70.
 
+### Copies compared
+
+A program that tracks what it drew on, not what changed, copies a
+good deal the screen already has: a sprite put back and drawn again
+where it stood is the same pixels as the frame before. With
+
+```c
+SDL_SetHint(STDL_SDL2_HINT_COMPARE, "1");
+```
+
+before the renderer is created, the renderer keeps a chunky copy of
+the screen (76.8K), compares each copy of whole groups with it and
+puts only the groups that differ into the batch. A group the screen
+already has is then a compare, some 70 cycles on a 68030, in place of
+a conversion, and no page owes it.
+
+- **What is compared:** copies whose x and width on the screen are
+  multiples of 16. A copy that covers part of a group goes the usual
+  way, as does a pairs copy and any copy into a batch that has one.
+- **The pixels are read at the copy** as well as when the batch is
+  converted, between which a program already leaves them alone.
+- **A present after copies that changed nothing still flips.**
+- **It is a hint.** Without the memory for the chunky copy the
+  renderer goes on without it. The screen check keeps the same copy,
+  so the two together cost what the check costs.
+
+It pays where most of what is copied has not changed. One port's game
+pushes every 8x8 block it drew on, and in play three groups in four of
+those were on screen already. Over ten recorded sessions in Hatari a
+frame's work fell 14% on both machines, from 11.60ms to 9.90 on a TT
+and from 22.84 to 19.57 on a Falcon, the add-on's share of it from
+4.38ms to 2.72 and from 8.70 to 5.49. The one session where over half
+the groups pushed had changed gained nothing (a Falcon's 27.38ms to
+27.54). Its cutscenes, where most of what a frame pushes is new, did
+3-4% less work over eight scenes, from 13% less in one to 6% more in
+another. A program whose every copy is new pixels pays a read of each
+for nothing.
+
+In the experimental 68000 build an ST's screen always compares.
+
 ## The conversion and its cost
 
 The conversion is ten merges a group with the assembler's writes
@@ -429,6 +469,7 @@ A program includes `SDL_stdl.h` itself:
 |---|---|
 | `STDL_SDL2_HINT_PAGES` | `"2"` or `"3"` (the default) pages. Three let a frame be drawn while the display still waits for the last; a third costs 153.6K of ST-RAM on a TT and 77-92K on a Falcon, and without the room STDL gives two |
 | `STDL_SDL2_HINT_LOGFILE` | the file `SDL_Log` and the rest write to, a line a message, flushed after each. Without it they write nothing. SDL2's priorities: the application's from INFO, assertions' from WARN, tests' from VERBOSE, the rest CRITICAL only |
+| `STDL_SDL2_HINT_COMPARE` | `"1"`: copies of whole groups are compared with a chunky copy of the screen (76.8K) and only the groups that differ are converted, for a program that copies what it drew on, changed or not: "Copies compared", above |
 | `STDL_SDL2_HINT_CHECK` | `"1"`: the screen check. The renderer keeps a chunky model of the screen, drawn as each copy and clear is made, and compares it, converted, with every page before it flips. It costs 230K and a page's conversion a flip, and is for testing; `STDL_SDL2_GetCheck` reads it |
 | `STDL_SDL2_SetRenderPalette` | the renderer's palette, staged at each present when its version has moved on |
 | `STDL_SDL2_SetRenderDrawIndex` | the clear colour as an index |
@@ -626,7 +667,7 @@ no TT or Falcon to hand, not to play it: the picture is a rough
   at a time, on the tall screen's 240 rows, on 200 where the border
   did not open and on a border cut short, with two pages and three
   and border indices 0 and 0x70, and the reduction against what it
-  promises, and ST Low by the hint. Then it runs `test_render`'s 18 TT
+  promises, and ST Low by the hint. Then it runs `test_render`'s 36 TT
   and Falcon screens through this build, which must show them as the
   other does. Eleven breakages of the ST path each failed it, ten more
   of it as it stood at v1.24.0, fifteen of the changed-group compare,
@@ -679,7 +720,9 @@ no TT or Falcon to hand, not to play it: the picture is a rough
   conversion's assembler against its C on the machine, and their
   times.
 - **`SDL2RCHK`:** `test_render.c` built for the machine against the
-  real STDL. `addons/sdl2/tests/test_render.c` says how to build it.
+  real STDL. `addons/sdl2/tests/test_render.c` says how to build it,
+  and `SDL2RCHC`, the same with copies compared
+  (`STDL_SDL2_HINT_COMPARE`), whose assembler only the machine runs.
 - **`SDL2BMP` (`tests/hatari/sdl2bmp.c`):** art `stdlconv bmp8` made
   (`sdl2bmp.py`), loaded with `SDL_LoadBMP` from the drive with the
   core's 4-bit `SAIL.BMP`, each hashed as `sdl2bmp.py` hashes Pillow's

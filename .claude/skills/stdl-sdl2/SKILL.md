@@ -200,6 +200,20 @@ builds by them; take a frame budget from a real machine.
 - **Round boxes out to 16-pixel groups** where the program can: a box
   of whole groups is an OR a row in the batch, one that starts or ends
   inside a group needs its partial groups merged under a pixel mask.
+- **A program that copies what it drew on, changed or not, sets
+  `STDL_SDL2_HINT_COMPARE`** to "1" before the renderer: copies of
+  whole groups are then compared with a chunky copy of the screen
+  (76.8K) and only the groups that differ are converted, a compare of
+  some 70 cycles for a group the screen already has. An engine that
+  keeps dirty blocks pushes mostly those (a sprite put back and drawn
+  again where it stood): three groups in four of one port's pushes in
+  play, where a frame's work fell 14% on both machines in Hatari (TT
+  11.60 -> 9.90ms, Falcon 22.84 -> 19.57). Its cutscenes, mostly new
+  pixels, did 3-4% less work, one scene 6% more, and a session where
+  over half the groups pushed had changed gained nothing.
+  Only whole-group copies are compared, so round the boxes out first;
+  pairs copies are not. A program that already copies only what
+  changed gains nothing and pays a read of every pixel it copies.
 - **Pixels drawn twice across (a game's low detail) convert 18%
   faster** through `STDL_SDL2_RenderCopyPairs`: a whole frame 31.0 ->
   25.6ms on a TT, 59.8 -> 48.8 on a Falcon; one port's low-detail

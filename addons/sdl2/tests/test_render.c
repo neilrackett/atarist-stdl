@@ -27,9 +27,13 @@
  * On the host (fake_stdl.c) each of a TT, a Falcon on VGA and on RGB,
  * with two pages and with three, and border indices 0, 0x70 (its own
  * loops) and 0x30 (the run-time one), runs in a process of its own,
- * as the screen is set up once a program. On the machine, the one
- * screen the machine has, against the real STDL; the screen check is
- * on in both. It prints S2R:done; SDL2RCH2 is the same with two pages:
+ * as the screen is set up once a program, and again with copies
+ * compared (STDL_SDL2_HINT_COMPARE), once of those without the
+ * add-on's own check, which then has the chunky copy and no page of
+ * its own. On the machine, the one screen the machine has, against
+ * the real STDL, the screen check on. It prints S2R:done; SDL2RCH2 is
+ * the same with two pages, SDL2RCHC with copies compared
+ * (-DSTDL_SDL2_TEST_COMPARE):
  *
  *   STCMD_NO_TTY=1 stcmd make sdl2
  *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -std=gnu99 \
@@ -1092,13 +1096,18 @@ static void pairs_rules(void)
     }
 }
 
+/* a run without the add-on's own check */
+static int unchecked;
+
 /* one screen: returns the failures */
 static int run(unsigned long s, unsigned x, int xconst)
 {
     seed = s;
     step = 0;
     failures = 0;
-    SDL_SetHint(STDL_SDL2_HINT_CHECK, "1");
+    if (!unchecked) {
+        SDL_SetHint(STDL_SDL2_HINT_CHECK, "1");
+    }
     CHECK(SDL_Init(SDL_INIT_VIDEO) == 0);
 #ifdef STDL_SDL2_ST
     is_st = STDL_SDL2_NO_256();
@@ -1154,9 +1163,13 @@ static int run(unsigned long s, unsigned x, int xconst)
     pairs_rules();
     {
         STDL_SDL2_Check chk;
-        CHECK(STDL_SDL2_GetCheck(R, &chk) == 0);
-        CHECK(chk.bad == lies);
-        CHECK(chk.flips > 100);
+        if (unchecked) {
+            CHECK(STDL_SDL2_GetCheck(R, &chk) == -1);
+        } else {
+            CHECK(STDL_SDL2_GetCheck(R, &chk) == 0);
+            CHECK(chk.bad == lies);
+            CHECK(chk.flips > 100);
+        }
     }
     return failures;
 }
@@ -1463,13 +1476,17 @@ int main(void)
 #endif
 
 #if !defined(__m68k__)
-static int child(int layout, int pages, unsigned x, int xconst)
+static int child(int layout, int pages, unsigned x, int xconst, int cmp)
 {
     int f;
     fake_layout = layout;
     fake_third = 1;
     fake_mach.mch_cookie = layout == FAKE_TT ? 0x00020000UL : 0x00030000UL;
     SDL_SetHint(STDL_SDL2_HINT_PAGES, pages == 2 ? "2" : "3");
+    if (cmp) {
+        SDL_SetHint(STDL_SDL2_HINT_COMPARE, "1");
+        unchecked = !xconst && x != 0;
+    }
     f = run(0xC0FFEEUL + (unsigned long)layout * 31 + (unsigned long)pages,
             x, xconst);
     if (fake_npages != pages) {
@@ -1487,21 +1504,25 @@ int main(void)
 {
     static const char *names[] = { "TT", "Falcon VGA", "Falcon RGB" };
     static const unsigned xs[] = { 0, 0x70, 0x30 };
-    int layout, pages, xi, total = 0, runs = 0;
+    int layout, pages, xi, cmp, total = 0, runs = 0;
     for (layout = 0; layout < 3; layout++) {
         for (pages = 2; pages <= 3; pages++) {
             for (xi = 0; xi < 3; xi++) {
-                pid_t pid = fork();
-                int status = 0;
-                if (pid == 0) {
-                    _exit(child(layout, pages, xs[xi], xi == 1) ? 1 : 0);
-                }
-                waitpid(pid, &status, 0);
-                runs++;
-                if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-                    printf("test_render: %s, %d pages, X 0x%X failed\n",
-                           names[layout], pages, xs[xi]);
-                    total++;
+                for (cmp = 0; cmp <= 1; cmp++) {
+                    pid_t pid = fork();
+                    int status = 0;
+                    if (pid == 0) {
+                        _exit(child(layout, pages, xs[xi], xi == 1, cmp)
+                              ? 1 : 0);
+                    }
+                    waitpid(pid, &status, 0);
+                    runs++;
+                    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+                        printf("test_render: %s, %d pages, X 0x%X%s"
+                               " failed\n", names[layout], pages, xs[xi],
+                               cmp ? ", copies compared" : "");
+                        total++;
+                    }
                 }
             }
         }
@@ -1526,6 +1547,9 @@ int main(void)
     hold_on_exit("SDL2RCHK");             /* SDL2RCHK: the results stay on screen */
     /* the machine's own screen, its layout read back from the page */
     SDL_SetHint(STDL_SDL2_HINT_PAGES, STDL_SDL2_TEST_PAGES);
+#ifdef STDL_SDL2_TEST_COMPARE
+    SDL_SetHint(STDL_SDL2_HINT_COMPARE, "1");
+#endif
 #ifdef STDL_SDL2_ST
     f = reduce_checks();
     f += run(0xC0FFEEUL, 0x70, 1);

@@ -1682,10 +1682,30 @@ rules below keep it from being anything else's.
   screen always, a TT's or a Falcon's by the hint.
   - **The chunky copy (`model`) is the renderer's, not the check's.**
     The compare reads and writes it, the check converts it, an ST's
-    stale page is converted from it. Every copy, clear and border
-    index keeps it right wherever it exists (`if (r->model)`),
-    compared or not, and `CHECKED` asks for the check's own page
-    (`scratch`).
+    stale page is converted from it. Every copy and clear keeps it
+    right while it is kept (`r->keep`: the compare, the check or an
+    ST's screen), compared or not, and `CHECKED` asks for the check's
+    own page (`scratch`).
+  - **`STDL_SDL2_SetCompare` (2026-11-17)** turns the compare off and
+    on as a program goes. Off, with no check, the copy is not kept
+    (`keep` 0): copies skip `model_copy`, which was most of what the
+    compare cost a copy of new pixels. On again, `holes` says the copy
+    may lack groups, `mvalid` a bit a group of those it has (none, at
+    the switch); `copy_changed` takes a row of a box whose groups are
+    not all valid whole, into the copy and the batch, and marks them
+    valid. A clear while kept makes it whole (`holes` 0). The first
+    two host breakages (no `holes` at the switch; `holes` ignored in
+    `copy_changed`) passed the random run, which seldom copies a group
+    back to what a stale copy still holds: `toggle_rules` does that,
+    a frame apart and within a frame, and fails both. A clear while
+    unkept marking the copy whole is no breakage: turning the compare
+    on marks it all stale whatever the clear did. `SDL2RCHT`
+    (`-DSTDL_SDL2_TEST_TOGGLE`: toggled, the check off) passed on
+    Hatari's TT and a Falcon on VGA and RGB. One port's Heretic,
+    timedemo demo1 on a TT, 9.87 fps at size 10 (the compare off, no
+    copy allocated) and 13.35 at size 7, against 9.86 and 13.44 with
+    the hint fixed at start-up; resized in play, the check found no
+    flip unlike its model. 380 bytes of `video.o` (`SDL2_MAX`).
   - **Its tests.** `test_render` runs every TT and Falcon screen with
     the hint off and on, a third of the latter without the add-on's
     own check, when the chunky copy exists and the check's page does

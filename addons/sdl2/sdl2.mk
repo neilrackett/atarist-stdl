@@ -166,9 +166,19 @@ $(SDL2CMINILIB): $(SDL2CMINIOBJS) $(SDL2XCMINIOBJS)
 # copy of the screen kept without the check. That port's frame of
 # play, three groups in four of its pushes on screen already, 11.60ms
 # to 9.90 on a TT and 22.84 to 19.57 on a Falcon. 31,300.
+#
+# Raised 31300 -> 31680 on 2026-11-17, by 380 in video.o for
+# STDL_SDL2_SetCompare, the compare turned on and off as a program
+# goes (168 for the call; the rest the chunky copy left unkept while
+# the compare is off and the rows of it gone stale since, tested at
+# each compared copy and clear). One port's view, all new pixels each
+# frame, fills the screen or leaves a border that never changes as the
+# player sizes it: the compare cost its frame 2-4% at the full size and
+# saved 4-13% at the smaller ones (Hatari, a TT), where the hint alone
+# had to take one or the other for the whole game. 31,680.
 # A TT or a Falcon has the room; the budget is there so that growth is
 # a decision, raised with its reason or not at all.
-SDL2_MAX = 31300
+SDL2_MAX = 31680
 
 # The checks a build of the add-on must pass:
 # - no SDL_ link symbol in either archive (SDL_stdinc.h says why);

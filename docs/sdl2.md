@@ -365,6 +365,18 @@ a conversion, and no page owes it.
 - **It is a hint.** Without the memory for the chunky copy the
   renderer goes on without it. The screen check keeps the same copy,
   so the two together cost what the check costs.
+- **`STDL_SDL2_SetCompare(renderer, on)` turns it on or off** at any
+  time, between copies too, for a program whose copies are mostly the
+  screen's at some times and mostly new at others. Off, the renderer
+  stops keeping the chunky copy (unless the check keeps it), and
+  copies cost what they do without one; the memory stays. On again,
+  the chunky copy lacks what was copied meanwhile: a copy that reaches
+  any of those groups on a row converts that row of the copy whole,
+  and the chunky copy has it from then on, so the first frames after
+  turning it on convert what they copy as they would without it. A
+  clear makes the chunky copy whole again. Turned on for a renderer
+  made without the hint, it allocates the chunky copy then (76.8K),
+  and returns -1 with the error set where there is no memory.
 
 It pays where most of what is copied has not changed. One port's game
 pushes every 8x8 block it drew on, and in play three groups in four of
@@ -378,7 +390,15 @@ the groups pushed had changed gained nothing (a Falcon's 27.38ms to
 another. A program whose every copy is new pixels pays a read of each
 for nothing.
 
-In the experimental 68000 build an ST's screen always compares.
+One port's game shows both kinds: its view, all new pixels every
+frame, fills the screen above the status bar or sits in a border that
+never changes, as the player sizes it. With every frame copied whole,
+the compare cost it 2-4% with the view at full size and saved 4-13%
+with it smaller (Hatari, a TT), so it turns the compare on whenever
+the view is smaller.
+
+In the experimental 68000 build an ST's screen always compares, and
+`STDL_SDL2_SetCompare` changes nothing there.
 
 ## The conversion and its cost
 
@@ -472,6 +492,7 @@ A program includes `SDL_stdl.h` itself:
 | `STDL_SDL2_HINT_PAGES` | `"2"` or `"3"` (the default) pages. Three let a frame be drawn while the display still waits for the last; a third costs 153.6K of ST-RAM on a TT and 77-92K on a Falcon, and without the room STDL gives two |
 | `STDL_SDL2_HINT_LOGFILE` | the file `SDL_Log` and the rest write to, a line a message, flushed after each. Without it they write nothing. SDL2's priorities: the application's from INFO, assertions' from WARN, tests' from VERBOSE, the rest CRITICAL only |
 | `STDL_SDL2_HINT_COMPARE` | `"1"`: copies of whole groups are compared with a chunky copy of the screen (76.8K) and only the groups that differ are converted, for a program that copies what it drew on, changed or not: "Copies compared", above |
+| `STDL_SDL2_SetCompare` | that compare on or off from here on, at any time: "Copies compared", above |
 | `STDL_SDL2_HINT_CHECK` | `"1"`: the screen check. The renderer keeps a chunky model of the screen, drawn as each copy and clear is made, and compares it, converted, with every page before it flips. It costs 230K and a page's conversion a flip, and is for testing; `STDL_SDL2_GetCheck` reads it |
 | `STDL_SDL2_SetRenderPalette` | the renderer's palette, staged at each present when its version has moved on |
 | `STDL_SDL2_SetRenderDrawIndex` | the clear colour as an index |
@@ -724,7 +745,10 @@ no TT or Falcon to hand, not to play it: the picture is a rough
 - **`SDL2RCHK`:** `test_render.c` built for the machine against the
   real STDL. `addons/sdl2/tests/test_render.c` says how to build it,
   and `SDL2RCHC`, the same with copies compared
-  (`STDL_SDL2_HINT_COMPARE`), whose assembler only the machine runs.
+  (`STDL_SDL2_HINT_COMPARE`), whose assembler only the machine runs,
+  and `SDL2RCHT` with the compare turned on and off as it goes
+  (`STDL_SDL2_SetCompare`) and the add-on's own check off, so that the
+  chunky copy goes unkept while the compare is off.
 - **`SDL2BMP` (`tests/hatari/sdl2bmp.c`):** art `stdlconv bmp8` made
   (`sdl2bmp.py`), loaded with `SDL_LoadBMP` from the drive with the
   core's 4-bit `SAIL.BMP`, each hashed as `sdl2bmp.py` hashes Pillow's

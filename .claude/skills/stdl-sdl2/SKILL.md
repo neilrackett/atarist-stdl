@@ -214,6 +214,12 @@ builds by them; take a frame budget from a real machine.
   Only whole-group copies are compared, so round the boxes out first;
   pairs copies are not. A program that already copies only what
   changed gains nothing and pays a read of every pixel it copies.
+  One whose copies are sometimes mostly the screen's and sometimes
+  mostly new turns it on and off as it goes with
+  `STDL_SDL2_SetCompare(renderer, on)`, which allocates the chunky
+  copy the first time if the hint did not: one port compares while
+  its view sits in a border that never changes (4-13% faster) and not
+  while the view fills the screen (2-4% slower with it).
 - **Pixels drawn twice across (a game's low detail) convert 18%
   faster** through `STDL_SDL2_RenderCopyPairs`: a whole frame 31.0 ->
   25.6ms on a TT, 59.8 -> 48.8 on a Falcon; one port's low-detail

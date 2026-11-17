@@ -167,6 +167,12 @@ struct SDL_Renderer {
                                  * converts and an ST converts again */
     int compare;                /* copies of whole groups are compared
                                  * with it (copy_changed) */
+    int keep;                   /* it is kept as copies are made: the
+                                 * compare, the check or an ST want it */
+    int holes;                  /* groups of it may not be the screen's,
+                                 * as copies went by while it was not
+                                 * kept: those mvalid has, and none other */
+    Uint32 mvalid[SCREEN_H];
     Uint8 *scratch;             /* the check's page */
     STDL_SDL2_Check chk;
 
@@ -527,6 +533,7 @@ SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, int index, Uint32 flags)
             return NULL;
         }
         r->compare = cmp && r->model;
+        r->keep = r->model != NULL;
     }
     window->renderer = r;
     return r;
@@ -1302,8 +1309,9 @@ int SDL_RenderClear(SDL_Renderer *renderer)
         }
     }
     NOW_ROWS(r, 0, SCREEN_H - 1);
-    if (r->model) {
+    if (r->keep) {
         memset(r->model, c, SCREEN_W * SCREEN_H);
+        r->holes = 0;
     }
     r->frame = r->drawn = 1;
     return 0;
@@ -1336,6 +1344,7 @@ static int copy_changed(SDL_Renderer *r, const SDL_Texture *t, int tx, int ty,
     const Uint8 *s;
     Uint8 *m;
     long sskip;
+    Uint32 rowbits;
     int g0, ng, y;
     if (((sx | w) & 15) || r->pairing || r->bpaired ||
         (((unsigned long)t->pixels + (unsigned long)tx) & LONGS_AT) ||
@@ -1358,61 +1367,73 @@ static int copy_changed(SDL_Renderer *r, const SDL_Texture *t, int tx, int ty,
 #endif
     g0 = sx >> 4;
     ng = w >> 4;
+    rowbits = ((1UL << ng) - 1) << g0;
     s = t->pixels + MUL(ty, t->pitch) + tx;
     m = r->model + MUL(sy, SCREEN_W) + sx;
     sskip = t->pitch - w;
     for (y = sy; y < sy + h; y++) {
         Uint32 bit = 1UL << g0, mask = 0;
         int g = ng;
+        if (r->holes && (r->mvalid[y] & rowbits) != rowbits) {
+            /* a row with groups the model has not got, as the compare
+             * was off when they were copied: all of it converted, and
+             * the model has it from here on */
+            memcpy(m, s, (size_t)w);
+            s += w;
+            m += w;
+            mask = rowbits;
+            r->mvalid[y] |= rowbits;
+        } else {
 #ifdef __m68k__
-        /* a group that differs is copied from the long that did, the
-         * ones before it being the same already */
-        __asm__ volatile (
-            "1:  cmpm.l (%[s])+,(%[m])+\n"
-            "    bne.s 2f\n"
-            "    cmpm.l (%[s])+,(%[m])+\n"
-            "    bne.s 3f\n"
-            "    cmpm.l (%[s])+,(%[m])+\n"
-            "    bne.s 4f\n"
-            "    cmpm.l (%[s])+,(%[m])+\n"
-            "    bne.s 5f\n"
-            "6:  add.l %[bit],%[bit]\n"
-            "    subq.l #1,%[g]\n"
-            "    bne.s 1b\n"
-            "    bra.s 7f\n"
-            "2:  move.l -4(%[s]),-4(%[m])\n"
-            "    move.l (%[s])+,(%[m])+\n"
-            "    move.l (%[s])+,(%[m])+\n"
-            "    move.l (%[s])+,(%[m])+\n"
-            "    or.l %[bit],%[mask]\n"
-            "    bra.s 6b\n"
-            "3:  move.l -4(%[s]),-4(%[m])\n"
-            "    move.l (%[s])+,(%[m])+\n"
-            "    move.l (%[s])+,(%[m])+\n"
-            "    or.l %[bit],%[mask]\n"
-            "    bra.s 6b\n"
-            "4:  move.l -4(%[s]),-4(%[m])\n"
-            "    move.l (%[s])+,(%[m])+\n"
-            "    or.l %[bit],%[mask]\n"
-            "    bra.s 6b\n"
-            "5:  move.l -4(%[s]),-4(%[m])\n"
-            "    or.l %[bit],%[mask]\n"
-            "    bra.s 6b\n"
-            "7:\n"
-            : [s] "+a" (s), [m] "+a" (m), [bit] "+d" (bit),
-              [mask] "+d" (mask), [g] "+d" (g)
-            : : "cc", "memory");
+            /* a group that differs is copied from the long that did, the
+             * ones before it being the same already */
+            __asm__ volatile (
+                "1:  cmpm.l (%[s])+,(%[m])+\n"
+                "    bne.s 2f\n"
+                "    cmpm.l (%[s])+,(%[m])+\n"
+                "    bne.s 3f\n"
+                "    cmpm.l (%[s])+,(%[m])+\n"
+                "    bne.s 4f\n"
+                "    cmpm.l (%[s])+,(%[m])+\n"
+                "    bne.s 5f\n"
+                "6:  add.l %[bit],%[bit]\n"
+                "    subq.l #1,%[g]\n"
+                "    bne.s 1b\n"
+                "    bra.s 7f\n"
+                "2:  move.l -4(%[s]),-4(%[m])\n"
+                "    move.l (%[s])+,(%[m])+\n"
+                "    move.l (%[s])+,(%[m])+\n"
+                "    move.l (%[s])+,(%[m])+\n"
+                "    or.l %[bit],%[mask]\n"
+                "    bra.s 6b\n"
+                "3:  move.l -4(%[s]),-4(%[m])\n"
+                "    move.l (%[s])+,(%[m])+\n"
+                "    move.l (%[s])+,(%[m])+\n"
+                "    or.l %[bit],%[mask]\n"
+                "    bra.s 6b\n"
+                "4:  move.l -4(%[s]),-4(%[m])\n"
+                "    move.l (%[s])+,(%[m])+\n"
+                "    or.l %[bit],%[mask]\n"
+                "    bra.s 6b\n"
+                "5:  move.l -4(%[s]),-4(%[m])\n"
+                "    or.l %[bit],%[mask]\n"
+                "    bra.s 6b\n"
+                "7:\n"
+                : [s] "+a" (s), [m] "+a" (m), [bit] "+d" (bit),
+                  [mask] "+d" (mask), [g] "+d" (g)
+                : : "cc", "memory");
 #else
-        do {
-            if (memcmp(s, m, 16)) {
-                memcpy(m, s, 16);
-                mask |= bit;
-            }
-            s += 16;
-            m += 16;
-            bit += bit;
-        } while (--g);
+            do {
+                if (memcmp(s, m, 16)) {
+                    memcpy(m, s, 16);
+                    mask |= bit;
+                }
+                s += 16;
+                m += 16;
+                bit += bit;
+            } while (--g);
 #endif
+        }
         if (mask) {
 #ifdef STDL_SDL2_ST
             /* an ST's colours seen: the changed groups', now the copy's */
@@ -1574,7 +1595,7 @@ int SDL_RenderCopy(SDL_Renderer *renderer, SDL_Texture *texture,
     r->bdy = dy;
     if (!r->compare || !copy_changed(r, texture, s->x, s->y, sx, sy, w, h)) {
         batch_add(r, sx, sy, w, h);
-        if (r->model) {
+        if (r->keep) {
             model_copy(r, texture, s->x, s->y, sx, sy, w, h);
         }
     }
@@ -1789,8 +1810,9 @@ int STDL_SDL2_ClearScreenNow(SDL_Renderer *renderer)
         r->clear[p] = p != shown;
     }
     no_rows(r);
-    if (r->model) {
+    if (r->keep) {
         memset(r->model, (int)r->x, SCREEN_W * SCREEN_H);
+        r->holes = 0;
     }
     r->frame = 0;
     r->drawn = 1;
@@ -1823,6 +1845,47 @@ int STDL_SDL2_GetCheck(SDL_Renderer *renderer, STDL_SDL2_Check *check)
         return SDL_SetError("The screen check is off (STDL_SDL2_HINT_CHECK)");
     }
     *check = renderer->chk;
+    return 0;
+}
+
+/*
+ * The compare on or off from here on (STDL_SDL2_HINT_COMPARE). Off, the
+ * chunky copy of the screen is no longer kept, unless the check keeps
+ * it, and copies cost what they do without one; the memory stays the
+ * renderer's. On again, the groups copied meanwhile are not in it, so
+ * a copy reaching any of a row's is converted whole on that row and
+ * the copy has them from then on; a clear of the screen fills it
+ * again. On for a renderer made without the hint, the copy is
+ * allocated now, all of it groups the copy has not got.
+ */
+int STDL_SDL2_SetCompare(SDL_Renderer *renderer, int on)
+{
+    SDL_Renderer *r = renderer;
+    if (!r) {
+        return SDL_InvalidParamError("renderer");
+    }
+#ifdef STDL_SDL2_ST
+    if (st_on) {
+        return 0;               /* an ST's screen always compares */
+    }
+#endif
+    if (!on) {
+        r->compare = 0;
+        r->keep = CHECKED(r);
+        return 0;
+    }
+    if (!r->model) {
+        r->model = (Uint8 *)malloc(SCREEN_W * SCREEN_H);
+        if (!r->model) {
+            return SDL_OutOfMemory();
+        }
+    }
+    if (!r->keep) {
+        memset(r->mvalid, 0, sizeof(r->mvalid));
+        r->holes = 1;
+        r->keep = 1;
+    }
+    r->compare = 1;
     return 0;
 }
 

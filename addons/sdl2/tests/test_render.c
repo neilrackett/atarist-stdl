@@ -30,10 +30,13 @@
  * as the screen is set up once a program, and again with copies
  * compared (STDL_SDL2_HINT_COMPARE), once of those without the
  * add-on's own check, which then has the chunky copy and no page of
- * its own. On the machine, the one screen the machine has, against
- * the real STDL, the screen check on. It prints S2R:done; SDL2RCH2 is
- * the same with two pages, SDL2RCHC with copies compared
- * (-DSTDL_SDL2_TEST_COMPARE):
+ * its own, and with the compare turned on and off as the run goes
+ * (STDL_SDL2_SetCompare), from none at the start and with the check
+ * off but where X is 0. On the machine, the one screen the machine
+ * has, against the real STDL, the screen check on. It prints
+ * S2R:done; SDL2RCH2 is the same with two pages, SDL2RCHC with copies
+ * compared (-DSTDL_SDL2_TEST_COMPARE) and SDL2RCHT with the compare
+ * toggled and the check off (-DSTDL_SDL2_TEST_TOGGLE):
  *
  *   STCMD_NO_TTY=1 stcmd make sdl2
  *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -std=gnu99 \
@@ -911,13 +914,22 @@ static void port_sequences(void)
     model_place(320, 240);
 }
 
+/* the compare turned on and off as the run goes (STDL_SDL2_SetCompare) */
+static int toggling;
+
 static void random_run(long steps)
 {
     long n;
     for (n = 0; n < steps; n++, step++) {
-        const int what = rndn(100);
-        Tex *t = &tex[rndn(ntex)];
+        int what;
+        Tex *t;
         SDL_Rect s, d;
+        if (toggling && rndn(16) == 0) {
+            /* between copies as often as between frames */
+            CHECK(STDL_SDL2_SetCompare(R, rndn(3) != 0) == 0);
+        }
+        what = rndn(100);
+        t = &tex[rndn(ntex)];
         if (what < 40) {
             random_rect(&s, t->w, t->h);
             d = s;
@@ -1096,6 +1108,61 @@ static void pairs_rules(void)
     }
 }
 
+/*
+ * The compare turned off and on again: what was copied while it was
+ * off is not in the renderer's chunky copy, which still has what was
+ * there before. A box copied with the compare on, another over it with
+ * it off and the first again with it on, a frame each and then in one
+ * frame, must show the first; and after a clear with it off and a box
+ * over that, a box of the clear's colour with it on must show that.
+ */
+static void toggle_rules(void)
+{
+    Tex *a = &tex[0], *b = &tex[3], *c;
+    SDL_Rect box;
+    const Uint8 col = 0x5A;
+    int y;
+    CHECK(SDL_RenderSetLogicalSize(R, 0, 0) == 0);
+    model_place(320, 240);
+    box.x = 32;
+    box.y = 40;
+    box.w = 64;
+    box.h = 16;
+    present();
+    CHECK(STDL_SDL2_SetCompare(R, 1) == 0);
+    copy(a, &box, &box);
+    present();
+    CHECK(STDL_SDL2_SetCompare(R, 0) == 0);
+    copy(b, &box, &box);
+    present();
+    CHECK(STDL_SDL2_SetCompare(R, 1) == 0);
+    copy(a, &box, &box);
+    present();
+    CHECK(STDL_SDL2_SetCompare(R, 0) == 0);
+    copy(b, &box, &box);
+    CHECK(STDL_SDL2_SetCompare(R, 1) == 0);
+    copy(a, &box, &box);
+    present();
+    c = own(64, 16);
+    for (y = 0; y < 16; y++) {
+        memset(c->px + y * c->pitch, col, 64);
+    }
+    CHECK(STDL_SDL2_SetCompare(R, 0) == 0);
+    clear_index(col);
+    present();
+    copy(b, &box, &box);
+    present();
+    CHECK(STDL_SDL2_SetCompare(R, 1) == 0);
+    {
+        SDL_Rect s = box;
+        s.x = s.y = 0;
+        copy(c, &s, &box);
+    }
+    present();
+    ntex--;
+    SDL_DestroyTexture(c->t);
+}
+
 /* a run without the add-on's own check */
 static int unchecked;
 
@@ -1154,13 +1221,17 @@ static int run(unsigned long s, unsigned x, int xconst)
     }
     make_textures();
     CHECK(SDL_RenderSetLogicalSize(R, 321, 200) == -1);
+    CHECK(STDL_SDL2_SetCompare(NULL, 1) == -1);
     copy(&tex[0], NULL, NULL);
     CHECK(STDL_SDL2_SetBorderIndex(R, 0x10) == -1);   /* drawn on now */
     present();
     few_colours();
     port_sequences();
     random_run(1500);
-    pairs_rules();
+    if (toggling) {
+        toggle_rules();
+    }
+    pairs_rules();                /* last: its screen is a lie to the check */
     {
         STDL_SDL2_Check chk;
         if (unchecked) {
@@ -1476,6 +1547,9 @@ int main(void)
 #endif
 
 #if !defined(__m68k__)
+/* cmp: 0 no compare, 1 the hint, 2 turned on and off as the run goes
+ * from none (the add-on's own check off unless X is 0, so that the
+ * chunky copy goes unkept while the compare is off) */
 static int child(int layout, int pages, unsigned x, int xconst, int cmp)
 {
     int f;
@@ -1483,9 +1557,12 @@ static int child(int layout, int pages, unsigned x, int xconst, int cmp)
     fake_third = 1;
     fake_mach.mch_cookie = layout == FAKE_TT ? 0x00020000UL : 0x00030000UL;
     SDL_SetHint(STDL_SDL2_HINT_PAGES, pages == 2 ? "2" : "3");
-    if (cmp) {
+    if (cmp == 1) {
         SDL_SetHint(STDL_SDL2_HINT_COMPARE, "1");
         unchecked = !xconst && x != 0;
+    } else if (cmp == 2) {
+        toggling = 1;
+        unchecked = x != 0;
     }
     f = run(0xC0FFEEUL + (unsigned long)layout * 31 + (unsigned long)pages,
             x, xconst);
@@ -1508,7 +1585,7 @@ int main(void)
     for (layout = 0; layout < 3; layout++) {
         for (pages = 2; pages <= 3; pages++) {
             for (xi = 0; xi < 3; xi++) {
-                for (cmp = 0; cmp <= 1; cmp++) {
+                for (cmp = 0; cmp <= 2; cmp++) {
                     pid_t pid = fork();
                     int status = 0;
                     if (pid == 0) {
@@ -1520,7 +1597,8 @@ int main(void)
                     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
                         printf("test_render: %s, %d pages, X 0x%X%s"
                                " failed\n", names[layout], pages, xs[xi],
-                               cmp ? ", copies compared" : "");
+                               cmp == 1 ? ", copies compared" :
+                               cmp == 2 ? ", the compare toggled" : "");
                         total++;
                     }
                 }
@@ -1549,6 +1627,11 @@ int main(void)
     SDL_SetHint(STDL_SDL2_HINT_PAGES, STDL_SDL2_TEST_PAGES);
 #ifdef STDL_SDL2_TEST_COMPARE
     SDL_SetHint(STDL_SDL2_HINT_COMPARE, "1");
+#endif
+#ifdef STDL_SDL2_TEST_TOGGLE
+    /* the compare turned on and off, the copy unkept while it is off */
+    toggling = 1;
+    unchecked = 1;
 #endif
 #ifdef STDL_SDL2_ST
     f = reduce_checks();

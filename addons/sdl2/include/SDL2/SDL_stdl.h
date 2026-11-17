@@ -43,7 +43,7 @@ extern "C" {
  * nothing, and a texture's pixels are read at the copy as well as when
  * converted. 76.8K; without the memory, no compare. An ST's screen in
  * the experimental 68000 build always compares. Read by
- * SDL_CreateRenderer. */
+ * SDL_CreateRenderer; STDL_SDL2_SetCompare turns it on or off later. */
 #define STDL_SDL2_HINT_COMPARE "STDL_SDL2_COMPARE"
 
 /* "0": in the experimental 68000 build (docs/sdl2.md), an ST's screen
@@ -168,6 +168,23 @@ extern int STDL_SDL2_RenderCopyPairs(SDL_Renderer *renderer,
                                      SDL_Texture *texture,
                                      const SDL_Rect *srcrect,
                                      const SDL_Rect *dstrect);
+
+/*
+ * Copies compared (STDL_SDL2_HINT_COMPARE) on or off from here on, for
+ * a program whose copies are sometimes mostly the screen's already and
+ * sometimes mostly new, as a game's whose view, all new pixels every
+ * frame, may fill the screen or leave a border that never changes.
+ * Off, the renderer stops keeping its chunky copy of the screen (unless
+ * the screen check keeps it) and copies cost what they do without
+ * it; the memory stays. On again, the copy lacks the groups copied
+ * while it was off, and a copy that reaches any of a row's converts
+ * that row of it whole, after which the copy has them; a clear makes
+ * it whole again. On for a renderer made without the hint, the copy is
+ * allocated now (76.8K): -1 with the error set without the memory.
+ * Any time, between copies too. An ST's screen in the experimental
+ * 68000 build compares whatever this says.
+ */
+extern int STDL_SDL2_SetCompare(SDL_Renderer *renderer, int on);
 
 /*
  * The page on show cleared now, margins and all, with no flip; the

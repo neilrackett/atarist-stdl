@@ -222,22 +222,80 @@ void SDL_GetClipRect(SDL_Surface *surface, SDL_Rect *rect)
     }
 }
 
+/* a long of a surface's pixels, wherever the program got them */
+typedef Uint32 __attribute__((__may_alias__)) pixels32;
+
+/*
+ * Whole rows are one memset, which fills at the speed memory takes it.
+ * Any other box is filled here a row at a time, in longs from the
+ * first long's address in the row (a 68000 needs its longs on an even
+ * one), with the bytes before and after: a memset a row cost more in
+ * the call than in the filling, 200 calls for a screen not quite its
+ * surface's width and, for a box of 8x8, three times a loop of bytes.
+ */
 int SDL_FillRect(SDL_Surface *dst, const SDL_Rect *rect, Uint32 color)
 {
-    SDL_Rect r;
+    const SDL_Rect *c;
     Uint8 *p;
-    int y;
+    Uint32 v;
+    long pitch;
+    int x0, y0, x1, y1, w, h;
     if (!dst) {
         return SDL_InvalidParamError("dst");
     }
-    r = rect ? *rect : dst->clip_rect;
-    if (!cut(&r, &dst->clip_rect)) {
+    /* the box cut to the clip rectangle, here and not by cut(): a small
+     * box costs more in its call than in its pixels, most of it the
+     * fetching of instructions from ST-RAM */
+    c = &dst->clip_rect;
+    x0 = c->x;
+    y0 = c->y;
+    x1 = x0 + c->w;
+    y1 = y0 + c->h;
+    if (rect) {
+        const int rx1 = rect->x + rect->w, ry1 = rect->y + rect->h;
+        if (rect->x > x0) {
+            x0 = rect->x;
+        }
+        if (rect->y > y0) {
+            y0 = rect->y;
+        }
+        if (rx1 < x1) {
+            x1 = rx1;
+        }
+        if (ry1 < y1) {
+            y1 = ry1;
+        }
+    }
+    w = x1 - x0;
+    h = y1 - y0;
+    if (w <= 0 || h <= 0) {
         return 0;
     }
-    p = (Uint8 *)dst->pixels + r.y * dst->pitch + r.x;
-    for (y = 0; y < r.h; y++, p += dst->pitch) {
-        memset(p, (int)(Uint8)color, (size_t)r.w);
+    pitch = dst->pitch;
+    p = (Uint8 *)dst->pixels + y0 * pitch + x0;
+    if (w == pitch) {
+        memset(p, (int)(Uint8)color, (size_t)w * (size_t)h);
+        return 0;
     }
+    v = (Uint8)color;
+    v |= v << 8;
+    v |= v << 16;
+    do {
+        Uint8 *q = p;
+        int left = w, n;
+        while (((unsigned long)q & 3) && left) {
+            *q++ = (Uint8)v;
+            left--;
+        }
+        for (n = left >> 2; n > 0; n--) {
+            *(pixels32 *)(void *)q = v;
+            q += 4;
+        }
+        for (n = left & 3; n > 0; n--) {
+            *q++ = (Uint8)v;
+        }
+        p += pitch;
+    } while (--h);
     return 0;
 }
 

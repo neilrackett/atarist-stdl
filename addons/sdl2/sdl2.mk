@@ -185,9 +185,16 @@ $(SDL2CMINILIB): $(SDL2CMINIOBJS) $(SDL2XCMINIOBJS)
 # (Hatari): 122.1ms a frame with every copy compared, 108.2 with none,
 # 115.0 with the compare off for the playfield before this and 104.5
 # with it. 31,764.
+#
+# Raised 31764 -> 31972 on 2026-11-19, by 208 in surface.o for
+# SDL_FillRect: whole rows as one memset, any other box in longs a row
+# with its own cut to the clip rectangle, where each row was a memset.
+# A screen 7.0ms to 4.1 on a TT and 14.2 to 8.1 on a Falcon, a 16x16
+# box 121us to 53 and 231 to 105, an 8x8 one 69us to 29 and 135 to 58
+# (Hatari, ST-RAM). 31,972.
 # A TT or a Falcon has the room; the budget is there so that growth is
 # a decision, raised with its reason or not at all.
-SDL2_MAX = 31764
+SDL2_MAX = 31972
 
 # The checks a build of the add-on must pass:
 # - no SDL_ link symbol in either archive (SDL_stdinc.h says why);

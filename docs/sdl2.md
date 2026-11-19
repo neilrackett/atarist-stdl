@@ -194,7 +194,12 @@ All of these come from the machine:
   unkeyed. `SDL_CreateTextureFromSurface` copies the indices: the
   surface's palette is not the screen's, the renderer's is.
   `SDL_LoadBMP` reads 8-bit BMPs, and 1- and 4-bit ones as 8-bit, but
-  not RLE or 16 to 32 bits (the next section).
+  not RLE or 16 to 32 bits (the next section). `SDL_FillRect` fills a
+  320x200 surface in 4.1ms on a TT and 8.1 on a Falcon, as fast as
+  their memory takes it, and a 16x16 box in 53us and 105 (Hatari,
+  ST-RAM). A smaller box costs more in the call than in its pixels: an
+  8x8 one takes 29us on a TT, where a program's own loop of bytes
+  takes 21.
 - **Byte order:** the swaps are inline (a rotate, or rotate, swap,
   rotate), no call and no link symbol; on the 68000 family the
   little-endian ones are the ones that swap.
@@ -769,7 +774,9 @@ no TT or Falcon to hand, not to play it: the picture is a rough
     from the logical size, the joystick and controller, the queue.
   - `test_surface`: blits against a pixel-by-pixel reference over
     random rectangles, clipped every way, keyed or not, onto another
-    surface and onto themselves; a texture made from a surface against
+    surface and onto themselves; fills against a byte-at-a-time one,
+    every box at each of a long's four addresses, with nothing outside
+    the box changed; a texture made from a surface against
     the page it shows on; streams in memory and in a file; the log.
   - `test_audio`: the callback on a stand-in for STDL's ring that asks
     for what the ring asks. Exactly the obtained size every call,

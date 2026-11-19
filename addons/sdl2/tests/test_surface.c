@@ -121,6 +121,92 @@ static void fills(void)
     SDL_FreeSurface(s);
 }
 
+/*
+ * Every box of a fill against a model, a byte at a time: a surface over
+ * the program's own pixels at each of a long's four addresses, with
+ * rows a multiple of 4 apart and not (so that a row's first long moves
+ * from row to row), and one as wide as its rows, which is filled as
+ * one block. Each x, each width from one pixel to the surface's and
+ * past it, the box hanging off each edge. Nothing outside the box
+ * changes: not the surface's other pixels, the bytes between its rows
+ * or the bytes before and after it.
+ */
+static void fill_boxes(void)
+{
+    enum { W = 23, H = 5, GUARD = 40 };
+    static const int pitches[] = { 23, 24, 25, 26, 27, 32 };
+    static Uint8 buf[GUARD + 3 + 32 * H + GUARD], want[sizeof(buf)];
+    int pi, off, x, y, w, h, bad = 0, boxes = 0;
+    for (pi = 0; pi < (int)(sizeof(pitches) / sizeof(pitches[0])); pi++) {
+        const int pitch = pitches[pi];
+        for (off = 0; off < 4; off++) {
+            Uint8 *px0 = buf + GUARD + off;
+            SDL_Surface *s = SDL_CreateRGBSurfaceFrom(px0, W, H, 8, pitch,
+                                                      0, 0, 0, 0);
+            CHECK(s != NULL);
+            if (!s) {
+                return;
+            }
+            for (x = -2; x < W + 1; x++) {
+                for (w = 1; w <= W + 3; w += (w < 10 || w > W - 2) ? 1 : 5) {
+                    for (y = -1; y < H; y += 2) {
+                        const Uint8 c = (Uint8)(1 + rnd(255));
+                        size_t i;
+                        int xx, yy;
+                        SDL_Rect r;
+                        h = 1 + rnd(H + 1);
+                        for (i = 0; i < sizeof(buf); i++) {
+                            buf[i] = want[i] = (Uint8)rnd(256);
+                        }
+                        for (yy = y; yy < y + h; yy++) {
+                            for (xx = x; xx < x + w; xx++) {
+                                if (xx >= 0 && xx < W && yy >= 0 && yy < H) {
+                                    want[GUARD + off + yy * pitch + xx] = c;
+                                }
+                            }
+                        }
+                        r.x = x;
+                        r.y = y;
+                        r.w = w;
+                        r.h = h;
+                        CHECK(SDL_FillRect(s, &r, c) == 0);
+                        bad += memcmp(buf, want, sizeof(buf)) != 0;
+                        boxes++;
+                    }
+                }
+            }
+            SDL_FreeSurface(s);
+        }
+    }
+    /* rows as wide as the surface: one block, its last row no longer */
+    {
+        Uint8 *px0 = buf + GUARD + 1;
+        SDL_Surface *s = SDL_CreateRGBSurfaceFrom(px0, 24, H, 8, 24, 0, 0, 0,
+                                                  0);
+        SDL_Rect r;
+        size_t i;
+        CHECK(s != NULL);
+        for (y = 0; s && y < H; y++) {
+            for (h = 1; y + h <= H; h++) {
+                for (i = 0; i < sizeof(buf); i++) {
+                    buf[i] = want[i] = (Uint8)rnd(256);
+                }
+                memset(want + GUARD + 1 + y * 24, 0x5A, (size_t)h * 24);
+                r.x = 0;
+                r.y = y;
+                r.w = 24;
+                r.h = h;
+                CHECK(SDL_FillRect(s, &r, 0x5A) == 0);
+                bad += memcmp(buf, want, sizeof(buf)) != 0;
+                boxes++;
+            }
+        }
+        SDL_FreeSurface(s);
+    }
+    CHECK(bad == 0);
+    CHECK(boxes > 5000);
+}
+
 /* SDL_UpperBlit's result, pixel by pixel: each source pixel inside
  * both surfaces and the clip rectangle lands, but for the key */
 static void reference(const Uint8 *src, int sw, int sh, int spitch,
@@ -374,6 +460,7 @@ int main(void)
     CHECK(SDL_Init(SDL_INIT_VIDEO) == 0);
     creation();
     fills();
+    fill_boxes();
     blits();
     texture();
     streams();

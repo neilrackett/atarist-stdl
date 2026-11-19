@@ -1588,6 +1588,54 @@ rules below keep it from being anything else's.
   none of the compositor's groups, batches or masks, which is why
   eight different breakages of those each failed it. `SDL2RCHK` is the
   same test on the machine.
+- **`SDL_FillRect` (`surface.c`) fills in longs, not a memset a row**
+  (2026-11-19). Each row was a `memset`, whose call cost more than its
+  filling: 200 calls for a screen, and for an 8x8 box three times what
+  a loop of bytes takes.
+  - **Now** whole rows (the box as wide as the surface's pitch) are one
+    `memset`, which fills as fast as a loop of longs written for it
+    (4.04ms against 4.08 for 64,000 bytes on a TT). Any other box is
+    filled a row at a time: bytes to the row's first long's address,
+    longs, bytes. A 68000 needs its longs on an even address, and the
+    host's test refuses any not on a long's. The box is cut to the clip
+    rectangle in the function itself, not by `cut()`: of a small box's
+    time most is its call, instructions fetched from ST-RAM, and that
+    took a 16x16 box from 66us to 53 on a TT.
+  - **Measured** in Hatari, the surface in ST-RAM, before and after:
+
+    | | TT | Falcon | Mega STE |
+    |---|---|---|---|
+    | 320x200 | 7.0ms, 4.1 | 14.2ms, 8.1 | 30.1ms, 17.6 |
+    | 64x64 | 594us, 361 | 1157us, 726 | 3964us, 3913 |
+    | 16x16 | 121us, 53 | 231us, 105 | 749us, 547 |
+    | 37x20 at x 3 | 169us, 95 | 329us, 190 | 1102us, 999 |
+    | 8x8 | 69us, 29 | 135us, 58 | 400us, 272 |
+
+    A TT at Hatari's 16MHz is the Falcon's figures within 2%. One
+    port's level, which fills little in a frame, was unchanged: 104.7ms
+    a frame before and 104.9 after on that TT.
+  - **Tried and dropped:** four longs a loop turn. Slower on the
+    machines the add-on is for (a 16x16 box 53us to 60 on a TT, 105 to
+    121 on a Falcon; 64x64, 361 to 393 and 726 to 779), whose writes to
+    ST-RAM bound the loop and whose every extra instruction is another
+    fetch. A 68000's wide boxes, which gained nothing here (64x64 on a
+    Mega STE), are where it would have paid, and that build is
+    experimental.
+  - **Its test** is `test_surface`'s `fill_boxes`: every box against a
+    byte-at-a-time model on surfaces over the test's own bytes, at each
+    of a long's four addresses, rows a multiple of 4 apart and not, and
+    one as wide as its rows; nothing outside the box may change.
+    Fourteen breakages each failed it (the bytes before the longs run
+    past a narrow box, none after, longs from any even address, the
+    block a row long, the block for any box the surface's width, the
+    colour in one byte of the long, a long too many or too few, one
+    row only, each of the clip's four edges, an empty box filled). On
+    the machine a probe filled 14,700 boxes against the same model with
+    none wrong on Hatari's TT, Falcon, Mega STE and ST; it is not in
+    the tree.
+  - **Not done:** `SDL_UpperBlit` and the renderer's chunky copy
+    (`model_copy`) still make a `memcpy` a row, and have not been
+    timed.
 - **What runs once a file is built -Os** (`SDL2_SIZE` in sdl2.mk, as
   the core's `SIZE_OBJS`). `SDL_LoadBMP` (`bmp.o`) came to 1,036 bytes
   against 1,280 at -O2, where gcc 4.6 also copied the error path out

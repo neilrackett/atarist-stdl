@@ -220,6 +220,21 @@ builds by them; take a frame budget from a real machine.
   copy the first time if the hint did not: one port compares while
   its view sits in a border that never changes (4-13% faster) and not
   while the view fills the screen (2-4% slower with it).
+- **A frame that is both kinds turns the compare off for one copy.**
+  A playfield or 3D view that is new every frame, with status displays
+  round it that seldom change: `STDL_SDL2_SetCompare(renderer, 0)`,
+  copy the view, `STDL_SDL2_SetCompare(renderer, 1)`, copy each
+  display's whole box. Only the groups copied while it is off leave
+  the chunky copy, so the displays are still compared and the view is
+  neither read nor kept. Round the view's box out to whole groups and
+  give the displays the groups left: a compared copy sharing a group
+  with the view's converts that row of itself whole every frame. One
+  port's level frame on a 16MHz TT in Hatari: 122.1ms with every copy
+  compared, 108.2 with no compare, 104.5 this way. Do not write a
+  compare of your own beside the renderer for it: that port's first
+  version did, against its own copy of the screen, and took 104.9.
+  (v1.32.0 dropped the whole chunky copy when turned off, and the same
+  calls took 115.0ms there: this needs v1.32.1.)
 - **Pixels drawn twice across (a game's low detail) convert 18%
   faster** through `STDL_SDL2_RenderCopyPairs`: a whole frame 31.0 ->
   25.6ms on a TT, 59.8 -> 48.8 on a Falcon; one port's low-detail

@@ -171,7 +171,9 @@ struct SDL_Renderer {
                                  * compare, the check or an ST want it */
     int holes;                  /* groups of it may not be the screen's,
                                  * as copies went by while it was not
-                                 * kept: those mvalid has, and none other */
+                                 * kept: those mvalid has, and none other.
+                                 * Unkept, a copy takes its groups out of
+                                 * mvalid and a clear all of them */
     Uint32 mvalid[SCREEN_H];
     Uint8 *scratch;             /* the check's page */
     STDL_SDL2_Check chk;
@@ -1267,6 +1269,18 @@ static void flush(SDL_Renderer *r)
 /* ------------------------------------------------------------------ */
 /* drawing                                                             */
 
+/* a clear, in the chunky copy of the screen: all of it colour c while
+ * it is kept, and while it is not, no group of it the screen's */
+static __attribute__((noinline)) void model_fill(SDL_Renderer *r, int c)
+{
+    if (r->keep) {
+        memset(r->model, c, SCREEN_W * SCREEN_H);
+        r->holes = 0;
+    } else if (r->model) {
+        memset(r->mvalid, 0, sizeof(r->mvalid));
+    }
+}
+
 int SDL_RenderClear(SDL_Renderer *renderer)
 {
     SDL_Renderer *r = renderer;
@@ -1309,10 +1323,7 @@ int SDL_RenderClear(SDL_Renderer *renderer)
         }
     }
     NOW_ROWS(r, 0, SCREEN_H - 1);
-    if (r->keep) {
-        memset(r->model, c, SCREEN_W * SCREEN_H);
-        r->holes = 0;
-    }
+    model_fill(r, c);
     r->frame = r->drawn = 1;
     return 0;
 }
@@ -1597,6 +1608,18 @@ int SDL_RenderCopy(SDL_Renderer *renderer, SDL_Texture *texture,
         batch_add(r, sx, sy, w, h);
         if (r->keep) {
             model_copy(r, texture, s->x, s->y, sx, sy, w, h);
+        } else if (r->model) {
+            /* the chunky copy is not kept (STDL_SDL2_SetCompare): the
+             * groups this copy touches are the screen's and no longer
+             * its own, and all its others still are. An AND a row, so
+             * that a program can leave one copy of a frame uncompared
+             * and have the rest of the screen compared as before. */
+            const Uint32 left = ~(Uint32)(((2UL << ((sx + w - 1) >> 4)) - 1) &
+                                          ~((1UL << (sx >> 4)) - 1));
+            Uint32 *v = &r->mvalid[sy];
+            do {
+                *v++ &= left;
+            } while (--h > 0);
         }
     }
     r->frame = r->drawn = 1;
@@ -1810,10 +1833,7 @@ int STDL_SDL2_ClearScreenNow(SDL_Renderer *renderer)
         r->clear[p] = p != shown;
     }
     no_rows(r);
-    if (r->keep) {
-        memset(r->model, (int)r->x, SCREEN_W * SCREEN_H);
-        r->holes = 0;
-    }
+    model_fill(r, (int)r->x);
     r->frame = 0;
     r->drawn = 1;
     return 0;
@@ -1851,12 +1871,16 @@ int STDL_SDL2_GetCheck(SDL_Renderer *renderer, STDL_SDL2_Check *check)
 /*
  * The compare on or off from here on (STDL_SDL2_HINT_COMPARE). Off, the
  * chunky copy of the screen is no longer kept, unless the check keeps
- * it, and copies cost what they do without one; the memory stays the
- * renderer's. On again, the groups copied meanwhile are not in it, so
- * a copy reaching any of a row's is converted whole on that row and
- * the copy has them from then on; a clear of the screen fills it
- * again. On for a renderer made without the hint, the copy is
- * allocated now, all of it groups the copy has not got.
+ * it, and copies cost what they do without one but for an AND a row:
+ * each takes the groups it touches out of those the copy has (mvalid),
+ * and a clear takes them all. On again, the copy has every group no
+ * copy or clear reached meanwhile, so those are compared as if it had
+ * never been off: a program turns it off for the one copy of a frame
+ * that is all new pixels and on for the rest. A copy reaching a group
+ * it lacks is converted whole on that row and the copy has it from
+ * then on; a clear of the screen while kept fills it again. On for a
+ * renderer made without the hint, the copy is allocated now, all of it
+ * groups the copy has not got.
  */
 int STDL_SDL2_SetCompare(SDL_Renderer *renderer, int on)
 {
@@ -1871,7 +1895,15 @@ int STDL_SDL2_SetCompare(SDL_Renderer *renderer, int on)
 #endif
     if (!on) {
         r->compare = 0;
-        r->keep = CHECKED(r);
+        if (r->keep && !CHECKED(r)) {
+            /* mvalid is read from here on: every group, unless some
+             * were missing already */
+            if (!r->holes) {
+                memset(r->mvalid, 0xFF, sizeof(r->mvalid));
+                r->holes = 1;
+            }
+            r->keep = 0;
+        }
         return 0;
     }
     if (!r->model) {
@@ -1879,12 +1911,10 @@ int STDL_SDL2_SetCompare(SDL_Renderer *renderer, int on)
         if (!r->model) {
             return SDL_OutOfMemory();
         }
-    }
-    if (!r->keep) {
         memset(r->mvalid, 0, sizeof(r->mvalid));
         r->holes = 1;
-        r->keep = 1;
     }
+    r->keep = 1;
     r->compare = 1;
     return 0;
 }

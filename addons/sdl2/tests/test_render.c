@@ -1163,6 +1163,126 @@ static void toggle_rules(void)
     SDL_DestroyTexture(c->t);
 }
 
+/*
+ * The compare off for one copy of a frame, as a program has it whose
+ * view is all new pixels and whose border seldom changes. The copy made
+ * with it off takes the groups it touches, in part too, out of the
+ * renderer's chunky copy, and a clear takes them all: a box copied with
+ * the compare on, a small one over part of it with it off (a pixel at a
+ * group's end and at the next one's start, on the box's first row and
+ * its last, across two groups, the whole box, over its edge) or a clear
+ * of either kind, and the first box again with it on must show the
+ * first, in one frame and a frame apart.
+ *
+ * And every other group is compared as if the compare had never been
+ * off. The whole screen copied with it on, a box over it with it off: a
+ * box beside that one, above it or below it, copied again as the screen
+ * has it, is not converted. To see that, its pixels are changed after
+ * the copy and before the present, as a program must not, since a
+ * conversion reads them then: the page must show none of it.
+ */
+static void toggle_one_copy(void)
+{
+    static const SDL_Rect small[] = {
+        { 47, 40, 1, 1 }, { 48, 55, 1, 1 }, { 40, 44, 10, 4 },
+        { 32, 40, 64, 16 }, { 90, 47, 20, 3 }
+    };
+    static const SDL_Rect beside[] = {
+        { 0, 40, 32, 16 }, { 96, 40, 224, 16 }, { 32, 24, 64, 16 },
+        { 32, 56, 64, 16 }, { 0, 0, 320, 40 }, { 0, 56, 320, 184 }
+    };
+    Tex *a = &tex[0], *b = &tex[3];
+    SDL_Rect box, all;
+    int i, k, x, y;
+    CHECK(SDL_RenderSetLogicalSize(R, 0, 0) == 0);
+    model_place(320, 240);
+    box.x = 32;
+    box.y = 40;
+    box.w = 64;
+    box.h = 16;
+    all.x = all.y = 0;
+    all.w = 320;
+    all.h = 240;
+    for (i = 0; i < (int)(sizeof(small) / sizeof(small[0])) + 2; i++) {
+        for (k = 0; k < 2; k++) {
+            CHECK(STDL_SDL2_SetCompare(R, 1) == 0);
+            copy(a, &box, &box);
+            present();
+            CHECK(STDL_SDL2_SetCompare(R, 0) == 0);
+            if (i < (int)(sizeof(small) / sizeof(small[0]))) {
+                copy(b, &small[i], &small[i]);
+            } else if (i & 1) {
+                clear_index(0xA5);
+            } else {
+                clear_now();
+            }
+            if (k) {
+                present();
+            }
+            CHECK(STDL_SDL2_SetCompare(R, 1) == 0);
+            copy(a, &box, &box);
+            present();
+        }
+    }
+
+    /* a clear with the compare on first: the chunky copy is whole when
+     * it is turned off, with nothing said yet of which groups it has */
+    CHECK(STDL_SDL2_SetCompare(R, 1) == 0);
+    clear_index(0x3C);
+    copy(b, &all, &all);
+    present();
+    CHECK(STDL_SDL2_SetCompare(R, 0) == 0);
+    copy(a, &box, &box);
+    CHECK(STDL_SDL2_SetCompare(R, 1) == 0);
+    present();
+    for (i = 0; i < (int)(sizeof(beside) / sizeof(beside[0])); i++) {
+        const SDL_Rect *o = &beside[i];
+        CHECK(SDL_RenderCopy(R, b->t, o, o) == 0);
+        drawn = 1;                  /* a copy flips, whatever it changed */
+        for (k = 0; k < 2; k++) {
+            for (y = o->y; y < o->y + o->h; y++) {
+                for (x = o->x; x < o->x + o->w; x++) {
+                    b->px[y * b->pitch + x] ^= 0xFF;
+                }
+            }
+            if (!k) {
+                present();
+            }
+        }
+    }
+}
+
+/*
+ * The compare turned on for the first time, by a renderer made without
+ * the hint: the chunky copy allocated then has none of the screen,
+ * whatever its memory holds. New memory is often zeroes, so a box of
+ * zeroes over a screen of other pixels must show.
+ */
+static void toggle_first(void)
+{
+    Tex *z;
+    SDL_Rect s, d;
+    int y;
+    CHECK(SDL_RenderSetLogicalSize(R, 0, 0) == 0);
+    model_place(320, 240);
+    copy(&tex[0], NULL, NULL);
+    present();
+    z = own(64, 16);
+    for (y = 0; y < 16; y++) {
+        memset(z->px + y * z->pitch, 0, 64);
+    }
+    s.x = s.y = 0;
+    s.w = d.w = 64;
+    s.h = d.h = 16;
+    d.x = 128;
+    d.y = 200;
+    CHECK(STDL_SDL2_SetCompare(R, 1) == 0);
+    copy(z, &s, &d);
+    present();
+    ntex--;
+    SDL_DestroyTexture(z->t);
+}
+
 /* a run without the add-on's own check */
 static int unchecked;
 
@@ -1227,9 +1347,13 @@ static int run(unsigned long s, unsigned x, int xconst)
     present();
     few_colours();
     port_sequences();
+    if (toggling) {
+        toggle_first();
+    }
     random_run(1500);
     if (toggling) {
         toggle_rules();
+        toggle_one_copy();
     }
     pairs_rules();                /* last: its screen is a lie to the check */
     {

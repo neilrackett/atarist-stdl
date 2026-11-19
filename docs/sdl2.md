@@ -367,16 +367,20 @@ a conversion, and no page owes it.
   so the two together cost what the check costs.
 - **`STDL_SDL2_SetCompare(renderer, on)` turns it on or off** at any
   time, between copies too, for a program whose copies are mostly the
-  screen's at some times and mostly new at others. Off, the renderer
-  stops keeping the chunky copy (unless the check keeps it), and
-  copies cost what they do without one; the memory stays. On again,
-  the chunky copy lacks what was copied meanwhile: a copy that reaches
-  any of those groups on a row converts that row of the copy whole,
-  and the chunky copy has it from then on, so the first frames after
-  turning it on convert what they copy as they would without it. A
-  clear makes the chunky copy whole again. Turned on for a renderer
-  made without the hint, it allocates the chunky copy then (76.8K),
-  and returns -1 with the error set where there is no memory.
+  screen's at some times and mostly new at others, or some of each in
+  one frame ("Off for one copy of a frame", below). Off, the renderer
+  stops keeping the chunky copy (unless the check keeps it): a copy
+  costs what it does without one and an AND a row, which takes the
+  groups it touches, in part too, out of those the chunky copy has,
+  and a clear takes them all. The memory stays. On again, every other
+  group is compared as if it had never been off. A copy that reaches a
+  group taken out converts that row of the copy whole, and the chunky
+  copy has it from then on, so the first frame after a long time off
+  converts what it copies as it would without the compare. A clear
+  with it on makes the chunky copy whole again. Turned on for a
+  renderer made without the hint, it allocates the chunky copy then
+  (76.8K), with none of the screen in it, and returns -1 with the
+  error set where there is no memory.
 
 It pays where most of what is copied has not changed. One port's game
 pushes every 8x8 block it drew on, and in play three groups in four of
@@ -397,8 +401,53 @@ the compare cost it 2-4% with the view at full size and saved 4-13%
 with it smaller (Hatari, a TT), so it turns the compare on whenever
 the view is smaller.
 
+#### Off for one copy of a frame
+
+A game's frame is often both kinds at once: a playfield or a 3D view
+that is new in nearly every pixel, and status displays round it that
+change now and then. Turn the compare off for the view's copy alone:
+
+```c
+STDL_SDL2_SetCompare(renderer, 0);
+SDL_RenderCopy(renderer, texture, &view, &view);     /* all new */
+STDL_SDL2_SetCompare(renderer, 1);
+SDL_RenderCopy(renderer, texture, &beside, &beside); /* seldom new */
+SDL_RenderCopy(renderer, texture, &below, &below);
+```
+
+The view is then neither read nor kept, and the displays are compared
+as before, since only the groups the view's copy touches leave the
+chunky copy. Two rules make it pay:
+
+- **Keep the two kinds in different groups.** Round the view's box out
+  to whole 16-pixel groups and give the displays the groups that are
+  left. A compared copy that shares a group with the view's on some
+  row converts that row of itself whole, every frame.
+- **The program needs no copy of the screen of its own.** One that
+  cannot say what it changed copies each display's whole box every
+  frame and leaves finding the changes to the compare.
+
+One port's game has a playfield 17 groups wide and 184 rows high, new
+every frame, with status displays beside and below it, and copies its
+8-bit frame from its own buffer. A frame of a level on a TT at 16MHz
+(Hatari, 300 frames, the same pictures in each):
+
+| | a frame | of it showing the screen |
+|---|---|---|
+| every copy compared (the hint alone) | 122.1ms | 70.4ms |
+| no compare | 108.2ms | 56.6ms |
+| the compare off for the playfield's copy | 104.5ms | 53.1ms |
+
+Its first version compared the displays itself, against a copy of the
+screen of its own, and sent the renderer only what had changed, with
+no compare in the renderer: 104.9ms. And in v1.32.0, where turning the
+compare off dropped the whole chunky copy, the calls above took
+115.0ms, more than no compare at all, as every display was converted
+every frame.
+
 In the experimental 68000 build an ST's screen always compares, and
-`STDL_SDL2_SetCompare` changes nothing there.
+`STDL_SDL2_SetCompare` changes nothing there, so a program written
+this way runs on it unchanged.
 
 ## The conversion and its cost
 
@@ -492,7 +541,7 @@ A program includes `SDL_stdl.h` itself:
 | `STDL_SDL2_HINT_PAGES` | `"2"` or `"3"` (the default) pages. Three let a frame be drawn while the display still waits for the last; a third costs 153.6K of ST-RAM on a TT and 77-92K on a Falcon, and without the room STDL gives two |
 | `STDL_SDL2_HINT_LOGFILE` | the file `SDL_Log` and the rest write to, a line a message, flushed after each. Without it they write nothing. SDL2's priorities: the application's from INFO, assertions' from WARN, tests' from VERBOSE, the rest CRITICAL only |
 | `STDL_SDL2_HINT_COMPARE` | `"1"`: copies of whole groups are compared with a chunky copy of the screen (76.8K) and only the groups that differ are converted, for a program that copies what it drew on, changed or not: "Copies compared", above |
-| `STDL_SDL2_SetCompare` | that compare on or off from here on, at any time: "Copies compared", above |
+| `STDL_SDL2_SetCompare` | that compare on or off from here on, at any time, for one copy of a frame too: "Copies compared", above |
 | `STDL_SDL2_HINT_CHECK` | `"1"`: the screen check. The renderer keeps a chunky model of the screen, drawn as each copy and clear is made, and compares it, converted, with every page before it flips. It costs 230K and a page's conversion a flip, and is for testing; `STDL_SDL2_GetCheck` reads it |
 | `STDL_SDL2_SetRenderPalette` | the renderer's palette, staged at each present when its version has moved on |
 | `STDL_SDL2_SetRenderDrawIndex` | the clear colour as an index |

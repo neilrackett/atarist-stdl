@@ -176,9 +176,18 @@ $(SDL2CMINILIB): $(SDL2CMINIOBJS) $(SDL2XCMINIOBJS)
 # player sizes it: the compare cost its frame 2-4% at the full size and
 # saved 4-13% at the smaller ones (Hatari, a TT), where the hint alone
 # had to take one or the other for the whole game. 31,680.
+#
+# Raised 31680 -> 31764 on 2026-11-18, by 84 in video.o for the compare
+# turned off for one copy of a frame: a copy made while it is off takes
+# its own groups out of those the chunky copy has, where turning it
+# off had dropped the whole copy. One port's level, a playfield that is
+# new every frame with status displays round it, on a TT at 16MHz
+# (Hatari): 122.1ms a frame with every copy compared, 108.2 with none,
+# 115.0 with the compare off for the playfield before this and 104.5
+# with it. 31,764.
 # A TT or a Falcon has the room; the budget is there so that growth is
 # a decision, raised with its reason or not at all.
-SDL2_MAX = 31680
+SDL2_MAX = 31764
 
 # The checks a build of the add-on must pass:
 # - no SDL_ link symbol in either archive (SDL_stdinc.h says why);

@@ -1691,21 +1691,68 @@ rules below keep it from being anything else's.
     (`keep` 0): copies skip `model_copy`, which was most of what the
     compare cost a copy of new pixels. On again, `holes` says the copy
     may lack groups, `mvalid` a bit a group of those it has (none, at
-    the switch); `copy_changed` takes a row of a box whose groups are
+    the switch, as it was then: see the next note); `copy_changed`
+    takes a row of a box whose groups are
     not all valid whole, into the copy and the batch, and marks them
     valid. A clear while kept makes it whole (`holes` 0). The first
     two host breakages (no `holes` at the switch; `holes` ignored in
     `copy_changed`) passed the random run, which seldom copies a group
     back to what a stale copy still holds: `toggle_rules` does that,
     a frame apart and within a frame, and fails both. A clear while
-    unkept marking the copy whole is no breakage: turning the compare
-    on marks it all stale whatever the clear did. `SDL2RCHT`
+    unkept marking the copy whole was no breakage then, when turning
+    the compare on marked it all stale whatever the clear did; it is
+    one now. `SDL2RCHT`
     (`-DSTDL_SDL2_TEST_TOGGLE`: toggled, the check off) passed on
     Hatari's TT and a Falcon on VGA and RGB. One port's Heretic,
     timedemo demo1 on a TT, 9.87 fps at size 10 (the compare off, no
     copy allocated) and 13.35 at size 7, against 9.86 and 13.44 with
     the hint fixed at start-up; resized in play, the check found no
     flip unlike its model. 380 bytes of `video.o` (`SDL2_MAX`).
+  - **Off for one copy of a frame (2026-11-18).** Turning the compare
+    off dropped the whole chunky copy, so a program could not leave one
+    copy of a frame uncompared and have the rest compared: turned on
+    again no group was valid, and one port's status displays, copied
+    whole every frame, were converted every frame.
+    - **What changed.** While unkept, a copy takes the groups it
+      touches out of `mvalid` (an AND a row in `SDL_RenderCopy`, groups
+      touched in part too) and a clear takes them all (`model_fill`,
+      both clears'). Turning it off makes `mvalid` whole first where
+      nothing was missing (`holes` 0), and turning it on marks nothing:
+      only a copy allocated there has no group. In a program that
+      toggles every frame `holes` stays 1, a test a row in
+      `copy_changed`. No new call: the header already said the copy
+      lacks "the groups copied while it was off".
+    - **Measured** with that port's level, a playfield of 17 groups by
+      184 rows that is new every frame and displays beside and below
+      it, on a TT at 16MHz (Hatari, 300 frames, the same pictures in
+      each): 122.1ms a frame with every copy compared, 108.2 with no
+      compare, 115.0 with the compare off for the playfield as v1.32.0
+      has it, 104.5 with this. The port's own compare of the displays
+      beside the renderer, which this replaces, took 104.9.
+    - **Its tests.** `toggle_one_copy`: a box with the compare on, a
+      smaller copy or a clear of either kind over it with it off, and
+      the box again, a frame apart and within one; then the one test
+      here that sees a conversion not happen. A borrowed texture's
+      pixels are changed after a compared copy the screen already has
+      and before the present, when a conversion would read them, and
+      the page must show none of it. `toggle_first` is the copy
+      allocated at the first turning on: new memory is often zeroes,
+      so a box of zeroes must show. v1.32.0's `video.c` fails the
+      first, as it should, and ten breakages each failed all twelve
+      toggled screens: a copy's groups not taken out, its partial
+      groups, its first row, its last, a clear taking none out, a
+      clear marking all valid, `mvalid` not made whole at the turning
+      off, `holes` not set there, a copy taking every group out, a new
+      copy's `mvalid` not cleared. The seventh and the tenth passed
+      until the test cleared with the compare on first and had
+      `toggle_first`. `SDL2RCHT` passed on Hatari's TT and a Falcon on
+      VGA and RGB, `SDL2RCHK` and `SDL2RCHC` on the TT, and the
+      toggled test through the 68000 build there (`SDL2RCST` with
+      `-DSTDL_SDL2_TEST_TOGGLE`).
+    - **Not done:** converting only the stale groups of a row that a
+      compared copy shares with them. It converts its row of the box
+      whole, as before, and the docs tell a program to keep the two
+      kinds in different groups. 84 bytes of `video.o` (`SDL2_MAX`).
   - **Its tests.** `test_render` runs every TT and Falcon screen with
     the hint off and on, a third of the latter without the add-on's
     own check, when the chunky copy exists and the check's page does

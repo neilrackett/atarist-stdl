@@ -64,6 +64,7 @@ pipeline to copy into a game's own Makefile. The results are tracked, so
 | RASTERS.TOS  | `rasters.c`   | Timer B rasters: copper bars in colour 0 edge to edge, a gradient in colour 15   |
 | RESPDEMO.TOS | `respdemo.c`  | one binary, each machine's best screen: 256 colours and 240 rows on a TT or Falcon |
 | SDL2DEMO.TOS | `sdl2demo.c`  | (`make sdl2`) the SDL2 add-on on a TT or a Falcon: INDEX8 textures, palette cycling, copying what changed (the background in pixel pairs, `STDL_SDL2_RenderCopyPairs`), a box made in a surface and moved by the keys, a pad or the mouse (relative motion), with a tone. `make sdl2st` builds it for every machine against the add-on's experimental 68000 build, not shipped: SDL2ST.TOS, and SDL2ST16.TOS, which gives an ST 16 colours of its own (`STDL_SDL2_SetSTColours`, S to switch) |
+| SDL2C2P.TOS  | `sdl2c2p.c`   | (`make sdl2`) a program's own chunky screen converted by the SDL2 add-on's conversion alone (`SDL_stdl_c2p.h`), no SDL and no renderer: a 68000 program on STDL's 256-colour screen, its picture drawn at half the width, P switching between `STDL_SDL2_ConvertBox` and `STDL_SDL2_ConvertBoxPairs`, the conversion's time on a bar. Needs a TT or a Falcon |
 
 ## The SDL1 add-on's (experimental, `make sdl1`, not shipped)
 

@@ -1552,15 +1552,39 @@ rules below keep it from being anything else's.
   - There is no libgcc arithmetic.
   - Each check was broken on purpose once and failed.
 - **The conversion (`c2p*.c`, `c2p_asm.h`).**
-  - Each loop, with the code round it that runs once a row (from
-    `_cache0` to `_cache1`), must stay within 240 bytes, which fits the
-    68030's 256-byte instruction cache whatever its alignment.
-    `sdl2check` measures that span with `nm` and refuses more, as the
-    assembler cannot measure across forward branches. So nothing
-    else goes inside a row: a copy of the group before the loop, which
-    the loops had until November 2026, made them 428 bytes, fetched
-    again at every row; taking it out made whole frames 12-21% faster
-    in Hatari and boxes two groups wide a third to a half.
+  - Each loop, with the code round it that runs once a row (from label
+    1 to label 9 in `C2P_FUNC`), must stay within 240 bytes, which fits
+    the 68030's 256-byte instruction cache whatever its alignment. The
+    assembler cannot test that span itself across forward branches,
+    but works it out once they are sized into an absolute symbol,
+    `_NAME_cachebytes`, which `sdl2check` reads with `nm`, refusing
+    more. So nothing else goes inside a row: a copy of the group
+    before the loop, which the loops had until November 2026, made them
+    428 bytes, fetched again at every row; taking it out made whole
+    frames 12-21% faster in Hatari and boxes two groups wide a third to
+    a half.
+  - **No label inside a loop may be a text symbol** (2026-11-21). The
+    span's ends were the labels `_NAME_cache0` and `_NAME_cache1`,
+    local text symbols, and a profiler or a debugger takes a text
+    symbol for a function: one port's Hatari profile showed
+    `_stdl_sdl2_c2p_plain2_cache0` "called" 215,134 times in 64 frames,
+    once a group, with the loop's time given to it and not to the
+    function. Now the ends are numeric local labels, which leave no
+    symbol, and the span is an absolute symbol, which Hatari does not
+    load with a program's code symbols. In a.out a `.L` label is still
+    a text symbol (`L` is the local prefix there, `.L` ELF's); numeric
+    labels are local in both. `sdl2check` refuses a `_cache0` or
+    `_cache1` text symbol, a span over 240 and fewer than 38 spans;
+    each was broken on purpose and failed (a loop 16 bytes longer:
+    "_stdl_sdl2_c2p_plain2: 244 bytes of loop"; the old label put
+    back; the old check against the new symbols: "0 conversion loops
+    measured"). Seen in Hatari's TT profiler, a program converting 320x240
+    frames for ever linked against v1.32.1 and against this, its symbols
+    loaded (`symbols prg`, `hatari_profile.py -st` on `profile save`):
+    before, 99.41% of the cycles went to `_stdl_sdl2_c2p_plain2_cache0`,
+    "called" 515,275 times by its own loop, and `_stdl_sdl2_c2p_plain2`
+    had none; after, 99.46% to `_stdl_sdl2_c2p_plain2`, called 107
+    times, once a frame.
   - Every box goes through the assembler on the machine, however
     narrow; the C twin is the host's, and the reference the machine
     checks the assembler against.
@@ -1569,6 +1593,48 @@ rules below keep it from being anything else's.
     constant X. Reading X at run time costs about 3% of a frame.
   - `SDL2CHK` (`tests/hatari/sdl2chk.c`) checks every variant against
     the C twin on the machine and times them.
+  - **The conversion alone is public** (`SDL_stdl_c2p.h`,
+    `STDL_SDL2_ConvertBox` and `STDL_SDL2_ConvertBoxPairs`, 2026-11-21),
+    for a program that converts its own chunky screen with no renderer.
+    One port had included `src/c2p.h` by path, compiled `c2p.c` into
+    itself and built its own pair loops from `c2p_asm.h`; the header
+    is the supported way. The rules that keep it so:
+    - **The header declares nothing of SDL** and includes only
+      `<stdint.h>`, so a program with no SDL.h (or another SDL's)
+      includes it from `addons/sdl2/include`. `c2p.h` includes it by a
+      relative path for the shared declarations, and `SDL_stdl.h`
+      includes it for the variants `STDL_SDL2_SetBorderIndex` names.
+    - **Its objects name nothing else.** The pair loops were in
+      `c2ppair.o` beside `STDL_SDL2_RenderCopyPairs`, which names the
+      renderer's `stdl_sdl2_copy_pairs`, so a call of them would have
+      linked `video.o` and STDL with it; they are `c2pp.o` now
+      (`stdl_sdl2_c2pp`, which the renderer reaches by its pointer as
+      before). `sdl2check` (and `sdl2st` for its archives) links
+      `tests/c2plink.c`, built for the 68000 and as C++98 with only that
+      header, against each archive with no `libstdl.a`; video.o there
+      fails the link on its STDL calls (broken on purpose: a reference
+      to `stdl_sdl2_copy_pairs` in `c2pp.c`).
+    - **The X is chosen inline**: `__builtin_constant_p` folds after
+      inlining in gcc 4.6, so a constant X links its own object (the
+      link map of `c2plink.c` has `c2px70.o` and `c2pany.o` and no other
+      X), and a variable X takes `c2pany.o`.
+    - A program converting only on a TT or a Falcon, built for the
+      68000, links `libstdl-sdl2.a`: the loops are 68000 instructions
+      and the C round them runs only where it is called. SDL2CHK built
+      `-m68000` against it and against `libstdl-sdl2-st.a` matched every
+      case on Hatari's TT, at the 68020 build's times.
+    - Moving the declarations into the public header renumbered gcc's
+      static locals in `timer.o` and `rwops.o` (`_last.4644` became
+      `_last.4699`): their sections and relocations are byte for byte
+      as they were, as are every other object's but `c2ppair.o`'s,
+      which lost the loops (1,584 bytes to 180; `c2pp.o` 1,404).
+    - Tests: `test_c2p` takes both entries against the reference, X
+      written as each constant and from a variable, pairs on pixels in
+      pairs and on pixels not (each breakage of the twin's or the
+      header's X failed it), and boxes of no groups or rows; SDL2CHK the
+      same on the machine (1,152 cases) and their times, which are
+      docs/sdl2.md's "Pairs pay in whole boxes". `SDL2C2P.TOS` is the
+      example, seen on Hatari's TT and a Falcon on VGA and RGB.
 - **Input keeps SDL2's numbers.** Scancodes, key codes, `KMOD_` bits
   and event types are SDL2's own values, which programs keep in saved
   key maps; `test_events` checks a sample, and that every STDL symbol

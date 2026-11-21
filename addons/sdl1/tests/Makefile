@@ -20,10 +20,10 @@ INC1    = -I$(A)/include/SDL1 -I$(A)/../../include
 INC2    = -I$(A)/../sdl2/include/SDL2 -I$(S2) -I$(A)/../../include
 
 SDL2    = $(S2)/init.c $(S2)/error.c $(S2)/hints.c $(S2)/c2p.c \
-          $(S2)/c2pany.c $(S2)/c2ppair.c $(S2)/palette.c $(S2)/timer.c \
-          $(S2)/video.c $(S2)/events.c $(S2)/keymap.c $(S2)/joystick.c \
-          $(S2)/surface.c $(S2)/rwops.c $(S2)/log.c $(S2)/audio.c \
-          $(S2)/audiomix.c $(S2)/wav.c $(S2)/bmp.c
+          $(S2)/c2pany.c $(S2)/c2pp.c $(S2)/c2ppair.c $(S2)/palette.c \
+          $(S2)/timer.c $(S2)/video.c $(S2)/events.c $(S2)/keymap.c \
+          $(S2)/joystick.c $(S2)/surface.c $(S2)/rwops.c $(S2)/log.c \
+          $(S2)/audio.c $(S2)/audiomix.c $(S2)/wav.c $(S2)/bmp.c
 SIDE1   = $(T)/test_sdl1.c $(A)/src/video.c
 SIDE2   = $(A)/src/bridge.c $(T)/sdl2_side.c $(A)/../sdl2/tests/fake_stdl.c
 DEPS    = test_sdl1.c sdl2_side.c ../src/video.c ../src/bridge.c \

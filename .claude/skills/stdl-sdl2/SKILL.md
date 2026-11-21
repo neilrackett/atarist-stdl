@@ -244,6 +244,29 @@ builds by them; take a frame budget from a real machine.
   converted whole, so text over the view stays sharp. The pixels must
   still be in pairs when converted; the screen check
   (`STDL_SDL2_HINT_CHECK`) catches any that are not.
+- **A program that converts its own screen, with no renderer,** calls
+  the conversion alone: `#include <SDL2/SDL_stdl_c2p.h>` from
+  `-I$STDL/addons/sdl2/include` (it declares nothing of SDL), then
+  `STDL_SDL2_ConvertBox(src, src_pitch, dst, dst_pitch, groups, rows,
+  two_lines, x)` or `STDL_SDL2_ConvertBoxPairs(...)` with the same
+  arguments: a box of whole 16-pixel groups into eight planes, a TT's
+  rows on two lines with `two_lines`, X the border index (a constant
+  links its own loops). It links the conversion's objects alone,
+  1,452 bytes and 1,404 more for pairs, no renderer and no
+  `libstdl.a`. A 68000 program that converts only on a TT or a Falcon
+  compiles `-m68000` and links the released `libstdl-sdl2.a` (or
+  `-cmini.a`). Do not include `addons/sdl2/src/c2p.h` or build
+  `c2p_asm.h`'s loops into the program: that is private and changes.
+  `SDL2C2P.TOS` (`examples/sdl2c2p.c`) is the pattern. **Pairs pay in
+  whole boxes**: a call costs some 40us on a TT (70 on a Falcon) and a
+  group as pairs saves 1.1us (2.3), so a 320x240 frame as one call is
+  31.0 -> 25.6ms on a TT, but a call a row 40.9 -> 34.6, slower than
+  one call of whole pixels (Hatari, SDL2CHK). One port's 3D view, 320
+  wide, went 20.5 -> 16.7ms a frame on a TT as one pairs box, where a
+  call a row of pairs measured no faster than whole pixels in its frame
+  and single-group runs as boxes saved nothing. Convert the view as one
+  box of pairs, then what is drawn over it at full width as whole
+  boxes.
 - **A TT writes every row to both of TT Low's lines**, so it is bound
   by its writes to ST-RAM. Its TT-RAM is fast: the add-on allocates
   textures and its working memory with `malloc`, which a program loaded

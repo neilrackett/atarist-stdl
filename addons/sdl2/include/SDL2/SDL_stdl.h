@@ -7,13 +7,16 @@
  * or a Falcon's screen needs said that SDL2 has no words for, and
  * what a program that manages its own screen (pushing the boxes it
  * changed, fading by the palette) needs to stay as it was. A program
- * includes this itself; SDL.h does not.
+ * includes this itself; SDL.h does not. It includes SDL_stdl_c2p.h,
+ * the conversion alone, which a program with no SDL.h can include by
+ * itself.
  */
 
 #ifndef STDL_SDL2_STDL_H
 #define STDL_SDL2_STDL_H
 
 #include "SDL_render.h"
+#include "SDL_stdl_c2p.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -124,14 +127,7 @@ extern SDL_Texture *STDL_SDL2_CreateTextureFrom(SDL_Renderer *renderer,
  * object each, about 900 bytes, costing what X = 0 does); an X known
  * only at run time links the loop that reads it, 4.5% slower.
  */
-struct stdl_sdl2_c2pv;
-extern const struct stdl_sdl2_c2pv
-    stdl_sdl2_c2p_x10, stdl_sdl2_c2p_x20, stdl_sdl2_c2p_x30,
-    stdl_sdl2_c2p_x40, stdl_sdl2_c2p_x50, stdl_sdl2_c2p_x60,
-    stdl_sdl2_c2p_x70, stdl_sdl2_c2p_x80, stdl_sdl2_c2p_x90,
-    stdl_sdl2_c2p_xa0, stdl_sdl2_c2p_xb0, stdl_sdl2_c2p_xc0,
-    stdl_sdl2_c2p_xd0, stdl_sdl2_c2p_xe0, stdl_sdl2_c2p_xf0,
-    stdl_sdl2_c2p_any;
+/* the variants are SDL_stdl_c2p.h's */
 extern int stdl_sdl2_set_border(SDL_Renderer *renderer, unsigned x,
                                 const struct stdl_sdl2_c2pv *v);
 

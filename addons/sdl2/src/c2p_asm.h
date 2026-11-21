@@ -83,10 +83,19 @@
  * is the row's end, for the next row's source and its first group.
  * The box's first stores, of nothing, go to 16 bytes of scratch.
  *
- * The loop and the code round it, from _cache0 to _cache1, must sit
+ * The loop and the code round it, from label 1 to label 9, must sit
  * in the 68030's instruction cache, 16 lines of 16 bytes: 240 bytes
  * fit whatever its alignment, and sdl2.mk's sdl2check refuses more
- * (the assembler cannot measure across forward branches). A copy of
+ * (the assembler cannot measure across forward branches). The span
+ * is the absolute symbol _NAME_cachebytes, which the assembler works
+ * out once the branches are sized and nm reads; the labels themselves
+ * are local and leave no symbol. Until November 2026 they were the
+ * text symbols _NAME_cache0 and _NAME_cache1, which a profiler or a
+ * debugger takes for functions: Hatari's profiler counted every pass
+ * back to the loop's top as a call of _NAME_cache0 (215,134 of them in
+ * one port's 64 frames, once a group) and gave the loop's time to it,
+ * not to NAME. Hatari loads only a program's text symbols for that,
+ * and an absolute one is not. A copy of
  * the group before the loop, which this had until 2026-11-07, made a
  * loop of 428 bytes that left the cache at every row: a 320x240 frame
  * as one row of 4,800 groups took 30.4ms on a TT against 34.3 as 240
@@ -134,7 +143,6 @@
     "	move.l	%sp,%a1\n" \
     A2SET \
     "	moveq	#0,%d6\n" \
-    "_" name "_cache0:\n" \
     "1:\n" G \
     "	dbra	%d6,1b\n" \
     "	tst.l	%d6\n" \
@@ -149,8 +157,8 @@
     "	move.l	20(%sp),24(%sp)\n" \
     "	moveq	#0,%d6\n" \
     "	bra.w	1b\n" \
-    "_" name "_cache1:\n" \
-    "9:\n" DRAIN \
+    "9:\n" \
+    "_" name "_cachebytes = 9b - 1b\n" DRAIN \
     "	lea	32(%sp),%sp\n" \
     "	movem.l	(%sp)+,%d2-%d7/%a2-%a6\n" \
     "	rts\n"
@@ -168,17 +176,18 @@
              "	move.l	%a1,%a2\n	adda.l	92(%sp),%a2\n", C2P_DRAIN2)
 
 /*
- * Pixel pairs (c2ppair.c, STDL_SDL2_RenderCopyPairs): a group whose
- * pixels come in pairs, 2i and 2i + 1 the same, has 8 distinct ones.
- * Two byte merges gather them into d0 and d1 (each long's even bytes
+ * Pixel pairs (c2pp.c, for STDL_SDL2_RenderCopyPairs and
+ * STDL_SDL2_ConvertBoxPairs): a group whose pixels come in pairs, 2i
+ * and 2i + 1 the same, has 8 distinct ones. Two byte merges gather
+ * them into d0 and d1 (each long's even bytes
  * with the third and fourth longs' odd ones), three merges and the
  * 16-bit exchange transpose those 64 bits, and each bit is doubled by
  * merging a long with a copy of itself: 56 instructions a group
  * against 74. The planes come out as d1 (0 and 1), d0 (2 and 3), d3 (4
  * and 5) and d2 (6 and 7), so X's tail is on d3 and d2. Of pixels that
  * are not in pairs it takes the first of each pair in the group's
- * first half and the second in its second half (c2ppair.c's C twin
- * does the same). The steps' roles were found by simulating the
+ * first half and the second in its second half (c2pp.c's C twin does
+ * the same). The steps' roles were found by simulating the
  * instructions against a reference conversion.
  */
 #define C2P_DOUBLE(z, b) \

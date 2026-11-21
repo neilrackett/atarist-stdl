@@ -41,7 +41,7 @@ void stdl_sdl2_screen_origin(int *x, int *y);
  * Pixel pairs (STDL_SDL2_RenderCopyPairs): c2ppair.c's side, which the
  * renderer reaches through the pointer stdl_sdl2_copy_pairs gives it,
  * so that a program that never asks for pairs links none of it. conv
- * converts as stdl_sdl2_c2p does. mark notes a copy of h rows at sx, w
+ * (c2pp.c's stdl_sdl2_c2pp) converts as stdl_sdl2_c2p does. mark notes a copy of h rows at sx, w
  * wide, in the batch's masks from its first row: a pairs copy's whole
  * groups go into pair[] where no other copy has reached them (whole[]
  * less pair[], or part[]); any other copy takes back every group it

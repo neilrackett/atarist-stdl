@@ -37,7 +37,10 @@ changed each frame. The art comes in through SDL2's own `SDL_LoadBMP`, from
 8-bit BMPs that `stdlconv bmp8` makes sharing the screen's one palette.
 
 It is where STDL is chunky, it is never part of the core library, and
-a program gets it only by asking for it.
+a program gets it only by asking for it. A program that draws its own
+chunky screen can take the conversion alone, with no SDL at all
+(`SDL_stdl_c2p.h`: `STDL_SDL2_ConvertBox`, and `STDL_SDL2_ConvertBoxPairs`
+for pixels drawn twice across).
 
 ### SDL1 add-on, for the first day of a port (experimental)
 

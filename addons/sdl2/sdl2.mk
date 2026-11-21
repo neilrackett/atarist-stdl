@@ -21,8 +21,8 @@ SDL2CMINILIB = libstdl-sdl2-cmini.a
 
 SDL2SRCS      = $(SDL2DIR)/src/init.c $(SDL2DIR)/src/error.c \
                 $(SDL2DIR)/src/hints.c $(SDL2DIR)/src/c2p.c \
-                $(SDL2DIR)/src/c2pany.c $(SDL2DIR)/src/c2ppair.c \
-                $(SDL2DIR)/src/palette.c \
+                $(SDL2DIR)/src/c2pany.c $(SDL2DIR)/src/c2pp.c \
+                $(SDL2DIR)/src/c2ppair.c $(SDL2DIR)/src/palette.c \
                 $(SDL2DIR)/src/timer.c $(SDL2DIR)/src/video.c \
                 $(SDL2DIR)/src/events.c $(SDL2DIR)/src/keymap.c \
                 $(SDL2DIR)/src/joystick.c $(SDL2DIR)/src/surface.c \
@@ -192,6 +192,10 @@ $(SDL2CMINILIB): $(SDL2CMINIOBJS) $(SDL2XCMINIOBJS)
 # A screen 7.0ms to 4.1 on a TT and 14.2 to 8.1 on a Falcon, a 16x16
 # box 121us to 53 and 231 to 105, an 8x8 one 69us to 29 and 135 to 58
 # (Hatari, ST-RAM). 31,972.
+# Unchanged on 2026-11-21 when the pair loops left c2ppair.o (1,584)
+# for an object of their own, c2pp.o (1,404; c2ppair.o 180), so that
+# SDL_stdl_c2p.h's STDL_SDL2_ConvertBoxPairs links them without the
+# renderer that STDL_SDL2_RenderCopyPairs names. 31,972.
 # A TT or a Falcon has the room; the budget is there so that growth is
 # a decision, raised with its reason or not at all.
 SDL2_MAX = 31972
@@ -202,11 +206,19 @@ SDL2_MAX = 31972
 #   errors, and refuse to meet the 1.2 shim;
 # - its text within SDL2_MAX;
 # - each conversion loop, with the code round it that runs once a row
-#   (c2p_asm.h's _cache0 to _cache1), within the 240 bytes that sit in
-#   the 68030's 256-byte instruction cache whatever their alignment:
-#   one that outgrew it would fetch part of itself again every row,
-#   from ST-RAM on a Falcon. The assembler cannot measure that span
-#   itself, as it has forward branches, so nm does;
+#   (c2p_asm.h's labels 1 to 9), within the 240 bytes that sit in the
+#   68030's 256-byte instruction cache whatever their alignment: one
+#   that outgrew it would fetch part of itself again every row, from
+#   ST-RAM on a Falcon. The assembler cannot test that span itself, as
+#   it has forward branches, but works it out once they are sized into
+#   an absolute symbol, _NAME_cachebytes, which nm reads. The labels
+#   leave no text symbol, which a profiler would take for a function
+#   (they were _NAME_cache0 and _NAME_cache1 until November 2026), and
+#   a text symbol of that name is refused;
+# - the conversion alone (SDL_stdl_c2p.h) compiles with no SDL.h on the
+#   path, as gnu99 for the 68000 and as C++98, and a program calling
+#   it (tests/c2plink.c) links against each archive with nothing else:
+#   no libstdl.a, so the renderer, which calls STDL, cannot come too;
 # - no libgcc arithmetic at all, as libcallcheck checks the core's
 #   against tests/libcalls.allow: the drawing is built for the 68020,
 #   which multiplies and divides 32 bits itself, so a call would be a
@@ -236,14 +248,28 @@ sdl2check: $(SDL2LIB) $(SDL2CMINILIB)
 	   echo "*** over the SDL2 add-on's size budget"; exit 1; \
 	 fi
 	@$(CROSS)nm -t d $(SDL2LIB) | awk ' \
-	   $$3 ~ /_cache0$$/ { n = $$3; sub(/_cache0$$/, "", n); s[n] = $$1 + 0 } \
-	   $$3 ~ /_cache1$$/ { n = $$3; sub(/_cache1$$/, "", n); e[n] = $$1 + 0 } \
-	   END { for (n in s) { d = e[n] - s[n]; c++; \
-	           if (d <= 0 || d > 240) { bad = 1; \
-	             print "*** " n ": " d " bytes of loop, past the 240 that sit in the 68030 instruction cache" } } \
-	         if (c < 38) { bad = 1; \
+	   $$2 == "a" && $$3 ~ /_cachebytes$$/ { n = $$3; \
+	     sub(/_cachebytes$$/, "", n); d = $$1 + 0; c++; \
+	     if (d <= 0 || d > 240) { bad = 1; \
+	       print "*** " n ": " d " bytes of loop, past the 240 that sit in the 68030 instruction cache" } } \
+	   $$2 ~ /^[Tt]$$/ && $$3 ~ /_cache[01]$$/ { bad = 1; \
+	     print "*** " $$3 ": a loop label as a text symbol, which a profiler takes for a function" } \
+	   END { if (c < 38) { bad = 1; \
 	           print "*** " c + 0 " conversion loops measured, 38 expected" } \
 	         exit bad }'
+	@mkdir -p $(OBJDIR)/$(SDL2DIR)
+	@$(CC) -std=gnu99 $(SDL2_WARN) -Werror -I$(SDL2DIR)/include -m68000 \
+	    -O2 -c -o $(OBJDIR)/$(SDL2DIR)/c2plink.o $(SDL2DIR)/tests/c2plink.c
+	@$(CROSS)g++ -std=c++98 $(SDL2_WARN) -Werror -I$(SDL2DIR)/include \
+	    -m68000 -fsyntax-only -x c++ $(SDL2DIR)/tests/c2plink.c
+	@$(CC) -m68000 -o $(OBJDIR)/$(SDL2DIR)/c2plink.tos \
+	    $(OBJDIR)/$(SDL2DIR)/c2plink.o $(SDL2LIB) || { \
+	   echo "*** the conversion alone does not link without STDL"; exit 1; }
+	@$(CC) -nostdlib -L$(CMINI)/lib -Wl,--traditional-format -m68000 \
+	    -o $(OBJDIR)/$(SDL2DIR)/c2plinkc.tos $(CMINI)/lib/crt0.o \
+	    $(OBJDIR)/$(SDL2DIR)/c2plink.o $(SDL2CMINILIB) -lcmini -lgcc || { \
+	   echo "*** the conversion alone does not link without STDL (cmini)"; \
+	   exit 1; }
 	@calls=`sh tools/libcalls.sh $(SDL2OBJS) $(SDL2XOBJS)` || exit 1; \
 	 if [ -n "$$calls" ]; then \
 	   echo "$$calls"; \
@@ -255,7 +281,7 @@ sdl2check: $(SDL2LIB) $(SDL2CMINILIB)
 # without FPU instructions and linked against the 68000 libraries, as
 # a program using the add-on is (the toolchain's 68020 ones assume an
 # FPU, and a stock Falcon refuses a program linked with them).
-SDL2EXAMPLES  = dist/SDL2DEMO.TOS
+SDL2EXAMPLES  = dist/SDL2DEMO.TOS dist/SDL2C2P.TOS
 SDL2_PROGFLAGS = -O2 -fomit-frame-pointer -std=gnu99 $(SDL2_WARN) \
                  -Iinclude -I$(SDL2DIR)/include/SDL2 -m68020-60 -msoft-float
 
@@ -263,6 +289,17 @@ dist/SDL2DEMO.TOS: examples/sdl2demo.c $(SDL2LIB) $(LIB) | dist
 	@mkdir -p $(OBJDIR)/examples
 	$(CC) $(SDL2_PROGFLAGS) -c -o $(OBJDIR)/examples/sdl2demo.o $<
 	$(CC) -m68000 -o $@ $(OBJDIR)/examples/sdl2demo.o $(SDL2LIB) $(LIB) \
+	    && $(STRIP) $@
+
+# The conversion alone (SDL_stdl_c2p.h) in a program that draws its own
+# chunky screen: built for the 68000, as a port that also runs on an ST
+# is, with no SDL.h on its path, and linked against this archive for
+# the conversion and libstdl.a for its screen.
+dist/SDL2C2P.TOS: examples/sdl2c2p.c $(SDL2LIB) $(LIB) | dist
+	@mkdir -p $(OBJDIR)/examples
+	$(CC) -O2 -fomit-frame-pointer -std=gnu99 $(SDL2_WARN) -Iinclude \
+	    -I$(SDL2DIR)/include -m68000 -c -o $(OBJDIR)/examples/sdl2c2p.o $<
+	$(CC) -m68000 -o $@ $(OBJDIR)/examples/sdl2c2p.o $(SDL2LIB) $(LIB) \
 	    && $(STRIP) $@
 
 sdl2: $(SDL2LIB) $(SDL2CMINILIB) sdl2check $(SDL2EXAMPLES)
@@ -338,6 +375,18 @@ sdl2st: $(SDL2STLIB) $(SDL2STCMINILIB) dist/SDL2ST.TOS dist/SDL2ST16.TOS
 	   echo "*** the SDL2 add-on's ST build defines SDL_ link symbols"; \
 	   exit 1; \
 	 fi
+	@mkdir -p $(OBJDIR)/$(SDL2DIR)
+	@$(CC) -std=gnu99 $(SDL2_WARN) -Werror -I$(SDL2DIR)/include -m68000 \
+	    -O2 -c -o $(OBJDIR)/$(SDL2DIR)/c2plink.o $(SDL2DIR)/tests/c2plink.c
+	@$(CC) -m68000 -o $(OBJDIR)/$(SDL2DIR)/c2plinkst.tos \
+	    $(OBJDIR)/$(SDL2DIR)/c2plink.o $(SDL2STLIB) || { \
+	   echo "*** the ST build's conversion alone does not link without STDL"; \
+	   exit 1; }
+	@$(CC) -nostdlib -L$(CMINI)/lib -Wl,--traditional-format -m68000 \
+	    -o $(OBJDIR)/$(SDL2DIR)/c2plinkstc.tos $(CMINI)/lib/crt0.o \
+	    $(OBJDIR)/$(SDL2DIR)/c2plink.o $(SDL2STCMINILIB) -lcmini -lgcc || { \
+	   echo "*** the ST build's conversion alone does not link without STDL (cmini)"; \
+	   exit 1; }
 
 -include $(SDL2OBJS:.o=.d) $(SDL2CMINIOBJS:.o=.d) $(SDL2XOBJS:.o=.d) \
          $(SDL2XCMINIOBJS:.o=.d) $(SDL2STOBJS:.o=.d) \

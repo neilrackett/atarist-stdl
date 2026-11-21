@@ -14,8 +14,13 @@
  * 320x240 frame each way, into ST-RAM as a page is, a TT's rows
  * doubled, and of a frame's worth of boxes two groups wide, a sprite's
  * box, against the C twin and the routine before. Then the pixel
- * pairs' loops (c2ppair.c) against their twin, on pixels not in pairs
- * so that every one counts, and a whole frame's time as pairs.
+ * pairs' loops (c2pp.c) against their twin, on pixels not in pairs
+ * so that every one counts, and a whole frame's time as pairs. Then
+ * the public entries a program converting its own screen calls
+ * (SDL_stdl_c2p.h's STDL_SDL2_ConvertBox and _ConvertBoxPairs), X
+ * constant and from a variable, against the same; and their times for
+ * a whole frame, a frame a row a call and a frame a group a call,
+ * whole pixels against pairs.
  *
  *   STCMD_NO_TTY=1 stcmd make sdl2
  *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -std=gnu99 \
@@ -30,14 +35,28 @@
  *
  * linked against the 68000 libraries, as a program using the add-on
  * is, so that it starts on a Falcon with no FPU (MACHINE=falcon and
- * TOS 4.04 or EmuTOS). Its cases take about two and a half minutes of
- * the host's time in Hatari, past one waitfor's two.
+ * TOS 4.04 or EmuTOS). Its cases take about three minutes of the
+ * host's time in Hatari, past one waitfor's two.
+ *
+ * Built -m68000 instead, it is a 68000 program converting on a TT or a
+ * Falcon, as docs/sdl2.md's "Converting a program's own screen" has
+ * one do: linked against libstdl-sdl2.a (SDL2CK00.TOS), the archive
+ * that page says to link, or the experimental libstdl-sdl2-st.a
+ * (SDL2CKST.TOS, after `make sdl2st`), whose conversion is the same
+ * assembler built for the 68000:
+ *
+ *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -std=gnu99 -m68000 \
+ *       -Iinclude -Iaddons/sdl2/include/SDL2 -Iaddons/sdl2/src \
+ *       -c -o obj/sdl2chk0.o tests/hatari/sdl2chk.c
+ *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -m68000 \
+ *       -o dist/SDL2CK00.TOS obj/sdl2chk0.o libstdl-sdl2.a libstdl.a
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <osbind.h>
 #include <stdl/stdl.h>
+#include "SDL_stdl_c2p.h"
 #include "c2p.h"
 #include "../../examples/hold.h"
 
@@ -128,8 +147,8 @@ O_FUNC("s2c_old2", O_S2,
        "	add.l	%d7,%d7\n")
 );
 
-/* the pixel pairs' loops (c2ppair.c), called as the renderer calls
- * them through STDL_SDL2_RenderCopyPairs */
+/* the pixel pairs' loops (c2pp.c), called as stdl_sdl2_c2pp calls
+ * them for STDL_SDL2_RenderCopyPairs and STDL_SDL2_ConvertBoxPairs */
 extern stdl_sdl2_c2p_fn stdl_sdl2_c2pp_plain1, stdl_sdl2_c2pp_plain2,
                         stdl_sdl2_c2pp_any1, stdl_sdl2_c2pp_any2;
 
@@ -193,6 +212,31 @@ static void ms(char *out, uint32_t ticks, int frames)
     /* 38400 ticks a second */
     unsigned long us = (unsigned long)ticks * 1000UL / 384UL * 10UL / frames;
     sprintf(out, "%lu.%02lu", us / 1000UL, (us % 1000UL) / 10UL);
+}
+
+/* the public entries: kind 0-2 ConvertBox with X the constant 0, 0x70
+ * or 0xF0 (so that each names its own loops), 3 ConvertBox with X from
+ * a variable, 4 ConvertBoxPairs with X the constant 0, 5 with X from a
+ * variable */
+static volatile unsigned runtime_x;
+
+static void public_box(int kind, const uint8_t *src, long sp, uint8_t *dst,
+                       long dp, long g, long h, int dbl, unsigned x)
+{
+    switch (kind) {
+    case 0: STDL_SDL2_ConvertBox(src, sp, dst, dp, g, h, dbl, 0); break;
+    case 1: STDL_SDL2_ConvertBox(src, sp, dst, dp, g, h, dbl, 0x70); break;
+    case 2: STDL_SDL2_ConvertBox(src, sp, dst, dp, g, h, dbl, 0xF0); break;
+    case 3:
+        runtime_x = x;
+        STDL_SDL2_ConvertBox(src, sp, dst, dp, g, h, dbl, runtime_x);
+        break;
+    case 4: STDL_SDL2_ConvertBoxPairs(src, sp, dst, dp, g, h, dbl, 0); break;
+    default:
+        runtime_x = x;
+        STDL_SDL2_ConvertBoxPairs(src, sp, dst, dp, g, h, dbl, runtime_x);
+        break;
+    }
 }
 
 static const struct stdl_sdl2_c2pv *const fixed[16] = {
@@ -310,6 +354,136 @@ int main(void)
                " cases\n", bad, cases);
     } else {
         printf("S2C: the pair loops match their twin, %ld cases\n", cases);
+    }
+
+    /* the public entries: each kind at its X (every X for those from a
+     * variable), against the C twin or the pairs' twin */
+    cases = bad = 0;
+    for (any = 0; any < 6; any++)
+    for (dbl = 0; dbl < 2; dbl++)
+    for (xi = 0; xi < 16; xi++)
+    for (gi = 0; gi < 6; gi += (gi < 2 ? 1 : 3))    /* 1, 2, 3, 20 */
+    for (hi = 0; hi < 2; hi++)
+    for (oi = 0; oi < 2; oi++) {
+        static const unsigned constant[6] = { 0, 0x70, 0xF0, 0, 0, 0 };
+        uint32_t x2, x0;
+        const unsigned x = (any == 3 || any == 5) ? (unsigned)xi << 4
+                                                  : constant[any];
+        long g = gs[gi], h = hs[hi];
+        if (xi > 0 && !(any == 3 || any == 5)) {
+            continue;           /* a constant X once */
+        }
+        stdl_sdl2_c2p_xor(x, &x2, &x0);
+        memset(a, 0x5A, PAGE);
+        memset(b, 0x5A, PAGE);
+        public_box(any, src + offs[oi], W + 7, a + 32, W, g, h, dbl, x);
+        if (any >= 4) {
+            pairs_twin(src + offs[oi], W + 7, b + 32, W, g, h, dbl, x2, x0);
+        } else {
+            stdl_sdl2_c2p_c(src + offs[oi], W + 7, b + 32, W, g, h, dbl,
+                            x2, x0);
+        }
+        cases++;
+        if (differ(a, b)) {
+            if (bad < 4) {
+                printf("S2C: PUBLIC MISMATCH kind %d dbl %d X %u groups %ld"
+                       " rows %ld source +%ld\n", any, dbl, x, g, h,
+                       offs[oi]);
+            }
+            bad++;
+        }
+    }
+    if (bad) {
+        printf("S2C: the public entries differ from the twins in %ld of"
+               " %ld cases\n", bad, cases);
+    } else {
+        printf("S2C: the public entries match the twins, %ld cases\n",
+               cases);
+    }
+
+    /* their times, X = 0: a whole frame in one call, a call a row (20
+     * groups by 1) and a call a group (1 by 1), whole and as pairs; then
+     * a call a row with the rows taking turns, one whole and one pairs,
+     * as a program sending each row the way its contents say does,
+     * against every row whole */
+    for (dbl = 0; dbl < 2; dbl++) {
+        enum { FRAMES = 10 };
+        uint32_t t[9];
+        char m[8][16];
+        int f, y, c, k;
+        t[0] = STDL_GetHz38400();
+        for (f = 0; f < FRAMES; f++) {
+            STDL_SDL2_ConvertBox(src, W, a, W, W / 16, H, dbl, 0);
+        }
+        t[1] = STDL_GetHz38400();
+        for (f = 0; f < FRAMES; f++) {
+            STDL_SDL2_ConvertBoxPairs(src, W, a, W, W / 16, H, dbl, 0);
+        }
+        t[2] = STDL_GetHz38400();
+        for (f = 0; f < FRAMES; f++) {
+            for (y = 0; y < H; y++) {
+                STDL_SDL2_ConvertBox(src + y * W, W, a + y * W * (dbl + 1),
+                                     W, W / 16, 1, dbl, 0);
+            }
+        }
+        t[3] = STDL_GetHz38400();
+        for (f = 0; f < FRAMES; f++) {
+            for (y = 0; y < H; y++) {
+                STDL_SDL2_ConvertBoxPairs(src + y * W, W,
+                                          a + y * W * (dbl + 1), W, W / 16,
+                                          1, dbl, 0);
+            }
+        }
+        t[4] = STDL_GetHz38400();
+        for (f = 0; f < FRAMES; f++) {
+            for (y = 0; y < H; y++) {
+                for (c = 0; c < W; c += 16) {
+                    STDL_SDL2_ConvertBox(src + y * W + c, W,
+                                         a + y * W * (dbl + 1) + c, W, 1, 1,
+                                         dbl, 0);
+                }
+            }
+        }
+        t[5] = STDL_GetHz38400();
+        for (f = 0; f < FRAMES; f++) {
+            for (y = 0; y < H; y++) {
+                for (c = 0; c < W; c += 16) {
+                    STDL_SDL2_ConvertBoxPairs(src + y * W + c, W,
+                                              a + y * W * (dbl + 1) + c, W,
+                                              1, 1, dbl, 0);
+                }
+            }
+        }
+        t[6] = STDL_GetHz38400();
+        for (f = 0; f < FRAMES; f++) {
+            for (y = 0; y < H; y++) {
+                STDL_SDL2_ConvertBox(src + y * W, W, a + y * W * (dbl + 1),
+                                     W, W / 16, 1, dbl, 0);
+            }
+        }
+        t[7] = STDL_GetHz38400();
+        for (f = 0; f < FRAMES; f++) {
+            for (y = 0; y < H; y++) {
+                if (y & 1) {
+                    STDL_SDL2_ConvertBox(src + y * W, W,
+                                         a + y * W * (dbl + 1), W, W / 16,
+                                         1, dbl, 0);
+                } else {
+                    STDL_SDL2_ConvertBoxPairs(src + y * W, W,
+                                              a + y * W * (dbl + 1), W,
+                                              W / 16, 1, dbl, 0);
+                }
+            }
+        }
+        t[8] = STDL_GetHz38400();
+        for (k = 0; k < 8; k++) {
+            ms(m[k], t[k + 1] - t[k], FRAMES);
+        }
+        printf("S2C: the public entries%s, ms a 320x240 frame, whole and as"
+               " pairs: one call %s %s, a call a row %s %s, a call a group"
+               " %s %s; a call a row, every row whole %s, rows taking"
+               " turns %s\n", dbl ? " on two lines" : "", m[0], m[1], m[2],
+               m[3], m[4], m[5], m[6], m[7]);
     }
 
     /* a whole frame, 20 groups by 240 rows, each way */

@@ -505,8 +505,10 @@ The pixels are read when converted, so they must be in pairs then.
 Ones that are not show one of each pair (the first in a group's first
 half, the second in its second); the screen check
 (`STDL_SDL2_HINT_CHECK`) finds every such frame. Only a program that
-calls it links the pair loops and their bookkeeping (1,584 bytes); every
-program pays 324 bytes for the batch's mask of them. A fixed border
+calls it links the pair loops and their bookkeeping (1,584 bytes: the
+loops' own object, which a program converting by itself calls directly,
+below, 1,404); every program pays 324 bytes for the batch's mask of
+them. A fixed border
 index takes the run-time XOR's pair loops. In the experimental 68000
 build, an ST's screen takes a pairs copy as any other.
 
@@ -537,6 +539,92 @@ The call is inline. With a constant X it links that X's conversion
 alone, about 900 bytes, which costs what X = 0 does. With an X known
 only at run time it links the loop that reads it, about 4.5% slower.
 
+## Converting a program's own screen (`SDL_stdl_c2p.h`)
+
+A program that draws its own byte-per-pixel screen and puts it on a
+TT's or a Falcon's 256-colour screen itself, with no `SDL_Renderer` and
+perhaps no SDL at all, can call the conversion alone:
+
+```c
+#include <SDL2/SDL_stdl_c2p.h>      /* -I$STDL/addons/sdl2/include */
+
+STDL_SDL2_ConvertBox(src, src_pitch, dst, dst_pitch, groups, rows,
+                     two_lines, x);
+STDL_SDL2_ConvertBoxPairs(src, src_pitch, dst, dst_pitch, groups, rows,
+                          two_lines, x);
+```
+
+- **The box:** `groups` 16-pixel groups by `rows` rows, from `src` (its
+  first row's first pixel, `src_pitch` bytes a row, any address on a
+  68030) to `dst` (its first group on its first line, `dst_pitch` bytes
+  a line), eight planes a word each, 16 bytes a group. With `two_lines`
+  each row goes to two lines `dst_pitch` apart, a TT's doubled rows in
+  TT Low, and `dst` moves on `2 * dst_pitch` a row. Nothing happens for
+  a box of no groups or no rows; `groups` is 32,768 at most.
+- **`x` is the border index** (above): 0, or a multiple of 16 up to
+  0xF0. Both calls are inline, so a constant X links its own loops and
+  an X from a variable the loops that read it.
+- **Pairs** are the pair loops of "Pixel pairs", above, for pixels the
+  program drew twice across: every pixel 2i the same as 2i + 1. X = 0
+  has loops of its own and any other X takes the run-time ones.
+- **What it links:** the conversion's objects and nothing else, no
+  renderer and no `libstdl.a` (a program using STDL's screen links that
+  for the screen): X = 0's loops and the C twin, 1,452 bytes; a fixed
+  X's loops 684-696 more, or the run-time X's 704; the pair loops, both
+  X's, 1,404. A program converting whole pixels with X = 0 and pairs
+  links 2,856 bytes of the add-on. `make sdl2` links a program calling
+  both (`addons/sdl2/tests/c2plink.c`) against each archive with
+  nothing else of STDL, where the renderer would fail for want of it.
+- **The header declares nothing of SDL**, so a program with no SDL.h,
+  or another SDL's, includes it from `-I$STDL/addons/sdl2/include`, which
+  puts no `SDL.h` on the include path. `SDL_stdl.h` includes it too.
+- **A 68000 program converting only on a TT or a Falcon** (one binary
+  for every machine, an ST taking another way to its screen) compiles
+  with `-m68000`, links `libstdl-sdl2.a` (or `libstdl-sdl2-cmini.a`
+  with libcmini), the released archives, and calls the conversion only
+  once it knows it has 8 planes. Their loops have no instruction a
+  68000 lacks; the C round them is built for the 68020 and runs only
+  where the program calls it. The experimental `libstdl-sdl2-st.a` has
+  the same conversion built for the 68000 and gives the same pages
+  (SDL2CHK built `-m68000` against each, on Hatari's TT), but is not
+  in a release.
+- **On STDL's responsive screen** (`stdl_responsive.h`): `dst` is the
+  screen's `pixels` plus the box's row times its `pitch` and its group
+  times 16; on a TT `pitch` is two lines, so `two_lines` is 1 and
+  `dst_pitch` is `pitch / 2`, and Flip has nothing to copy; on a Falcon
+  `two_lines` is 0 and `dst_pitch` is `pitch`. `examples/sdl2c2p.c`
+  (`SDL2C2P.TOS`) is the pattern: a 68000 program with its picture
+  drawn at half the width, P switching between the two calls, the time
+  on a bar.
+
+**Pairs pay in whole boxes.** A group converted as pairs saves the
+same however the box is cut, about 1.1us on a TT and 2.3 on a Falcon
+(56 instructions against 74), but each call costs some 40us on a TT and
+70 on a Falcon, its registers saved and its loop set up and drained.
+Times through these calls in Hatari (SDL2CHK, `--cpu-exact`), X = 0,
+ms a 320x240 frame, whole pixels against pairs:
+
+| | TT (rows on two lines) | Falcon on VGA |
+|---|---|---|
+| one call | 31.04 against 25.61 | 60.27 against 49.04 |
+| a call a row | 40.91 against 34.60 | 77.21 against 65.31 |
+| a call a group | 215.43 against 198.31 | 401.73 against 367.55 |
+| a call a row, the rows taking turns between the calls, against every row whole | 38.49 against 40.04 | 72.75 against 77.13 |
+
+So the box comes first: the view as one call rather than a call a row
+saves more than pairs do. Called back to back like this the pairs still
+save something in every row, less where the calls take turns (each
+call's loop pushing the other's out of the 68030's instruction cache).
+Inside a program's frame they can save nothing. One port's 3D view,
+320 pixels wide, on a TT with 2MB of ST-RAM and 4MB of TT-RAM in
+Hatari: its conversion took 20.5ms a frame, and 16.7 with the whole
+view's box as one pairs call; called a row at a time, rows of pairs
+and whole rows as its drawing said, the pairs measured no faster than
+whole pixels, and runs of single groups sent as boxes of their own
+saved nothing. Convert the view as one box of pairs, and what is drawn
+over it at full width (a weapon, messages) as boxes of whole pixels
+after it.
+
 ## Extensions (`SDL_stdl.h`)
 
 A program includes `SDL_stdl.h` itself:
@@ -553,6 +641,7 @@ A program includes `SDL_stdl.h` itself:
 | `STDL_SDL2_CreateTextureFrom` | a texture over the program's own pixels, no copy |
 | `STDL_SDL2_SetBorderIndex` | the border index, above |
 | `STDL_SDL2_RenderCopyPairs` | `SDL_RenderCopy` for pixels in pairs, converted at 56 instructions a group against 74: "Pixel pairs", above |
+| `STDL_SDL2_ConvertBox`, `STDL_SDL2_ConvertBoxPairs` | the conversion alone, whole pixels or pairs, for a program that converts its own screen with no renderer (`SDL_stdl_c2p.h`, which `SDL_stdl.h` includes): "Converting a program's own screen", above |
 | `STDL_SDL2_ClearScreenNow` | the page on show cleared at once, margins and all, with no flip, the others when next drawn on. For a program that clears its screen without presenting a frame |
 | `STDL_SDL2_StagePalette` | the colours staged now, with no present: a fade's steps |
 | `STDL_SDL2_GetRegisterColours` | the 256 colours as last staged, in register order |
@@ -762,7 +851,9 @@ no TT or Falcon to hand, not to play it: the picture is a rough
 
 - **Host tests (`addons/sdl2/tests`, run by `make ci`):**
   - `test_basics`: errors, hints and `SDL_Init` on each machine.
-  - `test_c2p`: the conversion's C against a pixel-by-pixel reference.
+  - `test_c2p`: the conversion's C against a pixel-by-pixel reference,
+    and the public entries (`SDL_stdl_c2p.h`), whole pixels and pairs,
+    X a constant and a variable, against the same.
   - `test_render`: the renderer against a chunky model of its screen,
     drawn a pixel at a time with none of the renderer's arithmetic.
     After every flip, the page shown must be the model converted, byte
@@ -797,7 +888,10 @@ no TT or Falcon to hand, not to play it: the picture is a rough
   queue.
 - **`SDL2CHK` (`tests/hatari/sdl2chk.c`):** every variant of the
   conversion's assembler against its C on the machine, and their
-  times.
+  times; then the public entries the same way, and their times in one
+  call, a call a row and a call a group. Built `-m68000` it is a 68000
+  program converting on a TT or a Falcon, against `libstdl-sdl2.a` or
+  the experimental `libstdl-sdl2-st.a`.
 - **`SDL2RCHK`:** `test_render.c` built for the machine against the
   real STDL. `addons/sdl2/tests/test_render.c` says how to build it,
   and `SDL2RCHC`, the same with copies compared

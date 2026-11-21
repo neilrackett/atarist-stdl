@@ -15,6 +15,10 @@
 #define STDL_SDL2_C2P_H
 
 #include <stdint.h>
+/* the public declarations (the variants, stdl_sdl2_c2p, the pairs'
+ * stdl_sdl2_c2pp and the XOR's longs), by path, so that this header
+ * needs no include path of its own */
+#include "../include/SDL2/SDL_stdl_c2p.h"
 
 /* one of the assembler's loops: as stdl_sdl2_c2p, a line a row or two */
 typedef void stdl_sdl2_c2p_fn(const uint8_t *src, long sp, uint8_t *dst,
@@ -32,26 +36,17 @@ struct stdl_sdl2_c2pv {
     stdl_sdl2_c2p_fn *one;
     stdl_sdl2_c2p_fn *two;
 };
-extern const struct stdl_sdl2_c2pv stdl_sdl2_c2p_plain, stdl_sdl2_c2p_any;
-extern const struct stdl_sdl2_c2pv
-    stdl_sdl2_c2p_x10, stdl_sdl2_c2p_x20, stdl_sdl2_c2p_x30,
-    stdl_sdl2_c2p_x40, stdl_sdl2_c2p_x50, stdl_sdl2_c2p_x60,
-    stdl_sdl2_c2p_x70, stdl_sdl2_c2p_x80, stdl_sdl2_c2p_x90,
-    stdl_sdl2_c2p_xa0, stdl_sdl2_c2p_xb0, stdl_sdl2_c2p_xc0,
-    stdl_sdl2_c2p_xd0, stdl_sdl2_c2p_xe0, stdl_sdl2_c2p_xf0;
 
 /*
- * h rows (at least one) of `groups` groups (at least one) from src,
- * sp bytes a row, to dst, dp bytes a line; with dbl each row goes to
- * two lines, dp apart (a TT's doubled rows), and dst steps 2*dp a
- * row. x2 and x0 are the XOR's two longs (stdl_sdl2_c2p_xor), and v the
- * variant for that X, whose assembler every box goes through on the
- * machine (the host has the C alone). groups is 32,768 at most. src
- * needs no alignment on the 68020; dst is a group's first byte.
+ * stdl_sdl2_c2p (SDL_stdl_c2p.h): h rows (at least one) of `groups`
+ * groups (at least one) from src, sp bytes a row, to dst, dp bytes a
+ * line; with dbl each row goes to two lines, dp apart (a TT's doubled
+ * rows), and dst steps 2*dp a row. x2 and x0 are the XOR's two longs
+ * (stdl_sdl2_c2p_xor), and v the variant for that X, whose assembler
+ * every box goes through on the machine (the host has the C alone).
+ * groups is 32,768 at most. src needs no alignment on the 68020; dst
+ * is a group's first byte.
  */
-void stdl_sdl2_c2p(const uint8_t *src, long sp, uint8_t *dst, long dp,
-                   long groups, long h, int dbl,
-                   const struct stdl_sdl2_c2pv *v, uint32_t x2, uint32_t x0);
 
 /* The C, whatever the width: the assembler's twin, which the host
  * runs and the machine checks the assembler against. */
@@ -60,28 +55,18 @@ void stdl_sdl2_c2p_c(const uint8_t *src, long sp, uint8_t *dst, long dp,
                      uint32_t x0);
 
 /*
- * Pixel pairs (c2ppair.c): as stdl_sdl2_c2p for the variant of X that
- * x2 and x0 make, for rows whose pixels 2i and 2i + 1 are the same;
- * reached through the pointer stdl_sdl2_copy_pairs gives the renderer,
- * so that only a program that asks for pairs links them. On the host,
- * the C twin: the pixels the loops take of a group not in pairs (the
- * first of each pair in its first half, the second in its second),
- * converted.
+ * Pixel pairs (c2pp.c, stdl_sdl2_c2pp in SDL_stdl_c2p.h): as
+ * stdl_sdl2_c2p for the variant of X that x2 and x0 make, for rows
+ * whose pixels 2i and 2i + 1 are the same. An object of its own, which
+ * STDL_SDL2_ConvertBoxPairs calls and the renderer reaches through the
+ * pointer stdl_sdl2_copy_pairs gives it (c2ppair.c), so that only a
+ * program that asks for pairs links them, and one converting by itself
+ * without the renderer. On the host, the C twin: the pixels the loops
+ * take of a group not in pairs (the first of each pair in its first
+ * half, the second in its second), converted.
  */
 typedef void stdl_sdl2_c2pp_fn(const uint8_t *src, long sp, uint8_t *dst,
                                long dp, long groups, long h, int dbl,
                                uint32_t x2, uint32_t x0);
-
-/*
- * The XOR by X as two longs. After the merges planes 4 and 5 are one
- * long's high and low words, as the screen has them, and planes 6 and
- * 7 another's, so X's bits 4-7 are each a word of ones; X's low nibble
- * must be 0.
- */
-static inline void stdl_sdl2_c2p_xor(unsigned x, uint32_t *x2, uint32_t *x0)
-{
-    *x2 = ((x & 0x10) ? 0xFFFF0000UL : 0) | ((x & 0x20) ? 0x0000FFFFUL : 0);
-    *x0 = ((x & 0x40) ? 0xFFFF0000UL : 0) | ((x & 0x80) ? 0x0000FFFFUL : 0);
-}
 
 #endif /* STDL_SDL2_C2P_H */

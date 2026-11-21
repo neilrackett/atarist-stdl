@@ -46,7 +46,7 @@ test_sdl1_st: $(DEPS)
 	rm -rf objst && mkdir -p objst/1 objst/2
 	cd objst/1 && $(CC) $(CFLAGS) $(INC1) -DSDL1_TEST_ST -c $(SIDE1)
 	cd objst/2 && $(CC) $(CFLAGS) $(INC2) -DSTDL_SDL2_ST -c $(SIDE2) \
-	    $(SDL2) $(S2)/st.c
+	    $(SDL2) $(S2)/st.c $(S2)/stpair.c
 	$(CC) $(CFLAGS) -o $@ objst/1/*.o objst/2/*.o
 
 run: $(TESTS)

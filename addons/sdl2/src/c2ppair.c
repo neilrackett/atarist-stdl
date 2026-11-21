@@ -42,7 +42,15 @@ static void mark(Uint32 *pair, const Uint32 *whole, const Uint32 *part,
     }
 }
 
+#ifdef STDL_SDL2_ST
+/* and an ST's screen's own (stpair.c), in the experimental 68000 build */
+#include "st.h"
+static const struct stdl_sdl2_pairs ops = { stdl_sdl2_c2pp, mark,
+                                            stdl_sdl2_st_c2pp,
+                                            stdl_sdl2_st_pairtabs };
+#else
 static const struct stdl_sdl2_pairs ops = { stdl_sdl2_c2pp, mark };
+#endif
 
 int STDL_SDL2_RenderCopyPairs(SDL_Renderer *renderer, SDL_Texture *texture,
                               const SDL_Rect *srcrect,

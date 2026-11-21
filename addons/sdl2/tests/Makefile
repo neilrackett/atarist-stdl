@@ -46,9 +46,9 @@ test_render: test_render.c fake_stdl.c fake_stdl.h $(RENDER) $(HDRS) \
              $(SRC)/c2p.h
 	$(CC) $(CFLAGS) -o $@ test_render.c fake_stdl.c $(RENDER)
 
-# the ST build's renderer (STDL_SDL2_ST, with st.c) on the stand-in's
-# ST screens, then on its TT's and Falcon's
-RENDERST = $(RENDER) $(SRC)/st.c
+# the ST build's renderer (STDL_SDL2_ST, with st.c and its pairs,
+# stpair.c) on the stand-in's ST screens, then on its TT's and Falcon's
+RENDERST = $(RENDER) $(SRC)/st.c $(SRC)/stpair.c
 
 test_render_st: test_render.c fake_stdl.c fake_stdl.h $(RENDERST) $(HDRS) \
                 $(SRC)/st.h

@@ -510,7 +510,8 @@ loops' own object, which a program converting by itself calls directly,
 below, 1,404); every program pays 324 bytes for the batch's mask of
 them. A fixed border
 index takes the run-time XOR's pair loops. In the experimental 68000
-build, an ST's screen takes a pairs copy as any other.
+build an ST's screen has pair loops of its own, about half the time of
+its whole conversion ("An ST's screen, for testing", below).
 
 Every time here is Hatari's. A real TT takes 2.3 times as long as
 Hatari's TT over the same compiled code, and 3.0 to 3.9 times over
@@ -723,6 +724,46 @@ no TT or Falcon to hand, not to play it: the picture is a rough
   the blocks it drew on, changed or not, pays a compare for most of
   them: one port's game converted 6ms a frame on a Mega STE where it
   had converted 20. Other copies are converted whole.
+- **Pixel pairs** (`STDL_SDL2_RenderCopyPairs`) have a conversion of
+  their own: a group's eight pairs are eight lookups where any other
+  group's pixels are sixteen, 382 cycles a group against 734 by the
+  instructions' counts (24 a pixel against 46). The rule is the TT's
+  and the Falcon's: a group goes through it only if every copy of it
+  before the present was a pairs copy covering it whole. Here pairs
+  copies are compared too, as every copy of whole groups is, and an
+  ordinary copy that changes nothing still takes back the groups it
+  covers.
+  - **Pixels not in pairs** show the second of each pair, the pixel at
+    x + 1 at an even x too. A pair is read as one word, so pairs from
+    an odd address or with an odd pitch are converted whole, as any
+    copy.
+  - **Its tables** are 8K, the two rows' sets of four, made from the
+    conversion's own tables, so a group in pairs comes out as the whole
+    conversion gives it by construction. They are allocated at the
+    first pairs copy (a program that never asks has none, and links
+    none of the code, `stpair.o`'s 332 bytes; the renderer is 292 bytes
+    larger in this build for it) and made again whenever the maps move:
+    15ms on an 8MHz ST and 9 on a Mega STE, beside the 28 and 15 the
+    conversion's own take and the whole screen converted again that a
+    move costs. Without the memory a pairs copy is converted as any.
+  - **What it buys**, in Hatari (`tests/hatari/sdl2stp.c`, ST Low, every
+    group new every frame, a frame's copies and present less its
+    flip's wait):
+
+    | ms | ST, 8MHz | Mega STE |
+    |---|---|---|
+    | The loops alone, a 320x168 view | 343 -> 179 | 181 -> 104 |
+    | A frame, all 320x200 in pairs | 767 -> 574 | 409 -> 320 |
+    | A frame, a 320x168 view in pairs over a 32-row bar of whole pixels | 767 -> 606 | 410 -> 335 |
+    | A frame, all in pairs, the program's own 16 colours | 517 -> 325 | 292 -> 203 |
+
+    The last row is the rest of a frame of new pixels: noting the
+    colours each changed group brings (`st_seen16`, 16 lookups a
+    group, pairs or not) is about 250ms of an ST's 767 and 117 of a
+    Mega STE's 409, and the program's own 16 note none. Noting only
+    the second pixel of each pair would halve that for pairs, at the
+    price of the test's model knowing which groups were converted as
+    pairs; not done.
 - **The 16 colours are made from the colours on the screen**, not
   from the palette as a whole: 15 slots and black. A program's
   palette has many colours its picture does not show, and every one
@@ -833,17 +874,25 @@ no TT or Falcon to hand, not to play it: the picture is a rough
   at a time, on the tall screen's 240 rows, on 200 where the border
   did not open and on a border cut short, with two pages and three
   and border indices 0 and 0x70, and the reduction against what it
-  promises, and ST Low by the hint. Then it runs `test_render`'s 36 TT
-  and Falcon screens through this build, which must show them as the
+  promises, and ST Low by the hint; the pair loop against a
+  conversion a pixel at a time and against the whole loop (rows in
+  pairs byte for byte, rows not as their second pixels), and pairs
+  copies on the screen, compared, with ordinary copies over them, from
+  an odd address and before any map has moved. Then it runs
+  `test_render`'s TT and Falcon screens through this build, which must show them as the
   other does. Eleven breakages of the ST path each failed it, ten more
   of it as it stood at v1.24.0, fifteen of the changed-group compare,
   the rows kept and the conversion's tables (a sixteenth, a page's
   owed rows never cleared, only copies more), and seventeen of the
   colours seen and the reduction: the test notes what its own model
   shows, counts it where the renderer should, and expects the
-  renderer's colours seen, maps and registers from that. `SDL2RCST` is the same on the machine (`test_render.c` says
+  renderer's colours seen, maps and registers from that; and fourteen
+  of the pixel pairs (the tables, the loop's C, the marking of compared
+  copies, the address test). `SDL2RCST` is the same on the machine (`test_render.c` says
   how to build it), and passed against the real STDL on Hatari's ST,
-  tall, and on its TT and its Falcon on VGA; `SDL2ST.TOS` showed all
+  tall, and on its TT and its Falcon on VGA; with the pairs, on an ST,
+  an STE, a Mega STE, a TT and a Falcon on VGA (the pair loop's
+  assembler with two of its tables swapped failed it on the ST); `SDL2ST.TOS` showed all
   240 rows on an STE. The border has not been seen on
   a real machine with this.
 
@@ -899,6 +948,11 @@ no TT or Falcon to hand, not to play it: the picture is a rough
   and `SDL2RCHT` with the compare turned on and off as it goes
   (`STDL_SDL2_SetCompare`) and the add-on's own check off, so that the
   chunky copy goes unkept while the compare is off.
+- **`SDL2STP` (`tests/hatari/sdl2stp.c`):** pixel pairs on an ST's
+  screen in the experimental 68000 build, timed: the pair loop against
+  the whole one (and the same pages from both), their tables' making,
+  and frames of new pixels in pairs and not, the table under "An ST's
+  screen, for testing".
 - **`SDL2BMP` (`tests/hatari/sdl2bmp.c`):** art `stdlconv bmp8` made
   (`sdl2bmp.py`), loaded with `SDL_LoadBMP` from the drive with the
   core's 4-bit `SAIL.BMP`, each hashed as `sdl2bmp.py` hashes Pillow's

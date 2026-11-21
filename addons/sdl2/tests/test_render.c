@@ -58,7 +58,9 @@
  * present flips when the maps have moved though nothing was drawn. The
  * test notes the colours its model shows and expects the renderer's
  * colours seen, maps and registers from them (st_eval), and the
- * reduction is checked for what it promises before the runs. On an ST:
+ * reduction is checked for what it promises before the runs, and the
+ * ST's own pair loop (pair_checks): pixel pairs on an ST's screen show
+ * the second of each pair where they are not pairs. On an ST:
  *
  *   STCMD_NO_TTY=1 stcmd make sdl2st
  *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -std=gnu99 -m68000 \
@@ -1051,29 +1053,42 @@ static Uint32 lies;
  * Pairs' rule: a group is converted as pairs only if every copy of it
  * in the batch was a pairs copy. The whole screen in pairs but for one
  * group, whose pixels are not, copied as pairs with that group copied
- * again as any, after and then before, shows the group as it is; then
- * as pairs alone, it shows what the loops take of it (the C twin's
- * pixels: the first of each pair in the group's first half, the second
- * in its second), which the add-on's own check finds unlike.
+ * again as any, after and then before, shows the group as it is: a
+ * pixel of it (partial) and then the whole group (on an ST's screen a
+ * compared copy, which changes nothing after the pairs copy and must
+ * still take the group back). Then as pairs alone, it shows what the
+ * loops take of it, which the add-on's own check finds unlike: on a TT
+ * or a Falcon the C twin's pixels, the first of each pair in the
+ * group's first half and the second in its second; on an ST's screen
+ * the second of each pair. Last, pairs from a texture at an odd
+ * address with an odd pitch, from its second row (at an even address,
+ * the next one at an odd): an ST's screen reads a pair as a word, so
+ * converts those whole and shows them as they are; the 68030's loops
+ * take them as pairs.
  */
 static void pairs_rules(void)
 {
-    Tex *t = &tex[3];               /* borrowed, 320x240 */
-    SDL_Rect all, spot;
+    Tex *t;
+    SDL_Rect all, spot, grp;
     int k, y, x;
     CHECK(SDL_RenderSetLogicalSize(R, 0, 0) == 0);
     model_place(320, 240);
-    all.x = all.y = 0;
-    all.w = 320;
-    all.h = 240;
     spot.x = 33;
-    spot.y = 10;
+    spot.y = 100;                   /* on every page an ST's screen has */
     spot.w = 1;
     spot.h = 6;
-    for (k = 0; k < 3; k++) {
+    grp = spot;
+    grp.x = 32;
+    grp.w = 16;
+    for (k = 0; k < 6; k++) {
+        t = &tex[k < 5 ? 3 : 2];    /* 320x240 borrowed; 250x200 at 3, 263 */
+        all.x = 0;
+        all.y = k == 5;             /* its rows from an odd one: an even address */
+        all.w = t->w;
+        all.h = t->h - all.y;
         present();
-        for (y = 0; y < 240; y++) {
-            for (x = 0; x < 320; x += 2) {
+        for (y = 0; y < t->h; y++) {
+            for (x = 0; x + 1 < t->w; x += 2) {
                 t->px[y * t->pitch + x + 1] = t->px[y * t->pitch + x];
             }
         }
@@ -1082,25 +1097,39 @@ static void pairs_rules(void)
             g[1] = (Uint8)(g[0] ^ 0x55);        /* the first half's */
             g[8] = (Uint8)(g[9] ^ 0xAA);        /* the second half's */
         }
-        if (k == 0) {
+        switch (k) {
+        case 0:
             CHECK(STDL_SDL2_RenderCopyPairs(R, t->t, &all, &all) == 0);
             CHECK(SDL_RenderCopy(R, t->t, &spot, &spot) == 0);
-        } else if (k == 1) {
+            break;
+        case 1:
             CHECK(SDL_RenderCopy(R, t->t, &spot, &spot) == 0);
             CHECK(STDL_SDL2_RenderCopyPairs(R, t->t, &all, &all) == 0);
-        } else {
+            break;
+        case 3:
             CHECK(STDL_SDL2_RenderCopyPairs(R, t->t, &all, &all) == 0);
+            CHECK(SDL_RenderCopy(R, t->t, &grp, &grp) == 0);
+            break;
+        case 4:
+            CHECK(SDL_RenderCopy(R, t->t, &grp, &grp) == 0);
+            CHECK(STDL_SDL2_RenderCopyPairs(R, t->t, &all, &all) == 0);
+            break;
+        default:
+            CHECK(STDL_SDL2_RenderCopyPairs(R, t->t, &all, &all) == 0);
+            break;
         }
         model_copy(t, &all, &all);
         drawn = 1;
-#ifdef STDL_SDL2_ST
-        if (!is_st)
-#endif
-        if (k == 2) {
-            /* the loops' pixels where they are not pairs */
+        /* the loops' pixels where they are not pairs */
+        if (k == 2 || (k == 5 && !is_st)) {
             for (y = spot.y; y < spot.y + spot.h; y++) {
-                model[y + yoff][32 + 1 + xoff] = model[y + yoff][32 + xoff];
-                model[y + yoff][32 + 8 + xoff] = model[y + yoff][32 + 9 + xoff];
+                Uint8 *m = &model[y + yoff][32 + xoff];
+                if (is_st) {
+                    m[0] = m[1];
+                } else {
+                    m[1] = m[0];
+                }
+                m[8] = m[9];
             }
             lies++;
         }
@@ -1345,6 +1374,17 @@ static int run(unsigned long s, unsigned x, int xconst)
     copy(&tex[0], NULL, NULL);
     CHECK(STDL_SDL2_SetBorderIndex(R, 0x10) == -1);   /* drawn on now */
     present();
+    {
+        /* pixel pairs at once, of colours on the page already: an ST's
+         * pair tables as they are made at the first pairs copy, as no
+         * new maps come to make them again */
+        SDL_Rect a;
+        a.x = a.y = 0;
+        a.w = 320;
+        a.h = 240;
+        copy_pairs(&tex[0], &a, &a);
+        present();
+    }
     few_colours();
     port_sequences();
     if (toggling) {
@@ -1601,6 +1641,81 @@ static int reduce_checks(void)
 }
 #endif
 
+#ifdef STDL_SDL2_ST
+/*
+ * An ST's pair conversion (stpair.c) on its own: random maps, boxes of
+ * up to 20 groups by 7 rows with strides wider than the box, starting
+ * on an even row or an odd one. Rows in pairs come out byte for byte
+ * as the whole conversion gives them, and both as a pixel-by-pixel
+ * conversion through the maps (the first slot where x + the row is
+ * even); rows not in pairs as that conversion of the second pixel of
+ * each pair. Nothing past a row's groups is written. On the machine it
+ * is the assembler.
+ */
+static Uint32 ptabs_w[2 * 1024], ptabs_p[2 * 1024];
+static Uint8 pc_src[7 * 336], pc_got[7 * 184], pc_want[7 * 184];
+
+static int pair_checks(void)
+{
+    Uint8 a[256], b[256];
+    int k, i;
+    failures = 0;
+    seed = 0x9A125;
+    for (k = 0; k < 96; k++) {
+        const int paired = k & 1, odd = (k >> 1) & 1;
+        const long groups = 1 + rndn(20), h = 1 + rndn(7);
+        const long sp = 16 * groups + 2 * rndn(9);
+        const long dp = 8 * groups + 8 * rndn(3);
+        const Uint32 *t0 = ptabs_w + (odd ? 1024 : 0);
+        const Uint32 *t1 = ptabs_w + (odd ? 0 : 1024);
+        long x, y;
+        for (i = 0; i < 256; i++) {
+            a[i] = (Uint8)(rnd() & 15);
+            b[i] = (Uint8)((k & 4) ? a[i] : rnd() & 15);
+        }
+        stdl_sdl2_st_spread(a, b, ptabs_w);
+        stdl_sdl2_st_pairtabs(ptabs_w, ptabs_p);
+        fill_random(pc_src, (long)sizeof(pc_src));
+        for (y = 0; y < h && paired; y++) {
+            for (x = 0; x < 16 * groups; x += 2) {
+                pc_src[y * sp + x + 1] = pc_src[y * sp + x];
+            }
+        }
+        /* the pixels as the maps show them, the second of each pair */
+        memset(pc_want, 0xA5, sizeof(pc_want));
+        for (y = 0; y < h; y++) {
+            memset(pc_want + y * dp, 0, (size_t)(8 * groups));
+            for (x = 0; x < 16 * groups; x++) {
+                const Uint8 c = pc_src[y * sp + (x | 1)];
+                const unsigned v = ((x + y + odd) & 1) ? b[c] : a[c];
+                Uint8 *grp = pc_want + y * dp + (x >> 4) * 8;
+                int p;
+                for (p = 0; p < 4; p++) {
+                    if (v >> p & 1) {
+                        grp[2 * p + ((x & 15) >> 3)] |= (Uint8)(0x80 >> (x & 7));
+                    }
+                }
+            }
+        }
+        memset(pc_got, 0xA5, sizeof(pc_got));
+        stdl_sdl2_st_c2pp(pc_src, sp, pc_got, dp, groups, h,
+                          ptabs_p + (odd ? 1024 : 0),
+                          ptabs_p + (odd ? 0 : 1024));
+        CHECK(memcmp(pc_got, pc_want, sizeof(pc_got)) == 0);
+        if (paired) {
+            memset(pc_got, 0xA5, sizeof(pc_got));
+            stdl_sdl2_st_c2p(pc_src, sp, pc_got, dp, groups, h, t0, t1);
+            CHECK(memcmp(pc_got, pc_want, sizeof(pc_got)) == 0);
+        }
+        step++;
+    }
+    if (failures) {
+        printf("test_render_st: the pair conversion failed\n");
+    }
+    return failures;
+}
+#endif
+
 #if !defined(__m68k__) && defined(STDL_SDL2_ST)
 static int main256(void);
 
@@ -1611,7 +1726,7 @@ int main(void)
      * which is ST Low's page and may have three; a border cut short */
     static const unsigned xs[] = { 0, 0x70 };
     static const int rows[] = { 240, 200, 216, 0 };
-    int ri, pages, xi, total = reduce_checks(), runs = 0;
+    int ri, pages, xi, total = reduce_checks() + pair_checks(), runs = 0;
     for (ri = 0; ri < 4; ri++) {
         for (pages = 2; pages <= 3; pages++) {
             for (xi = 0; xi < 2; xi++) {
@@ -1759,6 +1874,7 @@ int main(void)
 #endif
 #ifdef STDL_SDL2_ST
     f = reduce_checks();
+    f += pair_checks();
     f += run(0xC0FFEEUL, 0x70, 1);
 #else
     f = run(0xC0FFEEUL, 0x70, 1);

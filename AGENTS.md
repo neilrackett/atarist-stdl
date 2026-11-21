@@ -1789,6 +1789,70 @@ rules below keep it from being anything else's.
     `test_render`'s own TT and Falcon screens through this build. It
     is not shipped and has no size budget; its example is the add-on's
     demo built against it (`dist/SDL2ST.TOS`).
+  - **Pixel pairs on an ST's screen** (`stpair.c`, 2026-11-21), where a
+    pairs copy had been converted as any other.
+    - **The loop** reads a pair as one word, takes its second pixel's
+      byte (`and.w` with $FF) as the index and ORs one long a pair from
+      four tables, a pair's place among four in a byte of each plane,
+      so a group is eight lookups and no shift: 40 cycles a pair where
+      st.c's loop spends 40 a pixel, 382 a group against 734 by the
+      instructions' counts. Its tables (8K, both rows' sets) are made
+      from the conversion's own, two of its tables ORed a pair and the
+      first two shifted 4, so a group in pairs is the whole
+      conversion's by construction; `malloc`ed at the first pairs copy
+      (`ptab`) and made again in `st_reduce` whenever the maps move.
+      A word read needs an even address, so `convert_rows` converts
+      pairs whole when the source or the pitch is odd.
+    - **Pairs copies are compared here**, as the ST always compares:
+      uncompared, a still view in pairs would convert every group a
+      frame where a compare costs about 70 cycles one. `copy_changed`
+      takes pairs copies on an ST and applies `mark`'s rule to the
+      groups that changed; an ordinary copy takes back every group of
+      its box, changed or not, as the rule is about copies (a whole
+      group copied as it was after a pairs copy would otherwise stay
+      pairs, which `pairs_rules`' fourth case fails). A TT or a Falcon
+      in this build refuses them there as the other build does.
+    - **Bytes and memory**: `stpair.o` 332, reached only through
+      `c2ppair.c`'s pointers (`struct stdl_sdl2_pairs` gains two under
+      `STDL_SDL2_ST`), so a program that never asks links none of it
+      and allocates no tables; `video.o` 292 more in this build for
+      every program, `c2ppair.o` 8. `libstdl-sdl2.a` and
+      `-cmini.a` were compared object by object (`objdump -dr -s`)
+      before and after: all 70 the same.
+    - **Measured** (`tests/hatari/sdl2stp.c`, SDL2STP, Hatari, ST
+      Low): the loops alone over a 320x168 view 343.4 -> 179.3ms on an
+      8MHz ST (51 -> 27 cycles a pixel with TOS's interrupts) and 180.5
+      -> 103.9 on a Mega STE; tables 15.0ms against the conversion's
+      own 28.5 (9.0 and 15.2). Frames of new pixels, every group
+      changed: all 320x200 in pairs 766.8 -> 574.0 (409.4 -> 320.0), a
+      320x168 view in pairs over a 32-row bar 767.1 -> 605.8 (409.6 ->
+      335.5), and with `STDL_SDL2_SetSTColours`, which notes no colour,
+      517.5 -> 324.7 (292.5 -> 203.1).
+    - **Not done**: noting the colours a changed group brings
+      (`st_seen16`, 16 lookups) is about 250ms of the ST's 767, pairs
+      or not. Noting only the second pixel of each pair would halve it
+      for pairs, but the test's model notes every pixel it copies, and
+      to expect less it would have to know which groups the compositor
+      converted as pairs.
+    - **Tests**: `pair_checks` in `test_render.c` (host and SDL2RCST)
+      takes the loop against a conversion a pixel at a time through
+      random maps and against the whole loop, 96 boxes of up to 20
+      groups by 7 rows, wider strides, either row's set first, in pairs
+      and not; `pairs_rules` expects an ST's second pixels, an ordinary
+      whole group after and before a pairs copy, and pairs from an odd
+      address and pitch converted whole; `run` copies pairs before any
+      map moves (ASan's filled `malloc` showed the tables never made).
+      Fourteen breakages each failed `test_render_st`: tables not made
+      again at a move, not made at the first copy, made from one set or
+      with a and b swapped, the C reading the first pixel or not
+      swapping sets a row, an ordinary copy taking back only the
+      changed groups, a pairs copy marking every changed group or
+      ignoring `bpart`, marking none, `bpaired` not set, no address
+      test, the source's alone (caught once the case started on an
+      odd row), pairs ignored. SDL2RCST passed on Hatari's ST, STE,
+      Mega STE, TT and Falcon on VGA; built with two of the loop's
+      tables swapped it failed on the ST (`pair_checks`). `SDL2ST.TOS`,
+      whose background is pairs, showed it on an STE.
 - **Copies compared (`STDL_SDL2_HINT_COMPARE`, `copy_changed`), and
   the rows a present reads** (November 2026). One function in both
   builds compares each copy of whole groups with the renderer's chunky

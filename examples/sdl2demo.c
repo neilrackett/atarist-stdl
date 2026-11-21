@@ -25,7 +25,8 @@
  * background is drawn in pixel pairs (each shade two pixels wide), so
  * its copies are STDL_SDL2_RenderCopyPairs, which converts a group of
  * pairs in 56 instructions where any other takes 74, as a game's low
- * detail would use it. Cycling
+ * detail would use it (and on an ST's screen, in SDL2ST, in about half
+ * the time of any other). Cycling
  * the colours changes no pixel at all: it is the palette, staged to
  * the blank that shows the frame. A program that clears and redraws
  * the whole screen every frame is right too, and pays for converting

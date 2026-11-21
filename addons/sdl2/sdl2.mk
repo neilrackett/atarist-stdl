@@ -317,11 +317,13 @@ sdl2: $(SDL2LIB) $(SDL2CMINILIB) sdl2check $(SDL2EXAMPLES)
 # this, the archives above have none of it, and nothing here is
 # shipped. st.c is the reduction and the four-plane conversion, beside
 # the 68030's (c2p.c, c2pany.c, c2px.c), whose assembler a 68000 runs
-# too. A program is compiled -m68000 and links libstdl-sdl2-st.a where
-# it linked libstdl-sdl2.a.
+# too; stpair.c the conversion of pixel pairs, which only c2ppair.c's
+# pointers name, so only a program asking for pairs links it. A
+# program is compiled -m68000 and links libstdl-sdl2-st.a where it
+# linked libstdl-sdl2.a.
 SDL2STLIB      = libstdl-sdl2-st.a
 SDL2STCMINILIB = libstdl-sdl2-st-cmini.a
-SDL2STSRCS     = $(SDL2SRCS) $(SDL2DIR)/src/st.c
+SDL2STSRCS     = $(SDL2SRCS) $(SDL2DIR)/src/st.c $(SDL2DIR)/src/stpair.c
 SDL2STXOBJS      = $(SDL2XOBJS:.o=.st.o)
 SDL2STXCMINIOBJS = $(SDL2XOBJS:.o=.st.cmini.o)
 SDL2STOBJS      = $(patsubst %.c,$(OBJDIR)/%.st.o,$(SDL2STSRCS))

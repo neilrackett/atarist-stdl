@@ -212,7 +212,8 @@ builds by them; take a frame budget from a real machine.
   pixels, did 3-4% less work, one scene 6% more, and a session where
   over half the groups pushed had changed gained nothing.
   Only whole-group copies are compared, so round the boxes out first;
-  pairs copies are not. A program that already copies only what
+  pairs copies are not (on an ST's screen, in the experimental build,
+  they are). A program that already copies only what
   changed gains nothing and pays a read of every pixel it copies.
   One whose copies are sometimes mostly the screen's and sometimes
   mostly new turns it on and off as it goes with
@@ -420,6 +421,17 @@ Falcon that binary shows what the 68020 build shows, frame for frame,
   an even pitch): those copies are compared with what the screen has,
   and only the groups that differ are converted, so pushing a block
   again as it was costs a compare.
+- Pixel pairs (`STDL_SDL2_RenderCopyPairs`, the same calls as on a TT)
+  convert in about half the time here too, a lookup a pair: a 320x168
+  view 343 -> 179ms on an 8MHz ST, 181 -> 104 on a Mega STE (the loops
+  alone, Hatari). A frame of new pixels gains less, as the compare and
+  noting each changed group's colours stay (about 250ms of an 8MHz
+  frame): all 320x200 in pairs 767 -> 574ms, a 320x168 view in pairs
+  over a bar of whole pixels 767 -> 606; with the program's own 16
+  colours, which note nothing, 517 -> 325. Copy from an even address
+  with an even pitch, or the pairs are converted whole; pixels not in
+  pairs show the second of each. Its 8K of tables are allocated at
+  the first pairs copy.
 - 16 colours: 15 slots and black made from the colours on screen, not
   the whole palette, so up to 15 on screen beside black are exact; a
   checkerboard of two slots stands in for a colour between them (on by

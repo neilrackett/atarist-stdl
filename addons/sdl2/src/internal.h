@@ -51,6 +51,14 @@ struct stdl_sdl2_pairs {
     stdl_sdl2_c2pp_fn *conv;
     void (*mark)(Uint32 *pair, const Uint32 *whole, const Uint32 *part,
                  int h, int sx, int w, int pairing);
+#ifdef STDL_SDL2_ST
+    /* an ST's screen (stpair.c, st.h): its pair loop, and its pair
+     * tables made from the conversion's */
+    void (*st_conv)(const Uint8 *src, long sp, Uint8 *dst, long dp,
+                    long groups, long h, const Uint32 *tab,
+                    const Uint32 *next);
+    void (*st_tabs)(const Uint32 *tab, Uint32 *ptab);
+#endif
 };
 
 /* video.c: SDL_RenderCopy with its whole groups converted as pairs */

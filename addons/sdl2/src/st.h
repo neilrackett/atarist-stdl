@@ -84,6 +84,18 @@ void stdl_sdl2_st_c2p(const Uint8 *src, long sp, Uint8 *dst, long dp,
                       long groups, long h, const Uint32 *tab,
                       const Uint32 *next);
 
+/* Pixel pairs (stpair.c, reached through c2ppair.c's pointers): from
+ * the conversion's tables above, the pair tables, two sets of 4 by 256
+ * longs again (8K), a pair's two bits for its place among four in a
+ * byte of each plane; and h rows of groups through them, as
+ * stdl_sdl2_st_c2p, for rows whose pixels at 2i and 2i + 1 are the
+ * same: one lookup a pair, of the second pixel's colour. src and sp
+ * even, as the pairs are read a word each. */
+void stdl_sdl2_st_pairtabs(const Uint32 *tab, Uint32 *ptab);
+void stdl_sdl2_st_c2pp(const Uint8 *src, long sp, Uint8 *dst, long dp,
+                       long groups, long h, const Uint32 *tab,
+                       const Uint32 *next);
+
 /* video.c: the renderer's maps as its pages have them, what it reduces
  * with and the colours it has seen, for the tests */
 const struct stdl_sdl2_st_maps *stdl_sdl2_st_view(SDL_Renderer *renderer,

@@ -335,25 +335,12 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
 `__fixdfsi`...) shows up in the same list.
 
 **The calls that remain, on a TT or a Falcon: link with
-`STDL_ARITH020`.** A 68000 program calls libgcc for its 32-bit
-multiplies and divides on every machine, a 68030 included. Linked
-with the flags in `arith020.mk` (`include $(STDL)/arith020.mk`, then
-`$(STDL_ARITH020)` on the link line, libcmini or mintlib alike),
-every call of `__mulsi3`, `__udivsi3`, `__divsi3`, `__umodsi3`,
-`__modsi3`, `__muldi3` and `__divdi3` - the game's, STDL's, the C
-library's - is one `muls.l`/`divu.l`/`divs.l` on a 68020 or later and
-libgcc's own on a 68000, the same answer to the bit. Nothing in the
-source changes, there is no second build, and the CPU is found on the
-first call (before `STDL_Init`, in user mode, under MiNT). Estimated
-3-9x a call on a 68030 for the 32-bit routines and 20x for
-`__divdi3` (Hatari's 68030 gives the instructions themselves no time,
-so `docs/building.md` adds the manual's); one port had 31ms of a
-227ms TT frame in these calls. On a 68000 each call costs 41 cycles
-more (10-18%), so a game for the ST alone leaves the flags out.
-The first 64-bit call on a 68020 or later reads the `_CPU` cookie
-through the system, so a program whose first one could be in an
-interrupt routine does one in `main` first. `MULDIV.TOS`
-(`examples/muldiv.c`) shows it; `tests/hatari/arithchk.c` checks it.
+`STDL_ARITH020`** (`include $(STDL)/arith020.mk`, then
+`$(STDL_ARITH020)` on the link line before the libraries), and libgcc's
+multiplies and divides become a 68020's own instructions where the
+machine has them, libgcc's answer to the bit, from the same 68000 build
+at 41 cycles a call more on an ST: `docs/building.md` has the link, the
+costs and the gains, and `MULDIV.TOS` shows it.
 
 ## Writing a new game
 

@@ -506,12 +506,12 @@ Ones that are not show one of each pair (the first in a group's first
 half, the second in its second); the screen check
 (`STDL_SDL2_HINT_CHECK`) finds every such frame. Only a program that
 calls it links the pair loops and their bookkeeping (1,584 bytes: the
-loops' own object, which a program converting by itself calls directly,
-below, 1,404); every program pays 324 bytes for the batch's mask of
-them. A fixed border
-index takes the run-time XOR's pair loops. In the experimental 68000
-build an ST's screen has pair loops of its own, about half the time of
-its whole conversion ("An ST's screen, for testing", below).
+loops' own object, which a program converting by itself calls
+directly, below, 1,404); every program pays 324 bytes for the batch's
+mask of them. A fixed border index takes the run-time XOR's pair
+loops. In the experimental 68000 build an ST's screen has pair loops
+of its own, about half the time of its whole conversion ("An ST's
+screen, for testing", below).
 
 Every time here is Hatari's. A real TT takes 2.3 times as long as
 Hatari's TT over the same compiled code, and 3.0 to 3.9 times over
@@ -536,9 +536,11 @@ X goes to register 0 and is held black. Every pixel is XORed with X as
 it is converted, which inverts some of planes 4-7, and the palette goes
 to the registers permuted to match: register i takes colour i ^ X.
 
-The call is inline. With a constant X it links that X's conversion
-alone, about 900 bytes, which costs what X = 0 does. With an X known
-only at run time it links the loop that reads it, about 4.5% slower.
+The call is inline. With a constant X it links that X's loops alone,
+684-696 bytes beside X = 0's, which cost what X = 0's do. With an X
+known only at run time it links the loops that read it (`c2pany.o`,
+704 bytes), about 4.5% slower; until November 2026 such a call linked
+all fifteen fixed X's loops as well, about 10K.
 
 ## Converting a program's own screen (`SDL_stdl_c2p.h`)
 
@@ -601,16 +603,16 @@ STDL_SDL2_ConvertBoxPairs(src, src_pitch, dst, dst_pitch, groups, rows,
 **Pairs pay in whole boxes.** A group converted as pairs saves the
 same however the box is cut, about 1.1us on a TT and 2.3 on a Falcon
 (56 instructions against 74), but each call costs some 40us on a TT and
-70 on a Falcon, its registers saved and its loop set up and drained.
+80 on a Falcon, its registers saved and its loop set up and drained.
 Times through these calls in Hatari (SDL2CHK, `--cpu-exact`), X = 0,
 ms a 320x240 frame, whole pixels against pairs:
 
 | | TT (rows on two lines) | Falcon on VGA |
 |---|---|---|
-| one call | 31.04 against 25.61 | 60.27 against 49.04 |
-| a call a row | 40.91 against 34.60 | 77.21 against 65.31 |
-| a call a group | 215.43 against 198.31 | 401.73 against 367.55 |
-| a call a row, the rows taking turns between the calls, against every row whole | 38.49 against 40.04 | 72.75 against 77.13 |
+| one call | 31.00 against 25.59 | 59.46 against 48.61 |
+| a call a row | 41.48 against 35.35 | 79.38 against 66.89 |
+| a call a group | 215.11 against 196.39 | 412.45 against 358.05 |
+| a call a row, the rows taking turns between the calls (pairs and whole), against every row whole | 39.48 against 41.48 | 75.26 against 79.38 |
 
 So the box comes first: the view as one call rather than a call a row
 saves more than pairs do. Called back to back like this the pairs still
@@ -741,7 +743,7 @@ no TT or Falcon to hand, not to play it: the picture is a rough
     conversion's own tables, so a group in pairs comes out as the whole
     conversion gives it by construction. They are allocated at the
     first pairs copy (a program that never asks has none, and links
-    none of the code, `stpair.o`'s 332 bytes; the renderer is 292 bytes
+    none of the code, `stpair.o`'s 328 bytes; the renderer is 392 bytes
     larger in this build for it) and made again whenever the maps move:
     15ms on an 8MHz ST and 9 on a Mega STE, beside the 28 and 15 the
     conversion's own take and the whole screen converted again that a
@@ -872,29 +874,29 @@ no TT or Falcon to hand, not to play it: the picture is a rough
   `test_render.c` built with `STDL_SDL2_ST`, the page shown against
   the model's middle rows put through the renderer's two maps a pixel
   at a time, on the tall screen's 240 rows, on 200 where the border
-  did not open and on a border cut short, with two pages and three
-  and border indices 0 and 0x70, and the reduction against what it
-  promises, and ST Low by the hint; the pair loop against a
-  conversion a pixel at a time and against the whole loop (rows in
-  pairs byte for byte, rows not as their second pixels), and pairs
-  copies on the screen, compared, with ordinary copies over them, from
-  an odd address and before any map has moved. Then it runs
-  `test_render`'s TT and Falcon screens through this build, which must show them as the
-  other does. Eleven breakages of the ST path each failed it, ten more
-  of it as it stood at v1.24.0, fifteen of the changed-group compare,
-  the rows kept and the conversion's tables (a sixteenth, a page's
-  owed rows never cleared, only copies more), and seventeen of the
-  colours seen and the reduction: the test notes what its own model
-  shows, counts it where the renderer should, and expects the
+  did not open and on a border cut short, with two pages and three and
+  border indices 0 and 0x70, and the reduction against what it
+  promises, and ST Low by the hint; the pair loop against a conversion
+  a pixel at a time and against the whole loop (rows in pairs byte for
+  byte, rows not as their second pixels), and pairs copies on the
+  screen, compared, with ordinary copies over them, from an odd
+  address and before any map has moved. Then it runs `test_render`'s
+  TT and Falcon screens through this build, which must show them as
+  the other does. Eleven breakages of the ST path each failed it, ten
+  more of it as it stood at v1.24.0, fifteen of the changed-group
+  compare, the rows kept and the conversion's tables (a sixteenth, a
+  page's owed rows never cleared, only copies more), and seventeen of
+  the colours seen and the reduction: the test notes what its own
+  model shows, counts it where the renderer should, and expects the
   renderer's colours seen, maps and registers from that; and fourteen
-  of the pixel pairs (the tables, the loop's C, the marking of compared
-  copies, the address test). `SDL2RCST` is the same on the machine (`test_render.c` says
-  how to build it), and passed against the real STDL on Hatari's ST,
-  tall, and on its TT and its Falcon on VGA; with the pairs, on an ST,
-  an STE, a Mega STE, a TT and a Falcon on VGA (the pair loop's
-  assembler with two of its tables swapped failed it on the ST); `SDL2ST.TOS` showed all
-  240 rows on an STE. The border has not been seen on
-  a real machine with this.
+  of the pixel pairs (the tables, the loop's C, the marking of
+  compared copies, the address test). `SDL2RCST` is the same on the
+  machine (`test_render.c` says how to build it), and passed against
+  the real STDL on Hatari's ST, tall, and on its TT and its Falcon on
+  VGA; with the pairs, on an ST, an STE, a Mega STE, a TT and a Falcon
+  on VGA (the pair loop's assembler with two of its tables swapped
+  failed it on the ST); `SDL2ST.TOS` showed all 240 rows on an STE.
+  The border has not been seen on a real machine with this.
 
 ## Testing it
 

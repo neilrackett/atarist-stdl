@@ -40,18 +40,19 @@
  * twice); about 12s of the STE's and 24s of the TT's are the times.
  * Ends with "AC:done", the count of checks and of wrong answers.
  *
- *   STCMD_NO_TTY=1 stcmd make libstdl.a
+ *   STCMD_NO_TTY=1 stcmd make libstdl.a libstdl-arith020.o
  *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -O2 -std=gnu99 -Wall \
- *       -Wextra -o dist/ARITHCHK.TOS tests/hatari/arithchk.c libstdl.a \
+ *       -Wextra -o dist/ARITHCHK.TOS tests/hatari/arithchk.c \
+ *       libstdl-arith020.o libstdl.a \
  *       -Wl,--wrap=__mulsi3 -Wl,--wrap=__udivsi3 -Wl,--wrap=__divsi3 \
  *       -Wl,--wrap=__umodsi3 -Wl,--wrap=__modsi3 -Wl,--wrap=__muldi3 \
- *       -Wl,--wrap=__divdi3 -Wl,-u,___wrap___mulsi3
+ *       -Wl,--wrap=__divdi3
  *   MACHINE=tt TOS="<TOS 3.06 or a 512K EmuTOS>" \
  *       tests/hatari/run.sh ac_tt dist/ARITHCHK.TOS 8 "waitfor AC:done"
  *   MACHINE=falcon TOS=... tests/hatari/run.sh ac_falcon ...
  *   MACHINE=ste TOS=... tests/hatari/run.sh ac_ste ...
  *
- * (the flags are arith020.mk's STDL_ARITH020). Built with
+ * (the object and the flags are arith020.mk's STDL_ARITH020). Built with
  * -DARITHCHK_PLAIN and without the flags it times libgcc's routines
  * alone, by their own names (ARITHCHP.TOS), for what a program
  * without the flags pays: with them, libgcc's own inner calls (its
@@ -97,6 +98,18 @@ static long cpu;                /* the _CPU cookie, 0 without one */
 static signed char m32, m64;    /* the path under test */
 static FILE *out;
 
+/* the two bytes, which say the path (-1 the CPU not asked yet) */
+static void set_path(int p32, int p64)
+{
+#ifndef ARITHCHK_PLAIN
+    stdl_arith_l32 = (signed char)p32;
+    stdl_arith_l64 = (signed char)p64;
+#else
+    (void)p32;
+    (void)p64;
+#endif
+}
+
 #ifndef ARITHCHK_PLAIN
 /* ---------------------------------------------------------------- */
 /* Zero divides counted, and every wrapper called with the registers
@@ -105,6 +118,13 @@ static FILE *out;
 volatile long ac_zdiv;
 
 long ac_regs(void *fn, long a, long b, long c, long d);
+
+/* register REG still VAL, or bit BIT set in d0 */
+#define AC_KEPT(reg, val, bit) \
+    "cmp.l   #" val ",%" reg "\n\t" \
+    "beq.s   1f\n\t" \
+    "bset    #" bit ",%d0\n" \
+    "1:\t"
 
 __asm__(
     "\t.text\n\t.even\n"
@@ -137,40 +157,13 @@ __asm__(
     "jsr     (%a0)\n\t"
     "lea     16(%sp),%sp\n\t"
     "moveq   #0,%d0\n\t"
-    "cmp.l   #0x2D2D2D2D,%d2\n\t"
-    "beq.s   1f\n\t"
-    "bset    #0,%d0\n"
-    "1:\tcmp.l   #0x3D3D3D3D,%d3\n\t"
-    "beq.s   1f\n\t"
-    "bset    #1,%d0\n"
-    "1:\tcmp.l   #0x4D4D4D4D,%d4\n\t"
-    "beq.s   1f\n\t"
-    "bset    #2,%d0\n"
-    "1:\tcmp.l   #0x5D5D5D5D,%d5\n\t"
-    "beq.s   1f\n\t"
-    "bset    #3,%d0\n"
-    "1:\tcmp.l   #0x6D6D6D6D,%d6\n\t"
-    "beq.s   1f\n\t"
-    "bset    #4,%d0\n"
-    "1:\tcmp.l   #0x7D7D7D7D,%d7\n\t"
-    "beq.s   1f\n\t"
-    "bset    #5,%d0\n"
-    "1:\tcmp.l   #0x2A2A2A2A,%a2\n\t"
-    "beq.s   1f\n\t"
-    "bset    #6,%d0\n"
-    "1:\tcmp.l   #0x3A3A3A3A,%a3\n\t"
-    "beq.s   1f\n\t"
-    "bset    #7,%d0\n"
-    "1:\tcmp.l   #0x4A4A4A4A,%a4\n\t"
-    "beq.s   1f\n\t"
-    "bset    #8,%d0\n"
-    "1:\tcmp.l   #0x5A5A5A5A,%a5\n\t"
-    "beq.s   1f\n\t"
-    "bset    #9,%d0\n"
-    "1:\tcmp.l   #0x6A6A6A6A,%a6\n\t"
-    "beq.s   1f\n\t"
-    "bset    #10,%d0\n"
-    "1:\tmovem.l (%sp)+,%d2-%d7/%a2-%a6\n\t"
+    AC_KEPT("d2", "0x2D2D2D2D", "0") AC_KEPT("d3", "0x3D3D3D3D", "1")
+    AC_KEPT("d4", "0x4D4D4D4D", "2") AC_KEPT("d5", "0x5D5D5D5D", "3")
+    AC_KEPT("d6", "0x6D6D6D6D", "4") AC_KEPT("d7", "0x7D7D7D7D", "5")
+    AC_KEPT("a2", "0x2A2A2A2A", "6") AC_KEPT("a3", "0x3A3A3A3A", "7")
+    AC_KEPT("a4", "0x4A4A4A4A", "8") AC_KEPT("a5", "0x5A5A5A5A", "9")
+    AC_KEPT("a6", "0x6A6A6A6A", "10")
+    "movem.l (%sp)+,%d2-%d7/%a2-%a6\n\t"
     "rts\n"
 );
 extern void ac_zdiv_handler(void);
@@ -248,13 +241,6 @@ static void bad(const char *what, u64 a, u64 b, u64 got, u64 want)
     }
 }
 
-#define LIBGCC(dst, expr) do { \
-        stdl_arith_l32 = stdl_arith_l64 = 0; \
-        dst = (expr); \
-        stdl_arith_l32 = m32; \
-        stdl_arith_l64 = m64; \
-    } while (0)
-
 static long divdi3_native;      /* cases divs.l could take */
 
 static void check32(uint32_t a, uint32_t b)
@@ -263,7 +249,9 @@ static void check32(uint32_t a, uint32_t b)
 
 #define CHECK32(n, t) \
     x = (uint32_t)__wrap___##n((t)a, (t)b); \
-    LIBGCC(y, (uint32_t)__real___##n((t)a, (t)b)); \
+    set_path(0, 0); \
+    y = (uint32_t)__real___##n((t)a, (t)b); \
+    set_path(m32, m64); \
     checks++; \
     if (x != y) bad(#n, a, b, x, y);
 
@@ -282,7 +270,9 @@ static void check64(i64 a, i64 b)
     i64 x, y;
 
     x = __wrap___muldi3(a, b);
-    LIBGCC(y, __real___muldi3(a, b));
+    set_path(0, 0);
+    y = __real___muldi3(a, b);
+    set_path(m32, m64);
     checks++;
     if (x != y) {
         bad("muldi3", a, b, x, y);
@@ -291,7 +281,9 @@ static void check64(i64 a, i64 b)
         return;
     }
     x = __wrap___divdi3(a, b);
-    LIBGCC(y, __real___divdi3(a, b));
+    set_path(0, 0);
+    y = __real___divdi3(a, b);
+    set_path(m32, m64);
     checks++;
     if (x != y) {
         bad("divdi3", a, b, x, y);
@@ -308,8 +300,7 @@ static void values(const char *path, long n)
     int p, q;
 
     divdi3_native = 0;
-    stdl_arith_l32 = m32;
-    stdl_arith_l64 = m64;
+    set_path(m32, m64);
     for (p = 0; p < N32; p++) {
         for (q = 0; q < N32; q++) {
             check32(edge32[p], edge32[q]);
@@ -368,10 +359,9 @@ static void registers(void)
         for (w = 0; w < NWRAP; w++) {
             for (k = 0; k < 5; k++) {
                 if (mode < 0) {
-                    stdl_arith_l32 = stdl_arith_l64 = -1;
+                    set_path(-1, -1);
                 } else {
-                    stdl_arith_l32 = (signed char)(mode && m32);
-                    stdl_arith_l64 = (signed char)(mode && m64);
+                    set_path(mode && m32, mode && m64);
                 }
                 r = ac_regs(wrappers[w].fn, args[k][0], args[k][1],
                             args[k][2], args[k][3]);
@@ -411,21 +401,21 @@ static void cpu_asked(void)
     volatile i64 c = 7;
     void *ssp;
 
-    stdl_arith_l32 = stdl_arith_l64 = -1;
+    set_path(-1, -1);
     checks++;
     if (__wrap___mulsi3(a, b) != 15) {
         wrong++;
     }
     asked(w32, -1, "after a 32-bit call, not asked before");
 
-    stdl_arith_l32 = stdl_arith_l64 = -1;
+    set_path(-1, -1);
     checks++;
     if (__wrap___muldi3(c, c) != 49) {
         wrong++;
     }
     asked(w32, w64, "after a 64-bit call, not asked before");
 
-    stdl_arith_l32 = stdl_arith_l64 = -1;
+    set_path(-1, -1);
     ssp = (void *)Super(0L);
     c = __wrap___divdi3(c * 1000, 7);
     Super(ssp);
@@ -441,35 +431,36 @@ static void zero_divides(void)
 {
     static const long tops[] = { 0, 1, -1, 0x7FFFFFFFL, 0x80000000L };
     void (*old)(void) = Setexc(5, ac_zdiv_handler);
-    long traps_w = 0, traps_g = 0, calls = 0, t;
+    long traps_w = 0, traps_g = 0, calls = 0;
     int k, missed = 0;
 
-#define ZD(call) do { \
+/* a divide by 0, its traps added to acc */
+#define ZD(call, acc) do { \
+        long t; \
         ac_zdiv = 0; \
         (void)(call); \
         t = ac_zdiv; \
         calls++; \
-        if (t == 0) missed++; \
+        missed += t == 0; \
+        acc += t; \
     } while (0)
 
-    stdl_arith_l32 = m32;
-    stdl_arith_l64 = m64;
+    set_path(m32, m64);
     for (k = 0; k < 5; k++) {
         long a = tops[k];
 
-        ZD(__wrap___udivsi3(a, 0)); traps_w += t;
-        ZD(__wrap___umodsi3(a, 0)); traps_w += t;
-        ZD(__wrap___divsi3(a, 0)); traps_w += t;
-        ZD(__wrap___modsi3(a, 0)); traps_w += t;
-        ZD(__wrap___divdi3(a, 0)); traps_w += t;
-        stdl_arith_l32 = stdl_arith_l64 = 0;
-        ZD(__real___udivsi3(a, 0)); traps_g += t;
-        ZD(__real___umodsi3(a, 0)); traps_g += t;
-        ZD(__real___divsi3(a, 0)); traps_g += t;
-        ZD(__real___modsi3(a, 0)); traps_g += t;
-        ZD(__real___divdi3(a, 0)); traps_g += t;
-        stdl_arith_l32 = m32;
-        stdl_arith_l64 = m64;
+        ZD(__wrap___udivsi3(a, 0), traps_w);
+        ZD(__wrap___umodsi3(a, 0), traps_w);
+        ZD(__wrap___divsi3(a, 0), traps_w);
+        ZD(__wrap___modsi3(a, 0), traps_w);
+        ZD(__wrap___divdi3(a, 0), traps_w);
+        set_path(0, 0);
+        ZD(__real___udivsi3(a, 0), traps_g);
+        ZD(__real___umodsi3(a, 0), traps_g);
+        ZD(__real___divsi3(a, 0), traps_g);
+        ZD(__real___modsi3(a, 0), traps_g);
+        ZD(__real___divdi3(a, 0), traps_g);
+        set_path(m32, m64);
     }
     (void)Setexc(5, old);
     checks += calls;
@@ -561,20 +552,12 @@ static long ps(uint32_t n, uint32_t floor)
                   - 500000000000ULL * TICKS / 100 / floor);
 }
 
+/* ns to one place, for "%ld.%01ld" */
+#define NS(t) (t) / 1000, ((t) < 0 ? -(t) : (t)) % 1000 / 100
+
 static long cyc(long t)
 {
     return (long)((i64)t * mhz / 1000000);
-}
-
-static void set_path(int p32, int p64)
-{
-#ifndef ARITHCHK_PLAIN
-    stdl_arith_l32 = (signed char)p32;
-    stdl_arith_l64 = (signed char)p64;
-#else
-    (void)p32;
-    (void)p64;
-#endif
 }
 
 static uint32_t rate(int wide, void *f)
@@ -597,7 +580,7 @@ static void timed(const char *what, void *g, void *w, int wide,
     tg = ps(rate(wide, g), floor);
     if (w == NULL) {
         fprintf(out, "AC: %-22s libgcc, no flags %6ld.%01ld ns %5ld cyc\n",
-                what, tg / 1000, (tg < 0 ? -tg : tg) % 1000 / 100, cyc(tg));
+                what, NS(tg), cyc(tg));
         return;
     }
     t0 = ps(rate(wide, w), floor);
@@ -605,18 +588,15 @@ static void timed(const char *what, void *g, void *w, int wide,
         set_path(m32, m64);
         t2 = ps(rate(wide, w), floor);
     }
-    /* ns to one place, and cycles at the machine's clock */
+    /* ns, and cycles at the machine's clock */
     fprintf(out, "AC: %-22s libgcc %6ld.%01ld ns %5ld cyc"
             " | 68000 path %6ld.%01ld ns %5ld cyc", what,
-            tg / 1000, (tg < 0 ? -tg : tg) % 1000 / 100,
-            cyc(tg), t0 / 1000,
-            (t0 < 0 ? -t0 : t0) % 1000 / 100, cyc(t0));
+            NS(tg), cyc(tg), NS(t0), cyc(t0));
     if (t2 != -1) {
         long x10 = t2 > 0 ? (long)((i64)tg * 10 / t2) : 0;
 
         fprintf(out, " | 68020 %5ld.%01ld ns %4ld cyc, %ld.%ldx",
-                t2 / 1000, (t2 < 0 ? -t2 : t2) % 1000 / 100,
-                cyc(t2), x10 / 10, x10 % 10);
+                NS(t2), cyc(t2), x10 / 10, x10 % 10);
     }
     fprintf(out, "\n");
 }

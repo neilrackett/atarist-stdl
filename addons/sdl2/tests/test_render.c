@@ -230,6 +230,22 @@ static long want_bytes;
  * 256-colour one, as the other build has it */
 #define PAGE_ROWS page_rows
 
+/* colour c at x of a row of an ST's four planes, 8 bytes a group,
+ * through maps a and b: the first slot where the screen's x + y (xy)
+ * is even, the second where it is odd; ORed into a cleared row */
+static void st_pixel(Uint8 *row, long x, long xy, const Uint8 *a,
+                     const Uint8 *b, Uint8 c)
+{
+    const unsigned v = (xy & 1) ? b[c] : a[c];
+    Uint8 *grp = row + (x >> 4) * 8;
+    int p;
+    for (p = 0; p < 4; p++) {
+        if (v >> p & 1) {
+            grp[2 * p + ((x & 15) >> 3)] |= (Uint8)(0x80 >> (x & 7));
+        }
+    }
+}
+
 /* the page's rows, the screen's middle ones, through the renderer's
  * map, four planes */
 static void expect_page_st(long stride)
@@ -239,19 +255,12 @@ static void expect_page_st(long stride)
     const struct stdl_sdl2_st_maps *m = stdl_sdl2_st_view(R, &bits, &dither,
                                                           &rseen);
     const int row0 = PROW0;
-    int x, y, p;
+    int x, y;
     memset(want, 0, (size_t)want_bytes);
     for (y = 0; y < page_rows; y++) {
         for (x = 0; x < 320; x++) {
-            /* the first slot where the screen's x + y is even */
-            const Uint8 i = model[y + row0][x];
-            const unsigned v = ((x + y + row0) & 1) ? m->b[i] : m->a[i];
-            Uint8 *grp = want + y * stride + (x >> 4) * 8;
-            for (p = 0; p < 4; p++) {
-                if (v >> p & 1) {
-                    grp[2 * p + ((x & 15) >> 3)] |= (Uint8)(0x80 >> (x & 7));
-                }
-            }
+            st_pixel(want + y * stride, x, x + y + row0, m->a, m->b,
+                     model[y + row0][x]);
         }
     }
 }
@@ -1686,15 +1695,8 @@ static int pair_checks(void)
         for (y = 0; y < h; y++) {
             memset(pc_want + y * dp, 0, (size_t)(8 * groups));
             for (x = 0; x < 16 * groups; x++) {
-                const Uint8 c = pc_src[y * sp + (x | 1)];
-                const unsigned v = ((x + y + odd) & 1) ? b[c] : a[c];
-                Uint8 *grp = pc_want + y * dp + (x >> 4) * 8;
-                int p;
-                for (p = 0; p < 4; p++) {
-                    if (v >> p & 1) {
-                        grp[2 * p + ((x & 15) >> 3)] |= (Uint8)(0x80 >> (x & 7));
-                    }
-                }
+                st_pixel(pc_want + y * dp, x, x + y + odd, a, b,
+                         pc_src[y * sp + (x | 1)]);
             }
         }
         memset(pc_got, 0xA5, sizeof(pc_got));

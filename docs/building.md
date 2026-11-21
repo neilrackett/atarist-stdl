@@ -32,7 +32,8 @@ Other targets:
 | `make sdl2`   | the SDL2 add-on, only when asked: `libstdl-sdl2.a`, `libstdl-sdl2-cmini.a` and `dist/SDL2DEMO.TOS` ([sdl2.md](sdl2.md)) |
 | `make sdl1`   | the experimental SDL1 add-on, only when asked: `libstdl-sdl1.a`, the SDL2 add-on's 68000 build it draws through, and SDL 1.2's own tests as `dist/S1*.TOS` ([sdl1.md](sdl1.md)) |
 | `make test`   | the host test suite, natively with ASan: no cross toolchain needed                                    |
-| `arith020.mk` | not a target: `STDL_ARITH020`, the link flags that give a 68000 program a 68020's multiply and divide where it has one (below) |
+| `make libstdl-arith020.o` | the object a 68000 program links for a 68020's multiply and divide where it has one (`make` builds it too; below) |
+| `arith020.mk` | not a target: `STDL_ARITH020`, that object and the link flags that go with it (below) |
 | `make bundle` | `stdl-examples.zip`, the example binaries and their assets, as on the release page                    |
 | `make ci`     | everything CI runs, in order; run it on the host, not inside the container                            |
 
@@ -77,42 +78,52 @@ call of libgcc's `__mulsi3`, `__udivsi3`, `__divsi3`, `__umodsi3` or
 a TT or a Falcon as on an ST. A program built for the whole ST family
 can have the 68020's own instructions on the machines that have them
 without a second build: link it with `STDL_ARITH020`, from
-`arith020.mk`.
+`arith020.mk`, before the libraries.
 
 ```make
 include $(STDL)/arith020.mk
 
 $(TARGET): $(OBJS) $(STDL_LIB)
 	$(CC) -nostdlib -L$(CMINI)/lib -Wl,--traditional-format -o $@ \
-	    $(CMINI)/lib/crt0.o $(OBJS) $(STDL_LIB) -lcmini -lgcc \
-	    $(STDL_ARITH020)
+	    $(CMINI)/lib/crt0.o $(OBJS) $(STDL_ARITH020) $(STDL_LIB) \
+	    -lcmini -lgcc
 ```
 
-The same flags for `libstdl.a` and `libstdl-cmini.a`; without make
-they are
+The same for `libstdl.a` and `libstdl-cmini.a`. `STDL_ARITH020` is
+`libstdl-arith020.o`, beside `arith020.mk` in STDL's directory, and the
+flags; without make they are
 
 ```
+$STDL/libstdl-arith020.o
 -Wl,--wrap=__mulsi3 -Wl,--wrap=__udivsi3 -Wl,--wrap=__divsi3
 -Wl,--wrap=__umodsi3 -Wl,--wrap=__modsi3 -Wl,--wrap=__muldi3
--Wl,--wrap=__divdi3 -Wl,-u,___wrap___mulsi3
+-Wl,--wrap=__divdi3
 ```
 
+`make` builds the object with the archives, and the release page has
+it beside them; a game's Makefile that builds STDL's archive asks for
+it too (`$(MAKE) -C $(STDL) libstdl-cmini.a libstdl-arith020.o`).
+
 - **What it does.** ld's `--wrap` sends every call of those seven, the
-  program's, STDL's, the C library's and libgcc's own, to the archive's
-  `arith020.o` (`src/arith020.c`, 540 bytes). On a 68020 or later each
-  is one `muls.l`, `divu.l`, `divs.l` (with `divul.l`/`divsl.l` for the
-  remainders); `__muldi3` and `__divdi3` take the 64-bit forms on a
-  68020 to 68040 only, as a 68060 has none. On a 68000 the call goes
-  on to libgcc's. The answers are libgcc's to the bit, including what
-  the instructions cannot give, which goes to libgcc as well: -2^31 /
-  -1, and a 64-bit division whose divisor or quotient needs more than
-  32 bits. Dividing by 0 takes the zero-divide exception on both
-  paths, as libgcc's own `divu.w` does (bombs under TOS, `SIGFPE`
-  under MiNT). The source changes not at all.
-- **`-u ___wrap___mulsi3`** pulls the object in whatever the program's
-  own objects call. The C library and libgcc come after the archive on
-  the line, and their calls (printf's divides) are wrapped too: a
-  program whose own code made no such call failed to link without it.
+  program's, STDL's, the C library's and libgcc's own, to
+  `libstdl-arith020.o` (`src/arith020.c`, 560 bytes). On a 68020 or
+  later each is one `muls.l`, `divu.l`, `divs.l` (with
+  `divul.l`/`divsl.l` for the remainders); `__muldi3` and `__divdi3`
+  take the 64-bit forms on a 68020 to 68040 only, as a 68060 has none,
+  `__muldi3` one `muls.l` where both operands are 32-bit numbers widened
+  (gcc's `(long long)a * b`) and three multiplies otherwise. On a 68000
+  the call goes on to libgcc's. The answers are libgcc's to the bit,
+  including what the instructions cannot give, which goes to libgcc as
+  well: -2^31 / -1, and a 64-bit division whose divisor or quotient
+  needs more than 32 bits. Dividing by 0 takes the zero-divide exception
+  on both paths, as libgcc's own `divu.w` does (bombs under TOS,
+  `SIGFPE` under MiNT). The source changes not at all.
+- **An object, named on the line**, so it is linked whatever the
+  program's own objects call: the C library and libgcc come after the
+  archives, and their calls (printf's divides) are wrapped too. Before
+  the libraries, as it calls libgcc's own routines on a 68000. It calls
+  the system through its traps and no C library, so the one object
+  serves libcmini and mintlib programs.
 - **How it knows the CPU**, on the first call, so it is right before
   `STDL_Init`, before `main` (the C library's start-up divides) and
   without the rest of STDL linked. The 32-bit routines ask the CPU
@@ -160,21 +171,25 @@ they are
   | `__divsi3`                  |             321 |                   4 |          409 |          94 |   4x |
   | `__umodsi3`                 |             509 |                   4 |          681 |          82 |   8x |
   | `__modsi3`                  |             686 |                   4 |          858 |          94 |   9x |
-  | `__muldi3`                  |             754 |                  52 |        1,034 |         184 |   6x |
+  | `__muldi3`, 32x32 bits      |             754 |                  44 |        1,034 |          88 |  12x |
   | `__divdi3`, 64 by 32 bits   |           2,916 |                  52 |   over 3,000 |         142 | 20x+ |
 
   (the empty call's time taken off, which the 68020 path's few
-  instructions undercut). A Falcon's are the same cycles at 16MHz.
+  instructions undercut; `__muldi3` of operands wider than 32 bits
+  takes three multiplies, 52 cycles in Hatari, about 184 estimated). A
+  Falcon's are the same cycles at 16MHz.
   With the caches on, Hatari's figures move by where the link put the
   loop and the routine in the 256-byte instruction cache, and are not
   used. In one port's TT frame libgcc's arithmetic was 31ms of 227
   (Hatari's profiler, so without those instructions either); the same
   sources compiled for the 68030 ran 190ms. `MULDIV.TOS`, the example,
-  projects points with `x * fov / z`: in Hatari twice as many a second
-  on a TT or a Falcon as through libgcc's routines.
-- **A program without the flags** links none of `arith020.o` and is
-  byte for byte what it was: every example, and a small program on
-  each archive, linked the same before and after it came.
+  projects points with `x * fov / z`, through the wrappers and through
+  libgcc's own routines by name: in Hatari a TT 178,560 a second
+  against 85,760, a Falcon 92,160 against 42,624, and an STE 6,912
+  against 7,424.
+- **A program without it** links none of it and is byte for byte what
+  it was: every example, and a small program on each archive, linked
+  the same before and after it came.
 - **The check** is `tests/hatari/arithchk.c` (ARITHCHK): each routine
   against libgcc's on edge and random values, on both paths, the
   registers kept, the CPU asked, dividing by 0, and the times above.

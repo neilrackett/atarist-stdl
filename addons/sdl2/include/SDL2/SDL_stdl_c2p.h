@@ -13,8 +13,9 @@
  *     -I$STDL/addons/sdl2/include       #include <SDL2/SDL_stdl_c2p.h>
  *
  * and links the add-on's archive for the conversion's objects alone
- * (docs/sdl2.md, "Converting a program's own screen"): no renderer, and
- * no libstdl.a unless the program uses STDL itself.
+ * (docs/sdl2.md, "Converting a program's own screen", has their
+ * sizes): no renderer, and no libstdl.a unless the program uses STDL
+ * itself.
  */
 
 #ifndef STDL_SDL2_STDL_C2P_H
@@ -26,49 +27,7 @@
 extern "C" {
 #endif
 
-/*
- * A box of `groups` 16-pixel groups by `rows` rows, from src (pixel
- * 0 of its first row, src_pitch bytes a row) to dst (its first group
- * on its first line, dst_pitch bytes a line), the screen's eight
- * planes a word each, 16 bytes a group. With two_lines each row goes
- * to two lines, dst_pitch apart (a TT's doubled rows in TT Low), and
- * dst moves on 2 * dst_pitch a row. Nothing is done for groups or rows
- * under 1; groups is 32,768 at most.
- *
- * x is the border index X (SDL_stdl.h's STDL_SDL2_SetBorderIndex): 0,
- * or a multiple of 16 up to 0xF0 that every pixel is XORed with. A
- * constant links only that X's loops: X = 0's are c2p.o's, which every
- * program that converts links (1,452 bytes with the C twin), and a
- * fixed X's are about 700 bytes more. An X from a variable links the
- * loops that read it at run time (704 bytes), about 4.5% slower.
- *
- * For a TT or a Falcon (a 68030): src may be at any address there.
- * The loops have no instruction a 68000 lacks, so a 68000 program may
- * call this once it knows it is on one of those machines.
- */
-static __inline__ __attribute__((always_inline))
-void STDL_SDL2_ConvertBox(const uint8_t *src, long src_pitch, uint8_t *dst,
-                          long dst_pitch, long groups, long rows,
-                          int two_lines, unsigned x);
-
-/*
- * The same box for pixels in pairs: the program's word that in every
- * group the pixels 2i and 2i + 1 are the same, as a program drawing at
- * half the width (a game's low detail) has them. Each group is
- * converted from its 8 distinct pixels, 56 instructions against 74.
- * Pixels not in pairs come out as one of each pair: the first in a
- * group's first half, the second in its second. It pays in whole
- * boxes: one call for a whole view, not a call a row, nor a box for
- * each run of a group or two (docs/sdl2.md's numbers). x as above, but
- * any X but 0 takes the loops that read it at run time; both are in
- * one object, c2pp.o, 1,404 bytes.
- */
-static __inline__ __attribute__((always_inline))
-void STDL_SDL2_ConvertBoxPairs(const uint8_t *src, long src_pitch,
-                               uint8_t *dst, long dst_pitch, long groups,
-                               long rows, int two_lines, unsigned x);
-
-/* What the calls above name; a program calls those, not these. */
+/* What the calls at the end name; a program calls those, not these. */
 
 /* one X's loops, a line a row and two (c2p.h) */
 struct stdl_sdl2_c2pv;
@@ -125,6 +84,24 @@ const struct stdl_sdl2_c2pv *stdl_sdl2_c2p_variant(unsigned x)
         x == 0xF0 ? &stdl_sdl2_c2p_xf0 : &stdl_sdl2_c2p_any;
 }
 
+/*
+ * A box of `groups` 16-pixel groups by `rows` rows, from src (pixel
+ * 0 of its first row, src_pitch bytes a row) to dst (its first group
+ * on its first line, dst_pitch bytes a line), the screen's eight
+ * planes a word each, 16 bytes a group. With two_lines each row goes
+ * to two lines, dst_pitch apart (a TT's doubled rows in TT Low), and
+ * dst moves on 2 * dst_pitch a row. Nothing is done for groups or rows
+ * under 1; groups is 32,768 at most.
+ *
+ * x is the border index X (SDL_stdl.h's STDL_SDL2_SetBorderIndex): 0,
+ * or a multiple of 16 up to 0xF0 that every pixel is XORed with. A
+ * constant X links only its own loops; an X from a variable the loops
+ * that read it at run time, a little slower (docs/sdl2.md).
+ *
+ * For a TT or a Falcon (a 68030): src may be at any address there.
+ * The loops have no instruction a 68000 lacks, so a 68000 program may
+ * call this once it knows it is on one of those machines.
+ */
 static __inline__ __attribute__((always_inline))
 void STDL_SDL2_ConvertBox(const uint8_t *src, long src_pitch, uint8_t *dst,
                           long dst_pitch, long groups, long rows,
@@ -138,6 +115,18 @@ void STDL_SDL2_ConvertBox(const uint8_t *src, long src_pitch, uint8_t *dst,
     }
 }
 
+/*
+ * The same box for pixels in pairs: the program's word that in every
+ * group the pixels 2i and 2i + 1 are the same, as a program drawing at
+ * half the width (a game's low detail) has them. Each group is
+ * converted from its 8 distinct pixels, 56 instructions against 74.
+ * Pixels not in pairs come out as one of each pair: the first in a
+ * group's first half, the second in its second. It pays in whole
+ * boxes: one call for a whole view, not a call a row, nor a box for
+ * each run of a group or two (docs/sdl2.md's numbers). x as above, but
+ * any X but 0 takes the loops that read it at run time; both are in
+ * one object, c2pp.o.
+ */
 static __inline__ __attribute__((always_inline))
 void STDL_SDL2_ConvertBoxPairs(const uint8_t *src, long src_pitch,
                                uint8_t *dst, long dst_pitch, long groups,

@@ -1,7 +1,7 @@
 name: Release
 
-# Build the two archives and the examples zip, and put them on the
-# rolling "latest" release.
+# Build the archives, the arith020 object and the examples zip, and put
+# them on the rolling "latest" release.
 #
 # The trigger is a pushed version tag, not a push to main: STDL keeps
 # its version in annotated tags (`git tag -a v1.4.0`) and nowhere else,
@@ -86,10 +86,12 @@ jobs:
         # --clobber, because the release is rolling: the same asset
         # names every time, so a download link never changes. The SDL2
         # add-on's archives ship beside the core's, as files of their
-        # own: a program links them only by naming them.
+        # own: a program links them only by naming them. So does
+        # libstdl-arith020.o, an object a program links through
+        # arith020.mk's STDL_ARITH020 (docs/building.md).
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload latest libstdl.a libstdl-cmini.a \
-            libstdl-sdl2.a libstdl-sdl2-cmini.a \
+            libstdl-arith020.o libstdl-sdl2.a libstdl-sdl2-cmini.a \
             stdl-examples.zip --clobber

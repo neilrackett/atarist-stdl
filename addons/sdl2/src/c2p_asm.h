@@ -88,18 +88,15 @@
  * fit whatever its alignment, and sdl2.mk's sdl2check refuses more
  * (the assembler cannot measure across forward branches). The span
  * is the absolute symbol _NAME_cachebytes, which the assembler works
- * out once the branches are sized and nm reads; the labels themselves
- * are local and leave no symbol. Until November 2026 they were the
- * text symbols _NAME_cache0 and _NAME_cache1, which a profiler or a
- * debugger takes for functions: Hatari's profiler counted every pass
- * back to the loop's top as a call of _NAME_cache0 (215,134 of them in
- * one port's 64 frames, once a group) and gave the loop's time to it,
- * not to NAME. Hatari loads only a program's text symbols for that,
- * and an absolute one is not. A copy of
- * the group before the loop, which this had until 2026-11-07, made a
- * loop of 428 bytes that left the cache at every row: a 320x240 frame
- * as one row of 4,800 groups took 30.4ms on a TT against 34.3 as 240
- * rows, boxes of a group or three went through the C twin instead,
+ * out once the branches are sized and nm reads. No label inside a
+ * loop may be a text symbol, which a profiler or a debugger takes for
+ * a function and gives the loop's time to: the labels are numeric
+ * local ones, which leave none, and the span's symbol is absolute,
+ * which Hatari's profiler does not load (AGENTS.md has the history). A
+ * copy of the group before the loop, which this had until 2026-11-07,
+ * made a loop of 428 bytes that left the cache at every row: a 320x240
+ * frame as one row of 4,800 groups took 30.4ms on a TT against 34.3 as
+ * 240 rows, boxes of a group or three went through the C twin instead,
  * and those of 4 cost 49.1 a frame's worth (Hatari).
  *
  * The stack, past 32 bytes of frame, the eleven registers and the
@@ -176,19 +173,16 @@
              "	move.l	%a1,%a2\n	adda.l	92(%sp),%a2\n", C2P_DRAIN2)
 
 /*
- * Pixel pairs (c2pp.c, for STDL_SDL2_RenderCopyPairs and
- * STDL_SDL2_ConvertBoxPairs): a group whose pixels come in pairs, 2i
- * and 2i + 1 the same, has 8 distinct ones. Two byte merges gather
- * them into d0 and d1 (each long's even bytes
- * with the third and fourth longs' odd ones), three merges and the
- * 16-bit exchange transpose those 64 bits, and each bit is doubled by
- * merging a long with a copy of itself: 56 instructions a group
- * against 74. The planes come out as d1 (0 and 1), d0 (2 and 3), d3 (4
- * and 5) and d2 (6 and 7), so X's tail is on d3 and d2. Of pixels that
- * are not in pairs it takes the first of each pair in the group's
- * first half and the second in its second half (c2pp.c's C twin does
- * the same). The steps' roles were found by simulating the
- * instructions against a reference conversion.
+ * Pixel pairs (c2pp.c says what they are for and cost, and which
+ * pixels they take of a group not in pairs): a group whose pixels 2i
+ * and 2i + 1 are the same has 8 distinct ones. Two byte merges gather
+ * them into d0 and d1 (each long's even bytes with the third and
+ * fourth longs' odd ones), three merges and the 16-bit exchange
+ * transpose those 64 bits, and each bit is doubled by merging a long
+ * with a copy of itself. The planes come out as d1 (0 and 1), d0 (2
+ * and 3), d3 (4 and 5) and d2 (6 and 7), so X's tail is on d3 and d2.
+ * The steps' roles were found by simulating the instructions against
+ * a reference conversion.
  */
 #define C2P_DOUBLE(z, b) \
     "	move.l	" z ",%d7\n" \

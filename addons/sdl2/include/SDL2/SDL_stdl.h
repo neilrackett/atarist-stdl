@@ -123,9 +123,9 @@ extern SDL_Texture *STDL_SDL2_CreateTextureFrom(SDL_Renderer *renderer,
  * permuted to match: register i takes colour i ^ X. 0, the default,
  * swaps nothing. Set before anything is drawn.
  *
- * Inline, so that a constant X links that X's conversion alone (an
- * object each, about 900 bytes, costing what X = 0 does); an X known
- * only at run time links the loop that reads it, 4.5% slower.
+ * Inline, so that a constant X links only its own loops, costing what X
+ * = 0 does; an X known only at run time links the loops that read it,
+ * a little slower (docs/sdl2.md, "The border index").
  */
 /* the variants are SDL_stdl_c2p.h's */
 extern int stdl_sdl2_set_border(SDL_Renderer *renderer, unsigned x,
@@ -134,16 +134,7 @@ extern int stdl_sdl2_set_border(SDL_Renderer *renderer, unsigned x,
 static __inline__ __attribute__((always_inline))
 int STDL_SDL2_SetBorderIndex(SDL_Renderer *renderer, unsigned x)
 {
-    return stdl_sdl2_set_border(renderer, x,
-        x == 0x00 ? 0 :
-        x == 0x10 ? &stdl_sdl2_c2p_x10 : x == 0x20 ? &stdl_sdl2_c2p_x20 :
-        x == 0x30 ? &stdl_sdl2_c2p_x30 : x == 0x40 ? &stdl_sdl2_c2p_x40 :
-        x == 0x50 ? &stdl_sdl2_c2p_x50 : x == 0x60 ? &stdl_sdl2_c2p_x60 :
-        x == 0x70 ? &stdl_sdl2_c2p_x70 : x == 0x80 ? &stdl_sdl2_c2p_x80 :
-        x == 0x90 ? &stdl_sdl2_c2p_x90 : x == 0xA0 ? &stdl_sdl2_c2p_xa0 :
-        x == 0xB0 ? &stdl_sdl2_c2p_xb0 : x == 0xC0 ? &stdl_sdl2_c2p_xc0 :
-        x == 0xD0 ? &stdl_sdl2_c2p_xd0 : x == 0xE0 ? &stdl_sdl2_c2p_xe0 :
-        x == 0xF0 ? &stdl_sdl2_c2p_xf0 : &stdl_sdl2_c2p_any);
+    return stdl_sdl2_set_border(renderer, x, stdl_sdl2_c2p_variant(x));
 }
 
 /*
@@ -158,8 +149,9 @@ int STDL_SDL2_SetBorderIndex(SDL_Renderer *renderer, unsigned x)
  * converted whole. The pixels are read when converted (SDL_render.h),
  * so they must still be in pairs then; ones that are not show one of
  * each pair (the screen check, STDL_SDL2_HINT_CHECK, catches that).
- * Linked only by a program that calls it (1.5K). In the experimental
- * 68000 build, an ST's screen takes it as SDL_RenderCopy.
+ * Linked only by a program that calls it. In the experimental 68000
+ * build an ST's screen converts pairs through loops of its own, with
+ * 8K of tables made at the first pairs copy (docs/sdl2.md).
  */
 extern int STDL_SDL2_RenderCopyPairs(SDL_Renderer *renderer,
                                      SDL_Texture *texture,

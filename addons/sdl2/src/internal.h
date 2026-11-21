@@ -41,12 +41,18 @@ void stdl_sdl2_screen_origin(int *x, int *y);
  * Pixel pairs (STDL_SDL2_RenderCopyPairs): c2ppair.c's side, which the
  * renderer reaches through the pointer stdl_sdl2_copy_pairs gives it,
  * so that a program that never asks for pairs links none of it. conv
- * (c2pp.c's stdl_sdl2_c2pp) converts as stdl_sdl2_c2p does. mark notes a copy of h rows at sx, w
- * wide, in the batch's masks from its first row: a pairs copy's whole
- * groups go into pair[] where no other copy has reached them (whole[]
- * less pair[], or part[]); any other copy takes back every group it
- * touches.
+ * (c2pp.c's stdl_sdl2_c2pp) converts as stdl_sdl2_c2p does. mark notes
+ * a copy of h rows at sx, w wide, in the batch's masks from its first
+ * row, by stdl_sdl2_pair_rule.
  */
+#ifdef STDL_SDL2_ST
+/* an ST's screen's conversion (st.h): h rows of groups into its four
+ * planes, the first row through tab, the next through next, in turn */
+typedef void stdl_sdl2_st_conv_fn(const Uint8 *src, long sp, Uint8 *dst,
+                                  long dp, long groups, long h,
+                                  const Uint32 *tab, const Uint32 *next);
+#endif
+
 struct stdl_sdl2_pairs {
     stdl_sdl2_c2pp_fn *conv;
     void (*mark)(Uint32 *pair, const Uint32 *whole, const Uint32 *part,
@@ -54,12 +60,25 @@ struct stdl_sdl2_pairs {
 #ifdef STDL_SDL2_ST
     /* an ST's screen (stpair.c, st.h): its pair loop, and its pair
      * tables made from the conversion's */
-    void (*st_conv)(const Uint8 *src, long sp, Uint8 *dst, long dp,
-                    long groups, long h, const Uint32 *tab,
-                    const Uint32 *next);
+    stdl_sdl2_st_conv_fn *st_conv;
     void (*st_tabs)(const Uint32 *tab, Uint32 *ptab);
 #endif
 };
+
+/*
+ * The batch's rule for pairs, a row at a time: of a copy's groups m, a
+ * pairs copy's go into *pair where no other copy has reached them
+ * (*whole less *pair, or *part), and any other copy takes back every
+ * one. A group is converted as pairs only if every copy of the batch
+ * that reached it was a pairs copy covering it whole.
+ */
+static __inline__ void stdl_sdl2_pair_rule(Uint32 *pair, const Uint32 *whole,
+                                           const Uint32 *part, Uint32 m,
+                                           int pairing)
+{
+    const Uint32 p = *pair;
+    *pair = pairing ? p | (m & ~((*whole & ~p) | *part)) : p & ~m;
+}
 
 /* video.c: SDL_RenderCopy with its whole groups converted as pairs */
 int stdl_sdl2_copy_pairs(SDL_Renderer *r, SDL_Texture *texture,

@@ -80,44 +80,39 @@ static void take_pairs(uint8_t *row, long n, int paired)
     }
 }
 
-/* the public entries against the reference: 1 for a box unlike it.
- * kind 0 whole pixels with X a constant (each X written out, as a
- * program names its own), 1 with X from a variable, 2 pairs on pixels
- * in pairs, 3 pairs on pixels that are not */
+/* a box through the public entries: kind 0 whole pixels with X a
+ * constant (each X written out, as a program names its own), 1 with X
+ * from a variable, 2 pairs on pixels in pairs, 3 pairs on pixels that
+ * are not */
 static volatile unsigned runtime_x;
 
 static void convert_box(int kind, const uint8_t *src, long sp, uint8_t *dst,
                         long dp, long groups, long h, int dbl, unsigned x)
 {
+#define CASE(X) \
+    case X: STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, X); break;
     if (kind == 0) {
         switch (x) {
-        case 0x00: STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, 0x00); break;
-        case 0x10: STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, 0x10); break;
-        case 0x20: STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, 0x20); break;
-        case 0x30: STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, 0x30); break;
-        case 0x40: STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, 0x40); break;
-        case 0x50: STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, 0x50); break;
-        case 0x60: STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, 0x60); break;
-        case 0x70: STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, 0x70); break;
-        case 0x80: STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, 0x80); break;
-        case 0x90: STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, 0x90); break;
-        case 0xA0: STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, 0xA0); break;
-        case 0xB0: STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, 0xB0); break;
-        case 0xC0: STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, 0xC0); break;
-        case 0xD0: STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, 0xD0); break;
-        case 0xE0: STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, 0xE0); break;
-        default:   STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, 0xF0); break;
+        CASE(0x00) CASE(0x10) CASE(0x20) CASE(0x30) CASE(0x40) CASE(0x50)
+        CASE(0x60) CASE(0x70) CASE(0x80) CASE(0x90) CASE(0xA0) CASE(0xB0)
+        CASE(0xC0) CASE(0xD0) CASE(0xE0)
+        default:
+            STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, 0xF0);
+            break;
         }
-    } else if (kind == 1) {
-        runtime_x = x;
+        return;
+    }
+#undef CASE
+    runtime_x = x;
+    if (kind == 1) {
         STDL_SDL2_ConvertBox(src, sp, dst, dp, groups, h, dbl, runtime_x);
     } else {
-        runtime_x = x;
         STDL_SDL2_ConvertBoxPairs(src, sp, dst, dp, groups, h, dbl,
                                   runtime_x);
     }
 }
 
+/* the public entries against the reference; the boxes unlike it */
 static int public_entries(uint8_t *src, uint8_t *got, uint8_t *want,
                           long srcmax, long dstmax, int *runs)
 {
@@ -167,19 +162,20 @@ static int public_entries(uint8_t *src, uint8_t *got, uint8_t *want,
         }
     }
     /* nothing for no groups or no rows, either entry */
-    for (t = 0; t < 4; t++) {
-        const long groups = (t & 1) ? 0 : -1, h = (t & 2) ? 3 : 0;
-        memset(got, 0xA5, (size_t)dstmax);
-        memset(want, 0xA5, (size_t)dstmax);
-        STDL_SDL2_ConvertBox(src, 320, got, 320, groups, 2, 0, 0);
-        STDL_SDL2_ConvertBox(src, 320, got, 320, 2, h - 3, 1, 0x70);
-        STDL_SDL2_ConvertBoxPairs(src, 320, got, 320, groups, h, 0, 0);
-        STDL_SDL2_ConvertBoxPairs(src, 320, got, 320, 3, h - 3, 1, 0x30);
-        (*runs)++;
-        if (memcmp(got, want, (size_t)dstmax) != 0) {
-            printf("FAIL an empty box wrote to the page\n");
-            failures++;
-        }
+    memset(got, 0xA5, (size_t)dstmax);
+    memset(want, 0xA5, (size_t)dstmax);
+    STDL_SDL2_ConvertBox(src, 320, got, 320, 0, 2, 0, 0);
+    STDL_SDL2_ConvertBox(src, 320, got, 320, -1, 2, 0, 0);
+    STDL_SDL2_ConvertBox(src, 320, got, 320, 2, 0, 1, 0x70);
+    STDL_SDL2_ConvertBox(src, 320, got, 320, 2, -1, 1, 0x70);
+    STDL_SDL2_ConvertBoxPairs(src, 320, got, 320, 0, 3, 0, 0);
+    STDL_SDL2_ConvertBoxPairs(src, 320, got, 320, -1, 3, 0, 0);
+    STDL_SDL2_ConvertBoxPairs(src, 320, got, 320, 3, 0, 1, 0x30);
+    STDL_SDL2_ConvertBoxPairs(src, 320, got, 320, 3, -1, 1, 0x30);
+    (*runs)++;
+    if (memcmp(got, want, (size_t)dstmax) != 0) {
+        printf("FAIL an empty box wrote to the page\n");
+        failures++;
     }
     free(taken);
     return failures;

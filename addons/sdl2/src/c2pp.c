@@ -5,8 +5,10 @@
  *
  * Pixel pairs: rows whose pixels 2i and 2i + 1 are the same, as a
  * program drawing at half the width has them, converted by loops that
- * read a group's 8 distinct pixels (c2p_asm.h's C2P_PGROUP): 56
- * instructions a group against 74. Two variants, as for the whole
+ * read a group's 8 distinct pixels (c2p_asm.h's C2P_PGROUP, which says
+ * how): 56 instructions a group against 74. Of a group not in pairs
+ * they take the first of each pair in its first half and the second in
+ * its second, as the C twin below does. Two variants, as for the whole
  * loops: none for X = 0 and one that reads X's two longs, for any other
  * X (a fixed X's loops each would be 15 more objects for a call few
  * programs make).

@@ -3,26 +3,13 @@
  * SPDX-License-Identifier: CC0-1.0
  *
  * MULDIV: a 68000 program's 32-bit multiplies and divides on a 68020's
- * own instructions, where the machine has one (arith020.mk,
- * docs/building.md).
- *
- * The C is ordinary: x * fov / z on longs, which gcc 4.6 compiles for
- * the 68000 as calls of libgcc's __mulsi3 and __divsi3. What changes
- * is the link (the Makefile's rule): with $(STDL_ARITH020) every such
- * call goes through libstdl.a's arith020.o, which on a TT or a Falcon
- * answers with one muls.l or divs.l, and on an ST goes on to libgcc's.
- * The source needs nothing, which is why the pattern suits a port: it
- * runs as it did on every machine, faster on the ones that can.
- *
- * It projects 64 points over and over for a second, then for another
- * through libgcc's own routines - which a program linked with the
- * flags can still name, as __real___mulsi3 and __real___divsi3 - and
- * prints the two rates. In Hatari: a TT 178,432 a second against
- * 89,984, a Falcon 92,800 against 42,752, and an STE 6,912 against
- * 7,424, slower by the test that sends each call on to libgcc's (41
- * cycles at 8MHz). Hatari gives a 68030's multiply and divide
- * instructions almost no time, so a real TT's or Falcon's figures
- * will differ.
+ * own instructions where the machine has one, from the link alone
+ * (arith020.mk's STDL_ARITH020, docs/building.md): the C is ordinary
+ * x * fov / z on longs, so a port runs as it did on every machine and
+ * faster on the ones that can. It projects 64 points over and over for
+ * a second, then for another through libgcc's own routines by name
+ * (__real___mulsi3 and __real___divsi3, which only a program linked
+ * with the flags has), and prints the two rates.
  */
 
 #include <stdio.h>

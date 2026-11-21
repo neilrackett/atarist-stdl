@@ -43,9 +43,8 @@ int stdl_sdl1_br_open(void *pixels, int w, int h, int pitch, int *ox,
             return fail();
         }
         STDL_SDL2_SetRenderPalette(ren, pal);
-        /* the loop that reads X as it runs: STDL_SDL2_SetBorderIndex is
-         * inline so that a constant X links its own loop alone, and
-         * given a variable it would name, and link, all fifteen */
+        /* the loop that reads X as it runs, which is what
+         * STDL_SDL2_SetBorderIndex takes for an X from a variable */
         if (border && stdl_sdl2_set_border(ren, border,
                                            &stdl_sdl2_c2p_any) < 0) {
             return fail();

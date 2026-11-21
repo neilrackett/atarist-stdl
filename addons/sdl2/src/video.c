@@ -74,8 +74,7 @@ static int st_on, st_rows = SCREEN_H;
  * odd x */
 #define ST_TABS(r, y) (r)->tab[(y) & 1], (r)->tab[~(y) & 1]
 /* and the pair tables, which are made from them (stpair.c) */
-#define ST_PTABS(r, y) (r)->ptab + ((y) & 1) * 1024, \
-                       (r)->ptab + (~(y) & 1) * 1024
+#define ST_PTABS(r, y) (r)->ptab[(y) & 1], (r)->ptab[~(y) & 1]
 #define GLONGS(n) ((n) << (st_on ? 1 : 2))  /* and n groups in longs */
 /* a row or a texture's row times a stride: the 68000's own multiply,
  * where a 32-bit one is a library call (textures keep to 16 bits) */
@@ -185,7 +184,7 @@ struct SDL_Renderer {
     struct stdl_sdl2_st_maps maps;  /* a colour's two slots of the 16 */
     Uint32 tab[2][4 * 256];     /* as the conversion has them: even
                                  * rows' tables, and odd rows' */
-    Uint32 *ptab;               /* the same for pixel pairs, 8K made at
+    Uint32 (*ptab)[4 * 256];    /* the same for pixel pairs, 8K made at
                                  * the first pairs copy (stpair.c) */
     int bits;                   /* a channel as the machine shows it */
     int dither;                 /* a checkerboard of two slots (st.h) */
@@ -786,7 +785,7 @@ static int st_reduce(SDL_Renderer *r)
     if (moved) {
         stdl_sdl2_st_spread(r->maps.a, r->maps.b, r->tab[0]);
         if (r->ptab) {
-            r->pairs->st_tabs(r->tab[0], r->ptab);
+            r->pairs->st_tabs(r->tab[0], r->ptab[0]);
         }
         r->stale = r->frame = 1;
     }
@@ -1172,6 +1171,8 @@ static void convert_rows(SDL_Renderer *r, Uint8 *back, int y, int n, Uint32 m,
         Uint32 k = pair ? p : m & ~p;
         int g = 0;
         while (k) {
+            const Uint8 *src;
+            Uint8 *dst;
             int ge;
             while (!(k & 1)) {
                 k >>= 1;
@@ -1182,15 +1183,11 @@ static void convert_rows(SDL_Renderer *r, Uint8 *back, int y, int n, Uint32 m,
                 k >>= 1;
                 ge++;
             }
+            src = t->pixels + MUL(y - r->bdy, t->pitch) + (g * 16 - r->bdx);
+            dst = back + MUL(y, r->stride) + GOFF(g);
 #ifdef STDL_SDL2_ST
             if (st_on) {
-                const Uint8 *src = t->pixels + MUL(y - r->bdy, t->pitch) +
-                                   (g * 16 - r->bdx);
-                Uint8 *dst = back + MUL(y, r->stride) + GOFF(g);
-                /* pairs are read a word each, from even addresses; at an
-                 * odd one, converted whole */
-                if (pair && !(((unsigned long)src | (unsigned long)t->pitch) &
-                              1)) {
+                if (pair) {
                     r->pairs->st_conv(src, t->pitch, dst, r->dp, ge - g, n,
                                       ST_PTABS(r, y));
                 } else {
@@ -1200,9 +1197,6 @@ static void convert_rows(SDL_Renderer *r, Uint8 *back, int y, int n, Uint32 m,
             } else
 #endif
             {
-                const Uint8 *src = t->pixels + MUL(y - r->bdy, t->pitch) +
-                                   (g * 16 - r->bdx);
-                Uint8 *dst = back + MUL(y, r->stride) + g * 16;
                 if (pair) {
                     r->pairs->conv(src, t->pitch, dst, r->dp, ge - g, n,
                                    r->dbl, r->x2, r->x0);
@@ -1401,11 +1395,25 @@ static int copy_changed(SDL_Renderer *r, const SDL_Texture *t, int tx, int ty,
     if (h <= 0) {
         return 1;
     }
-    r->bpaired |= r->pairing;
 #endif
     g0 = sx >> 4;
     ng = w >> 4;
     rowbits = ((1UL << ng) - 1) << g0;
+#ifdef STDL_SDL2_ST
+    /* Pixel pairs on an ST's screen, by the batch's rule (internal.h's
+     * stdl_sdl2_pair_rule): any copy but a pairs copy takes back every
+     * group of its box, changed or not, as the rule is about the copies
+     * and not the pixels; a pairs copy's changed groups are pairs where
+     * no other copy has reached them (below). A group a pairs copy
+     * leaves as it was is not converted, and stays as it was marked. */
+    if (r->pairing) {
+        r->bpaired = 1;
+    } else if (r->bpaired) {
+        for (y = sy; y < sy + h; y++) {
+            stdl_sdl2_pair_rule(&r->bpair[y], NULL, NULL, rowbits, 0);
+        }
+    }
+#endif
     s = t->pixels + MUL(ty, t->pitch) + tx;
     m = r->model + MUL(sy, SCREEN_W) + sx;
     sskip = t->pitch - w;
@@ -1472,22 +1480,12 @@ static int copy_changed(SDL_Renderer *r, const SDL_Texture *t, int tx, int ty,
             } while (--g);
 #endif
         }
-#ifdef STDL_SDL2_ST
-        /* Pixel pairs on an ST's screen, by the batch's rule (c2ppair.c's
-         * mark): a pairs copy's changed groups are pairs where no other
-         * copy has reached them, and any other copy takes back every
-         * group of its box, changed or not, as the rule is about the
-         * copies and not the pixels. A group a pairs copy leaves as it
-         * was is not converted, and stays as it was marked. */
-        if (r->pairing) {
-            r->bpair[y] |= mask & ~((r->bwhole[y] & ~r->bpair[y]) |
-                                    r->bpart[y]);
-        } else if (r->bpaired) {
-            r->bpair[y] &= ~rowbits;
-        }
-#endif
         if (mask) {
 #ifdef STDL_SDL2_ST
+            if (r->pairing) {
+                stdl_sdl2_pair_rule(&r->bpair[y], &r->bwhole[y],
+                                    &r->bpart[y], mask, 1);
+            }
             /* an ST's colours seen: the changed groups', now the copy's */
             if (st_on && !r->given) {
                 const Uint8 *p = m - w;
@@ -1639,6 +1637,17 @@ int SDL_RenderCopy(SDL_Renderer *renderer, SDL_Texture *texture,
     sy = d->y + r->yoff;
     dx = sx - s->x;
     dy = sy - s->y;
+#ifdef STDL_SDL2_ST
+    /* an ST's pair loop reads a pair as a word, from an even address: a
+     * pairs copy from an odd one or with an odd pitch is an ordinary
+     * copy, its pixels converted whole. The batch is of one texture at
+     * one dx, so its copies are all the one or all the other. */
+    if (st_on && r->pairing &&
+        (((unsigned long)texture->pixels - (unsigned long)dx) |
+         (unsigned long)texture->pitch) & 1) {
+        r->pairing = 0;
+    }
+#endif
     if (r->bt && (r->bt != texture || r->bdx != dx || r->bdy != dy)) {
         flush(r);
     }
@@ -1672,22 +1681,22 @@ int stdl_sdl2_copy_pairs(SDL_Renderer *r, SDL_Texture *texture,
                          const struct stdl_sdl2_pairs *pairs)
 {
     int ret;
-#ifdef STDL_SDL2_ST
-    /* an ST's screen: pair tables of its own, made from the conversion's
-     * at the first pairs copy and again with them (st_reduce); without
-     * the memory for them a pairs copy is converted as any */
-    if (r && st_on && !r->ptab) {
-        r->ptab = (Uint32 *)malloc(sizeof(r->tab));
-        if (!r->ptab) {
-            return SDL_RenderCopy(r, texture, srcrect, dstrect);
-        }
-        pairs->st_tabs(r->tab[0], r->ptab);
-    }
-#endif
     /* no renderer: SDL_RenderCopy's error */
     if (!r) {
         return SDL_RenderCopy(r, texture, srcrect, dstrect);
     }
+#ifdef STDL_SDL2_ST
+    /* an ST's screen: pair tables of its own, made from the conversion's
+     * at the first pairs copy and again with them (st_reduce); without
+     * the memory for them a pairs copy is converted as any */
+    if (st_on && !r->ptab) {
+        r->ptab = (Uint32 (*)[4 * 256])malloc(sizeof(r->tab));
+        if (!r->ptab) {
+            return SDL_RenderCopy(r, texture, srcrect, dstrect);
+        }
+        pairs->st_tabs(r->tab[0], r->ptab[0]);
+    }
+#endif
     r->pairs = pairs;
     r->pairing = 1;
     ret = SDL_RenderCopy(r, texture, srcrect, dstrect);

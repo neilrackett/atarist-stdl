@@ -239,6 +239,47 @@ static void public_box(int kind, const uint8_t *src, long sp, uint8_t *dst,
     }
 }
 
+/* the public entries' times, X = 0: TFRAMES 320x240 frames from src
+ * into a, `how` 0 and 1 a call a frame (whole pixels, pairs), 2 and 3 a
+ * call a row, 4 and 5 a call a group, 6 a call a row with the rows
+ * taking turns, pairs on the even rows and whole pixels on the odd, as
+ * a program sending each row the way its contents say does */
+enum { TFRAMES = 10 };
+
+static __inline__ void box(int pairs, const uint8_t *src, uint8_t *dst,
+                           long g, long h, int dbl)
+{
+    if (pairs) {
+        STDL_SDL2_ConvertBoxPairs(src, W, dst, W, g, h, dbl, 0);
+    } else {
+        STDL_SDL2_ConvertBox(src, W, dst, W, g, h, dbl, 0);
+    }
+}
+
+static __attribute__((noinline)) uint32_t frame(const uint8_t *src,
+                                                uint8_t *a, int how,
+                                                int dbl)
+{
+    const long step = (how == 4 || how == 5) ? 16 : W;
+    const uint32_t t0 = STDL_GetHz38400();
+    int f, y;
+    long c;
+    for (f = 0; f < TFRAMES; f++) {
+        if (how < 2) {
+            box(how, src, a, W / 16, H, dbl);
+            continue;
+        }
+        for (y = 0; y < H; y++) {
+            const int pairs = how == 6 ? !(y & 1) : how & 1;
+            for (c = 0; c < W; c += step) {
+                box(pairs, src + (long)y * W + c,
+                    a + (((long)y * W) << dbl) + c, step / 16, 1, dbl);
+            }
+        }
+    }
+    return STDL_GetHz38400() - t0;
+}
+
 static const struct stdl_sdl2_c2pv *const fixed[16] = {
     &stdl_sdl2_c2p_plain, &stdl_sdl2_c2p_x10, &stdl_sdl2_c2p_x20,
     &stdl_sdl2_c2p_x30, &stdl_sdl2_c2p_x40, &stdl_sdl2_c2p_x50,
@@ -365,13 +406,15 @@ int main(void)
     for (gi = 0; gi < 6; gi += (gi < 2 ? 1 : 3))    /* 1, 2, 3, 20 */
     for (hi = 0; hi < 2; hi++)
     for (oi = 0; oi < 2; oi++) {
-        static const unsigned constant[6] = { 0, 0x70, 0xF0, 0, 0, 0 };
+        /* kinds 3 and 5 take X from a variable, every X; the others
+         * their constant, once */
+        const int var = any == 3 || any == 5;
+        const unsigned x = var ? (unsigned)xi << 4 :
+                           any == 1 ? 0x70 : any == 2 ? 0xF0 : 0;
         uint32_t x2, x0;
-        const unsigned x = (any == 3 || any == 5) ? (unsigned)xi << 4
-                                                  : constant[any];
         long g = gs[gi], h = hs[hi];
-        if (xi > 0 && !(any == 3 || any == 5)) {
-            continue;           /* a constant X once */
+        if (xi > 0 && !var) {
+            continue;
         }
         stdl_sdl2_c2p_xor(x, &x2, &x0);
         memset(a, 0x5A, PAGE);
@@ -401,89 +444,20 @@ int main(void)
                cases);
     }
 
-    /* their times, X = 0: a whole frame in one call, a call a row (20
-     * groups by 1) and a call a group (1 by 1), whole and as pairs; then
-     * a call a row with the rows taking turns, one whole and one pairs,
-     * as a program sending each row the way its contents say does,
-     * against every row whole */
+    /* their times (frame): a whole frame in one call, a call a row and a
+     * call a group, whole and as pairs; then a call a row with the rows
+     * taking turns, against every row whole (a call a row's) */
     for (dbl = 0; dbl < 2; dbl++) {
-        enum { FRAMES = 10 };
-        uint32_t t[9];
-        char m[8][16];
-        int f, y, c, k;
-        t[0] = STDL_GetHz38400();
-        for (f = 0; f < FRAMES; f++) {
-            STDL_SDL2_ConvertBox(src, W, a, W, W / 16, H, dbl, 0);
-        }
-        t[1] = STDL_GetHz38400();
-        for (f = 0; f < FRAMES; f++) {
-            STDL_SDL2_ConvertBoxPairs(src, W, a, W, W / 16, H, dbl, 0);
-        }
-        t[2] = STDL_GetHz38400();
-        for (f = 0; f < FRAMES; f++) {
-            for (y = 0; y < H; y++) {
-                STDL_SDL2_ConvertBox(src + y * W, W, a + y * W * (dbl + 1),
-                                     W, W / 16, 1, dbl, 0);
-            }
-        }
-        t[3] = STDL_GetHz38400();
-        for (f = 0; f < FRAMES; f++) {
-            for (y = 0; y < H; y++) {
-                STDL_SDL2_ConvertBoxPairs(src + y * W, W,
-                                          a + y * W * (dbl + 1), W, W / 16,
-                                          1, dbl, 0);
-            }
-        }
-        t[4] = STDL_GetHz38400();
-        for (f = 0; f < FRAMES; f++) {
-            for (y = 0; y < H; y++) {
-                for (c = 0; c < W; c += 16) {
-                    STDL_SDL2_ConvertBox(src + y * W + c, W,
-                                         a + y * W * (dbl + 1) + c, W, 1, 1,
-                                         dbl, 0);
-                }
-            }
-        }
-        t[5] = STDL_GetHz38400();
-        for (f = 0; f < FRAMES; f++) {
-            for (y = 0; y < H; y++) {
-                for (c = 0; c < W; c += 16) {
-                    STDL_SDL2_ConvertBoxPairs(src + y * W + c, W,
-                                              a + y * W * (dbl + 1) + c, W,
-                                              1, 1, dbl, 0);
-                }
-            }
-        }
-        t[6] = STDL_GetHz38400();
-        for (f = 0; f < FRAMES; f++) {
-            for (y = 0; y < H; y++) {
-                STDL_SDL2_ConvertBox(src + y * W, W, a + y * W * (dbl + 1),
-                                     W, W / 16, 1, dbl, 0);
-            }
-        }
-        t[7] = STDL_GetHz38400();
-        for (f = 0; f < FRAMES; f++) {
-            for (y = 0; y < H; y++) {
-                if (y & 1) {
-                    STDL_SDL2_ConvertBox(src + y * W, W,
-                                         a + y * W * (dbl + 1), W, W / 16,
-                                         1, dbl, 0);
-                } else {
-                    STDL_SDL2_ConvertBoxPairs(src + y * W, W,
-                                              a + y * W * (dbl + 1), W,
-                                              W / 16, 1, dbl, 0);
-                }
-            }
-        }
-        t[8] = STDL_GetHz38400();
-        for (k = 0; k < 8; k++) {
-            ms(m[k], t[k + 1] - t[k], FRAMES);
+        char m[7][16];
+        int k;
+        for (k = 0; k < 7; k++) {
+            ms(m[k], frame(src, a, k, dbl), TFRAMES);
         }
         printf("S2C: the public entries%s, ms a 320x240 frame, whole and as"
                " pairs: one call %s %s, a call a row %s %s, a call a group"
                " %s %s; a call a row, every row whole %s, rows taking"
                " turns %s\n", dbl ? " on two lines" : "", m[0], m[1], m[2],
-               m[3], m[4], m[5], m[6], m[7]);
+               m[3], m[4], m[5], m[2], m[6]);
     }
 
     /* a whole frame, 20 groups by 240 rows, each way */

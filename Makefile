@@ -27,6 +27,8 @@ CFLAGS  = -O2 -fomit-frame-pointer -std=gnu99 -Wall -Wextra \
           -Iinclude -Iinclude/compat -I$(XPAD)
 
 LIB     = libstdl.a
+# the 68020's multiply and divide, an object of its own (below)
+ARITH020 = libstdl-arith020.o
 
 LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/palette.c src/event.c src/time.c src/dirty.c src/dirtybg.c \
@@ -46,7 +48,7 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/spritebatch.c src/responsive.c src/planes8.c src/planes8ex.c \
           src/planes8tile.c src/asset8.c src/tall4.c src/tallst.c \
           src/hz38400.c src/rowcopy.c src/planes8row.c src/overlap.c \
-          src/overlap4.c src/overlap8.c src/banner.c src/arith020.c
+          src/overlap4.c src/overlap8.c src/banner.c
 # Objects live under obj/, mirroring each source's own path. Sources
 # now come from two places, this repo and the xpad submodule, and
 # building beside the source would drop .o files inside lib/xpad. The
@@ -76,7 +78,7 @@ EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
 # notice - a port lost a cycle to exactly this.
 .DEFAULT_GOAL := all
 
-all: $(LIB) sizecheck libcallcheck ovhostcheck $(EXAMPLES) assets
+all: $(LIB) $(ARITH020) sizecheck libcallcheck ovhostcheck $(EXAMPLES) assets
 
 # Size budget for the pixel-path objects.
 #
@@ -427,15 +429,22 @@ dist/OPLDEMO.TOS: examples/opldemo.c $(LIB)
 dist/CHUNKY.TOS: examples/chunky.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
 
-# The 68020's multiply and divide for a 68000 program: the link flags a
-# program takes from arith020.mk (docs/building.md)
+# The 68020's multiply and divide for a 68000 program (src/arith020.c,
+# docs/building.md): an object of its own beside the archives, not a
+# member of them, which a program links through arith020.mk's
+# STDL_ARITH020 and nothing else names. It calls the system through
+# its traps and no C library, so the one object serves libcmini and
+# mintlib programs alike.
+$(ARITH020): $(OBJDIR)/src/arith020.o
+	cp $< $@
+
 include arith020.mk
-dist/MULDIV.TOS: examples/muldiv.c $(LIB)
-	$(CC) $(CFLAGS) -o $@ $< $(LIB) $(STDL_ARITH020) && $(STRIP) $@
+dist/MULDIV.TOS: examples/muldiv.c $(LIB) $(ARITH020)
+	$(CC) $(CFLAGS) -o $@ $< $(STDL_ARITH020) $(LIB) && $(STRIP) $@
 
 # The generated header dependencies, if any objects exist yet.
 -include $(LIBOBJS:.o=.d) $(CMINIOBJS:.o=.d) $(STATSOBJS:.o=.d) \
-         $(OVHOST_OBJ:.o=.d)
+         $(OVHOST_OBJ:.o=.d) $(OBJDIR)/src/arith020.d
 
 # The SDL2 add-on's targets (`make sdl2`), which nothing above builds:
 # the core neither includes nor links it.
@@ -487,7 +496,7 @@ bundle:
 
 clean:
 	rm -rf $(OBJDIR)
-	rm -f $(CMINILIB) $(LIB) $(EXAMPLES) $(BUNDLE)
+	rm -f $(CMINILIB) $(LIB) $(ARITH020) $(EXAMPLES) $(BUNDLE)
 	rm -f $(SDL2LIB) $(SDL2CMINILIB) $(SDL2EXAMPLES)
 	rm -f $(SDL2STLIB) $(SDL2STCMINILIB) dist/SDL2ST.TOS
 	rm -f $(SDL1LIB) $(SDL1CMINILIB) $(SDL1EXAMPLES)

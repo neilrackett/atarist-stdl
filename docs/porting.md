@@ -531,8 +531,7 @@ truncates colours to the low N bits rather than rejecting them. See
   the port's objects to list every call per function. With `-a` and
   an allowlist it fails the build on a new one. The calls that stay
   can be a 68020's own instructions on a TT or a Falcon, from the same
-  68000 build: link with `STDL_ARITH020` (`arith020.mk`,
-  [building.md](building.md)), at 41 cycles a call more on an ST.
+  68000 build: link with `STDL_ARITH020` ([building.md](building.md)).
 * **libc memcpy in per-frame paths**: mintlib's memcpy overhead
   dominates short copies. 160 small per-line memcpys cost
   one port ~13ms/frame on an 8MHz ST; inline word-copy loops

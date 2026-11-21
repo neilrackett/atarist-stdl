@@ -5,11 +5,11 @@
  *
  * The conversion's loops for one fixed X, built once for each of the 15
  * (sdl2.mk: -DSTDL_SDL2_XS=10 ... f0) into an object of its own, so a
- * program names its X as a constant (STDL_SDL2_SetBorderIndex) and
- * links only that pair. X's bits 4 and 5 are planes 4 and 5, the high
- * and low words of d2 once the merges are done, and bits 6 and 7
- * planes 6 and 7, d0's: each long takes a not.w (the low word), a not.l
- * (both) or both (the high word alone).
+ * program names its X as a constant (STDL_SDL2_SetBorderIndex, the
+ * public entries) and links only that pair. X's bits 4 and 5 are planes
+ * 4 and 5, the high and low words of d2 once the merges are done, and
+ * bits 6 and 7 planes 6 and 7, d0's: each long takes a not.w (the low
+ * word), a not.l (both) or both (the high word alone).
  */
 
 #include "c2p.h"

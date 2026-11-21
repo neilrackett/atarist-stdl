@@ -489,9 +489,7 @@ void stdl_sdl2_st_spread(const Uint8 *a, const Uint8 *b, Uint32 *tab)
 }
 
 #ifdef __m68k__
-/* d0 and d2 the group's two longs, d1 the pixel's index, a2-a5 the four
- * tables; d3 groups - 1, d6 the group count, d7 the rows, d4 and d5 what
- * is left of each row's strides */
+/* a pixel: its byte, doubled twice for a long's index, d1 */
 #define ST_P(op, t) \
     "	moveq	#0,%d1\n" \
     "	move.b	(%a0)+,%d1\n" \
@@ -505,46 +503,7 @@ void stdl_sdl2_st_spread(const Uint8 *a, const Uint8 *b, Uint32 *tab)
     ST_P("or.l", "%a2") r "\n" ST_P("or.l", "%a3") r "\n" \
     ST_P("or.l", "%a4") r "\n" ST_P("or.l", "%a5") r "\n"
 
-__asm__(
-"	.text\n"
-"	.even\n"
-"	.globl	_stdl_sdl2_st_c2p\n"
-"_stdl_sdl2_st_c2p:\n"
-"	movem.l	%d2-%d7/%a2-%a5,-(%sp)\n"
-"	move.l	44(%sp),%a0\n"            /* src */
-"	move.l	48(%sp),%d4\n"            /* sp */
-"	move.l	52(%sp),%a1\n"            /* dst */
-"	move.l	56(%sp),%d5\n"            /* dp */
-"	move.l	60(%sp),%d3\n"            /* groups */
-"	move.l	64(%sp),%d7\n"            /* h */
-"	move.l	68(%sp),%a2\n"            /* this row's tables; 72: the next's */
-"	move.l	%d3,%d0\n"
-"	lsl.l	#3,%d0\n"
-"	sub.l	%d0,%d5\n"                /* dp - 8 * groups */
-"	add.l	%d0,%d0\n"
-"	sub.l	%d0,%d4\n"                /* sp - 16 * groups */
-"	subq.w	#1,%d3\n"
-"1:	lea	1024(%a2),%a3\n"
-"	lea	1024(%a3),%a4\n"
-"	lea	1024(%a4),%a5\n"
-"	move.w	%d3,%d6\n"
-"2:\n"
-ST_L("%d0")
-ST_L("%d2")
-"	movep.l	%d0,0(%a1)\n"
-"	movep.l	%d2,1(%a1)\n"
-"	addq.l	#8,%a1\n"
-"	dbra	%d6,2b\n"
-"	add.l	%d4,%a0\n"
-"	add.l	%d5,%a1\n"
-"	move.l	72(%sp),%d0\n"            /* the two rows' tables change places */
-"	move.l	%a2,72(%sp)\n"
-"	move.l	%d0,%a2\n"
-"	subq.l	#1,%d7\n"
-"	bne	1b\n"
-"	movem.l	(%sp)+,%d2-%d7/%a2-%a5\n"
-"	rts\n"
-);
+__asm__(ST_FUNC("stdl_sdl2_st_c2p", "", ST_L("%d0") ST_L("%d2")));
 #else
 #define FOUR(s) (tab[(s)[0]] | tab[256 + (s)[1]] | tab[512 + (s)[2]] | \
                  tab[768 + (s)[3]])
@@ -559,16 +518,8 @@ void stdl_sdl2_st_c2p(const Uint8 *src, long sp, Uint8 *dst, long dp,
         Uint8 *d = dst;
         long g;
         for (g = groups; g > 0; g--, s += 16, d += 8) {
-            const Uint32 a = FOUR(s) << 4 | FOUR(s + 4);
-            const Uint32 b = FOUR(s + 8) << 4 | FOUR(s + 12);
-            d[0] = (Uint8)(a >> 24);
-            d[2] = (Uint8)(a >> 16);
-            d[4] = (Uint8)(a >> 8);
-            d[6] = (Uint8)a;
-            d[1] = (Uint8)(b >> 24);
-            d[3] = (Uint8)(b >> 16);
-            d[5] = (Uint8)(b >> 8);
-            d[7] = (Uint8)b;
+            stdl_sdl2_st_store(d, FOUR(s) << 4 | FOUR(s + 4),
+                               FOUR(s + 8) << 4 | FOUR(s + 12));
         }
         tab = next;
         next = row;

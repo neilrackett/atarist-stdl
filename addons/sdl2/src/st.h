@@ -79,10 +79,9 @@ void stdl_sdl2_st_spread(const Uint8 *a, const Uint8 *b, Uint32 *tab);
 /* h rows of `groups` groups of 16 pixels from src, sp bytes a row,
  * to four planes at dst, dp bytes a row, 8 bytes a group; at least one
  * of each, 32,768 groups at most. The first row goes through tab, the
- * next through `next`, and so on in turn. */
-void stdl_sdl2_st_c2p(const Uint8 *src, long sp, Uint8 *dst, long dp,
-                      long groups, long h, const Uint32 *tab,
-                      const Uint32 *next);
+ * next through `next`, and so on in turn (stdl_sdl2_st_conv_fn,
+ * internal.h). */
+stdl_sdl2_st_conv_fn stdl_sdl2_st_c2p;
 
 /* Pixel pairs (stpair.c, reached through c2ppair.c's pointers): from
  * the conversion's tables above, the pair tables, two sets of 4 by 256
@@ -92,9 +91,68 @@ void stdl_sdl2_st_c2p(const Uint8 *src, long sp, Uint8 *dst, long dp,
  * same: one lookup a pair, of the second pixel's colour. src and sp
  * even, as the pairs are read a word each. */
 void stdl_sdl2_st_pairtabs(const Uint32 *tab, Uint32 *ptab);
-void stdl_sdl2_st_c2pp(const Uint8 *src, long sp, Uint8 *dst, long dp,
-                       long groups, long h, const Uint32 *tab,
-                       const Uint32 *next);
+stdl_sdl2_st_conv_fn stdl_sdl2_st_c2pp;
+
+#ifdef __m68k__
+/*
+ * The frame both loops have (st.c, stpair.c): `name` as
+ * stdl_sdl2_st_conv_fn, SETUP run once and G a group, from (a0)+ into
+ * d0 (its plane words' high bytes) and d2 (their low ones), which
+ * movep writes. a2-a5 are the row's four tables, a6 the next row's,
+ * exchanged a row; d3 is groups - 1, d6 the group count, d4 and d5
+ * what is left of each row's strides, and the rows are counted in
+ * their argument. d1 and d7 are G's (SETUP's) to use.
+ */
+#define ST_FUNC(name, setup, g) \
+    "	.text\n" \
+    "	.even\n" \
+    "	.globl	_" name "\n" \
+    "_" name ":\n" \
+    "	movem.l	%d2-%d7/%a2-%a6,-(%sp)\n" \
+    "	move.l	48(%sp),%a0\n"            /* src */ \
+    "	move.l	52(%sp),%d4\n"            /* sp */ \
+    "	move.l	56(%sp),%a1\n"            /* dst */ \
+    "	move.l	60(%sp),%d5\n"            /* dp */ \
+    "	move.l	64(%sp),%d3\n"            /* groups; 68: h */ \
+    "	move.l	72(%sp),%a2\n"            /* this row's tables */ \
+    "	move.l	76(%sp),%a6\n"            /* and the next's */ \
+    setup \
+    "	move.l	%d3,%d0\n" \
+    "	lsl.l	#3,%d0\n" \
+    "	sub.l	%d0,%d5\n"                /* dp - 8 * groups */ \
+    "	add.l	%d0,%d0\n" \
+    "	sub.l	%d0,%d4\n"                /* sp - 16 * groups */ \
+    "	subq.w	#1,%d3\n" \
+    "1:	lea	1024(%a2),%a3\n" \
+    "	lea	1024(%a3),%a4\n" \
+    "	lea	1024(%a4),%a5\n" \
+    "	move.w	%d3,%d6\n" \
+    "2:\n" g \
+    "	movep.l	%d0,0(%a1)\n" \
+    "	movep.l	%d2,1(%a1)\n" \
+    "	addq.l	#8,%a1\n" \
+    "	dbra	%d6,2b\n" \
+    "	add.l	%d4,%a0\n" \
+    "	add.l	%d5,%a1\n" \
+    "	exg	%a2,%a6\n"                /* the rows' tables change places */ \
+    "	subq.l	#1,68(%sp)\n" \
+    "	bne	1b\n" \
+    "	movem.l	(%sp)+,%d2-%d7/%a2-%a6\n" \
+    "	rts\n"
+#else
+/* the C twins' store of a group's two longs, a byte of each plane word */
+static __inline__ void stdl_sdl2_st_store(Uint8 *d, Uint32 a, Uint32 b)
+{
+    d[0] = (Uint8)(a >> 24);
+    d[2] = (Uint8)(a >> 16);
+    d[4] = (Uint8)(a >> 8);
+    d[6] = (Uint8)a;
+    d[1] = (Uint8)(b >> 24);
+    d[3] = (Uint8)(b >> 16);
+    d[5] = (Uint8)(b >> 8);
+    d[7] = (Uint8)b;
+}
+#endif
 
 /* video.c: the renderer's maps as its pages have them, what it reduces
  * with and the colours it has seen, for the tests */

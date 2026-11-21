@@ -6,8 +6,10 @@
  * The conversion's loops for an X known only at run time: its two
  * longs read from the arguments once a group and XORed in. An object
  * of its own, linked only by a program that sets its border index from
- * a variable (STDL_SDL2_SetBorderIndex); a constant takes c2px.c's
- * loops, which cost nothing over X = 0's (c2p_asm.h has the numbers).
+ * a variable (SDL_stdl_c2p.h's stdl_sdl2_c2p_variant, which
+ * STDL_SDL2_SetBorderIndex and the public entries use); a constant
+ * takes c2px.c's loops, which cost nothing over X = 0's (c2p_asm.h has
+ * the numbers).
  */
 
 #include "c2p.h"

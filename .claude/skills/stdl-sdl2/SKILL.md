@@ -175,7 +175,7 @@ for (;;) {
   and the picture's colour 0 lands there too. If colour 0 is not black,
   give an index the program never shows, a multiple of 16, as a
   constant: `STDL_SDL2_SetBorderIndex(ren, 0x70)` costs nothing over
-  none (a variable costs 4.5%).
+  none (a variable links the run-time loops alone, 4.5% slower).
 - **Logical size:** at most 320x240, centred, x on a 16-pixel group.
 
 ## What things cost (Hatari, a TT at 32MHz, a Falcon at 16MHz)
@@ -252,22 +252,22 @@ builds by them; take a frame budget from a real machine.
   two_lines, x)` or `STDL_SDL2_ConvertBoxPairs(...)` with the same
   arguments: a box of whole 16-pixel groups into eight planes, a TT's
   rows on two lines with `two_lines`, X the border index (a constant
-  links its own loops). It links the conversion's objects alone,
-  1,452 bytes and 1,404 more for pairs, no renderer and no
-  `libstdl.a`. A 68000 program that converts only on a TT or a Falcon
-  compiles `-m68000` and links the released `libstdl-sdl2.a` (or
-  `-cmini.a`). Do not include `addons/sdl2/src/c2p.h` or build
-  `c2p_asm.h`'s loops into the program: that is private and changes.
-  `SDL2C2P.TOS` (`examples/sdl2c2p.c`) is the pattern. **Pairs pay in
-  whole boxes**: a call costs some 40us on a TT (70 on a Falcon) and a
-  group as pairs saves 1.1us (2.3), so a 320x240 frame as one call is
-  31.0 -> 25.6ms on a TT, but a call a row 40.9 -> 34.6, slower than
-  one call of whole pixels (Hatari, SDL2CHK). One port's 3D view, 320
-  wide, went 20.5 -> 16.7ms a frame on a TT as one pairs box, where a
-  call a row of pairs measured no faster than whole pixels in its frame
-  and single-group runs as boxes saved nothing. Convert the view as one
-  box of pairs, then what is drawn over it at full width as whole
-  boxes.
+  links its own loops, a variable the run-time ones). It links the
+  conversion's objects alone, no renderer and no `libstdl.a`
+  (docs/sdl2.md has the bytes). A 68000 program that converts only on a
+  TT or a Falcon compiles `-m68000` and links the released
+  `libstdl-sdl2.a` (or `-cmini.a`). Do not include
+  `addons/sdl2/src/c2p.h` or build `c2p_asm.h`'s loops into the program:
+  that is private and changes. `SDL2C2P.TOS` (`examples/sdl2c2p.c`) is
+  the pattern. **Pairs pay in whole boxes**: a call costs some 40us on a
+  TT (80 on a Falcon) and a group as pairs saves 1.1us (2.3), so a
+  320x240 frame as one call is 31.0 -> 25.6ms on a TT, but a call a row
+  41.5 -> 35.4, slower than one call of whole pixels (Hatari, SDL2CHK).
+  One port's 3D view, 320 wide, went 20.5 -> 16.7ms a frame on a TT as
+  one pairs box, where a call a row of pairs measured no faster than
+  whole pixels in its frame and single-group runs as boxes saved
+  nothing. Convert the view as one box of pairs, then what is drawn over
+  it at full width as whole boxes.
 - **A TT writes every row to both of TT Low's lines**, so it is bound
   by its writes to ST-RAM. Its TT-RAM is fast: the add-on allocates
   textures and its working memory with `malloc`, which a program loaded
@@ -422,16 +422,12 @@ Falcon that binary shows what the 68020 build shows, frame for frame,
   and only the groups that differ are converted, so pushing a block
   again as it was costs a compare.
 - Pixel pairs (`STDL_SDL2_RenderCopyPairs`, the same calls as on a TT)
-  convert in about half the time here too, a lookup a pair: a 320x168
-  view 343 -> 179ms on an 8MHz ST, 181 -> 104 on a Mega STE (the loops
-  alone, Hatari). A frame of new pixels gains less, as the compare and
-  noting each changed group's colours stay (about 250ms of an 8MHz
-  frame): all 320x200 in pairs 767 -> 574ms, a 320x168 view in pairs
-  over a bar of whole pixels 767 -> 606; with the program's own 16
-  colours, which note nothing, 517 -> 325. Copy from an even address
-  with an even pitch, or the pairs are converted whole; pixels not in
-  pairs show the second of each. Its 8K of tables are allocated at
-  the first pairs copy.
+  convert in about half the time here too, a lookup a pair; a frame of
+  new pixels gains less, as the compare and noting each changed
+  group's colours stay (docs/sdl2.md's "An ST's screen, for testing"
+  has the numbers). Copy from an even address with an even pitch, or
+  the pairs are converted whole; pixels not in pairs show the second
+  of each. Its 8K of tables are allocated at the first pairs copy.
 - 16 colours: 15 slots and black made from the colours on screen, not
   the whole palette, so up to 15 on screen beside black are exact; a
   checkerboard of two slots stands in for a colour between them (on by

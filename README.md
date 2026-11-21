@@ -94,10 +94,9 @@ it calls.
 - **68000 arithmetic**: `<stdl/stdl_math.h>` is the 68000's own 16-bit
   multiply and divide, because gcc 4.6 turns any product it cannot prove
   16-bit into a `__mulsi3` call eight times the price; `tools/libcalls.sh`
-  lists every such call in a program's objects. Linked with
-  `STDL_ARITH020` (`arith020.mk`), the calls that remain are one
-  `muls.l` or `divs.l` on a TT or a Falcon and libgcc's on an ST, from
-  one 68000 build.
+  lists every such call in a program's objects. The calls that remain
+  are a 68020's own instructions on a TT or a Falcon when the program
+  links `STDL_ARITH020` ([docs/building.md](docs/building.md)).
 - **Clean exits**: VBL slots, vectors, palette, resolution and sound are put
   back however the program ends - `abort()`, a failed `assert` or a bus error
   included.
@@ -130,7 +129,7 @@ it calls.
 | `addons/sdl1/`    | the experimental SDL1 add-on, built by `make sdl1`                                             |
 | `tools/`          | `stdlconv`, the asset converter (images, banks, Degas, WAV, MIDI and VGM to YM), and `libcalls.sh` |
 | `examples/`       | ported SDL 1.2 tests and STDL demos, with their assets (public domain)                         |
-| `arith020.mk`     | `STDL_ARITH020`, the link flags for a 68020's multiply and divide in a 68000 program           |
+| `arith020.mk`     | `STDL_ARITH020`, what a 68000 program links for a 68020's multiply and divide                  |
 | `tests/`          | host tests (`make test`) and on-target runners for Hatari                                      |
 | `.claude/skills/` | the porting skills (below)                                                                     |
 | `dist/`           | build output: .TOS binaries and assets (untracked; doubles as a GEMDOS drive)                  |

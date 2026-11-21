@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <stdl/stdl.h>
 #include <SDL2/SDL_stdl_c2p.h>
+#include "hold.h"
 
 #define VIEW_W   320             /* the box converted: 20 groups */
 #define VIEW_H   200
@@ -66,6 +67,7 @@ int main(int argc, char *argv[])
 
     (void)argc;
     (void)argv;
+    hold_on_exit(NULL);
     STDL_UseResponsive(STDL_RESPONSIVE_COLOUR | STDL_RESPONSIVE_HEIGHT);
     s = STDL_SetVideoMode(320, 240, 8, STDL_DOUBLEBUF);
     if (s == NULL || s->format->BitsPerPixel != 8) {
@@ -88,14 +90,20 @@ int main(int argc, char *argv[])
     }
     STDL_SetColours(s, colours, 0, 256);
 
-    /* the picture at half the width: each value written to a pair */
+    /* the picture at half the width: each value written to a pair, the
+     * mean of three waves (each 254 at most, so 1 + v is a colour of
+     * the wheel). A sum of 762 at most divided by 3 is the 68000's
+     * 16-bit multiply and a shift, exact over that range, where / 3
+     * would be a libgcc call a pixel. */
     for (y = 0; y < VIEW_H; y++) {
+        const unsigned ty = tri((unsigned)y * 2);
         for (x = 0; x < WORLD_W; x += 2) {
             const unsigned h = (unsigned)x / 2;
-            const unsigned v = (tri(h * 3) + tri((unsigned)y * 2) +
-                                tri((h + (unsigned)y) * 2)) / 3;
+            const unsigned v = (unsigned)(STDL_MulU16(tri(h * 3) + ty +
+                                          tri((h + (unsigned)y) * 2),
+                                          683) >> 11);
             world[y * WORLD_W + x] = world[y * WORLD_W + x + 1] =
-                (uint8_t)(1 + v % 255);
+                (uint8_t)(1 + v);
         }
     }
 

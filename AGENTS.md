@@ -1563,34 +1563,31 @@ rules below keep it from being anything else's.
     428 bytes, fetched again at every row; taking it out made whole
     frames 12-21% faster in Hatari and boxes two groups wide a third to
     a half.
-  - **No label inside a loop may be a text symbol** (2026-11-21). The
-    span's ends were the labels `_NAME_cache0` and `_NAME_cache1`,
-    local text symbols, and a profiler or a debugger takes a text
-    symbol for a function: one port's Hatari profile showed
-    `_stdl_sdl2_c2p_plain2_cache0` "called" 215,134 times in 64 frames,
-    once a group, with the loop's time given to it and not to the
-    function. Now the ends are numeric local labels, which leave no
-    symbol, and the span is an absolute symbol, which Hatari does not
-    load with a program's code symbols. In a.out a `.L` label is still
-    a text symbol (`L` is the local prefix there, `.L` ELF's); numeric
-    labels are local in both. `sdl2check` refuses a `_cache0` or
-    `_cache1` text symbol, a span over 240 and fewer than 38 spans;
-    each was broken on purpose and failed (a loop 16 bytes longer:
-    "_stdl_sdl2_c2p_plain2: 244 bytes of loop"; the old label put
-    back; the old check against the new symbols: "0 conversion loops
-    measured"). Seen in Hatari's TT profiler, a program converting 320x240
-    frames for ever linked against v1.32.1 and against this, its symbols
-    loaded (`symbols prg`, `hatari_profile.py -st` on `profile save`):
-    before, 99.41% of the cycles went to `_stdl_sdl2_c2p_plain2_cache0`,
-    "called" 515,275 times by its own loop, and `_stdl_sdl2_c2p_plain2`
-    had none; after, 99.46% to `_stdl_sdl2_c2p_plain2`, called 107
-    times, once a frame.
+  - **No label inside a loop may be a text symbol** (2026-11-21):
+    a profiler or a debugger takes a text symbol for a function. The
+    span's ends were the labels `_NAME_cache0` and `_NAME_cache1`, and
+    Hatari's TT profiler, given a program converting 320x240 frames for
+    ever (`symbols prg`, `hatari_profile.py -st` on `profile save`),
+    put 99.41% of the cycles in `_stdl_sdl2_c2p_plain2_cache0`,
+    "called" 515,275 times by its own loop, and none in
+    `_stdl_sdl2_c2p_plain2`; with numeric local labels and the span as
+    an absolute symbol, which Hatari does not load with a program's code
+    symbols, 99.46% went to `_stdl_sdl2_c2p_plain2`, called 107 times,
+    once a frame. In a.out a `.L` label is still a text symbol (`L` is
+    the local prefix there, `.L` ELF's); numeric labels are local in
+    both. `sdl2check` refuses a `_cache0` or `_cache1` text symbol, a
+    span over 240 and fewer than 38 spans; each was broken on purpose
+    and failed.
   - Every box goes through the assembler on the machine, however
     narrow; the C twin is the host's, and the reference the machine
     checks the assembler against.
   - A fixed border index X has an object of its own (`c2px.c`, built
-    15 times), which `STDL_SDL2_SetBorderIndex` names inline for a
-    constant X. Reading X at run time costs about 3% of a frame.
+    15 times), which `STDL_SDL2_SetBorderIndex` and the public entries
+    name inline for a constant X (`stdl_sdl2_c2p_variant`); a variable
+    X takes the run-time loops (`c2pany.o`) alone. Until 2026-11-21
+    `STDL_SDL2_SetBorderIndex` kept a chooser of its own that, given a
+    variable, named and so linked all fifteen. Reading X at run time
+    costs about 3% of a frame.
   - `SDL2CHK` (`tests/hatari/sdl2chk.c`) checks every variant against
     the C twin on the machine and times them.
   - **The conversion alone is public** (`SDL_stdl_c2p.h`,
@@ -1620,21 +1617,16 @@ rules below keep it from being anything else's.
       X), and a variable X takes `c2pany.o`.
     - A program converting only on a TT or a Falcon, built for the
       68000, links `libstdl-sdl2.a`: the loops are 68000 instructions
-      and the C round them runs only where it is called. SDL2CHK built
-      `-m68000` against it and against `libstdl-sdl2-st.a` matched every
-      case on Hatari's TT, at the 68020 build's times.
-    - Moving the declarations into the public header renumbered gcc's
-      static locals in `timer.o` and `rwops.o` (`_last.4644` became
-      `_last.4699`): their sections and relocations are byte for byte
-      as they were, as are every other object's but `c2ppair.o`'s,
-      which lost the loops (1,584 bytes to 180; `c2pp.o` 1,404).
+      and the C round them runs only where it is called.
+    - A change to a header the add-on's objects include can renumber
+      gcc's static locals elsewhere (`_last.NNNN` in `timer.o` and
+      `rwops.o`): compare the objects' sections and relocations, not
+      the local symbols' names.
     - Tests: `test_c2p` takes both entries against the reference, X
       written as each constant and from a variable, pairs on pixels in
-      pairs and on pixels not (each breakage of the twin's or the
-      header's X failed it), and boxes of no groups or rows; SDL2CHK the
-      same on the machine (1,152 cases) and their times, which are
-      docs/sdl2.md's "Pairs pay in whole boxes". `SDL2C2P.TOS` is the
-      example, seen on Hatari's TT and a Falcon on VGA and RGB.
+      pairs and on pixels not, and boxes of no groups or rows; SDL2CHK
+      the same on the machine and their times, which are docs/sdl2.md's
+      "Pairs pay in whole boxes". `SDL2C2P.TOS` is the example.
 - **Input keeps SDL2's numbers.** Scancodes, key codes, `KMOD_` bits
   and event types are SDL2's own values, which programs keep in saved
   key maps; `test_events` checks a sample, and that every STDL symbol
@@ -1789,70 +1781,26 @@ rules below keep it from being anything else's.
     `test_render`'s own TT and Falcon screens through this build. It
     is not shipped and has no size budget; its example is the add-on's
     demo built against it (`dist/SDL2ST.TOS`).
-  - **Pixel pairs on an ST's screen** (`stpair.c`, 2026-11-21), where a
-    pairs copy had been converted as any other.
-    - **The loop** reads a pair as one word, takes its second pixel's
-      byte (`and.w` with $FF) as the index and ORs one long a pair from
-      four tables, a pair's place among four in a byte of each plane,
-      so a group is eight lookups and no shift: 40 cycles a pair where
-      st.c's loop spends 40 a pixel, 382 a group against 734 by the
-      instructions' counts. Its tables (8K, both rows' sets) are made
-      from the conversion's own, two of its tables ORed a pair and the
-      first two shifted 4, so a group in pairs is the whole
-      conversion's by construction; `malloc`ed at the first pairs copy
-      (`ptab`) and made again in `st_reduce` whenever the maps move.
-      A word read needs an even address, so `convert_rows` converts
-      pairs whole when the source or the pitch is odd.
-    - **Pairs copies are compared here**, as the ST always compares:
-      uncompared, a still view in pairs would convert every group a
-      frame where a compare costs about 70 cycles one. `copy_changed`
-      takes pairs copies on an ST and applies `mark`'s rule to the
-      groups that changed; an ordinary copy takes back every group of
-      its box, changed or not, as the rule is about copies (a whole
-      group copied as it was after a pairs copy would otherwise stay
-      pairs, which `pairs_rules`' fourth case fails). A TT or a Falcon
-      in this build refuses them there as the other build does.
-    - **Bytes and memory**: `stpair.o` 332, reached only through
-      `c2ppair.c`'s pointers (`struct stdl_sdl2_pairs` gains two under
-      `STDL_SDL2_ST`), so a program that never asks links none of it
-      and allocates no tables; `video.o` 292 more in this build for
-      every program, `c2ppair.o` 8. `libstdl-sdl2.a` and
-      `-cmini.a` were compared object by object (`objdump -dr -s`)
-      before and after: all 70 the same.
-    - **Measured** (`tests/hatari/sdl2stp.c`, SDL2STP, Hatari, ST
-      Low): the loops alone over a 320x168 view 343.4 -> 179.3ms on an
-      8MHz ST (51 -> 27 cycles a pixel with TOS's interrupts) and 180.5
-      -> 103.9 on a Mega STE; tables 15.0ms against the conversion's
-      own 28.5 (9.0 and 15.2). Frames of new pixels, every group
-      changed: all 320x200 in pairs 766.8 -> 574.0 (409.4 -> 320.0), a
-      320x168 view in pairs over a 32-row bar 767.1 -> 605.8 (409.6 ->
-      335.5), and with `STDL_SDL2_SetSTColours`, which notes no colour,
-      517.5 -> 324.7 (292.5 -> 203.1).
-    - **Not done**: noting the colours a changed group brings
-      (`st_seen16`, 16 lookups) is about 250ms of the ST's 767, pairs
-      or not. Noting only the second pixel of each pair would halve it
-      for pairs, but the test's model notes every pixel it copies, and
-      to expect less it would have to know which groups the compositor
-      converted as pairs.
-    - **Tests**: `pair_checks` in `test_render.c` (host and SDL2RCST)
-      takes the loop against a conversion a pixel at a time through
-      random maps and against the whole loop, 96 boxes of up to 20
-      groups by 7 rows, wider strides, either row's set first, in pairs
-      and not; `pairs_rules` expects an ST's second pixels, an ordinary
-      whole group after and before a pairs copy, and pairs from an odd
-      address and pitch converted whole; `run` copies pairs before any
-      map moves (ASan's filled `malloc` showed the tables never made).
-      Fourteen breakages each failed `test_render_st`: tables not made
-      again at a move, not made at the first copy, made from one set or
-      with a and b swapped, the C reading the first pixel or not
-      swapping sets a row, an ordinary copy taking back only the
-      changed groups, a pairs copy marking every changed group or
-      ignoring `bpart`, marking none, `bpaired` not set, no address
-      test, the source's alone (caught once the case started on an
-      odd row), pairs ignored. SDL2RCST passed on Hatari's ST, STE,
-      Mega STE, TT and Falcon on VGA; built with two of the loop's
-      tables swapped it failed on the ST (`pair_checks`). `SDL2ST.TOS`,
-      whose background is pairs, showed it on an STE.
+  - **Pixel pairs on an ST's screen** (`stpair.c`, 2026-11-21):
+    docs/sdl2.md's "An ST's screen, for testing" has what they do, cost
+    and buy, and what was not done. What the code relies on:
+    - **The pair tables are made from the conversion's own** (two of
+      its tables ORed a pair), so a group in pairs comes out as the
+      whole conversion gives it by construction. They are made at the
+      first pairs copy as well as when the maps move: `pairs_rules`
+      copies pairs before any map has moved, as ASan's filled `malloc`
+      showed tables never made.
+    - **The rule is `mark`'s** (`stdl_sdl2_pair_rule`, internal.h),
+      applied by `copy_changed` to a pairs copy's changed groups, as an
+      ST compares every copy; any other copy takes back every group of
+      its box, changed or not, or a whole group copied as it was after
+      a pairs copy would stay pairs.
+    - **A pair is read as a word**, so `SDL_RenderCopy` makes a pairs
+      copy from an odd address or with an odd pitch an ordinary one;
+      the batch is of one texture at one offset, so its copies are all
+      the one or all the other.
+    - `pair_checks` and `pairs_rules` in `test_render.c` (host and
+      SDL2RCST) are its tests; fourteen breakages each failed them.
 - **Copies compared (`STDL_SDL2_HINT_COMPARE`, `copy_changed`), and
   the rows a present reads** (November 2026). One function in both
   builds compares each copy of whole groups with the renderer's chunky
@@ -2625,56 +2573,44 @@ sdl2` and the release never do.
   their `"d"` constraints are what the pixel paths were measured
   with.
 - **A 68020's multiply and divide in a 68000 program** (`src/arith020.c`,
-  November 2026): a program linked with `arith020.mk`'s
-  `STDL_ARITH020` has every call of libgcc's `__mulsi3`, `__udivsi3`,
-  `__divsi3`, `__umodsi3`, `__modsi3`, `__muldi3` and `__divdi3` wrapped
-  (ld's `--wrap`) to `muls.l`, `divu.l` and the rest where the CPU has
-  them, libgcc's elsewhere. From one port, which had 31ms of a 227ms TT
-  frame in these calls. What it taught:
+  `libstdl-arith020.o`, November 2026): libgcc's `__mulsi3` and the rest
+  wrapped (ld's `--wrap`) to `muls.l`, `divu.l` and the rest where the
+  CPU has them. `docs/building.md` is the reference (what it does, the
+  link line, the costs and the measurements); one port had 31ms of a
+  227ms TT frame in these calls. What it taught:
   - **The answers must be libgcc's to the bit**, as a game's logic must
-    not depend on the machine: `-2^31 / -1` overflows `divs.l` and goes
-    to libgcc (which answers -2^31, remainder 0), and so does a 64-bit
-    division whose divisor or quotient needs more than 32 bits. Dividing
-    by 0 traps on both paths (libgcc's 68000 `divu.w` does, twice in
-    `__udivsi3`); a trap handler that returns gets garbage from either.
-    The 68060 has no 64-bit `mul.l`/`div.l` (its support package
-    emulates them, a trap each), so `__muldi3` and `__divdi3` keep
-    libgcc's there.
-  - **`--wrap` reaches the C library and libgcc too**, which come after
-    the archive on the line: a program whose own objects made no such
-    call left mintlib's printf with an undefined `___wrap___udivsi3`
-    until the flags gained `-u ___wrap___mulsi3` (the object-level name,
-    with a.out's underscore; `-u __wrap___mulsi3` failed). libgcc's own
-    inner calls are wrapped as well, so on a 68000 `__modsi3` pays the
-    41-cycle test four times. 10-18% a call on an 8MHz STE: a program
-    for the ST alone leaves the flags out.
-  - **The CPU is asked on the first call, not at `STDL_Init`**: the C
-    library's start-up divides before `main`, and a program may use the
-    flags without the rest of STDL. `lea (0,a0,d0.l*2)` scales on a
-    68020 and later and not before, which needs no supervisor mode, no
-    jar and no system call; only the 64-bit routines need the `_CPU`
-    cookie (to tell a 68060), through `Ssystem` or `Supexec` at their
-    first call. Hatari's STE, TT and Falcon, and its TT as a 68020,
-    68040 and 68060 under EmuTOS, each found what the cookie says.
-  - **Hatari's 68030 gives `mul`/`div` instructions next to no time**:
-    the `divu.l` path measured the same as an empty call, with
-    `--cpu-exact on` as without it, and libgcc's `__mulsi3` (three
-    `mulu.w`) 84 cycles. Per-call
-    gains on a TT are therefore Hatari's time plus the MC68030 manual's
-    for the instructions (`docs/building.md` has the table, 3-9x for the
-    32-bit routines), and any Hatari profile of a TT game undercounts
-    multiply-heavy code. With the caches on, a loop of its own per
-    routine measured the empty call slower than a multiply: where the
-    link put the loop and the routine in the 256-byte instruction cache
-    decided it. ARITHCHK times every routine from one loop, through a
-    pointer, and again with the caches off, the figures used.
+    not depend on the machine: what the instructions cannot give
+    (`-2^31 / -1`, a 64-bit quotient past 32 bits, the 68060's missing
+    64-bit forms) goes to libgcc rather than being worked round.
+  - **An object, not an archive member.** `--wrap` reaches the C
+    library and libgcc too, which come after the archives on the line:
+    as a member of `libstdl.a`, a program whose own objects made no
+    such call left mintlib's printf with an undefined
+    `___wrap___udivsi3`, and the flags needed `-u ___wrap___mulsi3`
+    (the object-level name, with a.out's underscore; `-u
+    __wrap___mulsi3` failed), which held only while all seven wrappers
+    stayed in one object and `libstdl.a` was on the line. Named on the
+    line, before the libraries (its `__real_` calls are libgcc's), it
+    is always linked, with libcmini or mintlib: it calls the system
+    through its traps alone. An archive built before the move keeps
+    the old member (`ar rcs` removes none): nothing pulls it, but
+    delete the archive before comparing its members.
+  - **Hatari's 68030 gives `mul`/`div` instructions next to no time**,
+    with `--cpu-exact on` as without it, so any Hatari profile of a TT
+    game undercounts multiply-heavy code, and the gains are Hatari's
+    time plus the MC68030 manual's for the instructions. With the
+    caches on, where the link put a timing loop and the routine in the
+    256-byte instruction cache decided the result: ARITHCHK times every
+    routine from one loop, through a pointer, and again with the caches
+    off, the figures used.
   - `tests/hatari/arithchk.c` (ARITHCHK, and ARITHCHP built without the
     flags for libgcc alone) checks every routine against libgcc's own
     (`__real___...`, with both path bytes at 0 so libgcc's inner calls
     are libgcc's too), the registers kept, the CPU asked in user and
     supervisor mode, and dividing by 0 under a handler of its own. A
     `__modsi3` returning the quotient, `__divdi3` losing d2, `__divdi3`
-    without its overflow test and the 68060 test at 30 each failed it.
+    without its overflow test, the 68060 test at 30 and `__muldi3`'s
+    32-bit operands through `mulu.l` each failed it.
 - Variable shifts cost 8+2n cycles each, so two of them per word is
   a fixed tax whatever the shift amount. Building the value from a
   32-bit window needs one: `(((uint32_t)hi << 16) | lo) >> n` rather

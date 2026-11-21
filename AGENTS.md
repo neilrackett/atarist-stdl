@@ -2624,6 +2624,57 @@ sdl2` and the release never do.
   and `stdl_divu` predate the public header and stay as they are:
   their `"d"` constraints are what the pixel paths were measured
   with.
+- **A 68020's multiply and divide in a 68000 program** (`src/arith020.c`,
+  November 2026): a program linked with `arith020.mk`'s
+  `STDL_ARITH020` has every call of libgcc's `__mulsi3`, `__udivsi3`,
+  `__divsi3`, `__umodsi3`, `__modsi3`, `__muldi3` and `__divdi3` wrapped
+  (ld's `--wrap`) to `muls.l`, `divu.l` and the rest where the CPU has
+  them, libgcc's elsewhere. From one port, which had 31ms of a 227ms TT
+  frame in these calls. What it taught:
+  - **The answers must be libgcc's to the bit**, as a game's logic must
+    not depend on the machine: `-2^31 / -1` overflows `divs.l` and goes
+    to libgcc (which answers -2^31, remainder 0), and so does a 64-bit
+    division whose divisor or quotient needs more than 32 bits. Dividing
+    by 0 traps on both paths (libgcc's 68000 `divu.w` does, twice in
+    `__udivsi3`); a trap handler that returns gets garbage from either.
+    The 68060 has no 64-bit `mul.l`/`div.l` (its support package
+    emulates them, a trap each), so `__muldi3` and `__divdi3` keep
+    libgcc's there.
+  - **`--wrap` reaches the C library and libgcc too**, which come after
+    the archive on the line: a program whose own objects made no such
+    call left mintlib's printf with an undefined `___wrap___udivsi3`
+    until the flags gained `-u ___wrap___mulsi3` (the object-level name,
+    with a.out's underscore; `-u __wrap___mulsi3` failed). libgcc's own
+    inner calls are wrapped as well, so on a 68000 `__modsi3` pays the
+    41-cycle test four times. 10-18% a call on an 8MHz STE: a program
+    for the ST alone leaves the flags out.
+  - **The CPU is asked on the first call, not at `STDL_Init`**: the C
+    library's start-up divides before `main`, and a program may use the
+    flags without the rest of STDL. `lea (0,a0,d0.l*2)` scales on a
+    68020 and later and not before, which needs no supervisor mode, no
+    jar and no system call; only the 64-bit routines need the `_CPU`
+    cookie (to tell a 68060), through `Ssystem` or `Supexec` at their
+    first call. Hatari's STE, TT and Falcon, and its TT as a 68020,
+    68040 and 68060 under EmuTOS, each found what the cookie says.
+  - **Hatari's 68030 gives `mul`/`div` instructions next to no time**:
+    the `divu.l` path measured the same as an empty call, with
+    `--cpu-exact on` as without it, and libgcc's `__mulsi3` (three
+    `mulu.w`) 84 cycles. Per-call
+    gains on a TT are therefore Hatari's time plus the MC68030 manual's
+    for the instructions (`docs/building.md` has the table, 3-9x for the
+    32-bit routines), and any Hatari profile of a TT game undercounts
+    multiply-heavy code. With the caches on, a loop of its own per
+    routine measured the empty call slower than a multiply: where the
+    link put the loop and the routine in the 256-byte instruction cache
+    decided it. ARITHCHK times every routine from one loop, through a
+    pointer, and again with the caches off, the figures used.
+  - `tests/hatari/arithchk.c` (ARITHCHK, and ARITHCHP built without the
+    flags for libgcc alone) checks every routine against libgcc's own
+    (`__real___...`, with both path bytes at 0 so libgcc's inner calls
+    are libgcc's too), the registers kept, the CPU asked in user and
+    supervisor mode, and dividing by 0 under a handler of its own. A
+    `__modsi3` returning the quotient, `__divdi3` losing d2, `__divdi3`
+    without its overflow test and the 68060 test at 30 each failed it.
 - Variable shifts cost 8+2n cycles each, so two of them per word is
   a fixed tax whatever the shift amount. Building the value from a
   32-bit window needs one: `(((uint32_t)hi << 16) | lo) >> n` rather

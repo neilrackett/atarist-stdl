@@ -52,6 +52,7 @@ pipeline to copy into a game's own Makefile. The results are tracked, so
 | ------------ | ------------- | -------------------------------------------------------------------------------- |
 | JOYBOXES.TOS | `joyboxes.c`  | two joysticks, two boxes: `STDL_SetNumJoysticks(2)` makes the mouse port joystick 1, `STDL_GetJoystickState(0)` and `(1)` move a box each, fire lights it; the mouse comes back at exit |
 | CHUNKY.TOS   | `chunky.c`    | engine-porting APIs: chunky sprites through a colour map, a borrowed playfield, priority masks, four-voice music |
+| MULDIV.TOS   | `muldiv.c`    | the link flags `STDL_ARITH020` (`arith020.mk`): ordinary 32-bit `x * fov / z`, one `muls.l` and `divs.l` on a TT or a Falcon, libgcc's on an ST; prints points projected a second both ways. In Hatari about twice as many on a TT or a Falcon, 7% fewer on an STE |
 | SFXDEMO.TOS  | `sfxdemo.c`   | Degas splash, YM effects stealing/restoring music voices, joystick key emulation |
 | TONEDEMO.TOS | `tonedemo.c`  | live notes on the three YM voices: a fourth note displacing and returning        |
 | OPLDEMO.TOS  | `opldemo.c`   | an OPL2 register stream (the IMF games' music format) replayed as YM notes       |

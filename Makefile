@@ -46,7 +46,7 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/spritebatch.c src/responsive.c src/planes8.c src/planes8ex.c \
           src/planes8tile.c src/asset8.c src/tall4.c src/tallst.c \
           src/hz38400.c src/rowcopy.c src/planes8row.c src/overlap.c \
-          src/overlap4.c src/overlap8.c src/banner.c
+          src/overlap4.c src/overlap8.c src/banner.c src/arith020.c
 # Objects live under obj/, mirroring each source's own path. Sources
 # now come from two places, this repo and the xpad submodule, and
 # building beside the source would drop .o files inside lib/xpad. The
@@ -67,7 +67,7 @@ EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
            dist/HWSCROLL.TOS dist/TONEDEMO.TOS dist/OPLDEMO.TOS \
            dist/MUSICVU.TOS dist/POLYDEMO.TOS dist/PATDEMO.TOS \
            dist/RASTERS.TOS dist/RESPDEMO.TOS dist/OVHOST.TOS \
-           dist/STARTER.TOS dist/JOYBOXES.TOS
+           dist/STARTER.TOS dist/JOYBOXES.TOS dist/MULDIV.TOS
 
 # Pinned, not left to ordering: a rule added above this one would
 # silently become the default goal, and `make` would then build
@@ -426,6 +426,12 @@ dist/OPLDEMO.TOS: examples/opldemo.c $(LIB)
 
 dist/CHUNKY.TOS: examples/chunky.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
+
+# The 68020's multiply and divide for a 68000 program: the link flags a
+# program takes from arith020.mk (docs/building.md)
+include arith020.mk
+dist/MULDIV.TOS: examples/muldiv.c $(LIB)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB) $(STDL_ARITH020) && $(STRIP) $@
 
 # The generated header dependencies, if any objects exist yet.
 -include $(LIBOBJS:.o=.d) $(CMINIOBJS:.o=.d) $(STATSOBJS:.o=.d) \

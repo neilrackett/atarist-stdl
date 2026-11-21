@@ -24,6 +24,10 @@ included because of" section; 2026-11-07):
   path, held to `PIXEL_MAX` by the build's `sizecheck`.
 - Everything else is linked only by a program that calls into it. The
   responsive screens' objects have a budget of their own, `RESP_MAX`.
+- `arith020.o`, a 68020's multiply and divide in place of libgcc's, is
+  named by nothing in the library: a program links it only through the
+  link flags in `arith020.mk`, whose `--wrap`s send libgcc's calls to it
+  and whose `-u` pulls it in.
 
 Check a change's effect the same way: link a small program before and
 after, and compare the member list and the .TOS size.
@@ -152,8 +156,9 @@ line-locked timers can interrupt it.
   against a register-file stand-in.
 - **`tests/hatari/`** has the on-target runners: the CHK programs run
   the host suites, or compare the asm with its C twin, on the machine;
-  the cost probes time paths (`sprcost.c`, `blitcost.c`); and `run.sh`
-  drives any program in Hatari.
+  the cost probes time paths (`sprcost.c`, `blitcost.c`); `arithchk.c`
+  checks `arith020.o` against libgcc, which only the machine can run;
+  and `run.sh` drives any program in Hatari.
 - **The cross build** fails on `sizecheck`, on a new libgcc arithmetic
   call (`libcallcheck`, `tools/libcalls.sh`), and on `overscan.c`
   growing a call into the rest of the library (`ovhostcheck`).

@@ -8,12 +8,18 @@
  * A host test cannot run 68020 instructions, so this is the check.
  *
  *  1. The CPU, asked: the two bytes start at -1 (not asked), and the
- *     first 32-bit call sets stdl_arith_l32 alone, to 1 where the _CPU
+ *     first 32-bit call sets stdl_arith_l32, to 1 where the _CPU
  *     cookie says 20 or more; the first 64-bit call sets
- *     stdl_arith_l64, to 1 where it says 20 to 59. Asked again in
- *     supervisor mode, as a program is after STDL_Init. What they were
- *     at main is printed too: the C library's start-up has divided by
- *     then.
+ *     stdl_arith_l64, to 1 where it says 20 to 59. On a 68000 the
+ *     first call of either sets both to 0 and makes every wrapper's
+ *     first instruction a jmp to libgcc's routine; on a 68020 or later
+ *     the wrappers must stay as they were. Asked again in supervisor
+ *     mode, as a program is after STDL_Init, from an interrupt (a VBL
+ *     queue routine), and with interrupts masked at level 7. What they
+ *     were at main is printed too: the C library's start-up has
+ *     divided by then. To ask again on a 68000 the probe puts the
+ *     wrappers' tst.b back (unpatch()), which knows arith020.c's
+ *     layout.
  *  2. Values: each routine on every pair of an edge set (0, +-1,
  *     -2^31, -2^31 / -1, 16-bit boundaries; for 64 bits the 32-bit
  *     boundaries and +-2^63 as well) and on 5000 random pairs of
@@ -32,8 +38,9 @@
  *     on both (libgcc's 68000 path traps twice, its two divu.w).
  *  5. Time a call, in ns and cycles at the machine's clock, the empty
  *     call's subtracted: libgcc's own, the wrapper on the 68000's path
- *     (what the flags cost a 68000) and on the 68020's; on a 68030
- *     with the caches as found, then off.
+ *     (what the flags cost a 68000: the jmp; on a 68020 or later the
+ *     byte at 0, which only a 68060's 64-bit routines take) and on the
+ *     68020's; on a 68030 with the caches as found, then off.
  *
  * In Hatari at the machine's own speed, from boot to the end, 47s on
  * an 8MHz STE and 48s on a TT (which runs both paths, and the times
@@ -98,10 +105,83 @@ static long cpu;                /* the _CPU cookie, 0 without one */
 static signed char m32, m64;    /* the path under test */
 static FILE *out;
 
-/* the two bytes, which say the path (-1 the CPU not asked yet) */
+#ifndef ARITHCHK_PLAIN
+/* Each wrapper's first six bytes (src/arith020.c): tst.b of its byte
+ * (0x4A39 and the byte's address), or on a 68000 after the first call
+ * jmp to libgcc's routine (0x4EF9 and its address). */
+static const struct {
+    void *wrap, *real;
+    signed char *flag;
+} entry[] = {
+    { (void *)__wrap___mulsi3, (void *)__real___mulsi3, &stdl_arith_l32 },
+    { (void *)__wrap___udivsi3, (void *)__real___udivsi3, &stdl_arith_l32 },
+    { (void *)__wrap___divsi3, (void *)__real___divsi3, &stdl_arith_l32 },
+    { (void *)__wrap___umodsi3, (void *)__real___umodsi3, &stdl_arith_l32 },
+    { (void *)__wrap___modsi3, (void *)__real___modsi3, &stdl_arith_l32 },
+    { (void *)__wrap___muldi3, (void *)__real___muldi3, &stdl_arith_l64 },
+    { (void *)__wrap___divdi3, (void *)__real___divdi3, &stdl_arith_l64 },
+};
+#define NENTRY (int)(sizeof(entry) / sizeof(entry[0]))
+
+/* the first six bytes as op, then the address */
+static int entry_is(int k, unsigned op, const void *to)
+{
+    const volatile uint16_t *p = (const volatile uint16_t *)entry[k].wrap;
+
+    return p[0] == op
+        && *(const volatile uint32_t *)(p + 1) == (uint32_t)to;
+}
+
+/* how many wrappers jump to libgcc's, how many still test their byte */
+static int entries_jmp(void)
+{
+    int k, n = 0;
+
+    for (k = 0; k < NENTRY; k++) {
+        n += entry_is(k, 0x4EF9, entry[k].real);
+    }
+    return n;
+}
+
+static int entries_tst(void)
+{
+    int k, n = 0;
+
+    for (k = 0; k < NENTRY; k++) {
+        n += entry_is(k, 0x4A39, entry[k].flag);
+    }
+    return n;
+}
+
+/* every wrapper's tst.b back as it was linked: on a 68000 only, which
+ * has no cache to hold the jmp (and only a 68000 has them written) */
+static void unpatch(void)
+{
+    volatile uint16_t *p;
+    int k;
+
+    for (k = 0; k < NENTRY; k++) {
+        p = (volatile uint16_t *)entry[k].wrap;
+        p[0] = 0x4A39;
+        *(volatile uint32_t *)(p + 1) = (uint32_t)entry[k].flag;
+    }
+}
+#endif
+
+/* the two bytes, which say the path (-1 the CPU not asked yet). On a
+ * 68000 the path is the jmps as well: -1 puts the tst.b back, 0 has
+ * the object write the jmps, as a program's first call does. */
 static void set_path(int p32, int p64)
 {
 #ifndef ARITHCHK_PLAIN
+    if (cpu < 20) {
+        if (p32 < 0) {
+            unpatch();
+        } else if (!entry_is(0, 0x4EF9, entry[0].real)) {
+            stdl_arith_l32 = stdl_arith_l64 = -1;
+            (void)__wrap___mulsi3(1, 1);
+        }
+    }
     stdl_arith_l32 = (signed char)p32;
     stdl_arith_l64 = (signed char)p64;
 #else
@@ -394,19 +474,88 @@ static int asked(int want32, int want64, const char *when)
     return ok;
 }
 
+/* the wrappers as the CPU wants them after its first call: on a
+ * 68000 every one a jmp to libgcc's, on a 68020 or later as linked */
+static void entries(const char *when)
+{
+    int j = entries_jmp(), t = entries_tst();
+    int ok = cpu < 20 ? j == NENTRY : t == NENTRY;
+
+    checks++;
+    if (!ok) {
+        wrong++;
+    }
+    fprintf(out, "AC: %s: %d of %d wrappers jmp to libgcc's, %d test"
+            " their byte%s\n", when, j, NENTRY, t, ok ? "" : "  WRONG");
+}
+
+/* The first call from an interrupt: a VBL queue routine, armed by
+ * irq_go and run once. Nothing here multiplies or divides but the
+ * calls under test. */
+static volatile int irq_go, irq_wide;
+static volatile unsigned long irq_q;
+static volatile long irq_p;
+static volatile i64 irq_w;
+
+static void irq_call(void)
+{
+    if (irq_go) {
+        if (irq_wide) {
+            irq_w = __wrap___divdi3(123456789000LL, 98765);
+        } else {
+            irq_q = __wrap___udivsi3(950000, 77);
+            irq_p = __wrap___mulsi3(-12345, 321);
+        }
+        irq_go = 0;
+    }
+}
+
+/* irq_call in the next VBL; 0 if there was no slot or it never ran */
+static int from_vbl(int wide)
+{
+    void *ssp = (void *)Super(0L);
+    int n = *(volatile short *)0x454, i, slot = -1;
+    /* volatile: else gcc drops the store, NULL stored over it after */
+    void (*volatile *q)(void) = *(void (*volatile **)(void))0x456;
+    uint32_t t0;
+
+    for (i = 0; i < n && slot < 0; i++) {
+        if (q[i] == NULL) {
+            slot = i;
+        }
+    }
+    if (slot >= 0) {
+        irq_wide = wide;
+        irq_go = 1;
+        q[slot] = irq_call;
+        t0 = *(volatile uint32_t *)0x4BAUL;
+        while (irq_go && *(volatile uint32_t *)0x4BAUL - t0 < 200) {
+        }
+        q[slot] = NULL;
+    }
+    Super(ssp);
+    return slot >= 0 && !irq_go;
+}
+
 static void cpu_asked(void)
 {
     int w32 = cpu >= 20, w64 = cpu >= 20 && cpu < 60;
     volatile long a = 3, b = 5;
     volatile i64 c = 7;
+    unsigned long q;
     void *ssp;
+    unsigned short sr;
+    long p;
+    i64 w;
+    int ran;
 
     set_path(-1, -1);
     checks++;
     if (__wrap___mulsi3(a, b) != 15) {
         wrong++;
     }
-    asked(w32, -1, "after a 32-bit call, not asked before");
+    asked(w32, cpu < 20 ? 0 : -1, "after a 32-bit call, not asked before");
+    entries("after it");
 
     set_path(-1, -1);
     checks++;
@@ -414,6 +563,7 @@ static void cpu_asked(void)
         wrong++;
     }
     asked(w32, w64, "after a 64-bit call, not asked before");
+    entries("after it");
 
     set_path(-1, -1);
     ssp = (void *)Super(0L);
@@ -424,6 +574,53 @@ static void cpu_asked(void)
         wrong++;
     }
     asked(w32, w64, "after a 64-bit call in supervisor mode");
+    entries("after it");
+
+    /* from an interrupt: libgcc's answers first, then nothing asked */
+    set_path(0, 0);
+    q = __real___udivsi3(950000, 77);
+    p = __real___mulsi3(-12345, 321);
+    w = __real___divdi3(123456789000LL, 98765);
+    set_path(-1, -1);
+    ran = from_vbl(0);
+    checks++;
+    if (!ran || irq_q != q || irq_p != p) {
+        wrong++;
+        fprintf(out, "AC: WRONG from a VBL routine: %s, %lu %ld, want"
+                " %lu %ld\n", ran ? "ran" : "never ran", irq_q, irq_p, q, p);
+    }
+    asked(w32, cpu < 20 ? 0 : -1, "after a 32-bit call from a VBL routine");
+    entries("after it");
+    if (cpu < 20) {
+        set_path(-1, -1);
+        ran = from_vbl(1);
+        checks++;
+        if (!ran || irq_w != w) {
+            wrong++;
+            fprintf(out, "AC: WRONG 64 bits from a VBL routine: %s\n",
+                    ran ? "the wrong answer" : "never ran");
+        }
+        asked(0, 0, "after a 64-bit call from a VBL routine");
+        entries("after it");
+    } else {
+        fprintf(out, "AC: (a first 64-bit call from an interrupt asks the"
+                " cookie on a 68020 or later: not tested)\n");
+    }
+
+    /* with every interrupt masked */
+    set_path(-1, -1);
+    ssp = (void *)Super(0L);
+    __asm__ __volatile__("move.w %%sr,%0\n\tori.w #0x0700,%%sr"
+                         : "=d"(sr));
+    a = (long)__wrap___udivsi3(950000, 77);
+    __asm__ __volatile__("move.w %0,%%sr" : : "d"(sr));
+    Super(ssp);
+    checks++;
+    if ((unsigned long)a != q) {
+        wrong++;
+    }
+    asked(w32, cpu < 20 ? 0 : -1, "after a 32-bit call at level 7");
+    entries("after it");
 }
 
 /* every divide by 0 must trap, as libgcc's does */

@@ -106,7 +106,7 @@ it too (`$(MAKE) -C $(STDL) libstdl-cmini.a libstdl-arith020.o`).
 
 - **What it does.** ld's `--wrap` sends every call of those seven, the
   program's, STDL's, the C library's and libgcc's own, to
-  `libstdl-arith020.o` (`src/arith020.c`, 560 bytes). On a 68020 or
+  `libstdl-arith020.o` (`src/arith020.c`, 656 bytes). On a 68020 or
   later each is one `muls.l`, `divu.l`, `divs.l` (with
   `divul.l`/`divsl.l` for the remainders); `__muldi3` and `__divdi3`
   take the 64-bit forms on a 68020 to 68040 only, as a 68060 has none,
@@ -138,21 +138,40 @@ it too (`$(MAKE) -C $(STDL) libstdl-cmini.a libstdl-arith020.o`).
   could be in an interrupt routine does one in `main` first. No
   cookie (a 68020 card in an ST with no jar) keeps libgcc's 64-bit
   routines.
-- **What it costs an ST**: 41 cycles a call, the test that sends it on
-  to libgcc's, and libgcc's own inner calls pay it as well (its
-  `__modsi3` calls `__divsi3` and `__mulsi3`). Measured in Hatari on
-  an 8MHz STE, cycles a call, libgcc alone and with the flags:
+- **How each call gets there.** Every wrapper starts by testing its
+  path's byte, and on a 68020 or later that is all it costs, the test
+  and a branch not taken. On a 68000 or 68010 the first call writes a
+  `jmp` to libgcc's routine over each wrapper's test, so every call
+  after it costs that `jmp` and tests nothing. Only on those: neither
+  has an instruction cache to hold the old test (a Mega STE's cache
+  holds code and data alike and sees every write the CPU makes) or an
+  MMU to protect the program's text, and a 68020 or later never has
+  its text written. One `movem.l` writes each wrapper's `jmp` and the
+  branch after it, so an interrupt finds a wrapper whole, old or new,
+  and either answers right. A program run from ROM, whose text cannot
+  be written, cannot use the flags on a 68000.
+- **What it costs an ST**: 12 cycles a call, the `jmp`, and libgcc's
+  own inner calls pay it as well (its `__modsi3` calls `__divsi3` and
+  `__mulsi3`). Measured in Hatari on an 8MHz STE (TOS 2.06), cycles a
+  call, libgcc alone and with the flags:
 
   | Routine                     | libgcc | with the flags |
   | --------------------------- | -----: | -------------: |
-  | `__mulsi3`                  |    234 |     275 (+18%) |
-  | `__udivsi3`, 16-bit divisor |    341 |     382 (+12%) |
-  | `__divsi3`                  |    525 |     607 (+16%) |
-  | `__modsi3`                  |    964 |   1,130 (+17%) |
-  | `__muldi3`                  |  1,191 |   1,313 (+10%) |
-  | `__divdi3`                  |  4,182 |   4,633 (+11%) |
+  | `__mulsi3`                  |    234 |      245 (+5%) |
+  | `__udivsi3`, 16-bit divisor |    340 |      351 (+3%) |
+  | `__divsi3`                  |    522 |      547 (+5%) |
+  | `__modsi3`                  |    960 |    1,008 (+5%) |
+  | `__muldi3`                  |  1,184 |    1,220 (+3%) |
+  | `__divdi3`                  |  4,164 |    4,289 (+3%) |
 
-  So a game for the ST alone leaves the flags out.
+  So a game for the ST alone leaves the flags out, and one for the
+  whole family pays a few per cent of its arithmetic on an ST. Up to
+  v1.33.0 the wrappers tested the byte on every call and jumped on,
+  41 cycles (+10 to +18%); a `beq.w` straight into libgcc's routine
+  would be 28, and fail to link ("relocation truncated to fit:
+  DISP16") wherever more than 32K of the program lies between the
+  object and libgcc's routines, which the gcc driver puts after
+  everything on the line.
 - **What it gains a TT or a Falcon** has not been timed on either.
   Hatari's 68030 gives the multiply and divide instructions next to no
   time of their own: the `divu.l` path measured the same as an empty
@@ -172,7 +191,7 @@ it too (`$(MAKE) -C $(STDL) libstdl-cmini.a libstdl-arith020.o`).
   | `__umodsi3`                 |             509 |                   4 |          681 |          82 |   8x |
   | `__modsi3`                  |             686 |                   4 |          858 |          94 |   9x |
   | `__muldi3`, 32x32 bits      |             754 |                  44 |        1,034 |          88 |  12x |
-  | `__divdi3`, 64 by 32 bits   |           2,916 |                  52 |   over 3,000 |         142 | 20x+ |
+  | `__divdi3`, 64 by 32 bits   |           2,916 |                  44 |   over 3,000 |         134 | 20x+ |
 
   (the empty call's time taken off, which the 68020 path's few
   instructions undercut; `__muldi3` of operands wider than 32 bits
@@ -184,18 +203,25 @@ it too (`$(MAKE) -C $(STDL) libstdl-cmini.a libstdl-arith020.o`).
   (Hatari's profiler, so without those instructions either); the same
   sources compiled for the 68030 ran 190ms. `MULDIV.TOS`, the example,
   projects points with `x * fov / z`, through the wrappers and through
-  libgcc's own routines by name: in Hatari a TT 178,560 a second
-  against 85,760, a Falcon 92,160 against 42,624, and an STE 6,912
-  against 7,424.
+  libgcc's own routines by name: in Hatari a TT 204,416 a second
+  against 87,040, a Falcon 97,408 against 42,240, and an STE 7,424
+  against 7,680, with the caches on. v1.33.0's were 178,304, 92,672
+  and 6,912: the STE gained the `jmp`, and the TT's and the Falcon's
+  68020 path is a branch shorter, which Hatari's 68030 timed the same
+  with the caches off, so most of their gain is where the link put the
+  code in their caches.
 - **A program without it** links none of it and is byte for byte what
   it was: every example, and a small program on each archive, linked
   the same before and after it came.
 - **The check** is `tests/hatari/arithchk.c` (ARITHCHK): each routine
   against libgcc's on edge and random values, on both paths, the
-  registers kept, the CPU asked, dividing by 0, and the times above.
-  It ran clean on Hatari's STE, TT and Falcon, and on its TT as a
-  68020, 68040 and 68060 under EmuTOS (the 68060 kept libgcc's 64-bit
-  routines). No real TT, Falcon or MiNT has run it.
+  registers kept, the CPU asked (in user and supervisor mode, from a
+  VBL routine and with interrupts masked at level 7), the wrappers'
+  `jmp`s written on a 68000 and left alone on a 68020, dividing by 0,
+  and the times above. It ran clean on Hatari's STE, TT and Falcon,
+  on its STE as a 68010 and its TT as a 68020, 68040 and 68060 under
+  EmuTOS (the 68060 kept libgcc's 64-bit routines). No real ST, TT,
+  Falcon or MiNT has run it.
 
 ## Setting up a game or a fork
 

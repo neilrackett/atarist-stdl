@@ -46,8 +46,22 @@
  *    or divide could be in one does one in main first. No cookie (a
  *    68020 card in an ST without a jar) keeps libgcc's.
  *
- * A 68000 pays 41 cycles a call for the test, and libgcc's own inner
- * calls pay it too. tests/hatari/arithchk.c (ARITHCHK) is the check.
+ * Each wrapper starts with its byte's test, tst.b abs.l, and on a
+ * 68020 or later that is all it ever costs: the test and a branch not
+ * taken. On a 68000 or 68010 the first call rewrites every wrapper's
+ * tst.b, six bytes, as a jmp to libgcc's routine, so from then on a
+ * call costs that jmp, 12 cycles, and tests nothing. Only there: a
+ * 68000 or 68010 has no instruction cache to keep the old test (a
+ * Mega STE's cache holds code and data alike, and sees every write
+ * the CPU makes) and no MMU to protect the program's text; a 68020
+ * or later, which may have both, never has its text written. One movem.l writes the jmp and
+ * the branch after it, as it was, eight bytes in one instruction, so
+ * an interrupt sees a wrapper whole, old or new, and code interrupted
+ * between the tst.b and the branch comes back to that same branch.
+ * Old or new, a wrapper answers right: until its jmp is written it
+ * tests the byte, which says 0 before the first jmp is written.
+ * tests/hatari/arithchk.c (ARITHCHK) is the check, and knows this
+ * layout: a wrapper's first six bytes are the tst.b or the jmp.
  *
  * The 68020 instructions are written as words, as the library is
  * assembled for the 68000.
@@ -97,31 +111,34 @@ long stdl_arith_cpu(void)
 }
 
 /*
- * The way in: the byte, 0 straight on to libgcc's (the 68000's way, 41
- * cycles: the test, the branch and the jump), 1 the instruction (FAST,
- * ending in rts or a branch to 8f, libgcc's), -1 the CPU asked (ASK)
- * and the call started again.
+ * The way in: the byte, tested by the first instruction, the one a
+ * 68000's first call makes a jmp to libgcc's. 1 the instruction (FAST,
+ * ending in rts or a branch to 8f, libgcc's), 0 straight on to
+ * libgcc's, -1 the CPU asked (ASK) and the call started again.
  *
  * Every label is a numeric local one, which leaves no symbol: in this
  * toolchain's a.out a .L label is a text symbol, which a profiler or a
- * debugger takes for a function. 8 and 9 are each wrapper's own, 3 and
- * 4 the questions' at the end (no wrapper defines those), and FAST
- * defines none of 3, 4, 8 and 9.
+ * debugger takes for a function. 6, 8 and 9 are each wrapper's own, 3
+ * and 4 the questions' at the end (no wrapper defines those), and FAST
+ * defines none of 3, 4, 6, 8 and 9.
  */
 #define AR_WRAP(name, flag, ask, fast) \
     "\t.globl " AR_SYM(__wrap_##name) "\n" \
     AR_SYM(__wrap_##name) ":\n\t" \
-    "tst.b   " AR_SYM(flag) "\n\t" \
-    "beq.s   8f\n\t" \
-    "bmi.s   9f\n\t" \
+    "tst.b   " AR_SYM(flag) "\n\t"    /* a 68000's: jmp __real_ */ \
+    "ble.s   9f\n\t" \
     fast \
+    "9:\n\t" \
+    "bmi.s   6f\n" \
     "8:\n\t" \
     "jmp     " AR_SYM(__real_##name) "\n" \
-    "9:\n\t" \
+    "6:\n\t" \
     "pea     " AR_SYM(__wrap_##name) "(%pc)\n\t" \
     "bra     " ask "\n"
 #define AR_WRAP32(name, fast) AR_WRAP(name, stdl_arith_l32, "3f", fast)
 #define AR_WRAP64(name, fast) AR_WRAP(name, stdl_arith_l64, "4f", fast)
+#define AR_JMP(name) \
+    ".long   " AR_SYM(__real_##name) "," AR_SYM(__wrap_##name) "\n\t"
 
 __asm__(
     "\t.text\n\t.even\n"
@@ -217,7 +234,11 @@ __asm__(
 
     /* 3, stdl_arith_l32 from the CPU: the index d0 = 1 scaled by 2 on
      * a 68020 and later, by 1 (the scale bits ignored) before. Returns
-     * it in d0 too, Z set for 0 by its move.b. */
+     * it in d0 too, Z set for 0. On a 68000 or 68010 stdl_arith_l64 is
+     * 0 as well, and every wrapper's tst.b becomes a jmp to libgcc's
+     * (5, the table): a long of jmp and the address's high word, and
+     * one of its low word and the wrapper's ble.s, written by one
+     * movem.l. */
     "3:\n\t"
     "moveq   #1,%d0\n\t"
     "suba.l  %a0,%a0\n\t"
@@ -225,6 +246,21 @@ __asm__(
     "move.l  %a0,%d0\n\t"
     "subq.b  #1,%d0\n\t"
     "move.b  %d0," AR_SYM(stdl_arith_l32) "\n\t"
+    "bne.s   1f\n\t"                        /* a 68020 or later */
+    "move.b  %d0," AR_SYM(stdl_arith_l64) "\n\t"
+    "lea     5f(%pc),%a0\n"
+    "2:\n\t"
+    "move.l  (%a0)+,%d0\n\t"                /* libgcc's, 0 the end */
+    "beq.s   1f\n\t"
+    "move.l  (%a0)+,%a1\n\t"                /* the wrapper */
+    "move.w  %d0,%d1\n\t"
+    "swap    %d1\n\t"
+    "move.w  6(%a1),%d1\n\t"                /* its ble.s, kept */
+    "move.w  #0x4EF9,%d0\n\t"               /* jmp abs.l */
+    "swap    %d0\n\t"
+    "movem.l %d0-%d1,(%a1)\n\t"
+    "bra.s   2b\n"
+    "1:\n\t"
     "rts\n"
 
     /* 4, stdl_arith_l64: 0 on a 68000 or 68010 (3 says so, d0 0 and Z
@@ -246,6 +282,13 @@ __asm__(
     "2:\n\t"
     "move.b  %d0," AR_SYM(stdl_arith_l64) "\n\t"
     "rts\n"
+
+    /* 5, what 3 writes on a 68000: libgcc's routine and its wrapper */
+    "\t.even\n"
+    "5:\n\t"
+    AR_JMP(__mulsi3) AR_JMP(__udivsi3) AR_JMP(__divsi3)
+    AR_JMP(__umodsi3) AR_JMP(__modsi3) AR_JMP(__muldi3) AR_JMP(__divdi3)
+    ".long   0\n"
 );
 
 #endif /* __m68k__ */

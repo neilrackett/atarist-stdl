@@ -2603,14 +2603,47 @@ sdl2` and the release never do.
     256-byte instruction cache decided the result: ARITHCHK times every
     routine from one loop, through a pointer, and again with the caches
     off, the figures used.
+  - **A 68000's call is a `jmp` the first call writes** over each
+    wrapper's `tst.b` (after v1.33.0). One port kept its own wrappers, a
+    `tst.b` and a `beq.w` into libgcc, because STDL's cost its 8MHz
+    frame a millisecond more over some 630 calls. Measured on Hatari's
+    STE, cycles a call over libgcc's: the byte tested on every call
+    and a `jmp` on, 40.9; `tst.b` and `beq.w`, 28.6; a vector a
+    routine (`move.l vec,a0; jmp (a0)`), 28.6, or 24.6 with the
+    vectors in the text and read pc-relative; the written `jmp`, 12.2.
+    On Hatari's 68030, caches off, over the bare instruction: the
+    byte's test 20.1 either way, `beq.w` 28, the vectors 32 (24 to 32
+    pc-relative). The `beq.w` also fails to link ("relocation
+    truncated to fit: DISP16", seen with 40K of the program's own
+    after the object) wherever 32K lies between: the gcc driver puts
+    `-lgcc -lc -lgcc` after everything on the line, so libgcc's
+    routines follow every archive member the program pulls. Written
+    only on a 68000 or 68010 (no instruction cache, no MMU); a 68020
+    or later keeps testing the byte, a branch not taken, and never
+    has its text written. One `movem.l` writes the `jmp` and the
+    `ble.s` after it, as it was, so code interrupted between the
+    `tst.b` and the branch comes back to the branch.
   - `tests/hatari/arithchk.c` (ARITHCHK, and ARITHCHP built without the
     flags for libgcc alone) checks every routine against libgcc's own
     (`__real___...`, with both path bytes at 0 so libgcc's inner calls
     are libgcc's too), the registers kept, the CPU asked in user and
-    supervisor mode, and dividing by 0 under a handler of its own. A
+    supervisor mode, from a VBL queue routine and at level 7, the
+    `jmp`s written on a 68000 and not on a 68020, and dividing by 0
+    under a handler of its own. To ask again on a 68000 it writes the
+    `tst.b` back itself (`unpatch()`, which knows the layout). A
     `__modsi3` returning the quotient, `__divdi3` losing d2, `__divdi3`
-    without its overflow test, the 68060 test at 30 and `__muldi3`'s
-    32-bit operands through `mulu.l` each failed it.
+    without its overflow test, the 68060 test at 30, `__muldi3`'s
+    32-bit operands through `mulu.l`, `__divdi3` left out of the
+    `jmp` table and the `jmp` aimed at the 68020 code each failed it.
+    The CPU asked through the cookie, a system call, passed the VBL
+    and level-7 checks under TOS 2.06 and 3.06, which answer one
+    there: those checks show the decision works in an interrupt, not
+    that it makes no system call.
+  - **A store into the VBL queue that is cleared before the function
+    returns is a dead store to gcc** unless the queue is reached
+    through a `volatile` pointer: ARITHCHK's first VBL check never
+    ran, its slot written in the source and not in the object, the
+    wait loop's volatile reads notwithstanding.
 - Variable shifts cost 8+2n cycles each, so two of them per word is
   a fixed tax whatever the shift amount. Building the value from a
   32-bit window needs one: `(((uint32_t)hi << 16) | lo) >> n` rather

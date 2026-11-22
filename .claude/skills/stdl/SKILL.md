@@ -339,8 +339,9 @@ next one stops the build. Soft float (`__mulsf3`, `__floatsisf`,
 `$(STDL_ARITH020)` on the link line before the libraries), and libgcc's
 multiplies and divides become a 68020's own instructions where the
 machine has them, libgcc's answer to the bit, from the same 68000 build
-at 41 cycles a call more on an ST: `docs/building.md` has the link, the
-costs and the gains, and `MULDIV.TOS` shows it.
+at 12 cycles a call more on an ST (a `jmp` the first call writes over
+each wrapper's test; 3-5% of libgcc's time): `docs/building.md` has the
+link, the costs and the gains, and `MULDIV.TOS` shows it.
 
 ## Writing a new game
 

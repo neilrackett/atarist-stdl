@@ -960,7 +960,8 @@ win = SDL_CreateWindow("", SDL_WINDOWPOS_CENTERED,
   partial group each truncated to 32 bits all failed it. `SDL2RCWD`
   (`test_render.c` built with `STDL_SDL2_TEST_WIDE`, the only test of
   the compare's assembler in its passes of 32 groups) passed on
-  Hatari's TT and Falcon on VGA. `SDL2WIDE` showed all 640x480 on both.
+  Hatari's TT and Falcon on VGA and RGB. `SDL2WIDE` showed all 640x480
+  on the TT and the Falcon on VGA.
 
 ## Testing it
 

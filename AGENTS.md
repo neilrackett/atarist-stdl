@@ -657,7 +657,8 @@ console, unless `STDL_UseBanner(0)` came first.
     on a TT, a Falcon's VGA and RGB, and RGB at 400 rows. WIDEDEMO in
     Hatari: 24 balls at 60 frames a second on a TT (TOS 3.06 and
     EmuTOS, from ST Low, TT Low and TT Medium desktops, with TT-RAM) and
-    a Falcon on VGA and on RGB in PAL and NTSC (TOS 4.04, EmuTOS).
+    a Falcon on VGA, on RGB in PAL and NTSC and on a TV (TOS 4.04,
+    EmuTOS), all 480 rows shown.
     Neither machine's real hardware has run it.
 - **The 16-colour tall screen costs a TT 6.3-7.5ms a frame.** ST Low
   costs a TT nothing, but TT Low is 8 planes, so without the colour
@@ -1989,7 +1990,7 @@ rules below keep it from being anything else's.
   - `test_render_st`'s wide runs and `SDL2RCWD` (`STDL_SDL2_TEST_WIDE`)
     are its tests; truncating the compare, the catch-up or a partial
     group to 32 bits each failed the first, and only the second runs
-    the assembler. SDL2RCWD outlasts `run.sh`'s two-minute `waitfor`
+    the assembler (it passed on Hatari's TT and Falcon on VGA and RGB). SDL2RCWD outlasts `run.sh`'s two-minute `waitfor`
     (15 minutes of the host's time on Hatari's TT, as each flip's check
     converts the whole model): chain eight.
   - `SDL_GetDesktopDisplayMode` (`display.c`, an object of its own)

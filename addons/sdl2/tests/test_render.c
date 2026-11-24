@@ -68,6 +68,11 @@
  *       -Iaddons/sdl2/src -c -o rchk.o addons/sdl2/tests/test_render.c
  *   STCMD_NO_TTY=1 stcmd m68k-atari-mint-gcc -m68000 \
  *       -o dist/SDL2RCST.TOS rchk.o libstdl-sdl2-st.a libstdl.a
+ *
+ * With -DSTDL_SDL2_TEST_WIDE as well it is SDL2RCWD, a window of 640x480:
+ * on a TT or a Falcon the wide screen (STDL_RESPONSIVE_WIDE), 40 groups
+ * a row, through the same 16-colour path; on the host test_render_st
+ * runs it on a TT and a Falcon, 480 rows and 400.
  */
 
 #include "SDL.h"
@@ -115,7 +120,13 @@ static int rndn(int n)
 /* ------------------------------------------------------------------ */
 /* the model                                                           */
 
-static Uint8 model[240][320];
+/* the screen's size: 320x240, or 640x480 for the ST build's wide screen
+ * (wide_run), which a window wider than 320 gets on a TT or a Falcon */
+static int SW = 320, SH = 240;
+#ifdef STDL_SDL2_ST
+static int wide_run;
+#endif
+static Uint8 model[480][640];
 static unsigned X;
 static int lw, lh, xoff, yoff;
 static int drawn;               /* a flip is due at the next present */
@@ -145,7 +156,7 @@ static int tfresh, tpal;
 /* an ST's screen, and the rows of the screen its page has: set when
  * the window is made, from the screen STDL set up */
 static int is_st, page_rows = 240;
-#define PROW0 ((240 - page_rows) / 2)
+#define PROW0 ((SH - page_rows) / 2)
 /* the program's own map and colours (STDL_SDL2_SetSTColours): while
  * they are given nothing is noted or counted, and a new map's second
  * slots are made at the next evaluation; given back, the renderer
@@ -171,8 +182,8 @@ static void model_place(int w, int h)
 {
     lw = w;
     lh = h;
-    xoff = ((320 - w) / 2) & ~15;
-    yoff = (240 - h) / 2;
+    xoff = ((SW - w) / 2) & ~15;
+    yoff = (SH - h) / 2;
 }
 
 /* -1 when the copy would scale, else whether it drew anything */
@@ -258,7 +269,7 @@ static void expect_page_st(long stride)
     int x, y;
     memset(want, 0, (size_t)want_bytes);
     for (y = 0; y < page_rows; y++) {
-        for (x = 0; x < 320; x++) {
+        for (x = 0; x < SW; x++) {
             st_pixel(want + y * stride, x, x + y + row0, m->a, m->b,
                      model[y + row0][x]);
         }
@@ -312,7 +323,7 @@ static void check_shown(void)
         want = (Uint8 *)malloc((size_t)bytes);
     }
 #ifdef STDL_SDL2_ST
-    CHECK(!is_st || bytes == 160L * page_rows);
+    CHECK(!is_st || bytes == (long)(SW / 2) * page_rows);
 #endif
     stride_ = bytes / PAGE_ROWS;
     dbl_ = stride_ == 640;
@@ -367,7 +378,7 @@ static int st_eval(void)
         if (tpal) {
             memset(tseen, 0, sizeof(tseen));
             for (y = PROW0; y < PROW0 + page_rows; y++) {
-                for (x = 0; x < 320; x++) {
+                for (x = 0; x < SW; x++) {
                     tseen[model[y][x]] = 1;
                 }
             }
@@ -752,7 +763,7 @@ static void random_rect(SDL_Rect *r, int maxw, int maxh)
  * groups and parts of groups, and the same again bringing none. */
 static void few_colours(void)
 {
-    Tex *t = borrowed(320, 240, 320, 0);
+    Tex *t = borrowed(SW, SH, SW, 0);
     SDL_Rect box;
     int i, k;
     clear_index(0);
@@ -760,7 +771,7 @@ static void few_colours(void)
     present();
     for (k = 0; k < 8; k++) {
         const int base = rndn(240);
-        for (i = 0; i < 320 * 240; i++) {
+        for (i = 0; i < SW * SH; i++) {
             t->px[i] = (Uint8)(base + rndn(12));
         }
         box.x = 16 * rndn(16);
@@ -922,7 +933,7 @@ static void port_sequences(void)
     copy(layer, &box, &box);
     present();
     CHECK(SDL_RenderSetLogicalSize(R, 0, 0) == 0);
-    model_place(320, 240);
+    model_place(SW, SH);
 }
 
 /* the compare turned on and off as the run goes (STDL_SDL2_SetCompare) */
@@ -1020,10 +1031,10 @@ static void random_run(long steps)
         } else if (what < 86) {
             clear_now();
         } else if (what < 89) {
-            int w = 16 + rndn(305), h = 1 + rndn(240);
+            int w = 16 + rndn(SW - 15), h = 1 + rndn(SH);
             if (rndn(4) == 0) {
                 CHECK(SDL_RenderSetLogicalSize(R, 0, 0) == 0);
-                model_place(320, 240);
+                model_place(SW, SH);
             } else {
                 CHECK(SDL_RenderSetLogicalSize(R, w, h) == 0);
                 model_place(w, h);
@@ -1049,10 +1060,10 @@ static void random_run(long steps)
 static void make_textures(void)
 {
     ntex = 0;
-    own(320, 240);
+    own(SW, SH);
     own(37, 29);
     borrowed(250, 200, 263, 3);   /* odd pitch, odd address */
-    borrowed(320, 240, 320, 0);
+    borrowed(SW, SH, SW, 0);
 }
 
 /* flips the add-on's own check is to find unlike its model */
@@ -1081,7 +1092,7 @@ static void pairs_rules(void)
     SDL_Rect all, spot, grp;
     int k, y, x;
     CHECK(SDL_RenderSetLogicalSize(R, 0, 0) == 0);
-    model_place(320, 240);
+    model_place(SW, SH);
     spot.x = 33;
     spot.y = 100;                   /* on every page an ST's screen has */
     spot.w = 1;
@@ -1161,7 +1172,7 @@ static void toggle_rules(void)
     const Uint8 col = 0x5A;
     int y;
     CHECK(SDL_RenderSetLogicalSize(R, 0, 0) == 0);
-    model_place(320, 240);
+    model_place(SW, SH);
     box.x = 32;
     box.y = 40;
     box.w = 64;
@@ -1233,14 +1244,14 @@ static void toggle_one_copy(void)
     SDL_Rect box, all;
     int i, k, x, y;
     CHECK(SDL_RenderSetLogicalSize(R, 0, 0) == 0);
-    model_place(320, 240);
+    model_place(SW, SH);
     box.x = 32;
     box.y = 40;
     box.w = 64;
     box.h = 16;
     all.x = all.y = 0;
-    all.w = 320;
-    all.h = 240;
+    all.w = (Uint16)SW;
+    all.h = (Uint16)SH;
     for (i = 0; i < (int)(sizeof(small) / sizeof(small[0])) + 2; i++) {
         for (k = 0; k < 2; k++) {
             CHECK(STDL_SDL2_SetCompare(R, 1) == 0);
@@ -1302,7 +1313,7 @@ static void toggle_first(void)
     SDL_Rect s, d;
     int y;
     CHECK(SDL_RenderSetLogicalSize(R, 0, 0) == 0);
-    model_place(320, 240);
+    model_place(SW, SH);
     copy(&tex[0], NULL, NULL);
     present();
     z = own(64, 16);
@@ -1334,13 +1345,33 @@ static int run(unsigned long s, unsigned x, int xconst)
         SDL_SetHint(STDL_SDL2_HINT_CHECK, "1");
     }
     CHECK(SDL_Init(SDL_INIT_VIDEO) == 0);
+    {
+        /* the largest window: 640x480 on a TT or a Falcon in the ST
+         * build, 320x240 otherwise */
+        SDL_DisplayMode dm;
 #ifdef STDL_SDL2_ST
-    is_st = STDL_SDL2_NO_256();
+        const int big = STDL_GetMachineInfo()->mch_cookie >= 0x00020000UL;
+#else
+        const int big = 0;
+#endif
+        CHECK(SDL_GetDesktopDisplayMode(0, &dm) == 0 &&
+              dm.format == SDL_PIXELFORMAT_INDEX8 &&
+              dm.w == (big ? 640 : 320) && dm.h == (big ? 480 : 240));
+        CHECK(SDL_GetDesktopDisplayMode(1, &dm) == -1 &&
+              SDL_GetDesktopDisplayMode(0, NULL) == -1);
+    }
+#ifdef STDL_SDL2_ST
+    /* the wide screen takes the 16-colour path an ST's screen does */
+    is_st = STDL_SDL2_NO_256() || wide_run;
+    if (wide_run) {
+        SW = 640;
+        SH = 480;
+    }
 #endif
     win = SDL_CreateWindow("test", SDL_WINDOWPOS_CENTERED,
-                           SDL_WINDOWPOS_CENTERED, 320, 240, 0);
+                           SDL_WINDOWPOS_CENTERED, SW, SH, 0);
     CHECK(win != NULL);
-    CHECK(SDL_CreateWindow("again", 0, 0, 320, 240, 0) == NULL);
+    CHECK(SDL_CreateWindow("again", 0, 0, SW, SH, 0) == NULL);
     R = SDL_CreateRenderer(win, -1, 0);
     CHECK(R != NULL);
     if (!R) {
@@ -1360,7 +1391,7 @@ static int run(unsigned long s, unsigned x, int xconst)
     random_colours(256);
     CHECK(STDL_SDL2_SetRenderPalette(R, pal) == 0);
     model_fill((Uint8)X);
-    model_place(320, 240);
+    model_place(SW, SH);
 #ifdef STDL_SDL2_ST
     /* the page's rows, and the colours from here on noted */
     memset(&want_maps, 0, sizeof(want_maps));
@@ -1378,7 +1409,7 @@ static int run(unsigned long s, unsigned x, int xconst)
         last_base = NULL;
     }
     make_textures();
-    CHECK(SDL_RenderSetLogicalSize(R, 321, 200) == -1);
+    CHECK(SDL_RenderSetLogicalSize(R, SW + 1, 200) == -1);
     CHECK(STDL_SDL2_SetCompare(NULL, 1) == -1);
     copy(&tex[0], NULL, NULL);
     CHECK(STDL_SDL2_SetBorderIndex(R, 0x10) == -1);   /* drawn on now */
@@ -1389,8 +1420,8 @@ static int run(unsigned long s, unsigned x, int xconst)
          * new maps come to make them again */
         SDL_Rect a;
         a.x = a.y = 0;
-        a.w = 320;
-        a.h = 240;
+        a.w = (Uint16)SW;
+        a.h = (Uint16)SH;
         copy_pairs(&tex[0], &a, &a);
         present();
     }
@@ -1776,11 +1807,55 @@ int main(void)
             }
         }
     }
+    {
+        /* the wide screen, 640x480 in 16 colours through the same
+         * path: a TT and a Falcon, two pages and three, X 0 and 0x70,
+         * and a Falcon's RGB that could not open past 400 rows */
+        static const struct {
+            unsigned long mch;
+            int rows, pages;
+            unsigned x;
+        } w[] = {
+            { 0x00020000UL, 480, 3, 0 }, { 0x00020000UL, 480, 2, 0x70 },
+            { 0x00030000UL, 480, 2, 0 }, { 0x00030000UL, 480, 3, 0x70 },
+            { 0x00030000UL, 400, 3, 0 }, { 0x00030000UL, 400, 2, 0x70 }
+        };
+        int k;
+        for (k = 0; k < (int)(sizeof(w) / sizeof(w[0])); k++) {
+            pid_t pid = fork();
+            int status = 0;
+            if (pid == 0) {
+                int f;
+                fake_third = 1;
+                fake_mach.mch_cookie = w[k].mch;
+                fake_mach.is_ste = 1;
+                fake_wide_rows = w[k].rows;
+                wide_run = 1;
+                SDL_SetHint(STDL_SDL2_HINT_PAGES, w[k].pages == 2 ? "2" : "3");
+                f = run(0xBEEFUL + (unsigned long)k, w[k].x, w[k].x != 0);
+                if (fake_npages != w[k].pages || fake_stride != 320 ||
+                    !fake_wide || page_rows != w[k].rows) {
+                    printf("FAIL wide: %d rows, %d pages\n", w[k].rows,
+                           w[k].pages);
+                    f++;
+                }
+                _exit(f ? 1 : 0);
+            }
+            waitpid(pid, &status, 0);
+            runs++;
+            if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+                printf("test_render_st: wide, %s, %d rows, %d pages, X 0x%X"
+                       " failed\n", w[k].mch == 0x00020000UL ? "TT"
+                       : "Falcon", w[k].rows, w[k].pages, w[k].x);
+                total++;
+            }
+        }
+    }
     if (total) {
         printf("test_render_st: failed\n");
         return 1;
     }
-    printf("test_render_st: ok (%d ST screens)\n", runs);
+    printf("test_render_st: ok (%d ST and wide screens)\n", runs);
     /* then a TT's and a Falcon's, which this build must show as the
      * other does */
     return main256();
@@ -1875,6 +1950,11 @@ int main(void)
     unchecked = 1;
 #endif
 #ifdef STDL_SDL2_ST
+#ifdef STDL_SDL2_TEST_WIDE
+    /* SDL2RCWD: a window of 640x480, the wide screen on a TT or a
+     * Falcon */
+    wide_run = 1;
+#endif
     f = reduce_checks();
     f += pair_checks();
     f += run(0xC0FFEEUL, 0x70, 1);

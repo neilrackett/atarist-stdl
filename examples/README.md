@@ -35,6 +35,7 @@ pipeline to copy into a game's own Makefile. The results are tracked, so
 | GRAYWIN.TOS  | `graywin.c`       | fills, clipping, palette                                                         |
 | TESTWIN.TOS  | `testwin.c`       | BMP loading, surface blits, palette fades                                        |
 | TSPRITE.TOS  | `testsprite.c`    | colour-keyed sprite blits, dirty rects, FPS                                      |
+| TSPRITEW.TOS | `testsprite.c`    | the same at SDL's own 640x480 on the SDL 1.2 shim: 640x480 in 16 colours on a TT or a Falcon (`STDL_RESPONSIVE_WIDE`), 320x200 on an ST |
 | TPALETTE.TOS | `testpalette.c`   | palette animation on a 16-entry budget; `-stage` lands each change in the blank  |
 | CHECKKEY.TOS | `checkkeys.c`     | raw IKBD keyboard, no video mode: key-ups, modifiers, unicode                    |
 | TTIMER.TOS   | `testtimer.c`     | 200Hz timing, cooperative timers                                                 |
@@ -65,7 +66,7 @@ pipeline to copy into a game's own Makefile. The results are tracked, so
 | RASTERS.TOS  | `rasters.c`   | Timer B rasters: copper bars in colour 0 edge to edge, a gradient in colour 15   |
 | RESPDEMO.TOS | `respdemo.c`  | one binary, each machine's best screen: 256 colours and 240 rows on a TT or Falcon |
 | WIDEDEMO.TOS | `widedemo.c`  | 640x480 in 16 colours on a TT or a Falcon (`STDL_RESPONSIVE_WIDE`), 24 balls over a background a page restores where they were; an ST's 320x200 elsewhere |
-| SDL2DEMO.TOS | `sdl2demo.c`  | (`make sdl2`) the SDL2 add-on on a TT or a Falcon: INDEX8 textures, palette cycling, copying what changed (the background in pixel pairs, `STDL_SDL2_RenderCopyPairs`), a box made in a surface and moved by the keys, a pad or the mouse (relative motion), with a tone. `make sdl2st` builds it for every machine against the add-on's experimental 68000 build, not shipped: SDL2ST.TOS, and SDL2ST16.TOS, which gives an ST 16 colours of its own (`STDL_SDL2_SetSTColours`, S to switch) |
+| SDL2DEMO.TOS | `sdl2demo.c`  | (`make sdl2`) the SDL2 add-on on a TT or a Falcon: INDEX8 textures, palette cycling, copying what changed (the background in pixel pairs, `STDL_SDL2_RenderCopyPairs`), a box made in a surface and moved by the keys, a pad or the mouse (relative motion), with a tone. `make sdl2st` builds it for every machine against the add-on's experimental 68000 build, not shipped: SDL2ST.TOS, SDL2ST16.TOS, which gives an ST 16 colours of its own (`STDL_SDL2_SetSTColours`, S to switch), and SDL2WIDE.TOS, a 640x480 window: 640x480 in 16 colours on a TT or a Falcon |
 | SDL2C2P.TOS  | `sdl2c2p.c`   | (`make sdl2`) a program's own chunky screen converted by the SDL2 add-on's conversion alone (`SDL_stdl_c2p.h`), no SDL and no renderer: a 68000 program on STDL's 256-colour screen, its picture drawn at half the width, P switching between `STDL_SDL2_ConvertBox` and `STDL_SDL2_ConvertBoxPairs`, the conversion's time on a bar. Needs a TT or a Falcon |
 
 ## The SDL1 add-on's (experimental, `make sdl1`, not shipped)
@@ -78,6 +79,7 @@ SDL 1.2's own tests, unchanged, running through the SDL1 add-on
 | ------------ | ----------------------------------- | ---------------------------------------------------------------- |
 | S1SPRITE.TOS | SDL's `testsprite.c`                | an unported program's blits, colour key, `SDL_DisplayFormat` and BMP, in SDL 1.2's 8-bit picture on every machine |
 | S1GRAY.TOS   | SDL's `graywin.c`                   | writes to the screen surface's own pixels, which a planar port cannot keep |
+| S1SPRW.TOS, S1GRAYW.TOS | SDL's `testsprite.c`, `graywin.c` | the same two at their own 640x480: on a TT or a Falcon STDL's 640x480 in 16 colours, through the SDL2 add-on's experimental build |
 | S1PORTED.TOS | `testsprite.c` here (TSPRITE's)     | the planar port's source built on the add-on with `STDL_SDL1_STRICT`: one source, both front ends |
 
 ## Checks

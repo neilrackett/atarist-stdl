@@ -151,7 +151,7 @@ program moved off them changes its include path to this shim's.
 | `SDL_Init` / `SDL_Quit` | `STDL_Init` / `STDL_Quit` | enters supervisor mode for the program's lifetime |
 | `SDL_InitSubSystem` / `SDL_QuitSubSystem` / `SDL_WasInit` | compat | there are no subsystems: everything starts at `SDL_Init` and only `SDL_Quit` puts the machine back. These keep the flags a program asked for, which `SDL_WasInit` answers |
 | `SDL_getenv` / `SDL_putenv` | the C library | STDL reads no variable, so one set to choose SDL's driver or to centre its window changes nothing |
-| `SDL_SetVideoMode` | `STDL_SetVideoMode` | w/h/bpp ignored, always 320x200x4, unless the program asked for a responsive option (`stdl_responsive.h`): then bpp 8 is the colour and h over 200 the tall screen |
+| `SDL_SetVideoMode` | `STDL_SetVideoMode` | w/h/bpp ignored, always 320x200x4, unless the program asked for a responsive option (`stdl_responsive.h`): then bpp 8 is the colour, h over 200 the tall screen and w over 320 the wide one (640x480 in 16 colours on a TT or a Falcon; an ST's 320x200 with the error set) |
 | `SDL_BlitSurface` | `STDL_BlitSurface` | full SDL semantics incl. dstrect writeback |
 | `SDL_FillRect` | wrapper | colour is a palette index, not mapped RGB |
 | `SDL_Flip` | `STDL_Flip` | VBL-synced; page flip with `SDL_DOUBLEBUF`, including while an overscan border is open; `STDL_TRIPLEBUF` adds a third page so a frame longer than a VBL is not rounded up to whole VBLs |
@@ -343,6 +343,16 @@ below). What they add - 256 colours, and 240 lines - a game asks for by
 name with `STDL_UseResponsive` (`stdl_responsive.h`), once, before the
 first `STDL_SetVideoMode`, and one binary serves every machine:
 [responsive.md](responsive.md).
+
+A game made for 640x480 in 16 colours (a Windows 3.x or a VGA-era DOS
+game) can keep its layout on a TT or a Falcon with
+`STDL_RESPONSIVE_WIDE`: TT Medium, or a Falcon's 640x480 in 16 colours,
+an ordinary 4-plane surface 640 pixels wide. An ST has no such screen,
+so such a game is for those two machines, or lays itself out again in
+320 pixels where `screen->w` says so. 640x480 is 4.8 times an ST's
+pixels with no BLiTTER, so redraw only what changed (`STDL_Dirty`).
+The SDL 1.2 shim's `SDL_GetVideoInfo` and `SDL_ListModes` report the
+screen's own size.
 
 ## Rewrite patterns
 

@@ -18,11 +18,12 @@
 #endif
 
 /* a copy's groups by the batch's rule (internal.h), from its first row */
-static void mark(Uint32 *pair, const Uint32 *whole, const Uint32 *part,
-                 int h, int sx, int w, int pairing)
+static void mark(stdl_sdl2_mask *pair, const stdl_sdl2_mask *whole,
+                 const stdl_sdl2_mask *part, int h, int sx, int w,
+                 int pairing)
 {
     int g0, g1;
-    Uint32 m;
+    stdl_sdl2_mask m;
     if (pairing) {
         g0 = (sx + 15) >> 4;
         g1 = ((sx + w) >> 4) - 1;
@@ -33,7 +34,8 @@ static void mark(Uint32 *pair, const Uint32 *whole, const Uint32 *part,
     if (g0 > g1) {
         return;
     }
-    m = (Uint32)(((1UL << (g1 + 1)) - 1) & ~((1UL << g0) - 1));
+    m = (stdl_sdl2_mask)(((STDL_SDL2_M1 << (g1 + 1)) - 1) &
+                         ~((STDL_SDL2_M1 << g0) - 1));
     for (; h > 0; h--, pair++, whole++, part++) {
         stdl_sdl2_pair_rule(pair, whole, part, m, pairing);
     }

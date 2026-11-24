@@ -406,9 +406,12 @@ static SDL_Surface *scr;
 static int W, H, OX, OY;        /* the picture, and its place */
 static unsigned X;              /* the border index */
 static int on_st;
+/* the screen's size: 320x240, or 640x480 where the first mode is wide
+ * (a TT's or a Falcon's 16 colours, through the experimental build) */
+static int SW = 320, SH = 240, on_wide;
 /* what the display should show of it: a pixel's value, or -1 where no
  * update has reached, which is the cleared screen's register 0 */
-static short shown[240][320];
+static short shown[480][640];
 /* and in which colours; and the screen surface's own palette, which
  * SDL_LOGPAL moves and SDL_PHYSPAL leaves */
 static SDL_Color phys[256], logi[256];
@@ -497,8 +500,8 @@ static void mode(int w, int h)
     }
     W = w;
     H = h;
-    OX = ((320 - w) / 2) & ~15;
-    OY = (240 - h) / 2;
+    OX = ((SW - w) / 2) & ~15;
+    OY = (SH - h) / 2;
     CHECK(scr == SDL_GetVideoSurface() && scr->w == w && scr->h == h &&
           scr->format->BitsPerPixel == 8 && scr->pitch >= w &&
           !(scr->pitch & 1) && !((size_t)scr->pixels & 1));
@@ -712,9 +715,14 @@ static void convert(void)
 
 static int screen(unsigned long s, unsigned x)
 {
-    static const int sizes[][2] = {
+    static const int narrow[][2] = {
         { 320, 200 }, { 320, 240 }, { 256, 224 }, { 300, 180 }, { 32, 16 }
     };
+    /* the first sets the screen up, the wide one; then smaller */
+    static const int wide[][2] = {
+        { 640, 480 }, { 640, 400 }, { 320, 240 }, { 600, 300 }, { 32, 16 }
+    };
+    const int (*sizes)[2] = on_wide ? wide : narrow;
     char name[32];
     int si, k;
     seed = s;
@@ -732,9 +740,24 @@ static int screen(unsigned long s, unsigned x)
     if (x) {
         CHECK(STDL_SDL1_SetBorderIndex(x) == 0);
     }
-    CHECK(SDL_VideoModeOK(320, 240, 8, 0) == 8 &&
-          SDL_VideoModeOK(640, 480, 8, 0) == 0);
-    CHECK(SDL_SetVideoMode(640, 480, 8, 0) == NULL);
+    {
+        /* 640x480 over the experimental build on a TT or a Falcon */
+        const int wide_ok = SDL_VideoModeOK(640, 480, 8, 0) == 8;
+        SDL_Rect **m = SDL_ListModes(NULL, 0);
+#ifdef SDL1_TEST_ST
+        CHECK(wide_ok == (fake_mach.mch_cookie >= 0x00020000UL));
+#else
+        CHECK(!wide_ok);
+#endif
+        CHECK(SDL_VideoModeOK(320, 240, 8, 0) == 8 &&
+              SDL_VideoModeOK(641, 480, 8, 0) == 0 &&
+              SDL_VideoModeOK(640, 481, 8, 0) == 0);
+        CHECK(m && m[0] && m[0]->w == (wide_ok ? 640 : 320) &&
+              m[0]->h == (wide_ok ? 480 : 240));
+        if (!wide_ok) {
+            CHECK(SDL_SetVideoMode(640, 480, 8, 0) == NULL);
+        }
+    }
     CHECK(SDL_SetVideoMode(320, 200, 16, 0) == NULL);
     CHECK(SDL_DisplayFormat(NULL) == NULL && SDL_GetVideoSurface() == NULL);
     CHECK(SDL_VideoDriverName(name, sizeof(name)) == name &&
@@ -747,6 +770,9 @@ static int screen(unsigned long s, unsigned x)
             CHECK(scr && scr->format->BitsPerPixel == 8);
         }
         mode(sizes[si][0], sizes[si][1]);
+        /* the screen there is, once a mode is set: no wider mode */
+        CHECK(SDL_VideoModeOK(SW + 1, 200, 8, 0) == 0 &&
+              SDL_VideoModeOK(SW, SH, 8, 0) == 8);
         /* the border index is the screen's from its start */
         CHECK(STDL_SDL1_SetBorderIndex(0x30) == -1);
         for (step = 0; step < 220; step++) {
@@ -816,6 +842,24 @@ static int on_256(int layout, int pages, unsigned x)
 }
 
 #ifdef SDL1_TEST_ST
+/* the wide screen: 640x480 in 16 colours on a TT or a Falcon, the first
+ * mode's; checked by the SDL2 add-on's own check, as an ST's screen */
+static int on_wide_screen(int falcon, int pages, unsigned x)
+{
+    on_st = 1;
+    on_wide = 1;
+    SW = 640;
+    SH = 480;
+    fake_third = 1;
+    fake_wide_rows = 480;
+    fake_mach.mch_cookie = falcon ? 0x00030000UL : 0x00020000UL;
+    fake_mach.is_ste = 1;
+    STDL_SDL1_SetHint(STDL_SDL1_HINT_PAGES, pages == 2 ? "2" : "3");
+    return screen(0x31DE5UL + (unsigned long)falcon * 2 +
+                  (unsigned long)pages, x) ||
+           fake_npages != pages || fake_stride != 320 || !fake_wide;
+}
+
 static int on_an_st(int tall, int ste, unsigned x)
 {
     on_st = 1;
@@ -850,6 +894,16 @@ int main(void)
             if (forked(on_an_st, layout, pages, pages ? 0x70 : 0)) {
                 printf("test_sdl1_st: an ST%s, %s failed\n",
                        pages ? "E" : "", layout ? "240 rows" : "ST Low");
+                bad++;
+            }
+            runs++;
+        }
+    }
+    for (layout = 0; layout < 2; layout++) {
+        for (pages = 2; pages <= 3; pages++) {
+            if (forked(on_wide_screen, layout, pages, pages == 3 ? 0x70 : 0)) {
+                printf("test_sdl1_st: the wide screen, a %s, %d pages "
+                       "failed\n", layout ? "Falcon" : "TT", pages);
                 bad++;
             }
             runs++;

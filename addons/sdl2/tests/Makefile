@@ -25,7 +25,7 @@ TESTS   = test_basics test_c2p test_render test_render_st test_events \
 # it, STDL's calls stood in for
 RENDER  = $(SRC)/init.c $(SRC)/error.c $(SRC)/hints.c $(SRC)/c2p.c \
           $(SRC)/c2pany.c $(SRC)/c2pp.c $(SRC)/c2ppair.c $(SRC)/palette.c \
-          $(SRC)/timer.c $(SRC)/video.c
+          $(SRC)/timer.c $(SRC)/video.c $(SRC)/display.c
 
 # and the rest of the add-on, on fake_stdl.c's input
 REST    = $(SRC)/events.c $(SRC)/keymap.c $(SRC)/joystick.c \

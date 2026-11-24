@@ -30,7 +30,7 @@ build lists the work.
 |---|---|
 | 8-bit art, one 256-colour palette | fits: `SDL_PIXELFORMAT_INDEX8` textures and surfaces |
 | 32-bit textures or surfaces (ARGB8888...) | convert the art to one 256-colour palette (`stdlconv bmp8`, below); there is no 32-bit path |
-| more than 320x240, or renderer scaling | redesign for 320x240; nothing scales, a copy that would fails |
+| more than 320x240, or renderer scaling | redesign for 320x240; nothing scales, a copy that would fails. A 640x480 program can keep its size in 16 colours through the experimental 68000 build on a TT or a Falcon (below) |
 | `SDL_RenderDrawLine`/`Point`/`Rect`, `FillRect` on the renderer, `RenderCopyEx`, blend or colour modes, render targets | not there: draw into the program's own 8-bit buffer instead |
 | `SDL_GetWindowSurface`/`UpdateWindowSurface` | not there: a texture over the program's buffer (`STDL_SDL2_CreateTextureFrom`) does the same job |
 | threads, `SDL_AddTimer` | not there: no threads; do the work in the main loop |
@@ -442,6 +442,16 @@ Falcon that binary shows what the 68020 build shows, frame for frame,
   the choice back. `SDL2ST16.TOS` (`examples/sdl2demo.c` with
   `SDL2DEMO_ST16`) shows it: a map made once, the 16 given again as
   the palette cycles.
+- 640x480 in 16 colours on a TT or a Falcon: a first window wider than
+  320 gets STDL's wide screen (`STDL_RESPONSIVE_WIDE`) through this same
+  16-colour path, in this build only (`SDL_GetDesktopDisplayMode` says
+  640x480 where it can be had; an ST refuses the window). Allow 850K:
+  three 153.6K pages, the 300K chunky copy and the rows. Hatari's TT
+  presents `SDL2WIDE` (nine boxes over a 640x480 background) in 12ms a
+  frame and a Falcon in 26ms; a palette change that moves the maps
+  converts the whole 640x480 page (137ms on a TT), so cycle colours
+  only where the maps keep, or give your own 16. docs/sdl2.md, "640x480
+  in 16 colours on a TT or a Falcon".
 - Slow, by design: a whole screen of new pixels 0.74s on an 8MHz ST and
   0.42s on a Mega STE, a new 64x48 box 41ms and 23ms, a palette change
   that keeps the maps 42ms and 22ms, or a

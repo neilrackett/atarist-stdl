@@ -63,7 +63,7 @@ The calls it has:
 |---|---|
 | Start and stop | `SDL_Init`, `SDL_InitSubSystem`, `SDL_QuitSubSystem`, `SDL_WasInit`, `SDL_Quit`, `SDL_GetVersion` (2.0.10) |
 | Errors, hints | `SDL_SetError`, `SDL_GetError`, `SDL_ClearError`, `SDL_SetHint`, `SDL_SetHintWithPriority`, `SDL_GetHint`, `SDL_GetHintBoolean`, `SDL_ClearHints` |
-| Window | `SDL_CreateWindow` (at most 320x240), `SDL_DestroyWindow`, `SDL_GetWindowSize`, `SDL_SetWindowTitle` (nothing to do) |
+| Window | `SDL_CreateWindow` (at most 320x240, or 640x480 in the experimental build: below), `SDL_DestroyWindow`, `SDL_GetWindowSize`, `SDL_SetWindowTitle` (nothing to do), `SDL_GetDesktopDisplayMode` (the largest window there can be) |
 | Renderer | `SDL_CreateRenderer`, `SDL_DestroyRenderer`, `SDL_RenderSetLogicalSize`, `SDL_RenderGetLogicalSize`, `SDL_SetRenderDrawColor`, `SDL_RenderClear`, `SDL_RenderCopy`, `SDL_RenderPresent` |
 | Textures | `SDL_CreateTexture`, `SDL_CreateTextureFromSurface`, `SDL_DestroyTexture`, `SDL_UpdateTexture`, `SDL_LockTexture`, `SDL_UnlockTexture`, `SDL_QueryTexture` |
 | Palettes | `SDL_AllocPalette`, `SDL_SetPaletteColors`, `SDL_FreePalette` |
@@ -92,6 +92,9 @@ All of these come from the machine:
   lines) on a TT. On a Falcon it is an 8-bit mode on VGA, or on RGB
   and a TV, where it is in overscan, 384 pixels a line with the
   picture in the middle. A window is at most 320x240 and is centred.
+  The experimental 68000 build gives a first window wider than 320
+  640x480 in 16 colours on a TT or a Falcon ("640x480 in 16 colours",
+  below); `SDL_GetDesktopDisplayMode` says which a program can have.
   The screen stays up after `SDL_DestroyWindow`, and a later window
   takes it again.
 - **Textures are `SDL_PIXELFORMAT_INDEX8` only:** a byte a pixel
@@ -897,6 +900,67 @@ no TT or Falcon to hand, not to play it: the picture is a rough
   on VGA (the pair loop's assembler with two of its tables swapped
   failed it on the ST); `SDL2ST.TOS` showed all 240 rows on an STE.
   The border has not been seen on a real machine with this.
+
+### 640x480 in 16 colours on a TT or a Falcon
+
+In this build a first window wider than 320 gets STDL's wide screen
+(`STDL_RESPONSIVE_WIDE`, [responsive.md](responsive.md)): TT Medium on a
+TT, a Falcon's own 640x480 in 16 colours on VGA, and on RGB or a TV
+640x400 interlaced opened to 480 lines. It is drawn as an ST's screen
+is, through the same 16-colour path: the colours made from those on
+screen or given (`STDL_SDL2_SetSTColours`), the checkerboard and its
+hint, every copy of whole groups compared, pixel pairs. A program asks
+what it can have before it makes the window:
+
+```c
+SDL_DisplayMode m;
+SDL_GetDesktopDisplayMode(0, &m);   /* 640x480 here on a TT or a Falcon */
+win = SDL_CreateWindow("", SDL_WINDOWPOS_CENTERED,
+                       SDL_WINDOWPOS_CENTERED, m.w, m.h, 0);
+```
+
+- **The first window decides**, as on an ST: one wider than 320 sets up
+  the wide screen, and a later one must fit it; one of 320 sets up the
+  256-colour screen, on which a wider one is refused. A smaller
+  logical size is centred, x on a group.
+- **An ST refuses it** ("needs a TT or a Falcon"), and no mode is set:
+  `SDL_GetDesktopDisplayMode` says 320x240 there, and in the 68020
+  build everywhere.
+- **A Falcon's RGB that cannot open to 480 lines** gives 640x400, which
+  shows the screen's middle 400 rows, as ST Low shows 200 of 240.
+- **Memory**: three of the display's pages are 461K of ST RAM, and the
+  renderer keeps a chunky copy of the screen as an ST's does (300K
+  here) and 69K of rows, so allow 850K.
+- **A row is 40 groups**, so this build's masks of groups are 64 bits
+  (`stdl_sdl2_mask`, internal.h), and its rows the renderer's own
+  allocation. The 68020 build's are the 32-bit
+  masks they were: its objects are byte for byte as before but for
+  gcc's numbering of static locals in `timer.o` and `rwops.o`, and
+  `display.o`, 212 bytes, which only `SDL_GetDesktopDisplayMode` links.
+- **What it costs** (Hatari; this build's 68000 code on a 68030):
+  - `SDL2WIDE.TOS` (`examples/sdl2demo.c` built with `SDL2DEMO_WIDE`:
+    nine boxes put back and drawn again over a 640x480 background each
+    frame) presents in 12ms a frame on a TT and 26ms on a Falcon on
+    VGA, against 9ms at 320x240 in 256 colours on a TT. The rest of its
+    frame is the demo's own, about as long at either size.
+  - With its 224 background colours cycled every frame (`SDL2WIDE C`)
+    the present takes 137ms on a TT: a cycle makes new maps, and new
+    maps convert the whole 640x480 page again. Cycle colours on this
+    screen only where the maps keep (a fade's steps do), or give the
+    program's own 16.
+  - SDL 1.2's testsprite, 16 sprites, through the SDL1 add-on: 13.9
+    frames a second on a TT and 6.9 on a Falcon on VGA at 640x480,
+    against 34.3 and 17.4 at 320x200 in 256 colours ([sdl1.md](sdl1.md)).
+  - A real TT takes 2.3 times as long as Hatari's (above), so take these
+    as an order of magnitude.
+- **Tested**: `test_render_st` runs `test_render`'s model on the wide
+  screen of a TT and a Falcon, at 480 rows and 400, with two pages and
+  three and border indices 0 and 0x70, and `SDL_GetDesktopDisplayMode`
+  everywhere; a compare that dropped groups 32-39, a catch-up and a
+  partial group each truncated to 32 bits all failed it. `SDL2RCWD`
+  (`test_render.c` built with `STDL_SDL2_TEST_WIDE`, the only test of
+  the compare's assembler in its passes of 32 groups) passed on
+  Hatari's TT and Falcon on VGA. `SDL2WIDE` showed all 640x480 on both.
 
 ## Testing it
 

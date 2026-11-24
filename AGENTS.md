@@ -629,6 +629,36 @@ console, unless `STDL_UseBanner(0)` came first.
   program asking for the height links none of the border code: TALLHGT
   is 8,698 bytes smaller than TALLCHK stripped, as is the colour's
   pair. TALL wins where a program asks for both.
+- **640x480 in 16 colours is the display page itself**
+  (`STDL_RESPONSIVE_WIDE`, `src/wide4.c`, November 2026): TT Medium and a
+  Falcon's 640x480 in 16 colours are the ST's interleaved 4-plane layout
+  at 320 bytes a row, so the screen is an ordinary 4-plane surface over
+  the page and Flip swaps pages, nothing to present. What it rests on:
+  - **The model sets its own size and mode** through two hooks
+    (`geometry`, `display` in `resp_model`), so responsive.o keeps the
+    320-pixel screens' code as it was and pays 280 bytes for the hooks,
+    the width test and an ST's error; `wide4.o` is 496 bytes.
+  - **TT Medium's sixteen are the selected bank's registers**, read from
+    the shifter's mode register after the mode set; `w4_tt_word` writes
+    there (`stdl_pal_write`), so the bank is never changed and nothing
+    has to be put back.
+  - **A Falcon's RGB or TV is 640x400 interlaced with VDB 40 lines lower
+    and VDE 40 higher**, read after the VBL that takes the mode set,
+    the window the Falcon's overscan modes have; NTSC moves the window
+    up by what it lacks below. Where no room is left above either, the
+    screen is 640x400 (`h` says so). Interlaced, the registers count
+    lines. The desktop's `VsetScreen` at exit reprograms them.
+  - **No console hook**: TT Medium's console writes the screen's own
+    layout, as an ST's does; only a doubled row (TT Low) needs one.
+  - **An ST gets its 320 pixels** with the error set in the mode set's
+    first step: there is no 640-pixel 16-colour mode to fall back to.
+  - `test_responsive`'s `test_wide4` models fills, pixels, lines, plain
+    and keyed blits and sprites over the whole page (its rows past 64K)
+    on a TT, a Falcon's VGA and RGB, and RGB at 400 rows. WIDEDEMO in
+    Hatari: 24 balls at 60 frames a second on a TT (TOS 3.06 and
+    EmuTOS, from ST Low, TT Low and TT Medium desktops, with TT-RAM) and
+    a Falcon on VGA and on RGB in PAL and NTSC (TOS 4.04, EmuTOS).
+    Neither machine's real hardware has run it.
 - **The 16-colour tall screen costs a TT 6.3-7.5ms a frame.** ST Low
   costs a TT nothing, but TT Low is 8 planes, so without the colour
   every Flip compares the whole 4-plane page with the display (20
@@ -1936,6 +1966,35 @@ rules below keep it from being anything else's.
     flips. `test_render` expects a flip for every copy, and to expect
     otherwise its model would have to know which copies the compare
     takes, the compositor's own arithmetic.
+- **The experimental build's rows are 40 groups on the wide screen**
+  (November 2026): a first window wider than 320 on a TT or a Falcon is
+  STDL's 640x480 in 16 colours through the ST screen's own path
+  (`st_on`). What that took:
+  - **A row of groups is `stdl_sdl2_mask`** (internal.h): a long long in
+    the experimental build, the long it always was in the 68020 build,
+    with `M1` for the literal. Swapping the type and the literal leaves
+    the 68020 build's objects byte for byte as they were (gcc's numbering
+    of static locals in `timer.o` and `rwops.o` aside); compare them
+    after any change here. gcc 4.6 inlines a 68000's 64-bit shifts, by a
+    variable too, so there are no libgcc calls in the masks.
+  - **The screen's size is a variable there** (`st_sw`, `st_sh`), and
+    the rows (owed, now, the batch's, mvalid, the partial groups) the
+    renderer's own allocation (`rows_alloc`), sized for the screen.
+  - **The compare's assembler keeps a group's bit in a long**, so the
+    experimental build runs it in passes of at most 32 groups
+    (`CMP_GROUPS`). Its macro parameters are `S_`, `M_` and the rest
+    because a parameter called `mask` replaces the `mask` of the
+    operand list's `[mask]` too, while the template's `%[mask]` sits in
+    a string: the first version would not assemble.
+  - `test_render_st`'s wide runs and `SDL2RCWD` (`STDL_SDL2_TEST_WIDE`)
+    are its tests; truncating the compare, the catch-up or a partial
+    group to 32 bits each failed the first, and only the second runs
+    the assembler. SDL2RCWD outlasts `run.sh`'s two-minute `waitfor`
+    (15 minutes of the host's time on Hatari's TT, as each flip's check
+    converts the whole model): chain eight.
+  - `SDL_GetDesktopDisplayMode` (`display.c`, an object of its own)
+    says 640x480 where the window can be had, and the SDL1 add-on's
+    `SDL_VideoModeOK` and `SDL_ListModes` ask it.
 - **A change a porter would meet goes into `docs/sdl2.md` and the
   `stdl-sdl2` skill** (`.claude/skills/stdl-sdl2/SKILL.md`) in the same
   change, as the core's API changes go into the `stdl` skill.

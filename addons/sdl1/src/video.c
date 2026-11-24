@@ -533,7 +533,8 @@ SDL_Surface *SDL_SetVideoMode(int width, int height, int bpp, Uint32 flags)
         return NULL;
     }
     if (!SDL_VideoModeOK(width, height, 8, flags)) {
-        STDL_SetError("The SDL1 add-on's screen is at most 320x240");
+        STDL_SetError("The SDL1 add-on's screen is at most 320x240, or "
+                      "640x480 on a TT or a Falcon over libstdl-sdl2-st.a");
         return NULL;
     }
     /* an even pitch at an even address: the SDL2 add-on compares such
@@ -641,18 +642,31 @@ const SDL_VideoInfo *SDL_GetVideoInfo(void)
     return &info;
 }
 
+/* largest first, as SDL 1.2's: 640x480 where the screen can be the
+ * wide one (bridge.h), then 320x240 and 320x200 */
 SDL_Rect **SDL_ListModes(SDL_PixelFormat *format, Uint32 flags)
 {
+    static SDL_Rect wide = { 0, 0, 640, 480 };
     static SDL_Rect tall = { 0, 0, 320, 240 }, low = { 0, 0, 320, 200 };
-    static SDL_Rect *modes[3] = { &tall, &low, NULL };
+    static SDL_Rect *modes[4];
+    int w, h, n = 0;
     (void)format; (void)flags;
+    stdl_sdl1_br_limit(&w, &h);
+    if (w > 320) {
+        modes[n++] = &wide;
+    }
+    modes[n++] = &tall;
+    modes[n++] = &low;
+    modes[n] = NULL;
     return modes;
 }
 
 int SDL_VideoModeOK(int width, int height, int bpp, Uint32 flags)
 {
+    int w, h;
     (void)bpp; (void)flags;
-    return (width >= 1 && height >= 1 && width <= 320 && height <= 240)
+    stdl_sdl1_br_limit(&w, &h);
+    return (width >= 1 && height >= 1 && width <= w && height <= h)
            ? 8 : 0;
 }
 

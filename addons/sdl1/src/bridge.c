@@ -70,6 +70,28 @@ int stdl_sdl1_br_open(void *pixels, int w, int h, int pitch, int *ox,
     return 0;
 }
 
+void stdl_sdl1_br_limit(int *w, int *h)
+{
+    SDL_DisplayMode m;
+    int ww, wh;
+    *w = 320;
+    *h = 240;
+    if (win) {
+        /* the screen is the first window's: wide if that was */
+        SDL_GetWindowSize(win, &ww, &wh);
+        if (ww > 320) {
+            *w = 640;
+            *h = 480;
+        }
+        return;
+    }
+    if ((SDL_WasInit(SDL_INIT_VIDEO) || SDL_Init(SDL_INIT_VIDEO) == 0) &&
+        SDL_GetDesktopDisplayMode(0, &m) == 0) {
+        *w = m.w;
+        *h = m.h;
+    }
+}
+
 void stdl_sdl1_br_push(int x, int y, int w, int h)
 {
     SDL_Rect r;

@@ -51,13 +51,30 @@
  * so the cycling is the 16 registers given again, and the map never
  * moves. S switches between those and the add-on's own; on a TT or a
  * Falcon the call says no, and it is SDL2DEMO.
+ *
+ * And once more as SDL2WIDE (SDL2DEMO_WIDE): a 640x480 window, which on
+ * a TT or a Falcon the experimental build shows on STDL's 640x480 in 16
+ * colours (STDL_RESPONSIVE_WIDE), the 16 made from the colours on screen
+ * as on an ST. The background is four times the pixels and the boxes
+ * the same, so the frame costs what the boxes do, as at 320x240; an ST
+ * has no such screen, and the window says so.
  */
 
 #include "SDL.h"
 #include "SDL_stdl.h"
+#ifdef SDL2DEMO_WIDE
+#include <stdio.h>
+#include "SDL_stdl_bench.h"
+#endif
 
+#ifdef SDL2DEMO_WIDE
+/* SDL2WIDE: 640x480 in 16 colours on a TT or a Falcon */
+#define W      640
+#define H      480
+#else
 #define W      320
 #define H      240
+#endif
 #define BOXES  8
 #define BOX    24
 #define SHADES 224              /* 0-223; the boxes 224-239, 240- unused */
@@ -131,6 +148,13 @@ int main(int argc, char *argv[])
     const Uint8 *keys = SDL_GetKeyboardState(NULL);
     int dx[BOXES], dy[BOXES];
     Uint32 start;
+#ifdef SDL2DEMO_WIDE
+    Uint32 frames = 0;
+    /* the colours cycled only with a command line of C (TT and Falcon
+     * runs compare the two): on 16 colours made from the 224 on screen,
+     * a cycle is new maps and the whole screen converted again */
+    const int cycle = argc > 1 && argv[1][0] == 'C';
+#endif
     int x, y, i, ox, oy, quit = 0;
 #ifdef SDL2DEMO_ST16
     int own;
@@ -311,17 +335,38 @@ int main(int argc, char *argv[])
         }
         SDL_RenderCopy(ren, metex, NULL, &me);
         /* the background's shades move on a step: colours alone */
-        for (i = 0; i < SHADES; i++) {
-            c[i] = pal->colors[(i + 1) % SHADES];
+#ifdef SDL2DEMO_WIDE
+        if (cycle)
+#endif
+        {
+            for (i = 0; i < SHADES; i++) {
+                c[i] = pal->colors[(i + 1) % SHADES];
+            }
+            SDL_SetPaletteColors(pal, c, 0, SHADES);
         }
-        SDL_SetPaletteColors(pal, c, 0, SHADES);
 #ifdef SDL2DEMO_ST16
         if (own) {
             own = st_give(ren, pal);
         }
 #endif
         SDL_RenderPresent(ren);
+#ifdef SDL2DEMO_WIDE
+        frames++;
+#endif
     }
+#ifdef SDL2DEMO_WIDE
+    {
+        /* the frames, and the presents' own time: the conversion and the
+         * page copies, then the flip and its wait (38,400 a second) */
+        Uint32 conv, flip;
+        const Uint32 ms = SDL_GetTicks() - start;
+        STDL_SDL2_GetPresentTimes(ren, &conv, &flip, 0);
+        printf("SDL2WIDE: %lu frames in %lums, present %lums, flip %lums\n",
+               (unsigned long)frames, (unsigned long)ms,
+               (unsigned long)(conv / 384 * 10),
+               (unsigned long)(flip / 384 * 10));
+    }
+#endif
 
     if (audio) {
         SDL_CloseAudioDevice(audio);

@@ -108,7 +108,7 @@ examples/testsprite.c` is what the port changed.
 
 | Area | Calls |
 |---|---|
-| The screen | `SDL_SetVideoMode` (at most 320x240, 8 bits), `SDL_GetVideoSurface`, `SDL_UpdateRect`, `SDL_UpdateRects`, `SDL_Flip`, `SDL_GetVideoInfo`, `SDL_ListModes`, `SDL_VideoModeOK`, `SDL_VideoDriverName` |
+| The screen | `SDL_SetVideoMode` (at most 320x240, or 640x480 on a TT or a Falcon: below; 8 bits), `SDL_GetVideoSurface`, `SDL_UpdateRect`, `SDL_UpdateRects`, `SDL_Flip`, `SDL_GetVideoInfo`, `SDL_ListModes`, `SDL_VideoModeOK`, `SDL_VideoDriverName` |
 | Surfaces | `SDL_CreateRGBSurface`, `SDL_CreateRGBSurfaceFrom`, `SDL_FreeSurface`, `SDL_DisplayFormat`, `SDL_LoadBMP`, `SDL_LockSurface`, `SDL_UnlockSurface`, `SDL_MUSTLOCK` |
 | Drawing | `SDL_BlitSurface` (`SDL_UpperBlit`), `SDL_FillRect`, `SDL_SetColorKey`, `SDL_SetClipRect`, `SDL_GetClipRect` |
 | Colours | `SDL_SetColors`, `SDL_SetPalette` (`SDL_LOGPAL`, `SDL_PHYSPAL`), `SDL_MapRGB`, `SDL_GetRGB` |
@@ -130,6 +130,32 @@ stood still), and costs a read of every pixel where all of it moved.
 Every video name is a macro onto a `stdl_sdl1_` link name, as
 `libstdl.a`'s own `SDL_Flip`, `SDL_FillRect` and the rest are the
 planar shim's.
+
+### 640x480 on a TT or a Falcon
+
+SDL 1.2 programs were written for 640x480 as often as not (SDL's own
+tests default to it), and on a TT or a Falcon the SDL2 add-on's
+experimental build gives a first mode wider than 320 STDL's 640x480 in
+16 colours (`STDL_RESPONSIVE_WIDE`; [sdl2.md](sdl2.md), "640x480 in 16
+colours on a TT or a Falcon"): the program's 8-bit picture at its own
+size, its 256 colours made into 16 as on an ST's screen.
+
+- **`SDL_VideoModeOK` and `SDL_ListModes` say what there is:** 640x480
+  first on a TT or a Falcon over `libstdl-sdl2-st.a`, until a screen of
+  320 pixels has been set; 320x240 and 320x200 on an ST, and over the
+  68020 build `libstdl-sdl2.a`, which has no wide screen. They ask the
+  SDL2 add-on (`SDL_GetDesktopDisplayMode`).
+- **The first mode decides,** as in the SDL2 add-on: 640x480 first sets
+  up the wide screen, and later modes up to 640x480 are pictures
+  centred on it; a mode of 320 first sets up the 256-colour screen.
+- **`S1SPRW.TOS` and `S1GRAYW.TOS`** are testsprite and graywin at their
+  own 640x480 (`make sdl1`). testsprite's 16 sprites ran 13.9 frames a
+  second on Hatari's TT and 6.9 on its Falcon on VGA, against 34.3 and
+  17.4 at 320x200 in 256 colours; with the screen check on, every flip
+  of both was as its updates made it on both machines. An ST refuses
+  the mode. testsprite's planar port on the SDL 1.2 shim,
+  `TSPRITEW.TOS`, keeps the TT's display rate of 60 with 10 sprites at
+  640x480: the conversion is what this add-on costs.
 
 ## Where it differs from SDL 1.2
 
@@ -242,7 +268,9 @@ never runs (`draw.o`); splitting that object would save it.
     colours set; the mouse must be measured from the picture;
   - `test_sdl1_st`, against the SDL2 add-on's 68000 build, runs an
     ST's screens first, where the SDL2 add-on's own check must agree
-    at every flip.
+    at every flip, and then the wide screen of a TT and a Falcon (a
+    first mode of 640x480, then smaller), the mode calls answering
+    640x480 there and 320x240 elsewhere.
 
   35 breakages of the add-on, each made on purpose, all failed it (one
   only once the test modelled the screen surface's own palette).

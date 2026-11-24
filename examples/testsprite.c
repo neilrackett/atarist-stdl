@@ -393,8 +393,17 @@ int main(int argc, char *argv[])
 
 	numsprites = NUM_SPRITES;
 	videoflags = SDL_HWSURFACE|SDL_ANYFORMAT;
+#ifdef TSPRITE_WIDE
+	/* TSPRITEW: SDL 1.2's own 640x480, which a TT or a Falcon shows
+	 * in 16 colours (STDL_RESPONSIVE_WIDE) and an ST as its 320x200,
+	 * the sprites placed by the screen's size either way */
+	STDL_UseResponsive(STDL_RESPONSIVE_WIDE);
+	width = 640;
+	height = 480;
+#else
 	width = 320;
 	height = 200;
+#endif
 	video_bpp = 4;
 	debug_flip = 0;
 	use_colorkey = 1;

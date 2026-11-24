@@ -27,6 +27,10 @@ void stdl_sdl1_br_present(void);
  * once */
 void stdl_sdl1_br_colours(const void *colours, int first, int n);
 int  stdl_sdl1_br_hint(const char *name, const char *value);
+/* the largest screen there can be: 640x480 on a TT or a Falcon over the
+ * SDL2 add-on's experimental build (SDL_GetDesktopDisplayMode) until a
+ * screen of 320 pixels is made, else 320x240 */
+void stdl_sdl1_br_limit(int *w, int *h);
 /* the SDL2 add-on's border index, for when the screen is made; -1
  * with STDL's error set once it has been */
 int  stdl_sdl1_br_border(unsigned x);

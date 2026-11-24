@@ -7,7 +7,10 @@
  * responsive screen (stdl_responsive.h), 320x240 in eight interleaved
  * planes on a TT or a Falcon. One window at a time, of 320x240 or
  * less, shown centred; position, title and the window flags are
- * accepted and have nothing to act on.
+ * accepted and have nothing to act on. The experimental 68000 build
+ * (docs/sdl2.md) gives a first window wider than 320 STDL's 640x480 in
+ * 16 colours on a TT or a Falcon, and SDL_GetDesktopDisplayMode says
+ * which a program can have.
  */
 
 #ifndef STDL_SDL2_VIDEO_H
@@ -44,13 +47,36 @@ typedef struct SDL_Window SDL_Window;
 #define SDL_WINDOWPOS_CENTERED_DISPLAY(X) (SDL_WINDOWPOS_CENTERED_MASK | (X))
 #define SDL_WINDOWPOS_CENTERED          SDL_WINDOWPOS_CENTERED_DISPLAY(0)
 
+/* SDL2's */
+typedef struct {
+    Uint32 format;
+    int w;
+    int h;
+    int refresh_rate;
+    void *driverdata;
+} SDL_DisplayMode;
+
+#define SDL_GetDesktopDisplayMode stdl_sdl2_GetDesktopDisplayMode
 #define SDL_CreateWindow   stdl_sdl2_CreateWindow
 #define SDL_DestroyWindow  stdl_sdl2_DestroyWindow
 #define SDL_GetWindowSize  stdl_sdl2_GetWindowSize
 #define SDL_SetWindowTitle stdl_sdl2_SetWindowTitle
 
 /*
- * w and h at most 320 and 240. The first window sets the screen up;
+ * The largest window this build gives on this machine, as a program
+ * asks the desktop's mode to size a window or a fullscreen picture by:
+ * 640x480 on a TT or a Falcon in the experimental 68000 build (the
+ * wide screen's 16 colours), else 320x240 (256 colours on a TT or a
+ * Falcon, an ST's 16 in the experimental build); format
+ * SDL_PIXELFORMAT_INDEX8, the textures', and refresh_rate 0, as the
+ * rate is the screen's to measure once it is set. Display 0 only,
+ * after SDL_Init(SDL_INIT_VIDEO).
+ */
+extern int SDL_GetDesktopDisplayMode(int displayIndex, SDL_DisplayMode *mode);
+
+/*
+ * w and h at most 320 and 240, or what SDL_GetDesktopDisplayMode says.
+ * The first window sets the screen up;
  * the screen stays up after SDL_DestroyWindow, until SDL_Quit or the
  * program's exit, and a later window takes it again (the page count
  * then is the first window's).

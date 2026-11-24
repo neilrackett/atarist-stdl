@@ -34,10 +34,30 @@
 #include "SDL_stdl_bench.h"
 #include "c2p.h"
 
+/* a row's groups (internal.h): a long, or a long long in the
+ * experimental build, whose screens include the 640-pixel one */
+typedef stdl_sdl2_mask Mask;
+#define M1        STDL_SDL2_M1
+#ifdef STDL_SDL2_ST
+/* the screen's size: 320x240, or 640x480 on the wide screen
+ * (STDL_RESPONSIVE_WIDE) a TT or a Falcon gives a window wider than
+ * 320; its rows are the renderer's own allocation (rows below) */
+static int st_sw = 320, st_sh = 240;
+#define SCREEN_W  st_sw
+#define SCREEN_H  st_sh
+#define GROUPS_MAX 40
+#else
 #define SCREEN_W  320
 #define SCREEN_H  240
+#endif
 #define GROUPS    (SCREEN_W / 16)
-#define ALLGROUPS ((Uint32)((1UL << GROUPS) - 1))
+#define ALLGROUPS ((Mask)((M1 << GROUPS) - 1))
+#ifdef STDL_SDL2_ST
+#define MROWS     ((size_t)SCREEN_H * sizeof(Mask)) /* a row array's bytes */
+#define MVALID_BYTES(r) MROWS
+#else
+#define MVALID_BYTES(r) sizeof((r)->mvalid)
+#endif
 
 /*
  * The ST build (st.h), experimental: the same screen of 320x240 and the
@@ -63,7 +83,7 @@
  * screen and the 68030's conversion, as the add-on built for them
  * gives it, and st_on is 0; an ST, an STE or a Mega STE gets the above.
  * So what is a constant in the other build is read here. */
-static int st_on, st_rows = SCREEN_H;
+static int st_on, st_rows = 240;
 #define PLANES    (st_on ? 4 : 8)
 #define ROW0      ((SCREEN_H - st_rows) >> 1)
 #define ROWS      st_rows
@@ -132,8 +152,14 @@ struct SDL_Renderer {
     int cur;                    /* the page being drawn on */
     Uint8 *page[3];             /* each page's picture, as STDL has it */
     Uint8 clear[3];             /* cleared when next drawn on */
+#ifdef STDL_SDL2_ST
+    /* the screen's rows of each, one allocation (rows_alloc) */
+    Mask *owed[3];
+    Mask *now;                  /* this frame's groups */
+#else
     Uint32 owed[3][SCREEN_H];
     Uint32 now[SCREEN_H];       /* this frame's groups */
+#endif
     const Uint8 *shown;         /* the page last flipped */
     int lw, lh, xoff, yoff;     /* the logical size and its place */
 
@@ -156,10 +182,17 @@ struct SDL_Renderer {
     long bdx, bdy;              /* screen = texture + (bdx, bdy) */
     int by0, by1;
     int bparts;                 /* any partial groups in it */
+#ifdef STDL_SDL2_ST
+    Mask *bwhole;
+    Mask *bpart;
+    Uint16 (*bpix)[GROUPS_MAX];
+    Mask *bpair;                /* whole groups only pairs copies made */
+#else
     Uint32 bwhole[SCREEN_H];
     Uint32 bpart[SCREEN_H];
     Uint16 bpix[SCREEN_H][GROUPS];
     Uint32 bpair[SCREEN_H];     /* whole groups only pairs copies made */
+#endif
     int bpaired;                /* any in this batch */
     int pairing;                /* the copy being made is of pairs */
     const struct stdl_sdl2_pairs *pairs;    /* c2ppair.c's side */
@@ -176,7 +209,12 @@ struct SDL_Renderer {
                                  * kept: those mvalid has, and none other.
                                  * Unkept, a copy takes its groups out of
                                  * mvalid and a clear all of them */
+#ifdef STDL_SDL2_ST
+    Mask *mvalid;
+    void *rows;                 /* the rows of all of these */
+#else
     Uint32 mvalid[SCREEN_H];
+#endif
     Uint8 *scratch;             /* the check's page */
     STDL_SDL2_Check chk;
 
@@ -244,11 +282,23 @@ SDL_Window *SDL_CreateWindow(const char *title, int x, int y, int w, int h,
         SDL_SetError("One window at a time");
         return NULL;
     }
+#ifdef STDL_SDL2_ST
+    /* the first window chooses the screen, which a later one must fit:
+     * wider than 320, the wide one a TT or a Falcon has */
+    if (w <= 0 || h <= 0 || w > (the_screen ? SCREEN_W : 640) ||
+        h > (the_screen ? SCREEN_H : (w > 320 ? 480 : 240))) {
+        SDL_SetError("A window is at most %dx%d, not %dx%d",
+                     the_screen ? SCREEN_W : 640,
+                     the_screen ? SCREEN_H : 480, w, h);
+        return NULL;
+    }
+#else
     if (w <= 0 || h <= 0 || w > SCREEN_W || h > SCREEN_H) {
         SDL_SetError("A window is at most %dx%d, not %dx%d", SCREEN_W,
                      SCREEN_H, w, h);
         return NULL;
     }
+#endif
     if (!the_screen) {
         const char *pages = SDL_GetHint(STDL_SDL2_HINT_PAGES);
         Uint32 vflags = (pages && strcmp(pages, "2") == 0)
@@ -256,7 +306,35 @@ SDL_Window *SDL_CreateWindow(const char *title, int x, int y, int w, int h,
         STDL_Surface *s;
 #ifdef STDL_SDL2_ST
         st_on = STDL_SDL2_NO_256();
-        if (st_on) {
+        if (w > 320) {
+            /*
+             * 640x480 in 16 colours (STDL_RESPONSIVE_WIDE): TT Medium,
+             * or a Falcon's own, through the 16-colour path an ST's
+             * screen takes, the reduction and all. A Falcon's RGB that
+             * cannot open to 480 lines gives 400, which shows the
+             * screen's middle 400 rows as ST Low shows 200 of 240. An
+             * ST has no such screen, and the mode is not set there.
+             */
+            if (st_on) {
+                SDL_SetError("A window wider than 320 needs a TT or a"
+                             " Falcon: 640x480 in 16 colours");
+                return NULL;
+            }
+            if (STDL_UseResponsive(STDL_RESPONSIVE_WIDE) < 0) {
+                SDL_SetError("No wide screen: %s", STDL_GetError());
+                return NULL;
+            }
+            s = STDL_SetVideoMode(640, 480, 4, vflags);
+            if (!s || s->w != 640 || s->format->BitsPerPixel != 4 ||
+                s->h > 480) {
+                SDL_SetError("No 640x480 screen here: %s", STDL_GetError());
+                return NULL;
+            }
+            st_on = 1;
+            st_sw = 640;
+            st_sh = 480;
+            st_rows = s->h;
+        } else if (st_on) {
             const int tall = h > 200 &&
                              SDL_GetHintBoolean(STDL_SDL2_HINT_ST_TALL,
                                                 SDL_TRUE) &&
@@ -411,6 +489,36 @@ static Uint8 *back_page(SDL_Renderer *r)
 /* ------------------------------------------------------------------ */
 /* the renderer                                                        */
 
+#ifdef STDL_SDL2_ST
+/*
+ * The renderer's rows: owed's three and now one after another (no_rows
+ * clears them in one), the batch's whole, partial and pairs groups and
+ * mvalid, a Mask a row each, and the batch's partial groups' pixel
+ * masks, GROUPS_MAX a row: the screen's rows of them, 480 on the wide
+ * screen and 240 on the others.
+ */
+static int rows_alloc(SDL_Renderer *r)
+{
+    const size_t n = MROWS;
+    Uint8 *p = (Uint8 *)calloc(1, 8 * n + (size_t)SCREEN_H *
+                                          sizeof(*r->bpix));
+    if (!p) {
+        return -1;
+    }
+    r->rows = p;
+    r->owed[0] = (Mask *)(void *)p;
+    r->owed[1] = (Mask *)(void *)(p + n);
+    r->owed[2] = (Mask *)(void *)(p + 2 * n);
+    r->now = (Mask *)(void *)(p + 3 * n);
+    r->bwhole = (Mask *)(void *)(p + 4 * n);
+    r->bpart = (Mask *)(void *)(p + 5 * n);
+    r->bpair = (Mask *)(void *)(p + 6 * n);
+    r->mvalid = (Mask *)(void *)(p + 7 * n);
+    r->bpix = (Uint16 (*)[GROUPS_MAX])(void *)(p + 8 * n);
+    return 0;
+}
+#endif
+
 static void place(SDL_Renderer *r, int w, int h)
 {
     r->lw = w;
@@ -422,8 +530,13 @@ static void place(SDL_Renderer *r, int w, int h)
 /* no group of now set, none owed by any page */
 static void no_rows(SDL_Renderer *r)
 {
+#ifdef STDL_SDL2_ST
+    /* owed's three and now, one after another (rows_alloc) */
+    memset(r->owed[0], 0, 4 * MROWS);
+#else
     memset(r->owed, 0, sizeof(r->owed));
     memset(r->now, 0, sizeof(r->now));
+#endif
     r->ny0 = r->oy0[0] = r->oy0[1] = r->oy0[2] = SCREEN_H;
     r->ny1 = r->oy1[0] = r->oy1[1] = r->oy1[2] = -1;
 }
@@ -435,8 +548,8 @@ static void frame_rows(SDL_Renderer *r)
     const int cur = r->cur;
     int q, y;
     for (q = 0; q < r->npages; q++) {
-        Uint32 *o = r->owed[q] + r->ny0;
-        const Uint32 *n = r->now + r->ny0;
+        Mask *o = r->owed[q] + r->ny0;
+        const Mask *n = r->now + r->ny0;
         if (q == cur) {
             continue;
         }
@@ -477,6 +590,13 @@ SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, int index, Uint32 flags)
         SDL_OutOfMemory();
         return NULL;
     }
+#ifdef STDL_SDL2_ST
+    if (rows_alloc(r) < 0) {
+        free(r);
+        SDL_OutOfMemory();
+        return NULL;
+    }
+#endif
     r->win = window;
     r->flags = flags;
     r->screen = the_screen;
@@ -534,6 +654,9 @@ SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, int index, Uint32 flags)
         if (must && (!r->model || (chk && !r->scratch))) {
             free(r->model);
             free(r->scratch);
+#ifdef STDL_SDL2_ST
+            free(r->rows);
+#endif
             free(r);
             SDL_OutOfMemory();
             return NULL;
@@ -584,6 +707,7 @@ void SDL_DestroyRenderer(SDL_Renderer *renderer)
     free(renderer->scratch);
 #ifdef STDL_SDL2_ST
     free(renderer->ptab);
+    free(renderer->rows);
 #endif
     free(renderer);
 }
@@ -995,7 +1119,7 @@ static Uint16 pixmask(int a, int b)
 
 static void part(SDL_Renderer *r, int y, int g, Uint16 m)
 {
-    const Uint32 bit = 1UL << g;
+    const Mask bit = M1 << g;
     Uint16 *pm = &r->bpix[y][g];
     if (r->bwhole[y] & bit) {
         return;
@@ -1034,13 +1158,13 @@ static __attribute__((noinline)) void batch_any(SDL_Renderer *r, int sx,
 {
     const int x1 = sx + w;
     const int g0 = sx >> 4, g1 = (x1 - 1) >> 4;
-    Uint32 whole = 0;
+    Mask whole = 0;
     int lg = -1, rg = -1;
     Uint16 lm = 0, rm = 0;
     if (g0 == g1) {
         const Uint16 m = pixmask(sx & 15, (x1 - 1) & 15);
         if (m == 0xFFFF) {
-            whole = 1UL << g0;
+            whole = M1 << g0;
         } else {
             lg = g0;
             lm = m;
@@ -1058,11 +1182,11 @@ static __attribute__((noinline)) void batch_any(SDL_Renderer *r, int sx,
             lgw = g1 - 1;
         }
         if (fg <= lgw) {
-            whole = (Uint32)(((1UL << (lgw + 1)) - 1) & ~((1UL << fg) - 1));
+            whole = (Mask)(((M1 << (lgw + 1)) - 1) & ~((M1 << fg) - 1));
         }
     }
     if (whole) {
-        Uint32 *wr = &r->bwhole[sy];
+        Mask *wr = &r->bwhole[sy];
         int n;
         for (n = h; n > 0; n--) {
             *wr++ |= whole;
@@ -1100,9 +1224,9 @@ static void batch_add(SDL_Renderer *r, int sx, int sy, int w, int h)
         r->bpaired |= r->pairing;
     }
     if (((sx | w) & 15) == 0) {
-        const Uint32 whole = (Uint32)(((1UL << ((sx + w) >> 4)) - 1) &
-                                      ~((1UL << (sx >> 4)) - 1));
-        Uint32 *wr = &r->bwhole[sy];
+        const Mask whole = (Mask)(((M1 << ((sx + w) >> 4)) - 1) &
+                                  ~((M1 << (sx >> 4)) - 1));
+        Mask *wr = &r->bwhole[sy];
         int n;
         for (n = h; n > 0; n--) {
             *wr++ |= whole;
@@ -1162,13 +1286,13 @@ static void merge_part(SDL_Renderer *r, Uint8 *back, int y, int g, Uint16 pm)
 
 /* n rows from y whose whole groups are m, a run of groups a call;
  * those of p, within m, as pixel pairs */
-static void convert_rows(SDL_Renderer *r, Uint8 *back, int y, int n, Uint32 m,
-                         Uint32 p)
+static void convert_rows(SDL_Renderer *r, Uint8 *back, int y, int n, Mask m,
+                         Mask p)
 {
     const SDL_Texture *t = r->bt;
     int pair;
     for (pair = 0; pair < 2; pair++) {
-        Uint32 k = pair ? p : m & ~p;
+        Mask k = pair ? p : m & ~p;
         int g = 0;
         while (k) {
             const Uint8 *src;
@@ -1231,7 +1355,7 @@ static void flush(SDL_Renderer *r)
 #endif
     /* the partial groups first, the whole ones' bits not among them */
     for (y = r->by0; r->bparts && y <= r->by1; y++) {
-        Uint32 pm = r->bpart[y];
+        Mask pm = r->bpart[y];
         if (!pm) {
             continue;
         }
@@ -1253,8 +1377,8 @@ static void flush(SDL_Renderer *r)
      * with pairs in the batch, the same pairs too, their groups through
      * their own loops */
     for (y = r->by0; y <= r->by1; ) {
-        const Uint32 m = r->bwhole[y];
-        const Uint32 p = r->bpaired ? r->bpair[y] & m : 0;
+        const Mask m = r->bwhole[y];
+        const Mask p = r->bpaired ? r->bpair[y] & m : 0;
         int y2 = y + 1, i;
         if (!m) {
             y++;
@@ -1291,7 +1415,7 @@ static __attribute__((noinline)) void model_fill(SDL_Renderer *r, int c)
         memset(r->model, c, SCREEN_W * SCREEN_H);
         r->holes = 0;
     } else if (r->model) {
-        memset(r->mvalid, 0, sizeof(r->mvalid));
+        memset(r->mvalid, 0, MVALID_BYTES(r));
     }
 }
 
@@ -1363,13 +1487,67 @@ int SDL_RenderClear(SDL_Renderer *renderer)
  * box this does not take (a part of a group, pixel pairs, a 68000's
  * pixels at an odd address), which goes the usual way.
  */
+/* g groups from s compared with the model at m, and s and m moved past
+ * them: each that differs is copied, a group that differs from the long
+ * that did, the ones before it being the same already, and its bit ORed
+ * into mask, bit doubling a group from the first's (longs, both) */
+#ifdef __m68k__
+#define CMP_GROUPS(S_, M_, BIT_, MASK_, G_) \
+    __asm__ volatile (                                  \
+        "1:  cmpm.l (%[s])+,(%[m])+\n"                  \
+        "    bne.s 2f\n"                                \
+        "    cmpm.l (%[s])+,(%[m])+\n"                  \
+        "    bne.s 3f\n"                                \
+        "    cmpm.l (%[s])+,(%[m])+\n"                  \
+        "    bne.s 4f\n"                                \
+        "    cmpm.l (%[s])+,(%[m])+\n"                  \
+        "    bne.s 5f\n"                                \
+        "6:  add.l %[bit],%[bit]\n"                     \
+        "    subq.l #1,%[g]\n"                          \
+        "    bne.s 1b\n"                                \
+        "    bra.s 7f\n"                                \
+        "2:  move.l -4(%[s]),-4(%[m])\n"                \
+        "    move.l (%[s])+,(%[m])+\n"                  \
+        "    move.l (%[s])+,(%[m])+\n"                  \
+        "    move.l (%[s])+,(%[m])+\n"                  \
+        "    or.l %[bit],%[mask]\n"                     \
+        "    bra.s 6b\n"                                \
+        "3:  move.l -4(%[s]),-4(%[m])\n"                \
+        "    move.l (%[s])+,(%[m])+\n"                  \
+        "    move.l (%[s])+,(%[m])+\n"                  \
+        "    or.l %[bit],%[mask]\n"                     \
+        "    bra.s 6b\n"                                \
+        "4:  move.l -4(%[s]),-4(%[m])\n"                \
+        "    move.l (%[s])+,(%[m])+\n"                  \
+        "    or.l %[bit],%[mask]\n"                     \
+        "    bra.s 6b\n"                                \
+        "5:  move.l -4(%[s]),-4(%[m])\n"                \
+        "    or.l %[bit],%[mask]\n"                     \
+        "    bra.s 6b\n"                                \
+        "7:\n"                                          \
+        : [s] "+a" (S_), [m] "+a" (M_), [bit] "+d" (BIT_), \
+          [mask] "+d" (MASK_), [g] "+d" (G_)              \
+        : : "cc", "memory")
+#else
+#define CMP_GROUPS(S_, M_, BIT_, MASK_, G_) \
+    do {                          \
+        if (memcmp(S_, M_, 16)) { \
+            memcpy(M_, S_, 16);   \
+            MASK_ |= BIT_;        \
+        }                         \
+        S_ += 16;                 \
+        M_ += 16;                 \
+        BIT_ += BIT_;             \
+    } while (--G_)
+#endif
+
 static int copy_changed(SDL_Renderer *r, const SDL_Texture *t, int tx, int ty,
                         int sx, int sy, int w, int h)
 {
     const Uint8 *s;
     Uint8 *m;
     long sskip;
-    Uint32 rowbits;
+    Mask rowbits;
     int g0, ng, y;
     if (((sx | w) & 15) ||
 #ifdef STDL_SDL2_ST
@@ -1398,7 +1576,7 @@ static int copy_changed(SDL_Renderer *r, const SDL_Texture *t, int tx, int ty,
 #endif
     g0 = sx >> 4;
     ng = w >> 4;
-    rowbits = ((1UL << ng) - 1) << g0;
+    rowbits = ((M1 << ng) - 1) << g0;
 #ifdef STDL_SDL2_ST
     /* Pixel pairs on an ST's screen, by the batch's rule (internal.h's
      * stdl_sdl2_pair_rule): any copy but a pairs copy takes back every
@@ -1418,8 +1596,12 @@ static int copy_changed(SDL_Renderer *r, const SDL_Texture *t, int tx, int ty,
     m = r->model + MUL(sy, SCREEN_W) + sx;
     sskip = t->pitch - w;
     for (y = sy; y < sy + h; y++) {
+#ifdef STDL_SDL2_ST
+        Mask mask = 0;
+#else
         Uint32 bit = 1UL << g0, mask = 0;
         int g = ng;
+#endif
         if (r->holes && (r->mvalid[y] & rowbits) != rowbits) {
             /* a row with groups the model has not got, as the compare
              * was off when they were copied: all of it converted, and
@@ -1430,54 +1612,22 @@ static int copy_changed(SDL_Renderer *r, const SDL_Texture *t, int tx, int ty,
             mask = rowbits;
             r->mvalid[y] |= rowbits;
         } else {
-#ifdef __m68k__
-            /* a group that differs is copied from the long that did, the
-             * ones before it being the same already */
-            __asm__ volatile (
-                "1:  cmpm.l (%[s])+,(%[m])+\n"
-                "    bne.s 2f\n"
-                "    cmpm.l (%[s])+,(%[m])+\n"
-                "    bne.s 3f\n"
-                "    cmpm.l (%[s])+,(%[m])+\n"
-                "    bne.s 4f\n"
-                "    cmpm.l (%[s])+,(%[m])+\n"
-                "    bne.s 5f\n"
-                "6:  add.l %[bit],%[bit]\n"
-                "    subq.l #1,%[g]\n"
-                "    bne.s 1b\n"
-                "    bra.s 7f\n"
-                "2:  move.l -4(%[s]),-4(%[m])\n"
-                "    move.l (%[s])+,(%[m])+\n"
-                "    move.l (%[s])+,(%[m])+\n"
-                "    move.l (%[s])+,(%[m])+\n"
-                "    or.l %[bit],%[mask]\n"
-                "    bra.s 6b\n"
-                "3:  move.l -4(%[s]),-4(%[m])\n"
-                "    move.l (%[s])+,(%[m])+\n"
-                "    move.l (%[s])+,(%[m])+\n"
-                "    or.l %[bit],%[mask]\n"
-                "    bra.s 6b\n"
-                "4:  move.l -4(%[s]),-4(%[m])\n"
-                "    move.l (%[s])+,(%[m])+\n"
-                "    or.l %[bit],%[mask]\n"
-                "    bra.s 6b\n"
-                "5:  move.l -4(%[s]),-4(%[m])\n"
-                "    or.l %[bit],%[mask]\n"
-                "    bra.s 6b\n"
-                "7:\n"
-                : [s] "+a" (s), [m] "+a" (m), [bit] "+d" (bit),
-                  [mask] "+d" (mask), [g] "+d" (g)
-                : : "cc", "memory");
-#else
+#ifdef STDL_SDL2_ST
+            /* at most 32 groups a pass, as the loop's bit and mask are
+             * longs and the wide screen's row has 40 */
+            int gp = g0, left = ng;
             do {
-                if (memcmp(s, m, 16)) {
-                    memcpy(m, s, 16);
-                    mask |= bit;
-                }
-                s += 16;
-                m += 16;
-                bit += bit;
-            } while (--g);
+                const int b = gp & 31;
+                int g = left < 32 - b ? left : 32 - b;
+                const int n = g;
+                Uint32 bit = 1UL << b, mk = 0;
+                CMP_GROUPS(s, m, bit, mk, g);
+                mask |= (Mask)mk << (gp & 32);
+                gp += n;
+                left -= n;
+            } while (left > 0);
+#else
+            CMP_GROUPS(s, m, bit, mask, g);
 #endif
         }
         if (mask) {
@@ -1489,7 +1639,7 @@ static int copy_changed(SDL_Renderer *r, const SDL_Texture *t, int tx, int ty,
             /* an ST's colours seen: the changed groups', now the copy's */
             if (st_on && !r->given) {
                 const Uint8 *p = m - w;
-                Uint32 k = mask >> g0;
+                Mask k = mask >> g0;
                 for (; k; k >>= 1, p += 16) {
                     if ((k & 1) && !st_seen16(r->seen, p)) {
                         st_mark(r, p, 16);
@@ -1519,7 +1669,7 @@ static __attribute__((noinline)) void model_copy(SDL_Renderer *r,
 {
     int row;
     for (row = 0; row < h; row++) {
-        memcpy(r->model + (sy + row) * SCREEN_W + sx,
+        memcpy(r->model + MUL(sy + row, SCREEN_W) + sx,
                t->pixels + (ty + row) * t->pitch + tx, (size_t)w);
 #ifdef STDL_SDL2_ST
         /* what the page shows of it */
@@ -1664,9 +1814,9 @@ int SDL_RenderCopy(SDL_Renderer *renderer, SDL_Texture *texture,
              * its own, and all its others still are. An AND a row, so
              * that a program can leave one copy of a frame uncompared
              * and have the rest of the screen compared as before. */
-            const Uint32 left = ~(Uint32)(((2UL << ((sx + w - 1) >> 4)) - 1) &
-                                          ~((1UL << (sx >> 4)) - 1));
-            Uint32 *v = &r->mvalid[sy];
+            const Mask left = ~(Mask)(((STDL_SDL2_M2 << ((sx + w - 1) >> 4))
+                                       - 1) & ~((M1 << (sx >> 4)) - 1));
+            Mask *v = &r->mvalid[sy];
             do {
                 *v++ &= left;
             } while (--h > 0);
@@ -1713,7 +1863,7 @@ int stdl_sdl2_copy_pairs(SDL_Renderer *r, SDL_Texture *texture,
 static void catch_up(SDL_Renderer *r, Uint8 *back)
 {
     const Uint8 *shown = r->shown;
-    const Uint32 *owed = r->owed[r->cur], *now = r->now;
+    const Mask *owed = r->owed[r->cur], *now = r->now;
     const long stride = r->stride, odd = r->dp >> 2;
     const int dbl = r->dbl, y1 = r->oy1[r->cur];
     int y = r->oy0[r->cur];
@@ -1722,7 +1872,7 @@ static void catch_up(SDL_Renderer *r, Uint8 *back)
         return;
     }
     for (; y <= y1; y++, off += stride) {
-        Uint32 m = owed[y] & ~now[y];
+        Mask m = owed[y] & ~now[y];
         int g = 0;
         while (m) {
             const Uint32 *s;
@@ -1956,7 +2106,7 @@ int STDL_SDL2_SetCompare(SDL_Renderer *renderer, int on)
             /* mvalid is read from here on: every group, unless some
              * were missing already */
             if (!r->holes) {
-                memset(r->mvalid, 0xFF, sizeof(r->mvalid));
+                memset(r->mvalid, 0xFF, MVALID_BYTES(r));
                 r->holes = 1;
             }
             r->keep = 0;
@@ -1968,7 +2118,7 @@ int STDL_SDL2_SetCompare(SDL_Renderer *renderer, int on)
         if (!r->model) {
             return SDL_OutOfMemory();
         }
-        memset(r->mvalid, 0, sizeof(r->mvalid));
+        memset(r->mvalid, 0, MVALID_BYTES(r));
         r->holes = 1;
     }
     r->keep = 1;

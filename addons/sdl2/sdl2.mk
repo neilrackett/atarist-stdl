@@ -24,6 +24,7 @@ SDL2SRCS      = $(SDL2DIR)/src/init.c $(SDL2DIR)/src/error.c \
                 $(SDL2DIR)/src/c2pany.c $(SDL2DIR)/src/c2pp.c \
                 $(SDL2DIR)/src/c2ppair.c $(SDL2DIR)/src/palette.c \
                 $(SDL2DIR)/src/timer.c $(SDL2DIR)/src/video.c \
+                $(SDL2DIR)/src/display.c \
                 $(SDL2DIR)/src/events.c $(SDL2DIR)/src/keymap.c \
                 $(SDL2DIR)/src/joystick.c $(SDL2DIR)/src/surface.c \
                 $(SDL2DIR)/src/rwops.c $(SDL2DIR)/src/log.c \
@@ -382,8 +383,17 @@ dist/SDL2ST16.TOS: examples/sdl2demo.c $(SDL2STLIB) $(LIB) | dist
 	$(CC) -m68000 -o $@ $(OBJDIR)/examples/sdl2demo.st16.o $(SDL2STLIB) \
 	    $(LIB) && $(STRIP) $@
 
+# and at 640x480 in 16 colours on a TT or a Falcon (sdl2demo.c's
+# SDL2DEMO_WIDE: STDL_RESPONSIVE_WIDE through the ST build's 16 colours)
+dist/SDL2WIDE.TOS: examples/sdl2demo.c $(SDL2STLIB) $(LIB) | dist
+	@mkdir -p $(OBJDIR)/examples
+	$(CC) $(filter-out -m68020-60 -msoft-float,$(SDL2_PROGFLAGS)) -m68000 \
+	    -DSDL2DEMO_WIDE -c -o $(OBJDIR)/examples/sdl2demo.wide.o $<
+	$(CC) -m68000 -o $@ $(OBJDIR)/examples/sdl2demo.wide.o $(SDL2STLIB) \
+	    $(LIB) && $(STRIP) $@
+
 sdl2st: $(SDL2STLIB) $(SDL2STCMINILIB) $(SDL2C2PLINK) dist/SDL2ST.TOS \
-        dist/SDL2ST16.TOS
+        dist/SDL2ST16.TOS dist/SDL2WIDE.TOS
 	@if $(CROSS)nm --defined-only $(SDL2STLIB) $(SDL2STCMINILIB) \
 	     | grep -E ' [A-Za-z] _SDL_'; then \
 	   echo "*** the SDL2 add-on's ST build defines SDL_ link symbols"; \

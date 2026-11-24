@@ -91,7 +91,11 @@ sdl1check: $(SDL1LIB) $(SDL1CMINILIB)
 # SDL1_EXTRA="-DSDL1_RUN=15 -DSDL1_CHECK" builds them to end by
 # themselves after 15 seconds, with the screen check on and its result
 # printed (args.c).
-SDL1TESTS      = dist/S1SPRITE.TOS dist/S1GRAY.TOS
+# S1SPRW and S1GRAYW run them at their own 640x480, which on a TT or a
+# Falcon is STDL's 640x480 in 16 colours (STDL_RESPONSIVE_WIDE) and on
+# an ST is refused, as SDL 1.2 refuses a mode a display has not got.
+SDL1TESTS      = dist/S1SPRITE.TOS dist/S1GRAY.TOS dist/S1SPRW.TOS \
+                 dist/S1GRAYW.TOS
 SDL1EXAMPLES   = $(SDL1TESTS) dist/S1PORTED.TOS
 SDL1_PROGFLAGS = -O2 -fomit-frame-pointer -std=gnu99 -m68000 \
                  -Iinclude $(SDL1_INC1) -I$(SDL1DIR)/examples
@@ -101,9 +105,15 @@ dist/S1SPRITE.TOS: SDL1_TEST = testsprite.c
 dist/S1SPRITE.TOS: SDL1_ARGS = "-width", "320", "-height", "200", "16"
 dist/S1GRAY.TOS:   SDL1_TEST = graywin.c
 dist/S1GRAY.TOS:   SDL1_ARGS = "-width", "320", "-height", "200"
+dist/S1SPRW.TOS:   SDL1_TEST = testsprite.c
+dist/S1SPRW.TOS:   SDL1_ARGS = "-width", "640", "-height", "480", "16"
+dist/S1GRAYW.TOS:  SDL1_TEST = graywin.c
+dist/S1GRAYW.TOS:  SDL1_ARGS = "-width", "640", "-height", "480"
 
 dist/S1SPRITE.TOS: $(SDL1DIR)/examples/testsprite.c
 dist/S1GRAY.TOS:   $(SDL1DIR)/examples/graywin.c
+dist/S1SPRW.TOS:   $(SDL1DIR)/examples/testsprite.c
+dist/S1GRAYW.TOS:  $(SDL1DIR)/examples/graywin.c
 
 $(SDL1TESTS): $(SDL1DIR)/examples/args.c $(SDL1_LIBS) | dist
 	$(CC) $(SDL1_PROGFLAGS) $(SDL1_EXTRA) -DSDL1_TEST='"$(SDL1_TEST)"' \

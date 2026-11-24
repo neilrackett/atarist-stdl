@@ -140,5 +140,14 @@ if (screen->w < 640) {
   flicker nor what a real monitor or TV crops, and it has not been seen
   on a real Falcon.
 
+On the SDL 1.2 shim the same call is `SDL_SetVideoMode(640, 480, ...)`
+after `STDL_UseResponsive(STDL_RESPONSIVE_WIDE)`, and `SDL_GetVideoInfo`
+and `SDL_ListModes` report the screen's size: `TSPRITEW.TOS`
+(`examples/testsprite.c` built with `TSPRITE_WIDE`) ran 10 sprites at
+the display's 60 frames a second on Hatari's TT. The SDL2 and SDL1
+add-ons give a program's own 8-bit picture this screen through the
+SDL2 add-on's experimental build, its colours made into 16
+([sdl2.md](sdl2.md), [sdl1.md](sdl1.md)).
+
 An SDL2 program for a TT or a Falcon only has an add-on of its own on
 this screen: [sdl2.md](sdl2.md).

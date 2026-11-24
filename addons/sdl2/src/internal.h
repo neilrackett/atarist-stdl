@@ -38,6 +38,22 @@ SDL_Keycode stdl_sdl2_keycode(unsigned sym);
 void stdl_sdl2_screen_origin(int *x, int *y);
 
 /*
+ * A row's groups of 16 pixels as bits, group g bit g: a 320-pixel
+ * screen's 20 in a long. The experimental build's screens include the
+ * 640-pixel one (STDL_RESPONSIVE_WIDE), 40 groups, so a row there is a
+ * long long; the 68020 build's masks are the long they always were.
+ */
+#ifdef STDL_SDL2_ST
+typedef unsigned long long stdl_sdl2_mask;
+#define STDL_SDL2_M1 1ULL
+#define STDL_SDL2_M2 2ULL
+#else
+typedef Uint32 stdl_sdl2_mask;
+#define STDL_SDL2_M1 1UL
+#define STDL_SDL2_M2 2UL
+#endif
+
+/*
  * Pixel pairs (STDL_SDL2_RenderCopyPairs): c2ppair.c's side, which the
  * renderer reaches through the pointer stdl_sdl2_copy_pairs gives it,
  * so that a program that never asks for pairs links none of it. conv
@@ -55,8 +71,9 @@ typedef void stdl_sdl2_st_conv_fn(const Uint8 *src, long sp, Uint8 *dst,
 
 struct stdl_sdl2_pairs {
     stdl_sdl2_c2pp_fn *conv;
-    void (*mark)(Uint32 *pair, const Uint32 *whole, const Uint32 *part,
-                 int h, int sx, int w, int pairing);
+    void (*mark)(stdl_sdl2_mask *pair, const stdl_sdl2_mask *whole,
+                 const stdl_sdl2_mask *part, int h, int sx, int w,
+                 int pairing);
 #ifdef STDL_SDL2_ST
     /* an ST's screen (stpair.c, st.h): its pair loop, and its pair
      * tables made from the conversion's */
@@ -72,11 +89,12 @@ struct stdl_sdl2_pairs {
  * one. A group is converted as pairs only if every copy of the batch
  * that reached it was a pairs copy covering it whole.
  */
-static __inline__ void stdl_sdl2_pair_rule(Uint32 *pair, const Uint32 *whole,
-                                           const Uint32 *part, Uint32 m,
-                                           int pairing)
+static __inline__ void stdl_sdl2_pair_rule(stdl_sdl2_mask *pair,
+                                           const stdl_sdl2_mask *whole,
+                                           const stdl_sdl2_mask *part,
+                                           stdl_sdl2_mask m, int pairing)
 {
-    const Uint32 p = *pair;
+    const stdl_sdl2_mask p = *pair;
     *pair = pairing ? p | (m & ~((*whole & ~p) | *part)) : p & ~m;
 }
 

@@ -99,11 +99,15 @@ typedef struct SDL_Surface {
 #define SDL_WarpMouse           stdl_sdl1_WarpMouse
 
 /*
- * The screen: at most 320x240, 8 bits a pixel, centred. bpp 0 or 8
- * is 8; another depth is 8 with SDL_ANYFORMAT and refused without it,
- * as there is no other. Set again, it is a new surface of the new
- * size on the same screen (on an ST the first call's height chose
- * ST Low or the tall screen: docs/sdl2.md). NULL with the error set.
+ * The screen: at most 320x240, 8 bits a pixel, centred; on a TT or a
+ * Falcon over the SDL2 add-on's experimental build (libstdl-sdl2-st.a)
+ * up to 640x480, the first call's width over 320 choosing STDL's
+ * 640x480 in 16 colours (docs/sdl1.md). SDL_VideoModeOK and
+ * SDL_ListModes say which. bpp 0 or 8 is 8; another depth is 8 with
+ * SDL_ANYFORMAT and refused without it, as there is no other. Set
+ * again, it is a new surface of the new size on the same screen (on an
+ * ST the first call's height chose ST Low or the tall screen:
+ * docs/sdl2.md). NULL with the error set.
  */
 SDL_Surface *SDL_SetVideoMode(int width, int height, int bpp, Uint32 flags);
 SDL_Surface *SDL_GetVideoSurface(void);

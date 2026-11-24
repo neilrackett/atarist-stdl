@@ -70,7 +70,7 @@ EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
            dist/MUSICVU.TOS dist/POLYDEMO.TOS dist/PATDEMO.TOS \
            dist/RASTERS.TOS dist/RESPDEMO.TOS dist/OVHOST.TOS \
            dist/STARTER.TOS dist/JOYBOXES.TOS dist/MULDIV.TOS \
-           dist/WIDEDEMO.TOS
+           dist/WIDEDEMO.TOS dist/TSPRITEW.TOS
 
 # Pinned, not left to ordering: a rule added above this one would
 # silently become the default goal, and `make` would then build
@@ -368,6 +368,9 @@ dist/TESTWIN.TOS: examples/testwin.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@
 dist/TSPRITE.TOS: examples/testsprite.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) -lm && $(STRIP) $@
+dist/TSPRITEW.TOS: examples/testsprite.c $(LIB)
+	$(CC) $(CFLAGS) -Iinclude/compat -DTSPRITE_WIDE -o $@ $< $(LIB) -lm && \
+	    $(STRIP) $@
 dist/TPALETTE.TOS: examples/testpalette.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) -lm && $(STRIP) $@
 dist/CHECKKEY.TOS: examples/checkkeys.c $(LIB)
@@ -509,7 +512,8 @@ clean:
 	rm -rf $(OBJDIR)
 	rm -f $(CMINILIB) $(LIB) $(ARITH020) $(EXAMPLES) $(BUNDLE)
 	rm -f $(SDL2LIB) $(SDL2CMINILIB) $(SDL2EXAMPLES)
-	rm -f $(SDL2STLIB) $(SDL2STCMINILIB) dist/SDL2ST.TOS
+	rm -f $(SDL2STLIB) $(SDL2STCMINILIB) dist/SDL2ST.TOS dist/SDL2ST16.TOS \
+	      dist/SDL2WIDE.TOS
 	rm -f $(SDL1LIB) $(SDL1CMINILIB) $(SDL1EXAMPLES)
 	$(MAKE) -C tests/host clean
 	$(MAKE) -C addons/sdl2/tests clean

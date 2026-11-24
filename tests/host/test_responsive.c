@@ -779,13 +779,13 @@ static int wpix(const uint8_t *row, int x)
          | (((g[2] >> b) & 1) << 2) | (((g[3] >> b) & 1) << 3);
 }
 
-static void wfill(int x, int y, int w, int h, int c, int sw, int sh)
+static void wfill(int x, int y, int w, int h, int c, int sh)
 {
     int i, j;
 
     for (j = y; j < y + h; j++) {
         for (i = x; i < x + w; i++) {
-            if (i >= 0 && j >= 0 && i < sw && j < sh) {
+            if (i >= 0 && j >= 0 && i < 640 && j < sh) {
                 wmodel[j][i] = (uint8_t)c;
             }
         }
@@ -797,7 +797,7 @@ static void test_wide4(int falcon, int vga, int no480, uint32_t flags)
     STDL_Surface *scr, *src;
     STDL_Sprite *spr[2];
     uint8_t srcm[48][64];
-    int f, i, x, y, sw, sh, k;
+    int f, i, x, y, sh, k;
 
     SET_MACHINE(falcon, vga);
     g_h = 480;
@@ -829,7 +829,6 @@ static void test_wide4(int falcon, int vga, int no480, uint32_t flags)
           && stdl_rs.page_bytes == 153600u && stdl_rs.dbl == 0
           && stdl_rs.top == 0 && stdl_rs.left == 0,
           "%s: the display's pages", cfg());
-    sw = 640;
 #ifndef __m68k__
     /* the colours: TT Medium's are the selected bank's */
     STDL_SetColour(5, 0x0F00);
@@ -868,7 +867,7 @@ static void test_wide4(int falcon, int vga, int no480, uint32_t flags)
                                rr(0, 160));
             const int c = rr(0, 15);
 
-            wfill(r.x, r.y, r.w, r.h, c, sw, sh);
+            wfill(r.x, r.y, r.w, r.h, c, sh);
             STDL_FillRect(scr, &r, (uint8_t)c);
         }
         /* the corners and the last rows, past 64K */
@@ -890,9 +889,9 @@ static void test_wide4(int falcon, int vga, int no480, uint32_t flags)
             x = rr(-10, 300);
             k = rr(0, 15);
             STDL_HLine(scr, x, x + l, y, (uint8_t)k);  /* both ends */
-            wfill(x, y, l + 1, 1, k, sw, sh);
+            wfill(x, y, l + 1, 1, k, sh);
             STDL_VLine(scr, x + 300, y - l, y, (uint8_t)k);
-            wfill(x + 300, y - l, 1, l + 1, k, sw, sh);
+            wfill(x + 300, y - l, 1, l + 1, k, sh);
         }
         /* blits, plain then keyed, at any phase */
         for (i = 0; i < 8; i++) {
@@ -913,7 +912,7 @@ static void test_wide4(int falcon, int vga, int no480, uint32_t flags)
                     if (keyed && c == 0) {
                         continue;
                     }
-                    wfill(dr.x + dx, dr.y + dy, 1, 1, c, sw, sh);
+                    wfill(dr.x + dx, dr.y + dy, 1, 1, c, sh);
                 }
             }
             STDL_BlitSurface(src, &sr, scr, &dr);
@@ -934,7 +933,7 @@ static void test_wide4(int falcon, int vga, int no480, uint32_t flags)
                     const int c = srcm[dy][fr * 32 + dx];
 
                     if (c != 0) {
-                        wfill(x + dx, y + dy, 1, 1, c, sw, sh);
+                        wfill(x + dx, y + dy, 1, 1, c, sh);
                     }
                 }
             }

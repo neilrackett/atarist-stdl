@@ -204,17 +204,17 @@ PIXEL_MAX  = 37100
 # blits' own way in, which keeps blit.o out of their programs, counts
 # here: 29,876.
 #
-# Raised 29928 -> 30668 on 2026-11-24 for the wide screen
+# Raised 29928 -> 30536 on 2026-11-24 for the wide screen
 # (STDL_RESPONSIVE_WIDE, 640x480 in 16 colours on a TT and a Falcon):
-# wide4.o (496), which only a program asking for it links, and 280 in
+# wide4.o (356), which only a program asking for it links, and 288 in
 # responsive.o that every program asking for any option carries - the
-# model's two hooks for a screen of its own size and mode set (174),
-# the wide test and an ST's error in the mode set's first step (92) and
-# the option's slot (16).
+# model's own size and mode set, the choice of screen both steps of the
+# mode set share with an ST's error, the option's slot, and the TT
+# bank's register base in the colours' writes.
 RESP_OBJS  = $(addprefix $(OBJDIR)/src/,responsive.o planes8.o \
              planes8ex.o planes8tile.o planes8row.o asset8.o tall4.o \
              overlap8.o wide4.o)
-RESP_MAX   = 30668
+RESP_MAX   = 30536
 
 sizecheck: $(PIXEL_OBJS) $(RESP_OBJS)
 	@n=`$(CROSS)size $(PIXEL_OBJS) | awk 'NR>1 {t+=$$1} END {print t}'`; \
@@ -512,8 +512,7 @@ clean:
 	rm -rf $(OBJDIR)
 	rm -f $(CMINILIB) $(LIB) $(ARITH020) $(EXAMPLES) $(BUNDLE)
 	rm -f $(SDL2LIB) $(SDL2CMINILIB) $(SDL2EXAMPLES)
-	rm -f $(SDL2STLIB) $(SDL2STCMINILIB) dist/SDL2ST.TOS dist/SDL2ST16.TOS \
-	      dist/SDL2WIDE.TOS
+	rm -f $(SDL2STLIB) $(SDL2STCMINILIB) $(SDL2STDEMOS)
 	rm -f $(SDL1LIB) $(SDL1CMINILIB) $(SDL1EXAMPLES)
 	$(MAKE) -C tests/host clean
 	$(MAKE) -C addons/sdl2/tests clean

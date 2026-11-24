@@ -364,36 +364,26 @@ $(SDL2STLIB): $(SDL2STOBJS) $(SDL2STXOBJS)
 $(SDL2STCMINILIB): $(SDL2STCMINIOBJS) $(SDL2STXCMINIOBJS)
 	$(AR) rcs $@ $(SDL2STCMINIOBJS) $(SDL2STXCMINIOBJS)
 
-# the add-on's example as an ST runs it
-dist/SDL2ST.TOS: examples/sdl2demo.c $(SDL2STLIB) $(LIB) | dist
+# The add-on's example built for this archive, three ways: SDL2ST as an
+# ST runs it; SDL2ST16 with the program's own 16 colours on an ST
+# (STDL_SDL2_SetSTColours, sdl2demo.c's SDL2DEMO_ST16); and SDL2WIDE at
+# 640x480 in 16 colours on a TT or a Falcon (SDL2DEMO_WIDE:
+# STDL_RESPONSIVE_WIDE through the ST build's 16 colours).
+SDL2STDEMOS = dist/SDL2ST.TOS dist/SDL2ST16.TOS dist/SDL2WIDE.TOS
+dist/SDL2ST.TOS:   SDL2DEMO_DEF =
+dist/SDL2ST16.TOS: SDL2DEMO_DEF = -DSDL2DEMO_ST16
+dist/SDL2WIDE.TOS: SDL2DEMO_DEF = -DSDL2DEMO_WIDE
+
+$(SDL2STDEMOS): examples/sdl2demo.c $(SDL2STLIB) $(LIB) | dist
 	@mkdir -p $(OBJDIR)/examples
 	$(CC) $(filter-out -m68020-60 -msoft-float,$(SDL2_PROGFLAGS)) -m68000 \
-	    -c -o $(OBJDIR)/examples/sdl2demo.st.o $<
-	$(CC) -m68000 -o $@ $(OBJDIR)/examples/sdl2demo.st.o $(SDL2STLIB) \
+	    $(SDL2DEMO_DEF) -c -o $(OBJDIR)/examples/$(notdir $@).o $<
+	$(CC) -m68000 -o $@ $(OBJDIR)/examples/$(notdir $@).o $(SDL2STLIB) \
 	    $(LIB) && $(STRIP) $@
 
 # no SDL_ link symbol here either. What keeps this code out of the
 # archives above is the #error in internal.h and st.c, not a check here.
-# and with the program's own 16 colours on an ST
-# (STDL_SDL2_SetSTColours, sdl2demo.c's SDL2DEMO_ST16)
-dist/SDL2ST16.TOS: examples/sdl2demo.c $(SDL2STLIB) $(LIB) | dist
-	@mkdir -p $(OBJDIR)/examples
-	$(CC) $(filter-out -m68020-60 -msoft-float,$(SDL2_PROGFLAGS)) -m68000 \
-	    -DSDL2DEMO_ST16 -c -o $(OBJDIR)/examples/sdl2demo.st16.o $<
-	$(CC) -m68000 -o $@ $(OBJDIR)/examples/sdl2demo.st16.o $(SDL2STLIB) \
-	    $(LIB) && $(STRIP) $@
-
-# and at 640x480 in 16 colours on a TT or a Falcon (sdl2demo.c's
-# SDL2DEMO_WIDE: STDL_RESPONSIVE_WIDE through the ST build's 16 colours)
-dist/SDL2WIDE.TOS: examples/sdl2demo.c $(SDL2STLIB) $(LIB) | dist
-	@mkdir -p $(OBJDIR)/examples
-	$(CC) $(filter-out -m68020-60 -msoft-float,$(SDL2_PROGFLAGS)) -m68000 \
-	    -DSDL2DEMO_WIDE -c -o $(OBJDIR)/examples/sdl2demo.wide.o $<
-	$(CC) -m68000 -o $@ $(OBJDIR)/examples/sdl2demo.wide.o $(SDL2STLIB) \
-	    $(LIB) && $(STRIP) $@
-
-sdl2st: $(SDL2STLIB) $(SDL2STCMINILIB) $(SDL2C2PLINK) dist/SDL2ST.TOS \
-        dist/SDL2ST16.TOS dist/SDL2WIDE.TOS
+sdl2st: $(SDL2STLIB) $(SDL2STCMINILIB) $(SDL2C2PLINK) $(SDL2STDEMOS)
 	@if $(CROSS)nm --defined-only $(SDL2STLIB) $(SDL2STCMINILIB) \
 	     | grep -E ' [A-Za-z] _SDL_'; then \
 	   echo "*** the SDL2 add-on's ST build defines SDL_ link symbols"; \

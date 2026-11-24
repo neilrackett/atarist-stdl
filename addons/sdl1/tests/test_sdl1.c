@@ -408,7 +408,7 @@ static unsigned X;              /* the border index */
 static int on_st;
 /* the screen's size: 320x240, or 640x480 where the first mode is wide
  * (a TT's or a Falcon's 16 colours, through the experimental build) */
-static int SW = 320, SH = 240, on_wide;
+static int SW = 320, SH = 240;
 /* what the display should show of it: a pixel's value, or -1 where no
  * update has reached, which is the cleared screen's register 0 */
 static short shown[480][640];
@@ -722,7 +722,7 @@ static int screen(unsigned long s, unsigned x)
     static const int wide[][2] = {
         { 640, 480 }, { 640, 400 }, { 320, 240 }, { 600, 300 }, { 32, 16 }
     };
-    const int (*sizes)[2] = on_wide ? wide : narrow;
+    const int (*sizes)[2] = SW > 320 ? wide : narrow;
     char name[32];
     int si, k;
     seed = s;
@@ -847,7 +847,6 @@ static int on_256(int layout, int pages, unsigned x)
 static int on_wide_screen(int falcon, int pages, unsigned x)
 {
     on_st = 1;
-    on_wide = 1;
     SW = 640;
     SH = 480;
     fake_third = 1;

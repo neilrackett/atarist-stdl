@@ -12,7 +12,6 @@
 
 int SDL_GetDesktopDisplayMode(int displayIndex, SDL_DisplayMode *mode)
 {
-    int wide = 0;
     if (displayIndex != 0) {
         return SDL_SetError("There is one display, 0, not %d", displayIndex);
     }
@@ -22,13 +21,8 @@ int SDL_GetDesktopDisplayMode(int displayIndex, SDL_DisplayMode *mode)
     if (!(stdl_sdl2_inited & SDL_INIT_VIDEO)) {
         return SDL_SetError("SDL_Init(SDL_INIT_VIDEO) comes first");
     }
-#ifdef STDL_SDL2_ST
-    /* the experimental build's wide screen, a TT's or a Falcon's */
-    wide = !STDL_SDL2_NO_256();
-#endif
     mode->format = SDL_PIXELFORMAT_INDEX8;
-    mode->w = wide ? 640 : 320;
-    mode->h = wide ? 480 : 240;
+    stdl_sdl2_largest(&mode->w, &mode->h);
     mode->refresh_rate = 0;
     mode->driverdata = NULL;
     return 0;

@@ -34,8 +34,7 @@ static void mark(stdl_sdl2_mask *pair, const stdl_sdl2_mask *whole,
     if (g0 > g1) {
         return;
     }
-    m = (stdl_sdl2_mask)(((STDL_SDL2_M1 << (g1 + 1)) - 1) &
-                         ~((STDL_SDL2_M1 << g0) - 1));
+    m = STDL_SDL2_SPAN(g0, g1 + 1);
     for (; h > 0; h--, pair++, whole++, part++) {
         stdl_sdl2_pair_rule(pair, whole, part, m, pairing);
     }

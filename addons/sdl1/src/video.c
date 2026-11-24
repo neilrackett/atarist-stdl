@@ -648,17 +648,11 @@ SDL_Rect **SDL_ListModes(SDL_PixelFormat *format, Uint32 flags)
 {
     static SDL_Rect wide = { 0, 0, 640, 480 };
     static SDL_Rect tall = { 0, 0, 320, 240 }, low = { 0, 0, 320, 200 };
-    static SDL_Rect *modes[4];
-    int w, h, n = 0;
+    static SDL_Rect *modes[4] = { &wide, &tall, &low, NULL };
+    int w, h;
     (void)format; (void)flags;
     stdl_sdl1_br_limit(&w, &h);
-    if (w > 320) {
-        modes[n++] = &wide;
-    }
-    modes[n++] = &tall;
-    modes[n++] = &low;
-    modes[n] = NULL;
-    return modes;
+    return w > 320 ? modes : modes + 1;
 }
 
 int SDL_VideoModeOK(int width, int height, int bpp, Uint32 flags)

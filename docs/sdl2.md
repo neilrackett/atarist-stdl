@@ -923,8 +923,8 @@ win = SDL_CreateWindow("", SDL_WINDOWPOS_CENTERED,
   the wide screen, and a later one must fit it; one of 320 sets up the
   256-colour screen, on which a wider one is refused. A smaller
   logical size is centred, x on a group.
-- **An ST refuses it** ("needs a TT or a Falcon"), and no mode is set:
-  `SDL_GetDesktopDisplayMode` says 320x240 there, and in the 68020
+- **An ST refuses it** ("A window is at most 320x240"), and no mode is
+  set: `SDL_GetDesktopDisplayMode` says 320x240 there, and in the 68020
   build everywhere.
 - **A Falcon's RGB that cannot open to 480 lines** gives 640x400, which
   shows the screen's middle 400 rows, as ST Low shows 200 of 240.
@@ -932,8 +932,10 @@ win = SDL_CreateWindow("", SDL_WINDOWPOS_CENTERED,
   renderer keeps a chunky copy of the screen as an ST's does (300K
   here) and 69K of rows, so allow 850K.
 - **A row is 40 groups**, so this build's masks of groups are 64 bits
-  (`stdl_sdl2_mask`, internal.h), and its rows the renderer's own
-  allocation. The 68020 build's are the 32-bit
+  (`stdl_sdl2_mask`, internal.h), never shifted by a variable (a libgcc
+  call there: spans and bits come from a table), and its rows the
+  renderer's own allocation. On an ST's own screen that is 25K of rows
+  where 32-bit masks took 17.3K. The 68020 build's are the 32-bit
   masks they were: its objects are byte for byte as before but for
   gcc's numbering of static locals in `timer.o` and `rwops.o`, and
   `display.o`, 212 bytes, which only `SDL_GetDesktopDisplayMode` links.

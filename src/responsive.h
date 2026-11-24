@@ -37,11 +37,11 @@ typedef struct stdl_resp_model {
     void (*screen_free)(void);
     /* what page p's drawing owes display page p, if anything */
     void (*present)(int p, const resp_box *b);
-    /* a screen of the model's own size (the wide one): its width, rows
-     * and line in stdl_rs and the display's lines returned, in place of
-     * the 320-pixel screens'; then, the pages and surfaces up, the
-     * display's mode set in place of theirs. NULL for those */
-    int  (*geometry)(int vga);
+    /* a screen of the model's own size (the wide one), its display's
+     * lines its rows and a line its pixels in its planes, in place of
+     * the 320-pixel screens' (0 for those); and, the pages and surfaces
+     * up, the display's mode set in place of theirs (NULL for those) */
+    int16_t w, h;
     void (*display)(int vga);
 } resp_model;
 
@@ -73,6 +73,8 @@ typedef struct {
     STDL_PresentStats stats;
     const resp_model *wide;     /* asked for too (last: the 8-plane
                                    objects' code keeps its offsets) */
+    uint8_t bank;               /* the register of colour 0: TT Medium's
+                                   16 are its selected bank's */
 } resp_state;
 
 extern resp_state stdl_rs;

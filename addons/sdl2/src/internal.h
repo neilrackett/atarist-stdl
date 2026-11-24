@@ -26,6 +26,20 @@
 #define STDL_SDL2_NO_256() \
     (STDL_GetMachineInfo()->mch_cookie < 0x00020000UL)
 
+/* The largest window there can be (SDL_GetDesktopDisplayMode, and the
+ * experimental build's first window): its wide screen on a TT or a
+ * Falcon, 640x480 in 16 colours, else 320x240 */
+static __inline__ void stdl_sdl2_largest(int *w, int *h)
+{
+#ifdef STDL_SDL2_ST
+    const int wide = !STDL_SDL2_NO_256();
+#else
+    const int wide = 0;
+#endif
+    *w = wide ? 640 : 320;
+    *h = wide ? 480 : 240;
+}
+
 /* SDL_INIT_ bits granted, for SDL_WasInit */
 extern Uint32 stdl_sdl2_inited;
 
@@ -47,10 +61,23 @@ void stdl_sdl2_screen_origin(int *x, int *y);
 typedef unsigned long long stdl_sdl2_mask;
 #define STDL_SDL2_M1 1ULL
 #define STDL_SDL2_M2 2ULL
+/* Groups g0 to gend - 1, and group g, from a table of the groups below
+ * each (video.c): gcc 4.6 makes a 68000's shift of a long long by a
+ * variable a libgcc call, so this build shifts none */
+extern const stdl_sdl2_mask stdl_sdl2_below[41];
+#define STDL_SDL2_SPAN(g0, gend) \
+    (stdl_sdl2_below[gend] & ~stdl_sdl2_below[g0])
+#define STDL_SDL2_BIT(g) (stdl_sdl2_below[(g) + 1] ^ stdl_sdl2_below[g])
+#define STDL_SDL2_HAS(m, g) (((m) & STDL_SDL2_BIT(g)) != 0)
 #else
 typedef Uint32 stdl_sdl2_mask;
 #define STDL_SDL2_M1 1UL
 #define STDL_SDL2_M2 2UL
+#define STDL_SDL2_SPAN(g0, gend) \
+    ((stdl_sdl2_mask)(((STDL_SDL2_M1 << (gend)) - 1) & \
+                      ~((STDL_SDL2_M1 << (g0)) - 1)))
+#define STDL_SDL2_BIT(g) (STDL_SDL2_M1 << (g))
+#define STDL_SDL2_HAS(m, g) ((m) >> (g) & 1)
 #endif
 
 /*

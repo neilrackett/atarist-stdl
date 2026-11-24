@@ -97,6 +97,7 @@ static void resp_whole(resp_box *b)
 }
 
 static int resp_enter(int w, int h, int bpp);
+static const resp_model *resp_pick(int w, int h, int bpp);
 static void resp_st_mode(int h);
 static void resp_update(int n, const STDL_Rect *rects);
 static void resp_fade(const STDL_Palette *target, int frames);
@@ -146,12 +147,10 @@ int stdl_use_responsive(unsigned what, const struct stdl_resp_model *colour,
  */
 static int resp_enter(int w, int h, int bpp)
 {
-    const int wide = stdl_rs.wide != NULL && w > 320;
-    const int take = (wide || (stdl_rs.colour != NULL && bpp >= 8)
-                      || (stdl_rs.tall != NULL && h > 200))
-                     && stdl.mach.mch_cookie >= 0x00020000UL;
+    const resp_model *m = resp_pick(w, h, bpp);
+    const int take = m != NULL && stdl.mach.mch_cookie >= 0x00020000UL;
 
-    if (wide && !take) {
+    if (m != NULL && m == stdl_rs.wide && !take) {
         STDL_SetError("640x480: an ST has 320 pixels");
     }
     if (stdl_resp_screen != NULL) {
@@ -258,13 +257,14 @@ static void resp_put(const uint32_t *w, int first, int n)
             *r++ = *w++;
         }
     } else {
-        volatile uint16_t *r = STDL_TTPAL + first;
+        volatile uint16_t *r = STDL_TTPAL + stdl_rs.bank + first;
 
         while (--n >= 0) {
             *r++ = (uint16_t)*w++;
         }
     }
 #else
+    first += stdl_rs.bank;
     while (--n >= 0) {
         stdl_host_resp_regs[first++] = *w++;
     }
@@ -437,14 +437,19 @@ void resp_third_lost(void)
     stdl_rs.npages = 2;
 }
 
+/* the screen a call asks for of those asked for: the wide one for more
+ * than 320 pixels, the colour or the tall one for 320, or none */
+static const resp_model *resp_pick(int w, int h, int bpp)
+{
+    return stdl_rs.wide != NULL && w > 320 ? stdl_rs.wide
+         : stdl_rs.colour != NULL && bpp >= 8 ? stdl_rs.colour
+         : stdl_rs.tall != NULL && h > 200 ? stdl_rs.tall : NULL;
+}
+
 STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
 {
-    /* the wide screen for a call asking more than 320 pixels; the
-     * colour and the tall one for 320 */
     const int tall = stdl_rs.tall != NULL && h > 200;
-    const resp_model *m = stdl_rs.wide != NULL && w > 320 ? stdl_rs.wide
-                        : stdl_rs.colour != NULL && bpp >= 8 ? stdl_rs.colour
-                        : tall ? stdl_rs.tall : NULL;
+    const resp_model *m = resp_pick(w, h, bpp);
     int i, rows, bytes, vga, lines;
     uint8_t *p;
 #ifdef __m68k__
@@ -464,11 +469,13 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
 #endif
     stdl_rs.left = 0;
     stdl_rs.dbl = 0;
+    stdl_rs.bank = 0;
     stdl_rs.w = 320;
-    if (m->geometry != NULL) {
-        /* a screen of the model's own size (wide4.c) */
-        lines = m->geometry(vga);
-        rows = stdl_rs.h;
+    if (m->w != 0) {
+        /* a screen of the model's own size (wide4.c): a line a row */
+        stdl_rs.w = m->w;
+        lines = rows = m->h;
+        stdl_rs.line = (int16_t)(m->w >> (m->planes == 8 ? 0 : 1));
     } else {
         rows = tall ? 240 : 200;
         /* 320 pixels in the screen's planes, in bytes */
@@ -564,7 +571,6 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
     stdl_rs.back = 1;
     m->screen_page(1);
 
-    stdl_pal_write = resp_pal_word;     /* or the model's own */
     /* a resolution change clears the screen, as the console is reset
      * with it, and sets its own colours: ours go after */
     if (m->display != NULL) {
@@ -604,6 +610,7 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
     }
 #endif
     stdl_resp_con_wrote = 0;
+    stdl_pal_write = resp_pal_word;
     if (m->planes == 8) {
         stdl_pal_flush8 = resp_flush;
         resp_registers(stdl_rs.colours, 0, 256);

@@ -126,7 +126,10 @@ static int SW = 320, SH = 240;
 #ifdef STDL_SDL2_ST
 static int wide_run;
 #endif
-static Uint8 model[480][640];
+/* SW by SH, allocated when the run starts: a 640x480 model would leave
+ * an ST running the 320-pixel test no room for the renderer */
+static Uint8 *model;
+#define MODEL(y, x) model[(long)(y) * SW + (x)]
 static unsigned X;
 static int lw, lh, xoff, yoff;
 static int drawn;               /* a flip is due at the next present */
@@ -216,8 +219,8 @@ static int model_copy(const Tex *t, const SDL_Rect *src, const SDL_Rect *dst)
                 lx < 0 || ly < 0 || lx >= lw || ly >= lh) {
                 continue;
             }
-            model[ly + yoff][lx + xoff] = t->px[ty * t->pitch + tx];
-            NOTE(ly + yoff, model[ly + yoff][lx + xoff]);
+            MODEL(ly + yoff, lx + xoff) = t->px[ty * t->pitch + tx];
+            NOTE(ly + yoff, MODEL(ly + yoff, lx + xoff));
             any = 1;
         }
     }
@@ -226,7 +229,7 @@ static int model_copy(const Tex *t, const SDL_Rect *src, const SDL_Rect *dst)
 
 static void model_fill(Uint8 c)
 {
-    memset(model, c, sizeof(model));
+    memset(model, c, (size_t)SW * SH);
     NOTE(PROW0, c);
 }
 
@@ -271,7 +274,7 @@ static void expect_page_st(long stride)
     for (y = 0; y < page_rows; y++) {
         for (x = 0; x < SW; x++) {
             st_pixel(want + y * stride, x, x + y + row0, m->a, m->b,
-                     model[y + row0][x]);
+                     MODEL(y + row0, x));
         }
     }
 }
@@ -287,7 +290,7 @@ static void expect_page(long stride, long margin, int dbl)
     memset(want, 0, (size_t)want_bytes);
     for (y = 0; y < 240; y++) {
         for (x = 0; x < 320; x++) {
-            const unsigned v = model[y][x] ^ X;
+            const unsigned v = MODEL(y, x) ^ X;
             Uint8 *grp = want + margin + y * stride + (x >> 4) * 16;
             const Uint8 bit = (Uint8)(0x80 >> (x & 7));
             for (p = 0; p < 8; p++) {
@@ -379,7 +382,7 @@ static int st_eval(void)
             memset(tseen, 0, sizeof(tseen));
             for (y = PROW0; y < PROW0 + page_rows; y++) {
                 for (x = 0; x < SW; x++) {
-                    tseen[model[y][x]] = 1;
+                    tseen[MODEL(y, x)] = 1;
                 }
             }
         }
@@ -1143,7 +1146,7 @@ static void pairs_rules(void)
         /* the loops' pixels where they are not pairs */
         if (k == 2 || (k == 5 && !is_st)) {
             for (y = spot.y; y < spot.y + spot.h; y++) {
-                Uint8 *m = &model[y + yoff][32 + xoff];
+                Uint8 *m = &MODEL(y + yoff, 32 + xoff);
                 if (is_st) {
                     m[0] = m[1];
                 } else {
@@ -1366,8 +1369,16 @@ static int run(unsigned long s, unsigned x, int xconst)
     if (wide_run) {
         SW = 640;
         SH = 480;
+    } else if (STDL_SDL2_NO_256()) {
+        /* an ST's largest window is 320 wide, and no mode is set */
+        CHECK(SDL_CreateWindow("wide", 0, 0, 640, 480, 0) == NULL);
     }
 #endif
+    model = (Uint8 *)malloc((size_t)SW * SH);
+    if (!model) {
+        printf("FAIL no memory for the model\n");
+        return 1;
+    }
     win = SDL_CreateWindow("test", SDL_WINDOWPOS_CENTERED,
                            SDL_WINDOWPOS_CENTERED, SW, SH, 0);
     CHECK(win != NULL);
@@ -1749,106 +1760,124 @@ static int pair_checks(void)
 }
 #endif
 
+#if !defined(__m68k__)
+/* fn(a, b, c, d) in a process of its own, as the screen is set up once
+ * a program: 1 if it failed */
+static int forked(int (*fn)(int, int, int, int), int a, int b, int c, int d)
+{
+    const pid_t pid = fork();
+    int status = 0;
+    if (pid == 0) {
+        _exit(fn(a, b, c, d) ? 1 : 0);
+    }
+    waitpid(pid, &status, 0);
+    return !WIFEXITED(status) || WEXITSTATUS(status) != 0;
+}
+#endif
+
 #if !defined(__m68k__) && defined(STDL_SDL2_ST)
 static int main256(void);
+
+/* the tall screen's 240 rows; 200 where the border cannot open, which
+ * is ST Low's page and may have three; a border cut short; and the
+ * last, the tall screen there and the hint against it */
+static const unsigned st_xs[] = { 0, 0x70 };
+static const int st_rows[] = { 240, 200, 216, 0 };
+
+static int st_screen(int ri, int pages, int xi, int unused)
+{
+    const int want_rows = st_rows[ri] ? st_rows[ri] : 200;
+    const int got = want_rows > 200 ? 2 : pages;
+    int f;
+    (void)unused;
+    fake_third = 1;
+    fake_st_rows = st_rows[ri] ? st_rows[ri] : 240;
+    if (!st_rows[ri]) {
+        SDL_SetHint(STDL_SDL2_HINT_ST_TALL, "0");
+    }
+    fake_mach.mch_cookie = 0;
+    /* an STE's 4 bits with three pages asked for, an ST's 3 with two;
+     * no checkerboard on the 200 rows of a border that did not open */
+    fake_mach.is_ste = pages == 3;
+    if (ri == 1) {
+        SDL_SetHint(STDL_SDL2_HINT_ST_DITHER, "0");
+    }
+    SDL_SetHint(STDL_SDL2_HINT_PAGES, pages == 2 ? "2" : "3");
+    f = run(0xC0FFEEUL + (unsigned long)pages, st_xs[xi], xi == 1);
+    if (fake_npages != got || fake_stride != 160 ||
+        fake_tall != (st_rows[ri] != 0) || page_rows != want_rows) {
+        printf("FAIL %d rows, %d pages asked for\n", st_rows[ri], pages);
+        f++;
+    }
+    return f;
+}
+
+/* the wide screen, 640x480 in 16 colours through the same path: a TT
+ * and a Falcon, two pages and three, X 0 and 0x70, and a Falcon's RGB
+ * that could not open past 400 rows */
+static const struct {
+    unsigned long mch;
+    int rows, pages;
+    unsigned x;
+} wides[] = {
+    { 0x00020000UL, 480, 3, 0 }, { 0x00020000UL, 480, 2, 0x70 },
+    { 0x00030000UL, 480, 2, 0 }, { 0x00030000UL, 480, 3, 0x70 },
+    { 0x00030000UL, 400, 3, 0 }, { 0x00030000UL, 400, 2, 0x70 }
+};
+
+static int wide_screen(int k, int b, int c, int d)
+{
+    int f;
+    (void)b;
+    (void)c;
+    (void)d;
+    fake_third = 1;
+    fake_mach.mch_cookie = wides[k].mch;
+    fake_mach.is_ste = 1;
+    fake_wide_rows = wides[k].rows;
+    wide_run = 1;
+    SDL_SetHint(STDL_SDL2_HINT_PAGES, wides[k].pages == 2 ? "2" : "3");
+    f = run(0xBEEFUL + (unsigned long)k, wides[k].x, wides[k].x != 0);
+    if (fake_npages != wides[k].pages || fake_stride != 320 ||
+        !fake_wide || page_rows != wides[k].rows) {
+        printf("FAIL wide: %d rows, %d pages\n", wides[k].rows,
+               wides[k].pages);
+        f++;
+    }
+    return f;
+}
 
 /* an ST, which the ST build's SDL_Init takes */
 int main(void)
 {
-    /* the tall screen's 240 rows; 200 where the border cannot open,
-     * which is ST Low's page and may have three; a border cut short */
-    static const unsigned xs[] = { 0, 0x70 };
-    static const int rows[] = { 240, 200, 216, 0 };
-    int ri, pages, xi, total = reduce_checks() + pair_checks(), runs = 0;
+    int ri, pages, xi, k, total = reduce_checks() + pair_checks(), runs = 0;
+    /* the table the masks' spans and bits come from (internal.h): a
+     * wrong entry shows only where a copy's groups end on it */
+    for (ri = 0; ri <= 40; ri++) {
+        if (stdl_sdl2_below[ri] != (1ULL << ri) - 1) {
+            printf("FAIL stdl_sdl2_below[%d]\n", ri);
+            total++;
+        }
+    }
     for (ri = 0; ri < 4; ri++) {
         for (pages = 2; pages <= 3; pages++) {
             for (xi = 0; xi < 2; xi++) {
-                pid_t pid = fork();
-                int status = 0;
-                if (pid == 0) {
-                    /* the last: the tall screen there, and the hint
-                     * against it */
-                    const int want_rows = rows[ri] ? rows[ri] : 200;
-                    const int got = want_rows > 200 ? 2 : pages;
-                    int f;
-                    fake_third = 1;
-                    fake_st_rows = rows[ri] ? rows[ri] : 240;
-                    if (!rows[ri]) {
-                        SDL_SetHint(STDL_SDL2_HINT_ST_TALL, "0");
-                    }
-                    fake_mach.mch_cookie = 0;
-                    /* an STE's 4 bits with three pages asked for, an
-                     * ST's 3 with two; no checkerboard on the 200 rows
-                     * of a border that did not open */
-                    fake_mach.is_ste = pages == 3;
-                    if (ri == 1) {
-                        SDL_SetHint(STDL_SDL2_HINT_ST_DITHER, "0");
-                    }
-                    SDL_SetHint(STDL_SDL2_HINT_PAGES,
-                                pages == 2 ? "2" : "3");
-                    f = run(0xC0FFEEUL + (unsigned long)pages, xs[xi],
-                            xi == 1);
-                    if (fake_npages != got || fake_stride != 160 ||
-                        fake_tall != (rows[ri] != 0) ||
-                        page_rows != want_rows) {
-                        printf("FAIL %d rows, %d pages asked for\n",
-                               rows[ri], pages);
-                        f++;
-                    }
-                    _exit(f ? 1 : 0);
-                }
-                waitpid(pid, &status, 0);
                 runs++;
-                if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+                if (forked(st_screen, ri, pages, xi, 0)) {
                     printf("test_render_st: %d rows, %d pages, X 0x%X"
-                           " failed\n", rows[ri], pages, xs[xi]);
+                           " failed\n", st_rows[ri], pages, st_xs[xi]);
                     total++;
                 }
             }
         }
     }
-    {
-        /* the wide screen, 640x480 in 16 colours through the same
-         * path: a TT and a Falcon, two pages and three, X 0 and 0x70,
-         * and a Falcon's RGB that could not open past 400 rows */
-        static const struct {
-            unsigned long mch;
-            int rows, pages;
-            unsigned x;
-        } w[] = {
-            { 0x00020000UL, 480, 3, 0 }, { 0x00020000UL, 480, 2, 0x70 },
-            { 0x00030000UL, 480, 2, 0 }, { 0x00030000UL, 480, 3, 0x70 },
-            { 0x00030000UL, 400, 3, 0 }, { 0x00030000UL, 400, 2, 0x70 }
-        };
-        int k;
-        for (k = 0; k < (int)(sizeof(w) / sizeof(w[0])); k++) {
-            pid_t pid = fork();
-            int status = 0;
-            if (pid == 0) {
-                int f;
-                fake_third = 1;
-                fake_mach.mch_cookie = w[k].mch;
-                fake_mach.is_ste = 1;
-                fake_wide_rows = w[k].rows;
-                wide_run = 1;
-                SDL_SetHint(STDL_SDL2_HINT_PAGES, w[k].pages == 2 ? "2" : "3");
-                f = run(0xBEEFUL + (unsigned long)k, w[k].x, w[k].x != 0);
-                if (fake_npages != w[k].pages || fake_stride != 320 ||
-                    !fake_wide || page_rows != w[k].rows) {
-                    printf("FAIL wide: %d rows, %d pages\n", w[k].rows,
-                           w[k].pages);
-                    f++;
-                }
-                _exit(f ? 1 : 0);
-            }
-            waitpid(pid, &status, 0);
-            runs++;
-            if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-                printf("test_render_st: wide, %s, %d rows, %d pages, X 0x%X"
-                       " failed\n", w[k].mch == 0x00020000UL ? "TT"
-                       : "Falcon", w[k].rows, w[k].pages, w[k].x);
-                total++;
-            }
+    for (k = 0; k < (int)(sizeof(wides) / sizeof(wides[0])); k++) {
+        runs++;
+        if (forked(wide_screen, k, 0, 0, 0)) {
+            printf("test_render_st: wide, %s, %d rows, %d pages, X 0x%X"
+                   " failed\n", wides[k].mch == 0x00020000UL ? "TT"
+                   : "Falcon", wides[k].rows, wides[k].pages, wides[k].x);
+            total++;
         }
     }
     if (total) {
@@ -1863,11 +1892,16 @@ int main(void)
 #endif
 
 #if !defined(__m68k__)
+static const unsigned xs256[] = { 0, 0x70, 0x30 };
+
 /* cmp: 0 no compare, 1 the hint, 2 turned on and off as the run goes
  * from none (the add-on's own check off unless X is 0, so that the
- * chunky copy goes unkept while the compare is off) */
-static int child(int layout, int pages, unsigned x, int xconst, int cmp)
+ * chunky copy goes unkept while the compare is off); X xs256[xi], a
+ * constant at 0x70 */
+static int child(int layout, int pages, int xi, int cmp)
 {
+    const unsigned x = xs256[xi];
+    const int xconst = xi == 1;
     int f;
     fake_layout = layout;
     fake_third = 1;
@@ -1896,23 +1930,15 @@ int main(void)
 #endif
 {
     static const char *names[] = { "TT", "Falcon VGA", "Falcon RGB" };
-    static const unsigned xs[] = { 0, 0x70, 0x30 };
     int layout, pages, xi, cmp, total = 0, runs = 0;
     for (layout = 0; layout < 3; layout++) {
         for (pages = 2; pages <= 3; pages++) {
             for (xi = 0; xi < 3; xi++) {
                 for (cmp = 0; cmp <= 2; cmp++) {
-                    pid_t pid = fork();
-                    int status = 0;
-                    if (pid == 0) {
-                        _exit(child(layout, pages, xs[xi], xi == 1, cmp)
-                              ? 1 : 0);
-                    }
-                    waitpid(pid, &status, 0);
                     runs++;
-                    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+                    if (forked(child, layout, pages, xi, cmp)) {
                         printf("test_render: %s, %d pages, X 0x%X%s"
-                               " failed\n", names[layout], pages, xs[xi],
+                               " failed\n", names[layout], pages, xs256[xi],
                                cmp == 1 ? ", copies compared" :
                                cmp == 2 ? ", the compare toggled" : "");
                         total++;

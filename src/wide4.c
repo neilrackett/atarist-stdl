@@ -29,32 +29,21 @@
 #define VIDEL_VDB (*(volatile uint16_t *)0xFFFF82A8UL)
 #define VIDEL_VDE (*(volatile uint16_t *)0xFFFF82AAUL)
 #else
-/* host tests: a Falcon's RGB with no room for 480 lines, and the bank
- * a TT has selected; and the registers (responsive.c) */
+/* host tests: a Falcon's RGB with no room for 480 lines, and the bank a
+ * TT has selected, as the mode register's low bits */
 int stdl_host_resp_400, stdl_host_resp_bank;
-extern uint32_t stdl_host_resp_regs[256];
+#define TT_SHIFT stdl_host_resp_bank
 #endif
-
-/* 640x480, 320 bytes a line on every machine and monitor */
-static int w4_geometry(int vga)
-{
-    (void)vga;
-    stdl_rs.w = 640;
-    stdl_rs.h = 480;
-    stdl_rs.line = 320;
-    return 480;
-}
 
 /* the screen's rows, fewer than it was set up with: the display shows
  * no more */
 static void w4_rows(int rows)
 {
     stdl_rs.h = (int16_t)rows;
-    stdl_rs.screen.s.h = (int16_t)rows;
-    stdl_rs.screen.s.clip.h = (uint16_t)rows;
+    p8_init_surface(&stdl_rs.screen.s, stdl_rs.w, rows);
+    stdl_rs.screen.s.planes = 4;
 }
 
-#ifdef __m68k__
 /*
  * A Falcon's 640x400 interlaced on RGB or a TV made 480 lines tall: the
  * window opened 40 lines at each end, the window the Falcon's own
@@ -66,6 +55,7 @@ static void w4_rows(int rows)
  */
 static int w4_falcon_480(void)
 {
+#ifdef __m68k__
     int vdb, vde, vbb, vbe;
 
     STDL_WaitVBL();
@@ -83,54 +73,32 @@ static int w4_falcon_480(void)
     VIDEL_VDB = (uint16_t)vdb;
     VIDEL_VDE = (uint16_t)vde;
     return 1;
-}
-#endif
-
-/* the TT's selected bank: TT Medium's sixteen are its registers */
-static uint16_t w4_bank;
-
-/* a word for the ST's registers (stdl_pal_write) onto the bank's, the
- * TT's 4 bits a channel */
-static void w4_tt_word(int index, uint16_t word)
-{
-    STDL_Colour c;
-
-    stdl_hw_to_rgb(word, &c);
-#ifdef __m68k__
-    STDL_TTPAL[w4_bank + index]
 #else
-    stdl_host_resp_regs[w4_bank + index]
+    return !stdl_host_resp_400;
 #endif
-        = (uint16_t)(((c.r >> 4) << 8) | (c.g & 0xF0) | (c.b >> 4));
 }
 
 static void w4_display(int vga)
 {
-#ifdef __m68k__
     if (stdl_rs.falcon) {
+#ifdef __m68k__
         /* on RGB or a TV, the desktop's PAL or NTSC: a set or a monitor
          * made for one may not sync to the other */
         (void)VsetScreen(stdl_rs.page[0], stdl_rs.page[0], 3,
                          (int16_t)(BPS4 | COL80
                                    | (vga ? VGA : ((stdl.old_vmode & PAL)
                                                    | VERTFLAG))));
+#endif
         if (!vga && !w4_falcon_480()) {
             w4_rows(400);
         }
     } else {
+#ifdef __m68k__
         (void)Setscreen(stdl_rs.page[0], stdl_rs.page[0], 4);
-        w4_bank = (uint16_t)((TT_SHIFT & 0x0F) << 4);
-        stdl_pal_write = w4_tt_word;
-    }
-#else
-    if (stdl_rs.falcon && !vga && stdl_host_resp_400) {
-        w4_rows(400);
-    }
-    if (!stdl_rs.falcon) {
-        w4_bank = (uint16_t)(stdl_host_resp_bank << 4);
-        stdl_pal_write = w4_tt_word;
-    }
 #endif
+        /* TT Medium's sixteen are the selected bank's registers */
+        stdl_rs.bank = (uint8_t)((TT_SHIFT & 0x0F) << 4);
+    }
 }
 
 /* nothing of its own: the pages are the display's */
@@ -158,5 +126,5 @@ const resp_model stdl_resp_wide = {
     .planes = 4,
     .screen_init = w4_screen_init, .screen_page = w4_screen_page,
     .screen_free = w4_screen_free,
-    .geometry = w4_geometry, .display = w4_display
+    .w = 640, .h = 480, .display = w4_display
 };

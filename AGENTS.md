@@ -634,14 +634,15 @@ console, unless `STDL_UseBanner(0)` came first.
   Falcon's 640x480 in 16 colours are the ST's interleaved 4-plane layout
   at 320 bytes a row, so the screen is an ordinary 4-plane surface over
   the page and Flip swaps pages, nothing to present. What it rests on:
-  - **The model sets its own size and mode** through two hooks
-    (`geometry`, `display` in `resp_model`), so responsive.o keeps the
-    320-pixel screens' code as it was and pays 280 bytes for the hooks,
-    the width test and an ST's error; `wide4.o` is 496 bytes.
+  - **The model gives its own size and mode set** (`w`, `h` and the
+    `display` hook in `resp_model`), and one choice of screen
+    (`resp_pick`) serves both steps of the mode set, so responsive.o
+    keeps the 320-pixel screens' code as it was and pays 288 bytes;
+    `wide4.o` is 356.
   - **TT Medium's sixteen are the selected bank's registers**, read from
-    the shifter's mode register after the mode set; `w4_tt_word` writes
-    there (`stdl_pal_write`), so the bank is never changed and nothing
-    has to be put back.
+    the shifter's mode register after the mode set into a register base
+    (`stdl_rs.bank`) that every colour write adds, so the bank is never
+    changed and nothing has to be put back.
   - **A Falcon's RGB or TV is 640x400 interlaced with VDB 40 lines lower
     and VDE 40 higher**, read after the VBL that takes the mode set,
     the window the Falcon's overscan modes have; NTSC moves the window
@@ -1976,14 +1977,22 @@ rules below keep it from being anything else's.
     with `M1` for the literal. Swapping the type and the literal leaves
     the 68020 build's objects byte for byte as they were (gcc's numbering
     of static locals in `timer.o` and `rwops.o` aside); compare them
-    after any change here. gcc 4.6 inlines a 68000's 64-bit shifts, by a
-    variable too, so there are no libgcc calls in the masks.
+    after any change here.
+  - **A long long shifted by a variable is a libgcc call there**
+    (`___ashldi3`, `___lshrdi3`, some 350 cycles each on a 68000), though
+    a small test function compiled alone inlined the same shift: check
+    `nm -u video.st.o`, not a snippet. So spans and bits of groups come
+    from a table (`STDL_SDL2_SPAN`, `STDL_SDL2_BIT`, `STDL_SDL2_HAS`,
+    `stdl_sdl2_below`), whose 68020 forms are the expressions they
+    replaced; loops shift by constants; and the compare works on two
+    32-bit halves, the second only on the wide screen.
   - **The screen's size is a variable there** (`st_sw`, `st_sh`), and
     the rows (owed, now, the batch's, mvalid, the partial groups) the
-    renderer's own allocation (`rows_alloc`), sized for the screen.
+    renderer's own allocation (`rows_alloc`), sized for the screen and
+    its groups.
   - **The compare's assembler keeps a group's bit in a long**, so the
-    experimental build runs it in passes of at most 32 groups
-    (`CMP_GROUPS`). Its macro parameters are `S_`, `M_` and the rest
+    experimental build runs it in passes of groups below 32 and from 32
+    on (`CMP_GROUPS`), worked out once a copy. Its macro parameters are `S_`, `M_` and the rest
     because a parameter called `mask` replaces the `mask` of the
     operand list's `[mask]` too, while the template's `%[mask]` sits in
     a string: the first version would not assemble.

@@ -46,7 +46,7 @@ LIBSRCS = src/video.c src/surface.c src/draw.c src/blit.c \
           src/stram.c src/wav.c src/ring.c \
           src/palstage.c src/polygon.c src/polypat.c src/raster.c \
           src/spritebatch.c src/responsive.c src/planes8.c src/planes8ex.c \
-          src/planes8tile.c src/asset8.c src/tall4.c src/tallst.c \
+          src/planes8tile.c src/asset8.c src/tall4.c src/tallst.c src/wide4.c \
           src/hz38400.c src/rowcopy.c src/planes8row.c src/overlap.c \
           src/overlap4.c src/overlap8.c src/banner.c
 # Objects live under obj/, mirroring each source's own path. Sources
@@ -69,7 +69,8 @@ EXAMPLES = dist/TBITMAP.TOS dist/GRAYWIN.TOS dist/TESTWIN.TOS \
            dist/HWSCROLL.TOS dist/TONEDEMO.TOS dist/OPLDEMO.TOS \
            dist/MUSICVU.TOS dist/POLYDEMO.TOS dist/PATDEMO.TOS \
            dist/RASTERS.TOS dist/RESPDEMO.TOS dist/OVHOST.TOS \
-           dist/STARTER.TOS dist/JOYBOXES.TOS dist/MULDIV.TOS
+           dist/STARTER.TOS dist/JOYBOXES.TOS dist/MULDIV.TOS \
+           dist/WIDEDEMO.TOS
 
 # Pinned, not left to ordering: a rule added above this one would
 # silently become the default goal, and `make` would then build
@@ -202,10 +203,18 @@ PIXEL_MAX  = 37100
 # p8_blit 136 smaller, 29,816 in all. overlap8.o (60), the 8-plane
 # blits' own way in, which keeps blit.o out of their programs, counts
 # here: 29,876.
+#
+# Raised 29928 -> 30668 on 2026-11-24 for the wide screen
+# (STDL_RESPONSIVE_WIDE, 640x480 in 16 colours on a TT and a Falcon):
+# wide4.o (496), which only a program asking for it links, and 280 in
+# responsive.o that every program asking for any option carries - the
+# model's two hooks for a screen of its own size and mode set (174),
+# the wide test and an ST's error in the mode set's first step (92) and
+# the option's slot (16).
 RESP_OBJS  = $(addprefix $(OBJDIR)/src/,responsive.o planes8.o \
              planes8ex.o planes8tile.o planes8row.o asset8.o tall4.o \
-             overlap8.o)
-RESP_MAX   = 29928
+             overlap8.o wide4.o)
+RESP_MAX   = 30668
 
 sizecheck: $(PIXEL_OBJS) $(RESP_OBJS)
 	@n=`$(CROSS)size $(PIXEL_OBJS) | awk 'NR>1 {t+=$$1} END {print t}'`; \
@@ -422,6 +431,8 @@ dist/PATDEMO.TOS: examples/patdemo.c $(LIB)
 dist/RASTERS.TOS: examples/rasters.c $(LIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
 dist/RESPDEMO.TOS: examples/respdemo.c $(LIB)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
+dist/WIDEDEMO.TOS: examples/widedemo.c $(LIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LIB) && $(STRIP) $@
 dist/OPLDEMO.TOS: examples/opldemo.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude/compat -o $@ $< $(LIB) && $(STRIP) $@

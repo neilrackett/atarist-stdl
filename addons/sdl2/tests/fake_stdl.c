@@ -36,7 +36,8 @@ static int back;
 
 struct stdl_resp_model { int unused; };
 struct stdl_resp_banks { int unused; };
-const struct stdl_resp_model stdl_resp_colour = { 0 }, stdl_resp_tall = { 0 };
+const struct stdl_resp_model stdl_resp_colour = { 0 }, stdl_resp_tall = { 0 },
+                             stdl_resp_wide = { 0 };
 const struct stdl_resp_banks stdl_resp_banks = { 0 };
 
 void stdl_resp_tall_st(int h)
@@ -47,9 +48,11 @@ void stdl_resp_tall_st(int h)
 int stdl_use_responsive(unsigned what, const struct stdl_resp_model *colour,
                         const struct stdl_resp_model *tall,
                         void (*st_tall)(int h),
-                        const struct stdl_resp_banks *banks)
+                        const struct stdl_resp_banks *banks,
+                        const struct stdl_resp_model *wide)
 {
     (void)banks;
+    (void)wide;
     /* the add-on asks for the colour and the display's height alone;
      * its ST build for the tall screen alone, an ST's border with it */
     if (what == STDL_RESPONSIVE_TALL && tall && st_tall) {

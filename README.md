@@ -75,8 +75,8 @@ it calls.
   into the planes through a colour map, `STDL_CreateSurfaceFrom` wraps an
   engine's own framebuffers, and `STDL_BlitSurfaceEx` composes against a
   priority plane. See `examples/chunky.c`.
-- **Display**: 256 colours and 240 rows on a TT or a Falcon
-  ([docs/responsive.md](docs/responsive.md)); on an ST, the top and bottom
+- **Display**: 256 colours and 240 rows on a TT or a Falcon, or
+  640x480 in 16 colours ([docs/responsive.md](docs/responsive.md)); on an ST, the top and bottom
   borders open for up to 273 rows and Timer B rasters change colours down the
   picture ([docs/overscan.md](docs/overscan.md)). STE hardware scrolling to the
   pixel (`STDL_SetScrollOrigin`), 50 or 60Hz (`STDL_SetRefresh`), and palette
@@ -109,7 +109,7 @@ it calls.
 | [docs/porting.md](docs/porting.md)                 | porting SDL 1.2 code: workflow, what maps, rewrite patterns, ST gotchas   |
 | [docs/format.md](docs/format.md)                   | the byte-level contract: surfaces, masks, sprites, banks, music           |
 | [docs/limits.md](docs/limits.md)                   | what STDL will not do, and why                                            |
-| [docs/responsive.md](docs/responsive.md)           | 256 colours and 240 rows on a TT or a Falcon                              |
+| [docs/responsive.md](docs/responsive.md)           | 256 colours and 240 rows, or 640x480 in 16, on a TT or a Falcon           |
 | [docs/overscan.md](docs/overscan.md)               | borders and rasters on an ST                                              |
 | [docs/sdl2.md](docs/sdl2.md)                       | the SDL2 add-on for a TT or a Falcon                                      |
 | [docs/sdl1.md](docs/sdl1.md)                       | the SDL1 add-on: an SDL 1.2 program running before it is ported (experimental) |

@@ -65,12 +65,33 @@
  *   none of the border code, 8.7K of a program. Asked for with
  *   STDL_RESPONSIVE_TALL, the tall screen wins.
  *
+ * STDL_RESPONSIVE_WIDE: 640x480 in 16 colours, asked for with a width
+ *   over 320, whatever the height and bpp asked:
+ *       STDL_SetVideoMode(640, 480, 4, STDL_DOUBLEBUF);
+ *   - A TT: TT Medium, the TT's own 640x480 in 16 colours.
+ *   - A Falcon on VGA: its own 640x480 in 16 colours. On RGB or a TV:
+ *     640x400 interlaced, the desktop's PAL or NTSC, with the VIDEL's
+ *     window opened 40 lines at each end, as its overscan modes have
+ *     it, to 480; where a mode leaves no room for that (NTSC with too
+ *     few lines below the picture moves up instead), 640x400.
+ *   - An ST, an STE or a Mega STE: no screen of 640 pixels in 16
+ *     colours. The call gives what the other options asked give its
+ *     width of 320 (320x200, or 320x240 tall), with the error set.
+ *   The screen is an ordinary 4-plane surface, the display page
+ *   itself: 320 bytes a row, 153.6K a page in ST RAM, every call and a
+ *   program's own writes working on it, Flip a page swap. Branch on
+ *   the screen's w (640 or 320) and h (480, 400 or the ST's). It wins
+ *   over the colour and the tall screen for a call asking more than 320
+ *   pixels; a call asking 320 gets those as before. The cursor is
+ *   refused on it, as on every responsive screen.
+ *
  * A responsive screen on a TT or a Falcon is always double-buffered,
  * and with STDL_TRIPLEBUF it has a third page, as an ST's screen has
  * (stdl_video.h): another of the display's, 153.6K of ST RAM on a TT
  * (and 38.4K more for the tall 16-colour screen's own copy), 64-92K on
- * a Falcon in 256 colours and 38-46K in 16. Without the memory it has
- * two, its flags say so and the error says why.
+ * a Falcon in 256 colours and 38-46K in 16, and 153.6K for the wide
+ * screen on both. Without the memory it has two, its flags say so and
+ * the error says why.
  * Its colours 0-15 start as an ST screen's do, and every palette call
  * reaches the TT's and the Falcon's own registers, staged ones and
  * STDL_SetColour too; a word for the ST's registers sets its entry at
@@ -139,6 +160,7 @@ extern "C" {
 #define STDL_RESPONSIVE_TALL   0x0002u
 #define STDL_RESPONSIVE_HEIGHT 0x0004u
 #define STDL_RESPONSIVE_BANKS 0x0008u
+#define STDL_RESPONSIVE_WIDE   0x0010u
 
 /*
  * 0, or -1 for an option this library does not know, or while a
@@ -149,13 +171,15 @@ extern "C" {
  */
 struct stdl_resp_model;
 struct stdl_resp_banks;
-extern const struct stdl_resp_model stdl_resp_colour, stdl_resp_tall;
+extern const struct stdl_resp_model stdl_resp_colour, stdl_resp_tall,
+                                    stdl_resp_wide;
 extern const struct stdl_resp_banks stdl_resp_banks;
 void stdl_resp_tall_st(int h);
 int stdl_use_responsive(unsigned what, const struct stdl_resp_model *colour,
                         const struct stdl_resp_model *tall,
                         void (*st_tall)(int h),
-                        const struct stdl_resp_banks *banks);
+                        const struct stdl_resp_banks *banks,
+                        const struct stdl_resp_model *wide);
 
 /* the height and the tall screen are one screen on a TT and a Falcon;
  * only the tall one opens an ST's border. Always inline: gcc 4.6 left
@@ -172,7 +196,8 @@ int STDL_UseResponsive(unsigned what)
         (what & STDL_RESPONSIVE_TALL) ? stdl_resp_tall_st : 0,
         /* the art is the colour's: alone it could never load */
         (what & STDL_RESPONSIVE_BANKS) && (what & STDL_RESPONSIVE_COLOUR)
-            ? &stdl_resp_banks : 0);
+            ? &stdl_resp_banks : 0,
+        (what & STDL_RESPONSIVE_WIDE) ? &stdl_resp_wide : 0);
 }
 
 #ifdef __cplusplus

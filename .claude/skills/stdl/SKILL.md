@@ -61,9 +61,18 @@ by name, once, before the first `STDL_SetVideoMode`
   over the ST's art (`depth=hi` and `low`, colours 16 families of 16),
   for surfaces, sprites, tilesets and palettes. 2.1K, linked by this
   option alone (`docs/format.md` section 6.1).
+- `STDL_RESPONSIVE_WIDE`, with a width over 320: 640x480 in 16 colours
+  on a TT (TT Medium) and a Falcon (on RGB or a TV 640x400 interlaced
+  opened to 480 lines, or 400 where it cannot open), an ordinary 4-plane
+  surface over the display page, 320 bytes a row, Flip a page swap; an
+  ST has no such screen and gets its 320 pixels with the error set, so
+  branch on `w`. A page is 153.6K of ST RAM; with 4.8 times an ST's
+  pixels and no BLiTTER, draw what changed (`STDL_DirtyRestore` a page:
+  `examples/widedemo.c`). For a TT- or Falcon-only game, or a PC game
+  drawn at 640x480 in 16 colours (`docs/responsive.md`).
 
-Then branch on what the screen says - `format->BitsPerPixel` and `h` -
-never on the machine. Keep colours 0-15 the ST's palette, so text and
+Then branch on what the screen says - `format->BitsPerPixel`, `w` and
+`h` - never on the machine. Keep colours 0-15 the ST's palette, so text and
 the HUD look the same everywhere, and put the extra shades above them.
 What it costs: the colour's code is about 25K of program (on a 512K ST
 link libcmini - one port kept 107K free with it); a TT copies what
@@ -150,7 +159,7 @@ the person who asked for the port, or work to plan for.
 
 | Program uses | On STDL |
 |---|---|
-| more than 320x200 (640x480, 640x400, a resizable window) | the screen is 320x200 on every ST: redesign the layout for it (a camera over a bigger world, art halved). 240 rows are an option: on every machine with an ST's bottom border open (`STDL_RESPONSIVE_TALL`, `docs/overscan.md`), or only on a TT or a Falcon (`STDL_RESPONSIVE_HEIGHT`, `docs/responsive.md`) |
+| more than 320x200 (640x480, 640x400, a resizable window) | the screen is 320x200 on every ST: redesign the layout for it (a camera over a bigger world, art halved). 240 rows are an option: on every machine with an ST's bottom border open (`STDL_RESPONSIVE_TALL`, `docs/overscan.md`), or only on a TT or a Falcon (`STDL_RESPONSIVE_HEIGHT`, `docs/responsive.md`). A game for a TT or a Falcon only, or one that keeps a 640x480 layout there, can have 640x480 in 16 colours (`STDL_RESPONSIVE_WIDE`), with no ST fallback but 320 pixels |
 | more than 16 colours at once (8-bit palettes, palette logic over 256 entries) | 16 at a time from the ST's 512 (an STE's 4096): quantise the art offline (`stdlconv bmp16 --st-palette`) and give the palette an explicit budget (`docs/porting.md`, "Rewrite patterns"). 256 colours only on a TT or a Falcon, as an option (`docs/responsive.md`) |
 | 16- or 32-bit colour, alpha blending, colour modulation | not there: no per-pixel alpha, no blending, no blit-time remap. Convert the art to 16 colours; do effects with the palette, and recoloured copies with `STDL_RemapSurface` at load |
 | drawing pixel by pixel into a frame buffer (software 3D, raycasters, plasma, pixel effects) | slow in planar, and there is no chunky buffer: rewrite as fills, spans, polygons and point lists (Porting workflow, step 3). 250 points cost 11ms of a 20ms frame on a plain ST, so a full-screen per-pixel effect is a redesign |

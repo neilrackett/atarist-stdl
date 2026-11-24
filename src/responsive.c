@@ -109,10 +109,12 @@ static const stdl_resp_video_t resp_video = {
 int stdl_use_responsive(unsigned what, const struct stdl_resp_model *colour,
                         const struct stdl_resp_model *tall,
                         void (*st_tall)(int h),
-                        const struct stdl_resp_banks *banks)
+                        const struct stdl_resp_banks *banks,
+                        const struct stdl_resp_model *wide)
 {
     if (what & ~(STDL_RESPONSIVE_COLOUR | STDL_RESPONSIVE_TALL
-                 | STDL_RESPONSIVE_HEIGHT | STDL_RESPONSIVE_BANKS)) {
+                 | STDL_RESPONSIVE_HEIGHT | STDL_RESPONSIVE_BANKS
+                 | STDL_RESPONSIVE_WIDE)) {
         STDL_SetError("unknown responsive option");
         return -1;
     }
@@ -122,9 +124,11 @@ int stdl_use_responsive(unsigned what, const struct stdl_resp_model *colour,
     }
     stdl_rs.colour = colour;
     stdl_rs.tall = tall;
+    stdl_rs.wide = wide;
     stdl_rs.st_tall = st_tall;
     stdl_resp_bank = banks;
-    stdl_resp_video = (colour != NULL || tall != NULL) ? &resp_video : NULL;
+    stdl_resp_video = (colour != NULL || tall != NULL || wide != NULL)
+                    ? &resp_video : NULL;
     return 0;
 }
 
@@ -137,15 +141,19 @@ int stdl_use_responsive(unsigned what, const struct stdl_resp_model *colour,
  * the first one's screen back, and under an ST mode set its mode stayed
  * up beneath the ST's pages, surfaces made after it with 8 planes. For
  * an ST set the display is ST Low again before the set's own work, its
- * colours to the ST's registers (the shutdown drops the sink).
+ * colours to the ST's registers (the shutdown drops the sink). The wide
+ * screen asked for on an ST is its 320 pixels, which the error says.
  */
 static int resp_enter(int w, int h, int bpp)
 {
-    const int take = stdl.mach.mch_cookie >= 0x00020000UL
-        && ((stdl_rs.colour != NULL && bpp >= 8)
-            || (stdl_rs.tall != NULL && h > 200));
+    const int wide = stdl_rs.wide != NULL && w > 320;
+    const int take = (wide || (stdl_rs.colour != NULL && bpp >= 8)
+                      || (stdl_rs.tall != NULL && h > 200))
+                     && stdl.mach.mch_cookie >= 0x00020000UL;
 
-    (void)w;
+    if (wide && !take) {
+        STDL_SetError("640x480: an ST has 320 pixels");
+    }
     if (stdl_resp_screen != NULL) {
         resp_shutdown();
 #ifdef __m68k__
@@ -431,23 +439,22 @@ void resp_third_lost(void)
 
 STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
 {
-    const int colour = stdl_rs.colour != NULL && bpp >= 8;
+    /* the wide screen for a call asking more than 320 pixels; the
+     * colour and the tall one for 320 */
     const int tall = stdl_rs.tall != NULL && h > 200;
-    const resp_model *m = colour ? stdl_rs.colour : stdl_rs.tall;
-    int i, rows, wide, vga, lines;
+    const resp_model *m = stdl_rs.wide != NULL && w > 320 ? stdl_rs.wide
+                        : stdl_rs.colour != NULL && bpp >= 8 ? stdl_rs.colour
+                        : tall ? stdl_rs.tall : NULL;
+    int i, rows, bytes, vga, lines;
     uint8_t *p;
 #ifdef __m68k__
     int16_t mode = 0;
 #endif
 
-    (void)w;
-    if (m == NULL || (!colour && !tall)) {
+    if (m == NULL) {
         STDL_SetError("no responsive screen asked for");
         return NULL;
     }
-    rows = tall ? 240 : 200;
-    /* 320 pixels in the screen's planes, in bytes */
-    wide = m->planes == 8 ? 320 : 160;
 #ifdef __m68k__
     stdl_rs.falcon = (uint8_t)stdl_is_falcon();
     vga = stdl_rs.falcon && VgetMonitor() == MON_VGA;
@@ -457,32 +464,42 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
 #endif
     stdl_rs.left = 0;
     stdl_rs.dbl = 0;
-    if (!stdl_rs.falcon) {
-        /* TT Low, 8 planes whatever the screen's */
-        lines = 480;
-        stdl_rs.line = 320;
-        stdl_rs.dbl = 1;
-    } else if (vga || rows == 200) {
-        lines = vga ? 240 : 200;
-        stdl_rs.line = (int16_t)wide;
+    stdl_rs.w = 320;
+    if (m->geometry != NULL) {
+        /* a screen of the model's own size (wide4.c) */
+        lines = m->geometry(vga);
+        rows = stdl_rs.h;
     } else {
-        /* 240 lines on RGB or a TV take overscan: 384 pixels a line,
-         * the picture 32 in */
-        lines = 240;
-        stdl_rs.line = (int16_t)(m->planes == 8 ? 384 : 192);
-        stdl_rs.left = (int16_t)(m->planes == 8 ? 32 : 16);
-    }
+        rows = tall ? 240 : 200;
+        /* 320 pixels in the screen's planes, in bytes */
+        bytes = m->planes == 8 ? 320 : 160;
+        if (!stdl_rs.falcon) {
+            /* TT Low, 8 planes whatever the screen's */
+            lines = 480;
+            stdl_rs.line = 320;
+            stdl_rs.dbl = 1;
+        } else if (vga || rows == 200) {
+            lines = vga ? 240 : 200;
+            stdl_rs.line = (int16_t)bytes;
+        } else {
+            /* 240 lines on RGB or a TV take overscan: 384 pixels a
+             * line, the picture 32 in */
+            lines = 240;
+            stdl_rs.line = (int16_t)(m->planes == 8 ? 384 : 192);
+            stdl_rs.left = (int16_t)(m->planes == 8 ? 32 : 16);
+        }
 #ifdef __m68k__
-    if (stdl_rs.falcon) {
-        mode = (int16_t)((m->planes == 8 ? BPS8 : BPS4) | COL40
-                         | (vga ? (VGA | VERTFLAG)
-                                /* the desktop's PAL or NTSC: a set or
-                                 * a monitor made for one may not sync
-                                 * to the other */
-                                : ((stdl.old_vmode & PAL)
-                                   | (rows > 200 ? OVERSCAN : 0))));
-    }
+        if (stdl_rs.falcon) {
+            mode = (int16_t)((m->planes == 8 ? BPS8 : BPS4) | COL40
+                             | (vga ? (VGA | VERTFLAG)
+                                    /* the desktop's PAL or NTSC: a set
+                                     * or a monitor made for one may not
+                                     * sync to the other */
+                                    : ((stdl.old_vmode & PAL)
+                                       | (rows > 200 ? OVERSCAN : 0))));
+        }
 #endif
+    }
     stdl_rs.page_bytes = stdl_row_off(lines, (uint16_t)stdl_rs.line);
     /* always double-buffered: a page is shown while the next is drawn,
      * and a third asked for lets the next frame start before the VBL */
@@ -503,7 +520,6 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
         memset(p, 0, stdl_rs.page_bytes);
         stdl_rs.page[i] = p;
     }
-    stdl_rs.w = 320;
     stdl_rs.h = (int16_t)rows;
     stdl_rs.top = (int16_t)((((lines >> stdl_rs.dbl) - rows) >> 1)
                             << stdl_rs.dbl);
@@ -529,7 +545,7 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
     stdl_rs.format.BytesPerPixel = 1;
 
     memset(&stdl_rs.screen, 0, sizeof(stdl_rs.screen));
-    p8_init_surface(&stdl_rs.screen.s, 320, rows);
+    p8_init_surface(&stdl_rs.screen.s, stdl_rs.w, rows);
     stdl_rs.screen.s.planes = m->planes;
     stdl_rs.model = m;
     /* kept after a tall screen, for 8-plane surfaces an earlier
@@ -548,10 +564,14 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
     stdl_rs.back = 1;
     m->screen_page(1);
 
-#ifdef __m68k__
+    stdl_pal_write = resp_pal_word;     /* or the model's own */
     /* a resolution change clears the screen, as the console is reset
      * with it, and sets its own colours: ours go after */
-    if (stdl_rs.falcon) {
+    if (m->display != NULL) {
+        m->display(vga);
+    }
+#ifdef __m68k__
+    else if (stdl_rs.falcon) {
         (void)VsetScreen(stdl_rs.page[0], stdl_rs.page[0], 3, mode);
     } else {
         (void)Setscreen(stdl_rs.page[0], stdl_rs.page[0], 7);
@@ -572,8 +592,10 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
         esc[4] = (char)(32 + ((stdl_rs.top + 7) >> 3));
         (void)Cconws(esc);
     }
-    /* once: a second mode set would chain the hook onto itself */
-    if (!stdl_rs.falcon && stdl_shutdown_console == NULL) {
+    /* once: a second mode set would chain the hook onto itself. Only
+     * where a row is two lines: TT Medium's console writes the screen's
+     * own layout, as an ST's and a Falcon's do */
+    if (stdl_rs.dbl && stdl_shutdown_console == NULL) {
         stdl_resp_con_old[0] = XCONOUT[2];
         stdl_resp_con_old[1] = XCONOUT[5];
         XCONOUT[2] = (uint32_t)(uintptr_t)stdl_resp_con2;
@@ -582,7 +604,6 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
     }
 #endif
     stdl_resp_con_wrote = 0;
-    stdl_pal_write = resp_pal_word;
     if (m->planes == 8) {
         stdl_pal_flush8 = resp_flush;
         resp_registers(stdl_rs.colours, 0, 256);

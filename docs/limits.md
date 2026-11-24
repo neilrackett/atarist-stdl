@@ -26,8 +26,10 @@ stop trying and redesign instead.
 * `STDL_SetVideoMode` yields the 320x200x4 screen; requested
   width/height/bpp are accepted for source compatibility and
   ignored, unless a program has asked for a responsive option
-  (`stdl_responsive.h`), when a bpp of 8 asks for the colour and a
-  height over 200 for the tall screen. On a monochrome monitor it fails (mono emulation is a
+  (`stdl_responsive.h`), when a bpp of 8 asks for the colour, a
+  height over 200 for the tall screen and a width over 320 for the
+  wide one (640x480 in 16 colours on a TT or a Falcon only; an ST has
+  no such screen and gets its 320 pixels with the error set). On a monochrome monitor it fails (mono emulation is a
   post-v1 feature, see the design overview section 3.4). On a TT or
   a Falcon that screen is ST Low, the TT's line-doubled by its
   monitor, unless the program asks for more: `stdl_responsive.h`

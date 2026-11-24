@@ -122,20 +122,34 @@ const SDL_VideoInfo *SDL_GetVideoInfo(void)
     videoinfo.video_mem = 32;           /* one 32K frame */
     videoinfo.current_w = 320;
     videoinfo.current_h = 200;
+    if (screen != NULL) {
+        /* the screen's own: 320x240 tall, 640x480 wide (150K) */
+        videoinfo.current_w = screen->w;
+        videoinfo.current_h = screen->h;
+        videoinfo.video_mem = (Uint32)stdl_row_off(screen->h,
+                                                   screen->stride) >> 10;
+    }
     videoinfo.vfmt = (screen != NULL) ? screen->format : NULL;
     return &videoinfo;
 }
 
+/* the screen's size once there is one, 320x200 before */
 SDL_Rect **SDL_ListModes(SDL_PixelFormat *format, Uint32 flags)
 {
+    STDL_Surface *screen = STDL_GetVideoSurface();
+
     (void)format; (void)flags;
+    if (screen != NULL) {
+        mode_rect.w = (Uint16)screen->w;
+        mode_rect.h = (Uint16)screen->h;
+    }
     return mode_list;
 }
 
 int SDL_VideoModeOK(int width, int height, int bpp, Uint32 flags)
 {
     (void)width; (void)height; (void)bpp; (void)flags;
-    return 4;                           /* everything becomes 320x200x4 */
+    return 4;                           /* everything becomes the screen's */
 }
 
 char *SDL_VideoDriverName(char *namebuf, int maxlen)

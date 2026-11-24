@@ -924,17 +924,18 @@ static void handle_mouse_buttons(uint8_t ikbd_bits)
     mouse_state = new_state;
 }
 
-/* The mouse's reach: the screen's rows - 240 on a responsive or tall
- * screen, an open border's on an ST - or an ST's 200 with none up. It
- * was 200 always, which left a 240-row screen's bottom 40 rows out of
- * the mouse's reach. */
+/* The mouse's reach: the screen's - 240 rows on a responsive or tall
+ * screen, an open border's on an ST, 640x480 on a wide one - or an
+ * ST's 320x200 with none up. It was 320x200 always, which left a
+ * 240-row screen's bottom 40 rows out of the mouse's reach. */
 static void clamp_mouse(void)
 {
     const STDL_Surface *s = STDL_GetVideoSurface();
+    const int16_t cols = s ? s->w : STDL_SCREEN_W;
     const int16_t rows = s ? s->h : STDL_SCREEN_H;
     if (mouse_x < 0) mouse_x = 0;
     if (mouse_y < 0) mouse_y = 0;
-    if (mouse_x >= STDL_SCREEN_W) mouse_x = STDL_SCREEN_W - 1;
+    if (mouse_x >= cols) mouse_x = (int16_t)(cols - 1);
     if (mouse_y >= rows) mouse_y = (int16_t)(rows - 1);
 }
 
@@ -1215,7 +1216,7 @@ void STDL_WarpMouse(uint16_t x, uint16_t y)
     STDL_Event ev;
     const int16_t ox = mouse_x, oy = mouse_y;
 
-    mouse_x = (int16_t)(x > STDL_SCREEN_W ? STDL_SCREEN_W : x);
+    mouse_x = (int16_t)(x > 0x7FFF ? 0x7FFF : x);
     mouse_y = (int16_t)(y > 0x7FFF ? 0x7FFF : y);
     clamp_mouse();
     memset(&ev, 0, sizeof(ev));

@@ -910,5 +910,7 @@ int p8ref_use(unsigned what)
                                ? &stdl_resp_tall : NULL,
                                (what & STDL_RESPONSIVE_TALL)
                                ? stdl_resp_tall_st : NULL,
-                               NULL);     /* no bank art on two halves */
+                               NULL,      /* no bank art on two halves */
+                               (what & STDL_RESPONSIVE_WIDE)
+                               ? &stdl_resp_wide : NULL);
 }

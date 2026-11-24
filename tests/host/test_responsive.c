@@ -26,7 +26,9 @@
 static int stdl_host_resp_falcon, stdl_host_resp_vga;
 #define SET_MACHINE(f, v) ((void)(f), (void)(v))
 #else
-extern int stdl_host_resp_falcon, stdl_host_resp_vga;
+extern int stdl_host_resp_falcon, stdl_host_resp_vga, stdl_host_resp_400;
+extern int stdl_host_resp_bank;
+extern uint32_t stdl_host_resp_regs[256];
 #define SET_MACHINE(f, v) (stdl_host_resp_falcon = (f), \
                            stdl_host_resp_vga = (v))
 #endif
@@ -754,6 +756,245 @@ static void test_tall4(int falcon, int vga)
     stdl_resp_video->shutdown();
     stdl_resp_screen = NULL;
 }
+
+/*
+ * The wide screen (STDL_RESPONSIVE_WIDE): 640x480 in 4 planes, the
+ * display page itself, on a TT (TT Medium) and a Falcon's VGA and RGB,
+ * and 640x400 on RGB without room for 480 lines. Fills, pixels, lines,
+ * blits plain and keyed and sprites pre-shifted and not, at random over
+ * the whole screen - rows past 64K of the page included - against a
+ * model a byte a pixel; every page shown decoded and compared. The
+ * colours go to the TT's selected bank, and the call is the colour's
+ * or the tall screen's where it asks 320 pixels.
+ */
+static uint8_t wmodel[480][640];
+
+/* pixel x of a 4-plane row, the planes as the machine's words */
+static int wpix(const uint8_t *row, int x)
+{
+    const uint16_t *g = (const uint16_t *)(const void *)(row + (x >> 4) * 8);
+    const int b = 15 - (x & 15);
+
+    return ((g[0] >> b) & 1) | (((g[1] >> b) & 1) << 1)
+         | (((g[2] >> b) & 1) << 2) | (((g[3] >> b) & 1) << 3);
+}
+
+static void wfill(int x, int y, int w, int h, int c, int sw, int sh)
+{
+    int i, j;
+
+    for (j = y; j < y + h; j++) {
+        for (i = x; i < x + w; i++) {
+            if (i >= 0 && j >= 0 && i < sw && j < sh) {
+                wmodel[j][i] = (uint8_t)c;
+            }
+        }
+    }
+}
+
+static void test_wide4(int falcon, int vga, int no480, uint32_t flags)
+{
+    STDL_Surface *scr, *src;
+    STDL_Sprite *spr[2];
+    uint8_t srcm[48][64];
+    int f, i, x, y, sw, sh, k;
+
+    SET_MACHINE(falcon, vga);
+    g_h = 480;
+    g_tall = STDL_RESPONSIVE_TALL;
+    g_flags = flags;
+#ifndef __m68k__
+    stdl_host_resp_400 = no480;
+    stdl_host_resp_bank = falcon ? 0 : 3;
+#else
+    (void)no480;
+#endif
+    g_what = STDL_RESPONSIVE_WIDE | STDL_RESPONSIVE_COLOUR
+           | STDL_RESPONSIVE_TALL;
+    CHECK(use_lib() == 0, "wide: use");
+    /* 320 pixels asked: the colour's screen, as without the option */
+    scr = stdl_resp_video->set_mode(320, 200, 8, STDL_DOUBLEBUF);
+    CHECK(scr != NULL && scr->w == 320 && scr->planes == 8,
+          "%s: 320 asked, the colour", cfg());
+    scr = stdl_resp_video->set_mode(640, 480, 8, flags);
+    sh = no480 && falcon && !vga ? 400 : 480;
+    CHECK(scr != NULL && scr->w == 640 && scr->h == sh && scr->planes == 4
+          && scr->format->BitsPerPixel == 4 && scr->stride == 320
+          && scr->clip.w == 640 && scr->clip.h == sh,
+          "%s: 640x%d in 4 planes", cfg(), sh);
+    if (scr == NULL) {
+        goto done;
+    }
+    CHECK(stdl_rs.npages == ((flags & STDL_TRIPLEBUF) ? 3 : 2)
+          && stdl_rs.page_bytes == 153600u && stdl_rs.dbl == 0
+          && stdl_rs.top == 0 && stdl_rs.left == 0,
+          "%s: the display's pages", cfg());
+    sw = 640;
+#ifndef __m68k__
+    /* the colours: TT Medium's are the selected bank's */
+    STDL_SetColour(5, 0x0F00);
+    k = falcon ? 5 : 48 + 5;
+    CHECK(stdl_host_resp_regs[k] == (falcon ? 0xFC000000u : 0x0F00u),
+          "%s: colour 5 into register %d", cfg(), k);
+#endif
+    /* a source of rows 64 wide, colour 0 its key, and sprites of it */
+    src = STDL_CreateSurface(64, 48);
+    for (y = 0; y < 48; y++) {
+        for (x = 0; x < 64; x++) {
+            srcm[y][x] = (uint8_t)(((x * 7 + y * 3) >> 2) & 15);
+            if ((x ^ y) % 5 == 0) {
+                srcm[y][x] = 0;
+            }
+            STDL_PutPixel(src, x, y, srcm[y][x]);
+        }
+    }
+    spr[0] = NULL;
+    spr[1] = NULL;
+    memset(wmodel, 0, sizeof(wmodel));
+    for (f = 0; f < 10; f++) {
+        const int p = stdl_rs.back;
+        const uint8_t *page;
+
+        CHECK(scr->pixels == stdl_rs.page[p], "%s: the page drawn",
+              cfg());
+        if (f == 0) {
+            /* every page starts as the model does */
+            for (k = 0; k < stdl_rs.npages; k++) {
+                memset(stdl_rs.page[k], 0, stdl_rs.page_bytes);
+            }
+        }
+        for (i = 0; i < 12; i++) {
+            STDL_Rect r = rect(rr(-30, 660), rr(-30, 500), rr(0, 200),
+                               rr(0, 160));
+            const int c = rr(0, 15);
+
+            wfill(r.x, r.y, r.w, r.h, c, sw, sh);
+            STDL_FillRect(scr, &r, (uint8_t)c);
+        }
+        /* the corners and the last rows, past 64K */
+        STDL_PutPixel(scr, 639, sh - 1, 9);
+        wmodel[sh - 1][639] = 9;
+        STDL_PutPixel(scr, 0, sh - 1, 10);
+        wmodel[sh - 1][0] = 10;
+        for (i = 0; i < 40; i++) {
+            x = rr(0, 639);
+            y = rr(0, sh - 1);
+            k = rr(0, 15);
+            STDL_PutPixel(scr, x, y, (uint8_t)k);
+            wmodel[y][x] = (uint8_t)k;
+        }
+        for (i = 0; i < 4; i++) {
+            const int l = rr(0, 400);
+
+            y = rr(0, sh - 1);
+            x = rr(-10, 300);
+            k = rr(0, 15);
+            STDL_HLine(scr, x, x + l, y, (uint8_t)k);  /* both ends */
+            wfill(x, y, l + 1, 1, k, sw, sh);
+            STDL_VLine(scr, x + 300, y - l, y, (uint8_t)k);
+            wfill(x + 300, y - l, 1, l + 1, k, sw, sh);
+        }
+        /* blits, plain then keyed, at any phase */
+        for (i = 0; i < 8; i++) {
+            STDL_Rect sr = rect(rr(0, 20), rr(0, 10), rr(1, 44), rr(1, 38));
+            STDL_Rect dr = rect(rr(-40, 650), rr(-40, sh + 10), 0, 0);
+            const int keyed = i & 1;
+            int dx, dy;
+
+            if (keyed) {
+                STDL_SetColourKey(src, 1, 0);
+            } else {
+                STDL_SetColourKey(src, 0, 0);
+            }
+            for (dy = 0; dy < sr.h; dy++) {
+                for (dx = 0; dx < sr.w; dx++) {
+                    const int c = srcm[sr.y + dy][sr.x + dx];
+
+                    if (keyed && c == 0) {
+                        continue;
+                    }
+                    wfill(dr.x + dx, dr.y + dy, 1, 1, c, sw, sh);
+                }
+            }
+            STDL_BlitSurface(src, &sr, scr, &dr);
+        }
+        if (f == 1) {
+            STDL_SetColourKey(src, 1, 0);
+            spr[0] = STDL_SpriteFromSurface(src, 32, 0);
+            spr[1] = STDL_SpriteFromSurface(src, 32, STDL_PRESHIFT);
+        }
+        for (i = 0; i < 6 && spr[0] != NULL && spr[1] != NULL; i++) {
+            const int fr = i & 1;
+            int dx, dy;
+
+            x = rr(-40, 660);
+            y = rr(-60, sh + 10);
+            for (dy = 0; dy < 48; dy++) {
+                for (dx = 0; dx < 32; dx++) {
+                    const int c = srcm[dy][fr * 32 + dx];
+
+                    if (c != 0) {
+                        wfill(x + dx, y + dy, 1, 1, c, sw, sh);
+                    }
+                }
+            }
+            STDL_BlitSprite(spr[(i >> 1) & 1], fr, scr, x, y);
+        }
+        stdl_resp_video->flip();
+        page = stdl_rs.page[p];
+        for (y = 0; y < sh; y++) {
+            for (x = 0; x < 640; x++) {
+                if (wpix(page + (size_t)y * 320, x) != wmodel[y][x]) {
+                    CHECK(0, "%s, frame %d: pixel %d,%d is %d, not %d",
+                          cfg(), f, x, y, wpix(page + (size_t)y * 320, x),
+                          wmodel[y][x]);
+                    y = sh;
+                    break;
+                }
+            }
+        }
+        /* the next page drawn catches up with the model: what the
+         * program does when it redraws, here a copy of the shown */
+        memcpy(stdl_rs.page[stdl_rs.back], page, stdl_rs.page_bytes);
+    }
+    STDL_FreeSprite(spr[0]);
+    STDL_FreeSprite(spr[1]);
+    STDL_FreeSurface(src);
+done:
+    stdl_resp_video->shutdown();
+    stdl_resp_screen = NULL;
+#ifndef __m68k__
+    stdl_host_resp_400 = 0;
+    stdl_host_resp_bank = 0;
+#endif
+    g_flags = STDL_DOUBLEBUF;
+}
+
+#ifndef __m68k__
+/* the wide screen on an ST: not taken, the error set; on a TT taken
+ * only where more than 320 pixels are asked */
+static void test_wide_enter(void)
+{
+    const uint32_t mch = stdl.mach.mch_cookie;
+
+    g_what = STDL_RESPONSIVE_WIDE;
+    CHECK(use_lib() == 0, "wide alone: use");
+    stdl.mach.mch_cookie = 0x00010000UL;            /* an STE */
+    STDL_SetError("");
+    CHECK(!stdl_resp_video->enter(640, 480, 4), "wide: an ST's own screen");
+    CHECK(strstr(STDL_GetError(), "640x480") != NULL,
+          "wide: an ST says why (%s)", STDL_GetError());
+    stdl.mach.mch_cookie = 0x00020000UL;            /* a TT */
+    STDL_SetError("");
+    CHECK(stdl_resp_video->enter(640, 480, 4)
+          && STDL_GetError()[0] == '\0', "wide: a TT's own");
+    CHECK(!stdl_resp_video->enter(320, 200, 4), "wide: 320 on a TT");
+    CHECK(!stdl_resp_video->enter(320, 240, 8),
+          "wide alone: 320x240x8 is no wide screen");
+    stdl.mach.mch_cookie = mch;
+    CHECK(STDL_UseResponsive(0x0100) < 0, "an unknown option refused");
+}
+#endif
 
 /*
  * The console's text on a TT's 8-plane screen: once it has written,
@@ -2400,6 +2641,8 @@ int main(void)
     g_tall = STDL_RESPONSIVE_HEIGHT;
     TIMED(compare(0, 0, 240, 7));
     TIMED(test_tall4(0, 0));
+    TIMED(test_wide4(0, 0, 0, STDL_DOUBLEBUF));
+    TIMED(test_wide4(0, 0, 0, STDL_TRIPLEBUF));
     STDL_Quit();
     fprintf(stderr, failures ? "RC:%d failure(s)\nRC:done\n"
                              : "RC:ok\nRC:done\n", failures);
@@ -2427,6 +2670,12 @@ int main(void)
     TIMED(test_tall4(0, 0));
     TIMED(test_tall4(1, 0));
     TIMED(test_height());
+    TIMED(test_wide4(0, 0, 0, STDL_DOUBLEBUF));    /* TT Medium */
+    TIMED(test_wide4(1, 1, 0, STDL_DOUBLEBUF));    /* Falcon VGA */
+    TIMED(test_wide4(1, 0, 0, STDL_TRIPLEBUF));    /* Falcon RGB, 480 */
+    TIMED(test_wide4(1, 0, 1, STDL_DOUBLEBUF));    /* RGB, no room: 400 */
+    TIMED(test_wide4(0, 0, 0, STDL_TRIPLEBUF));
+    TIMED(test_wide_enter());
     if (failures) {
         printf("test_responsive: %d failure(s)\n", failures);
         return 1;

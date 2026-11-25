@@ -12,13 +12,13 @@
 #include <stdl/stdl.h>
 #include "SDL.h"
 
-enum { FAKE_TT, FAKE_VGA, FAKE_RGB };
+enum { FAKE_TT, FAKE_VGA };
 
 extern int fake_layout, fake_third, fake_npages, fake_shown;
 extern int fake_flips, fake_waits, fake_stagings;
 extern STDL_Colour fake_regs[256];
 extern Uint8 *fake_page[3];
-extern long fake_stride, fake_margin;
+extern long fake_stride;
 extern int fake_tall, fake_st_rows, fake_wide, fake_wide_rows;
 extern STDL_MachineInfo fake_mach;
 

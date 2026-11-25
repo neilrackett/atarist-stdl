@@ -460,7 +460,7 @@ void resp_third_lost(void)
  * was, where a mode set some other way leaves no room above either.
  * Read after the VBL that takes the mode set.
  */
-int resp_falcon_window(void)
+static int resp_falcon_window(void)
 {
 #ifdef __m68k__
     int vdb, vde, vbb, vbe;
@@ -486,12 +486,6 @@ int resp_falcon_window(void)
 #endif
 }
 
-void resp_rows(int rows)
-{
-    stdl_rs.h = stdl_rs.screen.s.h = (int16_t)rows;
-    stdl_rs.screen.s.clip.h = (uint16_t)rows;
-}
-
 /* the screen a call asks for of those asked for: the wide one for more
  * than 320 pixels, the colour or the tall one for 320, or none */
 static const resp_model *resp_pick(int w, int h, int bpp)
@@ -505,7 +499,7 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
 {
     const int tall = stdl_rs.tall != NULL && h > 200;
     const resp_model *m = resp_pick(w, h, bpp);
-    int i, rows, bytes, vga, lines;
+    int i, rows, bytes, vga, lines, own;
     uint8_t *p;
 #ifdef __m68k__
     int16_t mode = 0;
@@ -624,18 +618,21 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
      * with it, and sets its own colours: ours go after */
     if (m->display != NULL) {
         m->display(vga);
-    } else {
+    }
 #ifdef __m68k__
-        if (stdl_rs.falcon) {
-            (void)VsetScreen(stdl_rs.page[0], stdl_rs.page[0], 3, mode);
-        } else {
-            (void)Setscreen(stdl_rs.page[0], stdl_rs.page[0], 7);
-        }
+    else if (stdl_rs.falcon) {
+        (void)VsetScreen(stdl_rs.page[0], stdl_rs.page[0], 3, mode);
+    } else {
+        (void)Setscreen(stdl_rs.page[0], stdl_rs.page[0], 7);
+    }
 #endif
-        if (stdl_rs.falcon && !vga && rows > 200
-            && !resp_falcon_window()) {
-            resp_rows(200);
-        }
+    /* a Falcon's RGB or TV: rows past its mode's own lines (400
+     * interlaced for the wide screen, 200 for the others) are the
+     * window opened; where it cannot be, the mode's */
+    own = m->w != 0 ? 400 : 200;
+    if (stdl_rs.falcon && !vga && rows > own && !resp_falcon_window()) {
+        stdl_rs.h = stdl_rs.screen.s.h = (int16_t)own;
+        stdl_rs.screen.s.clip.h = (uint16_t)own;
     }
 #ifdef __m68k__
     stdl_vbl_hz = stdl_measure_vbl();

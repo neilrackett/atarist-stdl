@@ -162,7 +162,6 @@ struct SDL_Renderer {
     STDL_Surface *screen;
     long stride;                /* bytes a row */
     long dp;                    /* bytes a line: a TT's row is two */
-    long margin;                /* bytes before the picture in a line */
     int dbl;
     int npages;
     int cur;                    /* the page being drawn on */
@@ -499,7 +498,7 @@ static Uint8 *back_page(SDL_Renderer *r)
             st_fill(r, pix, r->x);
         } else
 #endif
-        memset(pix - r->margin, 0, (size_t)r->stride * SCREEN_H);
+        memset(pix, 0, (size_t)r->stride * SCREEN_H);
         r->clear[p] = 0;
     }
     return pix - ROW0 * r->stride;
@@ -621,7 +620,7 @@ SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, int index, Uint32 flags)
     r->stride = the_screen->stride;
 #ifdef STDL_SDL2_ST
     if (st_on) {
-        /* an ST's page: a line a row, no margin */
+        /* an ST's page: a line a row */
         r->dp = r->stride;
         r->bits = STDL_GetMachineInfo()->is_ste ? 4 : 3;
         r->dither = SDL_GetHintBoolean(STDL_SDL2_HINT_ST_DITHER, SDL_TRUE);
@@ -632,8 +631,6 @@ SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, int index, Uint32 flags)
         /* a TT's 320x240 is TT Low's 480 lines, a row on two of them */
         r->dbl = r->stride == 2 * SCREEN_W;
         r->dp = r->dbl ? r->stride / 2 : r->stride;
-        /* a Falcon's RGB line is 384 pixels, the picture in its middle */
-        r->margin = (r->dp - SCREEN_W) / 2;
         r->npages = (the_screen->flags & STDL_TRIPLEBUF) ? 3 : 2;
         r->v = &stdl_sdl2_c2p_plain;
     }
@@ -1964,12 +1961,11 @@ static void catch_up(SDL_Renderer *r, Uint8 *back)
     }
 }
 
-/* the page about to be shown against the model converted, margins and
- * all */
+/* the page about to be shown against the model converted */
 static void check(SDL_Renderer *r, const Uint8 *back)
 {
     const size_t bytes = (size_t)r->stride * ROWS;
-    const Uint8 *a = back + ROW0 * r->stride - r->margin;
+    const Uint8 *a = back + ROW0 * r->stride;
     size_t i;
     memset(r->scratch, 0, bytes);
 #ifdef STDL_SDL2_ST
@@ -1978,7 +1974,7 @@ static void check(SDL_Renderer *r, const Uint8 *back)
                          r->dp, GROUPS, ROWS, ST_TABS(r, ROW0));
     } else
 #endif
-    stdl_sdl2_c2p_c(r->model, SCREEN_W, r->scratch + r->margin, r->dp,
+    stdl_sdl2_c2p_c(r->model, SCREEN_W, r->scratch, r->dp,
                     GROUPS, SCREEN_H, r->dbl, r->x2, r->x0);
     r->chk.flips++;
     for (i = 0; i < bytes; i++) {
@@ -2093,7 +2089,7 @@ int STDL_SDL2_ClearScreenNow(SDL_Renderer *renderer)
 #endif
     if (r->shown) {
         shown = page_index(r, (Uint8 *)r->shown);
-        memset((Uint8 *)r->shown - r->margin, 0, (size_t)r->stride * SCREEN_H);
+        memset((Uint8 *)r->shown, 0, (size_t)r->stride * SCREEN_H);
     }
     for (p = 0; p < r->npages; p++) {
         r->clear[p] = p != shown;
@@ -2112,8 +2108,7 @@ int STDL_SDL2_GetShownPage(SDL_Renderer *renderer, const Uint8 **base,
         return SDL_InvalidParamError("renderer");
     }
     if (base) {
-        *base = renderer->shown ? renderer->shown +
-                                  ROW0 * renderer->stride - renderer->margin
+        *base = renderer->shown ? renderer->shown + ROW0 * renderer->stride
                                 : NULL;
     }
     if (bytes) {

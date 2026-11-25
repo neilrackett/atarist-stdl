@@ -332,8 +332,7 @@ static void texture(void)
     SDL_RenderPresent(r);
     /* the page shown, read back from its 8 planes */
     for (y = 0; y < 10; y++) {
-        const Uint8 *row = fake_page[fake_shown] + (7 + y) * fake_stride +
-                           fake_margin;
+        const Uint8 *row = fake_page[fake_shown] + (7 + y) * fake_stride;
         for (x = 0; x < 48; x++) {
             const int sx = 32 + x, g = sx >> 4, bit = 15 - (sx & 15);
             int p, v = 0;

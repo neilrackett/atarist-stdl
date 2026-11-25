@@ -650,8 +650,9 @@ console, unless `STDL_UseBanner(0)` came first.
     screen is 640x400 (`h` says so). The registers count half-lines of
     a field, so 40 is 20 lines of the beam at each end, 40 rows of the
     interlaced frame; the 320-pixel screens' 240 rows on RGB open the
-    same 40 in their 200-line mode (`resp_falcon_window`, below). The
-    desktop's `VsetScreen` at exit reprograms them.
+    same 40 in their 200-line mode (`resp_falcon_window`, below), which
+    the mode set does after any screen's display hook. The desktop's
+    `VsetScreen` at exit reprograms them.
   - **No console hook**: TT Medium's console writes the screen's own
     layout, as an ST's does; only a doubled row (TT Low) needs one.
   - **An ST gets its 320 pixels** with the error set in the mode set's
@@ -670,8 +671,9 @@ console, unless `STDL_UseBanner(0)` came first.
   line with the picture 32 pixels in, the VIDEL reading the 64 pixels
   of margin from the page every line. Now they set the 200-line mode
   and open the VIDEL's window 40 half-lines at each end after the VBL
-  that takes it, as the wide screen did for its 400 lines, and the one
-  routine serves both.
+  that takes it, as the wide screen did for its 400 lines: the mode set
+  does it once for every screen, after the model's display hook, from
+  the mode's own lines (400 for the wide screen, 200 for the others).
   - **The same window as TOS's.** FALCWIN (`tests/hatari/falcwin.c`)
     sets TOS's three overscan modes, then STDL's screens, and prints
     the VIDEL's vertical registers for each. In PAL, on RGB and a TV,
@@ -689,10 +691,14 @@ console, unless `STDL_UseBanner(0)` came first.
     unmeasured. And one layout on every Falcon monitor: `stdl_rs.left`
     is gone, and with it the stride past the picture that
     `STDL_PutGroup` once wrote through.
-  - **No room** (a mode set some other way) leaves 200 rows, `h` saying
-    so (`resp_rows`), as the wide screen keeps 400.
-  - **Bytes:** the responsive objects 68 fewer: responsive.o +72,
-    wide4.o -116, planes8.o and tall4.o -12 each (`RESP_MAX` lowered).
+  - **No room** (a mode set some other way) leaves the mode's own rows,
+    200 or the wide screen's 400, `h` saying so.
+  - **Bytes:** the responsive objects 148 fewer: responsive.o +28,
+    wide4.o -152, planes8.o and tall4.o -12 each (`RESP_MAX` lowered).
+    The SDL2 add-on worked its margin out from the stride and drew
+    right either way; its renderer lost the margin (`video.o` -64) and
+    its host fakes the 384-byte RGB layout the core no longer makes,
+    which left a Falcon's RGB the same as its VGA there.
   - **Tested:** `test_falcon_window` checks each screen's layout,
     whether the window was asked for (RGB at 240 only), and the
     fallback's rows, clip and fill; seven breakages each failed it. In

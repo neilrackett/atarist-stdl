@@ -5,8 +5,8 @@
  *
  * The STDL calls the SDL2 add-on makes, stood in for on the host: a
  * responsive 256-colour screen in a TT's layout (a row on two lines,
- * 640 bytes), a Falcon's on VGA (320) or on RGB (384, the picture 32
- * bytes in), with two or three pages that STDL_Flip moves through as
+ * 640 bytes) or a Falcon's (320, on every monitor), with two or three
+ * pages that STDL_Flip moves through as
  * STDL does, and registers that STDL_SetColours writes; and STDL's
  * input, events queued by the test and the state it sets. The add-on
  * reaches STDL through these public calls alone, so what it draws and
@@ -19,14 +19,14 @@
 
 #include "fake_stdl.h"
 
-int fake_layout;                /* FAKE_TT, FAKE_VGA or FAKE_RGB */
+int fake_layout;                /* FAKE_TT or FAKE_VGA */
 int fake_third = 1;             /* ST-RAM for a third page */
 int fake_npages;
 int fake_shown;                 /* the page on display */
 int fake_flips, fake_waits, fake_stagings;
 STDL_Colour fake_regs[256];
 Uint8 *fake_page[3];
-long fake_stride, fake_margin;
+long fake_stride;
 int fake_tall, fake_st_rows = 240;  /* TALL asked for; what it gives */
 /* WIDE asked for (a TT's or a Falcon's 640x480 in 16 colours); its
  * rows, 400 for a Falcon's RGB that could not open to 480 */
@@ -108,9 +108,7 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
     }
     /* 8 planes of 240 rows as the layout has them, or an ST's four,
      * 160 bytes a row, which the add-on's ST build asks for */
-    fake_stride = bpp == 4 ? cols / 2 : fake_layout == FAKE_TT ? 640
-                : fake_layout == FAKE_RGB ? 384 : 320;
-    fake_margin = bpp != 4 && fake_layout == FAKE_RGB ? 32 : 0;
+    fake_stride = bpp == 4 ? cols / 2 : fake_layout == FAKE_TT ? 640 : 320;
     fake_npages = ((flags & STDL_TRIPLEBUF) && fake_third) ? 3 : 2;
     for (i = 0; i < fake_npages; i++) {
         fake_page[i] = (Uint8 *)calloc((size_t)fake_stride * h, 1);
@@ -128,7 +126,7 @@ STDL_Surface *STDL_SetVideoMode(int w, int h, int bpp, uint32_t flags)
     surf.planes = (uint8_t)bpp;
     surf.flags = STDL_SCREEN | STDL_DOUBLEBUF |
                  (fake_npages == 3 ? STDL_TRIPLEBUF : 0);
-    surf.pixels = fake_page[back] + fake_margin;
+    surf.pixels = fake_page[back];
     return &surf;
 }
 
@@ -141,7 +139,7 @@ void STDL_Flip(void)
 {
     fake_shown = back;
     back = (back + 1) % fake_npages;
-    surf.pixels = fake_page[back] + fake_margin;
+    surf.pixels = fake_page[back];
     fake_flips++;
 }
 

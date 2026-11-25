@@ -8,7 +8,7 @@
  * should then hold it, with none of the renderer's own arithmetic -
  * no groups, batches, masks or catching up. After every present that
  * flips, the page shown must be the model converted to planes byte
- * for byte, a pixel at a time, margins and all, and the registers the
+ * for byte, a pixel at a time, and the registers the
  * palette permuted by the border index; a present with nothing drawn
  * must not flip, and a clear of the screen on show must be there at
  * once.
@@ -283,7 +283,7 @@ static void expect_page_st(long stride)
 #define PAGE_ROWS 240
 #endif
 
-static void expect_page(long stride, long margin, int dbl)
+static void expect_page(long stride, int dbl)
 {
     const long dp = dbl ? stride / 2 : stride;
     int x, y, p;
@@ -291,7 +291,7 @@ static void expect_page(long stride, long margin, int dbl)
     for (y = 0; y < 240; y++) {
         for (x = 0; x < 320; x++) {
             const unsigned v = MODEL(y, x) ^ X;
-            Uint8 *grp = want + margin + y * stride + (x >> 4) * 16;
+            Uint8 *grp = want + y * stride + (x >> 4) * 16;
             const Uint8 bit = (Uint8)(0x80 >> (x & 7));
             for (p = 0; p < 8; p++) {
                 if (v >> p & 1) {
@@ -305,12 +305,12 @@ static void expect_page(long stride, long margin, int dbl)
     }
 }
 
-static long stride_, margin_;
+static long stride_;
 static int dbl_;
 static const Uint8 *last_base;
 
 /* the layout from the page's size: a TT's 640 bytes a row, a Falcon's
- * 320 on VGA and 384 on RGB, the picture in the middle */
+ * 320 */
 static void check_shown(void)
 {
     const Uint8 *base;
@@ -330,13 +330,12 @@ static void check_shown(void)
 #endif
     stride_ = bytes / PAGE_ROWS;
     dbl_ = stride_ == 640;
-    margin_ = ((dbl_ ? stride_ / 2 : stride_) - 320) / 2;
 #ifdef STDL_SDL2_ST
     if (is_st) {
         expect_page_st(stride_);
     } else
 #endif
-    expect_page(stride_, margin_, dbl_);
+    expect_page(stride_, dbl_);
     if (memcmp(base, want, (size_t)bytes) != 0) {
         long i = 0;
         while (base[i] == want[i]) {
@@ -1929,9 +1928,9 @@ static int main256(void)
 int main(void)
 #endif
 {
-    static const char *names[] = { "TT", "Falcon VGA", "Falcon RGB" };
+    static const char *names[] = { "TT", "Falcon" };
     int layout, pages, xi, cmp, total = 0, runs = 0;
-    for (layout = 0; layout < 3; layout++) {
+    for (layout = FAKE_TT; layout <= FAKE_VGA; layout++) {
         for (pages = 2; pages <= 3; pages++) {
             for (xi = 0; xi < 3; xi++) {
                 for (cmp = 0; cmp <= 2; cmp++) {

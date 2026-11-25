@@ -32,26 +32,24 @@ int stdl_host_resp_bank;
 static void w4_display(int vga)
 {
     if (stdl_rs.falcon) {
+        /* on RGB or a TV, 640x400 interlaced in the desktop's PAL or
+         * NTSC (a set or a monitor made for one may not sync to the
+         * other), which responsive.c opens to 480 lines */
 #ifdef __m68k__
-        /* on RGB or a TV, the desktop's PAL or NTSC: a set or a monitor
-         * made for one may not sync to the other */
         (void)VsetScreen(stdl_rs.page[0], stdl_rs.page[0], 3,
                          (int16_t)(BPS4 | COL80
                                    | (vga ? VGA : ((stdl.old_vmode & PAL)
                                                    | VERTFLAG))));
+#else
+        (void)vga;
 #endif
-        /* 640x400 interlaced made 480 lines tall, as the 320-pixel
-         * screens' 200 are made 240 */
-        if (!vga && !resp_falcon_window()) {
-            resp_rows(400);
-        }
-    } else {
-#ifdef __m68k__
-        (void)Setscreen(stdl_rs.page[0], stdl_rs.page[0], 4);
-#endif
-        /* TT Medium's sixteen are the selected bank's registers */
-        stdl_rs.bank = (uint8_t)((TT_SHIFT & 0x0F) << 4);
+        return;
     }
+#ifdef __m68k__
+    (void)Setscreen(stdl_rs.page[0], stdl_rs.page[0], 4);
+#endif
+    /* TT Medium's sixteen are the selected bank's registers */
+    stdl_rs.bank = (uint8_t)((TT_SHIFT & 0x0F) << 4);
 }
 
 /* nothing of its own: the pages are the display's */

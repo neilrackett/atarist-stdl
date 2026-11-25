@@ -421,7 +421,7 @@ static SDL_Color phys[256], logi[256];
 static int page_px(int x, int y)
 {
     const Uint8 *g = fake_page[fake_shown] + (long)y * fake_stride +
-                     fake_margin + (x >> 4) * 16;
+                     (x >> 4) * 16;
     const int bit = 15 - (x & 15);
     int k, v = 0;
     for (k = 0; k < 8; k++) {
@@ -909,7 +909,7 @@ int main(void)
         }
     }
 #endif
-    for (layout = FAKE_TT; layout <= FAKE_RGB; layout++) {
+    for (layout = FAKE_TT; layout <= FAKE_VGA; layout++) {
         for (pages = 2; pages <= 3; pages++) {
             for (xi = 0; xi < 3; xi++) {
                 if (forked(on_256, layout, pages, xs[xi])) {

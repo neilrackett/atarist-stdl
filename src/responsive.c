@@ -12,10 +12,10 @@
  * into (resp_touch) so that Flip presents that box alone; or a 4-plane
  * screen for a tall one without it (tall4.c). On a TT each row goes on
  * two lines (TT Low cannot double them itself); on a Falcon the VIDEL
- * doubles them on VGA, and an RGB monitor or a TV has 200 lines, or
- * 240 in overscan, 384 pixels wide with the picture centred. A page's
- * box is what changed on it since it was last shown, as each page keeps
- * its own picture.
+ * doubles them on VGA, and an RGB monitor or a TV has 200 lines, or 240
+ * with the VIDEL's window opened (resp_falcon_window), its lines 320
+ * pixels as on VGA. A page's box is what changed on it since it was
+ * last shown, as each page keeps its own picture.
  */
 
 #include <stdlib.h>
@@ -25,12 +25,22 @@
 #ifdef __m68k__
 #include <osbind.h>
 #include <mint/falcon.h>
+
+/* the VIDEL's vertical blank's start and end, and the picture's first
+ * line and the line after its last: in half-lines of a field */
+#define VIDEL_VBB (*(volatile uint16_t *)0xFFFF82A4UL)
+#define VIDEL_VBE (*(volatile uint16_t *)0xFFFF82A6UL)
+#define VIDEL_VDB (*(volatile uint16_t *)0xFFFF82A8UL)
+#define VIDEL_VDE (*(volatile uint16_t *)0xFFFF82AAUL)
 #else
 /* host tests: the machine the screen is set on, a TT unless these say
  * a Falcon, on VGA or RGB */
 int stdl_host_resp_falcon, stdl_host_resp_vga;
 /* the TT's or the Falcon's 256 colour registers, as their words */
 uint32_t stdl_host_resp_regs[256];
+/* a Falcon's RGB with no room to open its window, and how often it
+ * was asked to */
+int stdl_host_resp_noroom, stdl_host_resp_windows;
 #endif
 
 resp_state stdl_rs;
@@ -437,6 +447,51 @@ void resp_third_lost(void)
     stdl_rs.npages = 2;
 }
 
+/*
+ * A Falcon's RGB or TV, its mode set, made 1.2 times as tall: the
+ * VIDEL's window opened by 40 half-lines at each end, 20 lines of the
+ * beam, the window TOS's overscan modes have. 200 lines make 240, and
+ * 400 interlaced 480. TOS's overscan widens the line as well, to 384
+ * pixels with the picture 32 in, and the VIDEL reads those margins
+ * from the page every line; opened here, the line is the mode's own,
+ * laid out as on VGA, and the VIDEL draws the sides as the border.
+ * NTSC has too few lines below the picture for 20 more, so the window
+ * moves up into those above by what it lacks. 0, the window as it
+ * was, where a mode set some other way leaves no room above either.
+ * Read after the VBL that takes the mode set.
+ */
+int resp_falcon_window(void)
+{
+#ifdef __m68k__
+    int vdb, vde, vbb, vbe;
+
+    STDL_WaitVBL();
+    vdb = (VIDEL_VDB & 0x7FF) - 40;
+    vde = (VIDEL_VDE & 0x7FF) + 40;
+    vbb = VIDEL_VBB & 0x7FF;
+    vbe = VIDEL_VBE & 0x7FF;
+    if (vde > vbb) {
+        vdb -= vde - vbb;
+        vde = vbb;
+    }
+    if (vdb < vbe) {
+        return 0;
+    }
+    VIDEL_VDB = (uint16_t)vdb;
+    VIDEL_VDE = (uint16_t)vde;
+    return 1;
+#else
+    stdl_host_resp_windows++;
+    return !stdl_host_resp_noroom;
+#endif
+}
+
+void resp_rows(int rows)
+{
+    stdl_rs.h = stdl_rs.screen.s.h = (int16_t)rows;
+    stdl_rs.screen.s.clip.h = (uint16_t)rows;
+}
+
 /* the screen a call asks for of those asked for: the wide one for more
  * than 320 pixels, the colour or the tall one for 320, or none */
 static const resp_model *resp_pick(int w, int h, int bpp)
@@ -467,7 +522,6 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
     stdl_rs.falcon = (uint8_t)stdl_host_resp_falcon;
     vga = stdl_host_resp_vga;
 #endif
-    stdl_rs.left = 0;
     stdl_rs.dbl = 0;
     stdl_rs.bank = 0;
     stdl_rs.w = 320;
@@ -485,15 +539,11 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
             lines = 480;
             stdl_rs.line = 320;
             stdl_rs.dbl = 1;
-        } else if (vga || rows == 200) {
-            lines = vga ? 240 : 200;
-            stdl_rs.line = (int16_t)bytes;
         } else {
-            /* 240 lines on RGB or a TV take overscan: 384 pixels a
-             * line, the picture 32 in */
-            lines = 240;
-            stdl_rs.line = (int16_t)(m->planes == 8 ? 384 : 192);
-            stdl_rs.left = (int16_t)(m->planes == 8 ? 32 : 16);
+            /* VGA's 240 lines, doubled; RGB's or a TV's 200, or 240
+             * with the window opened after the mode set */
+            lines = vga ? 240 : rows;
+            stdl_rs.line = (int16_t)bytes;
         }
 #ifdef __m68k__
         if (stdl_rs.falcon) {
@@ -502,8 +552,7 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
                                     /* the desktop's PAL or NTSC: a set
                                      * or a monitor made for one may not
                                      * sync to the other */
-                                    : ((stdl.old_vmode & PAL)
-                                       | (rows > 200 ? OVERSCAN : 0))));
+                                    : (stdl.old_vmode & PAL)));
         }
 #endif
     }
@@ -575,13 +624,20 @@ STDL_Surface *resp_set_mode(int w, int h, int bpp, uint32_t flags)
      * with it, and sets its own colours: ours go after */
     if (m->display != NULL) {
         m->display(vga);
+    } else {
+#ifdef __m68k__
+        if (stdl_rs.falcon) {
+            (void)VsetScreen(stdl_rs.page[0], stdl_rs.page[0], 3, mode);
+        } else {
+            (void)Setscreen(stdl_rs.page[0], stdl_rs.page[0], 7);
+        }
+#endif
+        if (stdl_rs.falcon && !vga && rows > 200
+            && !resp_falcon_window()) {
+            resp_rows(200);
+        }
     }
 #ifdef __m68k__
-    else if (stdl_rs.falcon) {
-        (void)VsetScreen(stdl_rs.page[0], stdl_rs.page[0], 3, mode);
-    } else {
-        (void)Setscreen(stdl_rs.page[0], stdl_rs.page[0], 7);
-    }
     stdl_vbl_hz = stdl_measure_vbl();
     stdl.asked = STDL_FRCLOCK - 1;
     if (stdl_rs.top > 0) {

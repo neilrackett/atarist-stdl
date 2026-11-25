@@ -90,8 +90,9 @@ All of these come from the machine:
 
 - **One screen, 320x240 in 256 colours.** It is TT Low (a row on two
   lines) on a TT. On a Falcon it is an 8-bit mode on VGA, or on RGB
-  and a TV, where it is in overscan, 384 pixels a line with the
-  picture in the middle. A window is at most 320x240 and is centred.
+  and a TV, where the 200-line mode is made 240 lines tall by opening
+  the VIDEL's window, as TOS's overscan modes do. A window is at most
+  320x240 and is centred.
   The experimental 68000 build gives a first window wider than 320
   640x480 in 16 colours on a TT or a Falcon ("640x480 in 16 colours",
   below); `SDL_GetDesktopDisplayMode` says which a program can have.
@@ -637,7 +638,7 @@ A program includes `SDL_stdl.h` itself:
 
 | Call or hint | What it is for |
 |---|---|
-| `STDL_SDL2_HINT_PAGES` | `"2"` or `"3"` (the default) pages. Three let a frame be drawn while the display still waits for the last; a third costs 153.6K of ST-RAM on a TT and 77-92K on a Falcon, and without the room STDL gives two |
+| `STDL_SDL2_HINT_PAGES` | `"2"` or `"3"` (the default) pages. Three let a frame be drawn while the display still waits for the last; a third costs 153.6K of ST-RAM on a TT and 76.8K on a Falcon, and without the room STDL gives two |
 | `STDL_SDL2_HINT_LOGFILE` | the file `SDL_Log` and the rest write to, a line a message, flushed after each. Without it they write nothing. SDL2's priorities: the application's from INFO, assertions' from WARN, tests' from VERBOSE, the rest CRITICAL only |
 | `STDL_SDL2_HINT_COMPARE` | `"1"`: copies of whole groups are compared with a chunky copy of the screen (76.8K) and only the groups that differ are converted, for a program that copies what it drew on, changed or not: "Copies compared", above |
 | `STDL_SDL2_SetCompare` | that compare on or off from here on, at any time, for one copy of a frame too: "Copies compared", above |

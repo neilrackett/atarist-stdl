@@ -13,7 +13,7 @@
  * converters - goes through each, and every display page after every
  * Flip must be byte for byte the same, on a TT's 480 doubled lines and
  * a Falcon's 240 and 200, and tall, 240 rows on each (a Falcon's RGB
- * in overscan). Off-screen surfaces and their masks are
+ * with its window opened). Off-screen surfaces and their masks are
  * compared pixel by pixel at the end.
  */
 #include <stdio.h>
@@ -26,7 +26,8 @@
 static int stdl_host_resp_falcon, stdl_host_resp_vga;
 #define SET_MACHINE(f, v) ((void)(f), (void)(v))
 #else
-extern int stdl_host_resp_falcon, stdl_host_resp_vga, stdl_host_resp_400;
+extern int stdl_host_resp_falcon, stdl_host_resp_vga;
+extern int stdl_host_resp_noroom, stdl_host_resp_windows;
 extern int stdl_host_resp_bank;
 extern uint32_t stdl_host_resp_regs[256];
 #define SET_MACHINE(f, v) (stdl_host_resp_falcon = (f), \
@@ -94,7 +95,7 @@ static uint32_t fnv(const uint8_t *p, uint32_t n)
 
     /* h * 33 + each long, a shift and an add on a 68000: FNV's byte
      * multiply was a __mulsi3 call a byte there, every page of every
-     * frame. Pages are whole longs (153.6K, 64-92K) */
+     * frame. Pages are whole longs (153.6K, 64-77K) */
     for (n >>= 2; n-- > 0; ) {
         h = (h << 5) + h + *w++;
     }
@@ -727,8 +728,7 @@ static void test_tall4(int falcon, int vga)
         stdl_resp_video->flip();
         page = stdl_rs.page[p];
         if (falcon) {
-            CHECK(memcmp(page + stdl_rs.left
-                         + (size_t)stdl_rs.top * stdl_rs.line, copy,
+            CHECK(memcmp(page + (size_t)stdl_rs.top * stdl_rs.line, copy,
                          (size_t)scr->stride) == 0
                   && scr->stride == stdl_rs.line,
                   "%s: the surface is the display page", cfg());
@@ -804,7 +804,7 @@ static void test_wide4(int falcon, int vga, int no480, uint32_t flags)
     g_tall = STDL_RESPONSIVE_TALL;
     g_flags = flags;
 #ifndef __m68k__
-    stdl_host_resp_400 = no480;
+    stdl_host_resp_noroom = no480;
     stdl_host_resp_bank = falcon ? 0 : 3;
 #else
     (void)no480;
@@ -827,7 +827,7 @@ static void test_wide4(int falcon, int vga, int no480, uint32_t flags)
     }
     CHECK(stdl_rs.npages == ((flags & STDL_TRIPLEBUF) ? 3 : 2)
           && stdl_rs.page_bytes == 153600u && stdl_rs.dbl == 0
-          && stdl_rs.top == 0 && stdl_rs.left == 0,
+          && stdl_rs.top == 0,
           "%s: the display's pages", cfg());
 #ifndef __m68k__
     /* the colours: TT Medium's are the selected bank's */
@@ -963,11 +963,83 @@ done:
     stdl_resp_video->shutdown();
     stdl_resp_screen = NULL;
 #ifndef __m68k__
-    stdl_host_resp_400 = 0;
+    stdl_host_resp_noroom = 0;
     stdl_host_resp_bank = 0;
 #endif
     g_flags = STDL_DOUBLEBUF;
 }
+
+#ifndef __m68k__
+/*
+ * A Falcon's RGB or TV: 240 rows from its 200-line mode, the VIDEL's
+ * window opened after the mode set, the page laid out as on VGA (320
+ * pixels a line, the picture at its start); no window opened for 200
+ * rows or on VGA; and where a mode leaves no room for it, 200 rows,
+ * the screen saying so and drawing no further.
+ */
+static void test_falcon_window(void)
+{
+    static const struct {
+        int vga, h, bpp, noroom, rows, opens;
+    } c[] = {
+        { 0, 240, 8, 0, 240, 1 }, { 0, 240, 4, 0, 240, 1 },
+        { 0, 200, 8, 0, 200, 0 }, { 1, 240, 8, 0, 240, 0 },
+        { 1, 240, 4, 0, 240, 0 }, { 1, 200, 8, 0, 200, 0 },
+        { 0, 240, 8, 1, 200, 1 }, { 0, 240, 4, 1, 200, 1 },
+    };
+    unsigned i;
+
+    g_what = STDL_RESPONSIVE_COLOUR | STDL_RESPONSIVE_HEIGHT;
+    CHECK(use_lib() == 0, "window: use");
+    for (i = 0; i < sizeof(c) / sizeof(c[0]); i++) {
+        const int line = c[i].bpp == 8 ? 320 : 160;
+        const int lines = c[i].vga ? 240 : c[i].h;
+        const int opens = stdl_host_resp_windows;
+        STDL_Surface *scr;
+        const uint8_t *page;
+        size_t k;
+        int lit = 0, past = 0;
+
+        SET_MACHINE(1, c[i].vga);
+        stdl_host_resp_noroom = c[i].noroom;
+        scr = stdl_resp_video->set_mode(320, c[i].h, c[i].bpp,
+                                        STDL_DOUBLEBUF);
+        CHECK(scr != NULL && scr->w == 320 && scr->h == c[i].rows
+              && scr->clip.h == c[i].rows && stdl_rs.h == c[i].rows
+              && scr->planes == c[i].bpp,
+              "window %u: %d rows asked, %d given", i, c[i].h,
+              scr ? scr->h : -1);
+        if (scr == NULL) {
+            continue;
+        }
+        CHECK(stdl_rs.line == line && scr->stride == line
+              && stdl_rs.page_bytes == (uint32_t)lines * line
+              && stdl_rs.top == (lines - c[i].h) / 2
+              && scr->pixels == stdl_rs.page[stdl_rs.back]
+                                + (size_t)stdl_rs.top * line,
+              "window %u: the page's layout (line %d, top %d, %lu bytes)",
+              i, stdl_rs.line, stdl_rs.top,
+              (unsigned long)stdl_rs.page_bytes);
+        CHECK(stdl_host_resp_windows - opens == c[i].opens,
+              "window %u: opened %d times", i,
+              stdl_host_resp_windows - opens);
+        /* the whole screen filled: every row given, none past them */
+        STDL_FillRect(scr, NULL, 1);
+        page = scr->pixels;
+        for (k = 0; k < (size_t)c[i].rows * line; k++) {
+            lit += page[k] != 0;
+        }
+        for (; k < (size_t)(lines - stdl_rs.top) * line; k++) {
+            past += page[k] != 0;
+        }
+        /* colour 1: plane 0's word of each of 20 groups */
+        CHECK(lit == c[i].rows * 40 && past == 0,
+              "window %u: %d bytes lit in the rows, %d past them", i,
+              lit, past);
+    }
+    stdl_host_resp_noroom = 0;
+}
+#endif
 
 #ifndef __m68k__
 /* the wide screen on an ST: not taken, the error set; on a TT taken
@@ -2656,14 +2728,14 @@ int main(void)
     g_flags = STDL_DOUBLEBUF;
     TIMED(compare(0, 0, 240, 4));              /* tall: TT */
     TIMED(compare(1, 1, 240, 5));              /* Falcon VGA */
-    TIMED(compare(1, 0, 240, 6));              /* Falcon RGB, overscan */
+    TIMED(compare(1, 0, 240, 6));              /* Falcon RGB, opened */
     TIMED(test_mixed());
     TIMED(test_tall4(0, 0));
     TIMED(test_tall4(1, 1));
     TIMED(test_tall4(1, 0));
     TIMED(test_console8());
-    /* the display's own height: the same 240 on these, in overscan on
-     * a Falcon's RGB too */
+    /* the display's own height: the same 240 on these, a Falcon's RGB
+     * with its window opened too */
     g_tall = STDL_RESPONSIVE_HEIGHT;
     TIMED(compare(1, 0, 240, 7));
     TIMED(test_tall4(0, 0));
@@ -2675,6 +2747,7 @@ int main(void)
     TIMED(test_wide4(1, 0, 1, STDL_DOUBLEBUF));    /* RGB, no room: 400 */
     TIMED(test_wide4(0, 0, 0, STDL_TRIPLEBUF));
     TIMED(test_wide_enter());
+    TIMED(test_falcon_window());
     if (failures) {
         printf("test_responsive: %d failure(s)\n", failures);
         return 1;

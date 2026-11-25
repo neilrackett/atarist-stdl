@@ -707,8 +707,8 @@ SDL_VIDEODRIVER=dummy TOS=$TOS512 MACHINE=falcon MONITOR=rgb EXTRA="$X" \
 - **A Falcon on both monitors.** `MONITOR=vga` and `MONITOR=rgb` give a
   program different modes: an 8-plane screen is mode word 0x0113 on
   VGA, and on RGB 0x0023 at 50Hz or 0x0003 at 60Hz, the desktop's PAL
-  or NTSC, with a 384-pixel line and the picture centred. PAL or NTSC
-  comes from Hatari's NVRAM (PAL in a fresh configuration). A TT needs
+  or NTSC, the VIDEL's window opened for 240 rows. PAL or NTSC comes
+  from Hatari's NVRAM (PAL in a fresh configuration). A TT needs
   no `MONITOR`; `MONITOR=mono` gives it a TT High desktop, where STDL
   refuses its screens.
 - **TT-RAM:** `EXTRA="--cpu-exact on --compatible on --memsize 2"

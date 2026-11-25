@@ -29,6 +29,15 @@ wide screen.
 * **Branch on the screen, not the machine.** `BitsPerPixel` and `h`
   say what was given: an ST answers 4 and 200, or 240 with
   `STDL_RESPONSIVE_TALL`, its bottom border open.
+* **240 rows on a Falcon's RGB or a TV** are its 200-line mode with
+  the VIDEL's window opened 20 lines at each end, the window TOS's own
+  overscan modes have, so the page is laid out as on VGA: 320 pixels a
+  line, nothing beside the picture. TOS's overscan would also widen
+  the line to 384 pixels, 20% more page and more for the VIDEL to read
+  every line. On NTSC the picture sits 2 lines higher than TOS's
+  overscan puts it, whose last lines fall after its own vertical blank
+  begins. Where a mode leaves no room to open (a mode set some other
+  way), the screen is 200 rows and `h` says so.
 * **Colours.** Every call takes 0-255 on an 8-plane screen. Keep 0-15
   the ST's palette and put the extra shades above them: text, the HUD
   and anything drawn from 4-plane data (a surface made before the
@@ -63,7 +72,7 @@ wide screen.
   screen is the display itself, with nothing to copy. A responsive
   screen is always double-buffered, and `STDL_TRIPLEBUF` gives it a
   third page as on an ST, another of the display's: 153.6K of ST RAM
-  on a TT, 64-92K on a Falcon in 256 colours. The times are Hatari's:
+  on a TT, 64-77K on a Falcon in 256 colours. The times are Hatari's:
   a real TT takes 2.3 times as long as Hatari's TT over the same
   compiled code, and 3.0 to 3.9 times over copies into ST-RAM, which
   is what a present is; a real Falcon has not been timed, so take a

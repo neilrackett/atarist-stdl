@@ -818,7 +818,7 @@ static void sp_present(int p, const resp_box *b)
     const uint8_t *hrow = hi->pixels + stdl_row_off(b->y0, hi->stride)
                         + g0 * 8;
     const int line = stdl_rs.line;
-    uint8_t *drow = stdl_rs.page[p] + stdl_rs.left
+    uint8_t *drow = stdl_rs.page[p]
                   + stdl_row_off(stdl_rs.top + (b->y0 << stdl_rs.dbl),
                                  (uint16_t)line) + g0 * 16;
     int y, g;

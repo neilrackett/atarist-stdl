@@ -622,13 +622,13 @@ console, unless `STDL_UseBanner(0)` came first.
   TALLCOL with the colour) draws a card to the very edge on each.
 - **The display's own height is the tall screen without the ST's
   border** (`STDL_RESPONSIVE_HEIGHT`): 240 rows on a TT and a Falcon
-  (on RGB in overscan, as the tall screen), an ST's 200 with no border
-  and no error, so each machine shows all of its own pixels. The two
-  options share one model; the border hook is an object of its own
-  (`src/tallst.c`), passed by `STDL_UseResponsive` for TALL alone, so a
-  program asking for the height links none of the border code: TALLHGT
-  is 8,698 bytes smaller than TALLCHK stripped, as is the colour's
-  pair. TALL wins where a program asks for both.
+  (on RGB with its window opened, as the tall screen), an ST's 200
+  with no border and no error, so each machine shows all of its own
+  pixels. The two options share one model; the border hook is an
+  object of its own (`src/tallst.c`), passed by `STDL_UseResponsive`
+  for TALL alone, so a program asking for the height links none of the
+  border code: TALLHGT is 8,698 bytes smaller than TALLCHK stripped,
+  as is the colour's pair. TALL wins where a program asks for both.
 - **640x480 in 16 colours is the display page itself**
   (`STDL_RESPONSIVE_WIDE`, `src/wide4.c`, November 2026): TT Medium and a
   Falcon's 640x480 in 16 colours are the ST's interleaved 4-plane layout
@@ -647,8 +647,11 @@ console, unless `STDL_UseBanner(0)` came first.
     and VDE 40 higher**, read after the VBL that takes the mode set,
     the window the Falcon's overscan modes have; NTSC moves the window
     up by what it lacks below. Where no room is left above either, the
-    screen is 640x400 (`h` says so). Interlaced, the registers count
-    lines. The desktop's `VsetScreen` at exit reprograms them.
+    screen is 640x400 (`h` says so). The registers count half-lines of
+    a field, so 40 is 20 lines of the beam at each end, 40 rows of the
+    interlaced frame; the 320-pixel screens' 240 rows on RGB open the
+    same 40 in their 200-line mode (`resp_falcon_window`, below). The
+    desktop's `VsetScreen` at exit reprograms them.
   - **No console hook**: TT Medium's console writes the screen's own
     layout, as an ST's does; only a doubled row (TT Low) needs one.
   - **An ST gets its 320 pixels** with the error set in the mode set's
@@ -661,6 +664,46 @@ console, unless `STDL_UseBanner(0)` came first.
     a Falcon on VGA, on RGB in PAL and NTSC and on a TV (TOS 4.04,
     EmuTOS), all 480 rows shown.
     Neither machine's real hardware has run it.
+- **A Falcon's 240 rows on RGB or a TV are its window opened, not TOS's
+  overscan** (`resp_falcon_window`, responsive.c, November 2026). The
+  320-pixel screens asked TOS for its overscan mode there: a 384-pixel
+  line with the picture 32 pixels in, the VIDEL reading the 64 pixels
+  of margin from the page every line. Now they set the 200-line mode
+  and open the VIDEL's window 40 half-lines at each end after the VBL
+  that takes it, as the wide screen did for its 400 lines, and the one
+  routine serves both.
+  - **The same window as TOS's.** FALCWIN (`tests/hatari/falcwin.c`)
+    sets TOS's three overscan modes, then STDL's screens, and prints
+    the VIDEL's vertical registers for each. In PAL, on RGB and a TV,
+    under TOS 4.04 and EmuTOS 1.4, every register agrees (VDB 87 and
+    VDE 567 for 240 rows, 86 and 566 for 480). In NTSC TOS's overscan
+    ends the picture 4 half-lines after its own vertical blank begins
+    (VDE 517, VBB 513); STDL keeps it inside, 2 lines higher (33,
+    513). The registers are TOS's own values, so the comparison holds
+    off the emulator; what a monitor shows of them nobody has seen.
+  - **What it buys.** A page is the display's lines at 320 pixels, as
+    on VGA: 76,800 bytes where it was 92,160 in 256 colours, 38,400
+    where it was 46,080 in 16 (31K of ST RAM double-buffered, 46K
+    triple). The VIDEL reads a sixth less a line, bus time a Falcon's
+    CPU should get back; Hatari does not model that, so it is
+    unmeasured. And one layout on every Falcon monitor: `stdl_rs.left`
+    is gone, and with it the stride past the picture that
+    `STDL_PutGroup` once wrote through.
+  - **No room** (a mode set some other way) leaves 200 rows, `h` saying
+    so (`resp_rows`), as the wide screen keeps 400.
+  - **Bytes:** the responsive objects 68 fewer: responsive.o +72,
+    wide4.o -116, planes8.o and tall4.o -12 each (`RESP_MAX` lowered).
+  - **Tested:** `test_falcon_window` checks each screen's layout,
+    whether the window was asked for (RGB at 240 only), and the
+    fallback's rows, clip and fill; seven breakages each failed it. In
+    Hatari, TOS 4.04: TALLCHK and TALLCOL on RGB in PAL, TALLCOL on RGB
+    and TALLHGT on a TV in NTSC, each with its card's frame on rows 0
+    and 239; RESPCHK passed on a TT and a Falcon on VGA and RGB (PAL
+    and NTSC), STG8CHK on RGB, SDL2RCHK on RGB in PAL and NTSC, and
+    WIDEDEMO showed 480 rows on RGB in NTSC.
+  - **RESPCHK writes `bank8.tmp` beside itself**, so two run at once
+    on one GEMDOS drive fail each other's bank checks (19 and 5
+    failures here, none run alone). Run them one at a time.
 - **The 16-colour tall screen costs a TT 6.3-7.5ms a frame.** ST Low
   costs a TT nothing, but TT Low is 8 planes, so without the colour
   every Flip compares the whole 4-plane page with the display (20
@@ -816,9 +859,11 @@ console, unless `STDL_UseBanner(0)` came first.
   mode (0x0003, 60Hz), which is why RGB ran at 60 there, and a PAL one
   gets 0x0023 at 50.
 - **Bound a group by the surface's width, not its stride.** A Falcon's
-  overscan line is 384 pixels with the 320 centred, so the screen's
-  stride runs past the picture: STDL_PutGroup on an 8-plane screen,
-  bounded by the stride, wrote into the margin and the next line.
+  overscan line was 384 pixels with the 320 centred, so the screen's
+  stride ran past the picture: STDL_PutGroup on an 8-plane screen,
+  bounded by the stride, wrote into the margin and the next line. That
+  screen has 320-pixel lines now, but a view or a borrowed block's
+  stride still runs past its width.
 - **The host suite runs on the machine too** (`RESPCHK.TOS`, built from
   `tests/host/test_responsive.c` as its main says): the same calls
   against the reference on the TT's or the Falcon's own screen, page

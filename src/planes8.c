@@ -1613,7 +1613,7 @@ static int p8_screen_init(void)
 
 static void p8_screen_page(int p)
 {
-    stdl_rs.screen.s.pixels = stdl_rs.page[p] + stdl_rs.left
+    stdl_rs.screen.s.pixels = stdl_rs.page[p]
         + stdl_row_off(stdl_rs.top, (uint16_t)stdl_rs.line);
     stdl_rs.screen.s.stride = (uint16_t)(stdl_rs.line << stdl_rs.dbl);
 }

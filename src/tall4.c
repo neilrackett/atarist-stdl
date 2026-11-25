@@ -51,7 +51,7 @@ static void t4_screen_page(int p)
     STDL_Surface *s = &stdl_rs.screen.s;
 
     if (stdl_rs.falcon) {
-        s->pixels = stdl_rs.page[p] + stdl_rs.left
+        s->pixels = stdl_rs.page[p]
                   + stdl_row_off(stdl_rs.top, (uint16_t)stdl_rs.line);
         s->stride = (uint16_t)stdl_rs.line;
     } else {

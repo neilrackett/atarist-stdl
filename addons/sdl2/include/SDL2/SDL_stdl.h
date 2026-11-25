@@ -26,7 +26,7 @@ extern "C" {
 
 /* "2" or "3" (the default): the screen's pages. Three let a frame be
  * drawn while the display still waits to take the last; without the
- * ST-RAM for a third (153.6K on a TT, 77-92K on a Falcon) STDL gives
+ * ST-RAM for a third (153.6K on a TT, 76.8K on a Falcon) STDL gives
  * two. Read by the first SDL_CreateWindow. */
 #define STDL_SDL2_HINT_PAGES "STDL_SDL2_PAGES"
 

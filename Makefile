@@ -211,10 +211,17 @@ PIXEL_MAX  = 37100
 # model's own size and mode set, the choice of screen both steps of the
 # mode set share with an ST's error, the option's slot, and the TT
 # bank's register base in the colours' writes.
+#
+# Lowered 30536 -> 30468 on 2026-11-25: a Falcon's RGB or TV opens the
+# VIDEL's window for 240 rows rather than taking TOS's overscan, whose
+# 384-pixel line needed an offset to the picture. The window's code
+# moved from wide4.o (-116) to responsive.o (+72), where the 320-pixel
+# screens reach it too; planes8.o and tall4.o lost the offset (-12
+# each).
 RESP_OBJS  = $(addprefix $(OBJDIR)/src/,responsive.o planes8.o \
              planes8ex.o planes8tile.o planes8row.o asset8.o tall4.o \
              overlap8.o wide4.o)
-RESP_MAX   = 30536
+RESP_MAX   = 30468
 
 sizecheck: $(PIXEL_OBJS) $(RESP_OBJS)
 	@n=`$(CROSS)size $(PIXEL_OBJS) | awk 'NR>1 {t+=$$1} END {print t}'`; \

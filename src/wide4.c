@@ -22,61 +22,12 @@
 #include <mint/falcon.h>
 
 #define TT_SHIFT  (*(volatile uint16_t *)0xFFFF8262UL)
-/* the VIDEL's vertical blank's start and end, and the picture's first
- * line and the line after its last: in lines while it interlaces */
-#define VIDEL_VBB (*(volatile uint16_t *)0xFFFF82A4UL)
-#define VIDEL_VBE (*(volatile uint16_t *)0xFFFF82A6UL)
-#define VIDEL_VDB (*(volatile uint16_t *)0xFFFF82A8UL)
-#define VIDEL_VDE (*(volatile uint16_t *)0xFFFF82AAUL)
 #else
-/* host tests: a Falcon's RGB with no room for 480 lines, and the bank a
- * TT has selected, as the mode register's low bits */
-int stdl_host_resp_400, stdl_host_resp_bank;
+/* host tests: the bank a TT has selected, as the mode register's low
+ * bits */
+int stdl_host_resp_bank;
 #define TT_SHIFT stdl_host_resp_bank
 #endif
-
-/* the screen's rows, fewer than it was set up with: the display shows
- * no more */
-static void w4_rows(int rows)
-{
-    stdl_rs.h = (int16_t)rows;
-    p8_init_surface(&stdl_rs.screen.s, stdl_rs.w, rows);
-    stdl_rs.screen.s.planes = 4;
-}
-
-/*
- * A Falcon's 640x400 interlaced on RGB or a TV made 480 lines tall: the
- * window opened 40 lines at each end, the window the Falcon's own
- * overscan modes have, so the line stays 640 pixels and the page the
- * TT's and VGA's. NTSC has too few lines below the picture for 40 more,
- * so the window moves up into those above by what it lacks. 0, left at
- * 400 lines, where a mode set some other way leaves no room above
- * either. Read after the VBL that takes the mode set.
- */
-static int w4_falcon_480(void)
-{
-#ifdef __m68k__
-    int vdb, vde, vbb, vbe;
-
-    STDL_WaitVBL();
-    vdb = (VIDEL_VDB & 0x7FF) - 40;
-    vde = (VIDEL_VDE & 0x7FF) + 40;
-    vbb = VIDEL_VBB & 0x7FF;
-    vbe = VIDEL_VBE & 0x7FF;
-    if (vde > vbb) {
-        vdb -= vde - vbb;
-        vde = vbb;
-    }
-    if (vdb < vbe) {
-        return 0;
-    }
-    VIDEL_VDB = (uint16_t)vdb;
-    VIDEL_VDE = (uint16_t)vde;
-    return 1;
-#else
-    return !stdl_host_resp_400;
-#endif
-}
 
 static void w4_display(int vga)
 {
@@ -89,8 +40,10 @@ static void w4_display(int vga)
                                    | (vga ? VGA : ((stdl.old_vmode & PAL)
                                                    | VERTFLAG))));
 #endif
-        if (!vga && !w4_falcon_480()) {
-            w4_rows(400);
+        /* 640x400 interlaced made 480 lines tall, as the 320-pixel
+         * screens' 200 are made 240 */
+        if (!vga && !resp_falcon_window()) {
+            resp_rows(400);
         }
     } else {
 #ifdef __m68k__

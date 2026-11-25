@@ -274,7 +274,7 @@ builds by them; take a frame budget from a real machine.
   into TT-RAM gets from there (one port's play 10% faster with it).
 - **Three pages by default**: a frame is drawn while the display still
   shows the last; with two, the present waits for the blank that shows
-  its page. A third page costs 153.6K of ST-RAM on a TT, 77-92K on a
+  its page. A third page costs 153.6K of ST-RAM on a TT, 76.8K on a
   Falcon.
 - **On a 68030, where a library routine sits in the instruction cache
   matters.** Its cache is 256 bytes, direct-mapped. A hot loop that
@@ -366,9 +366,9 @@ builds by them; take a frame budget from a real machine.
   ST-RAM and 4MB of TT-RAM; without `--addr24 off` Hatari stops at a
   question before TOS starts and the program never runs.
 - **A Falcon:** `MACHINE=falcon`, to which the driver adds `--fpu none`,
-  with `MONITOR=vga` and again with `MONITOR=rgb`: RGB's line is 384
-  pixels with the picture centred, and its rate is the desktop's PAL
-  (50Hz) or NTSC (60Hz), so test both.
+  with `MONITOR=vga` and again with `MONITOR=rgb`: RGB's 240 lines are
+  its 200-line mode with the VIDEL's window opened, and its rate is the
+  desktop's PAL (50Hz) or NTSC (60Hz), so test both.
 - **`--confirm-quit false`:** the driver passes it. A runner of your
   own needs it whenever Hatari runs with a `HOME` or config of its own:
   Hatari's default asks to confirm a quit, and a finished emulator

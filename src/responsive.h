@@ -58,7 +58,6 @@ typedef struct {
     uint32_t page_bytes;
     int16_t w, h;
     int16_t line;               /* bytes a display line               */
-    int16_t left;               /* bytes into a line to the picture   */
     int16_t top;                /* the display line of row 0          */
     uint8_t dbl;                /* a TT: each row on two lines        */
     uint8_t falcon;
@@ -117,6 +116,11 @@ void resp_shutdown(void);
 int  resp_set_colours(STDL_Surface *s, const STDL_Colour *c, int first,
                       int n);
 void p8_init_surface(STDL_Surface *s, int w, int h);
+/* a Falcon's RGB or TV, its mode set: the picture 1.2 times as tall,
+ * or 0 where the mode leaves no room; and the screen's rows, fewer
+ * than it was set up with, where the display then shows no more */
+int  resp_falcon_window(void);
+void resp_rows(int rows);
 /*
  * What the 8-plane objects share (planes8.c, planes8ex.c, planes8row.c).
  * A group is four longs, each two planes' words, so a 16-bit mask

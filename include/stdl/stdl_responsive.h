@@ -19,8 +19,10 @@
  *   - A TT: TT Low, each row on two of its 480 lines; 200 rows centred
  *     in 240, unless the screen is tall.
  *   - A Falcon: an 8-bit mode, 240 lines on VGA (the VIDEL doubles
- *     them), on RGB or a TV 200 or, tall, 240 in overscan, 384 pixels
- *     wide with the picture centred.
+ *     them), on RGB or a TV 200 or, tall, 240: the 200-line mode with
+ *     the VIDEL's window opened 20 lines at each end, the window TOS's
+ *     overscan modes have, its lines 320 pixels as on VGA. Where a mode
+ *     leaves no room for that, 200 rows (h says so).
  *   - An ST, an STE or a Mega STE: its 16 colours, as without it.
  *   Every surface created while the screen is up has 8 interleaved
  *   planes, the display's own layout, so the screen is the display
@@ -59,10 +61,10 @@
  *
  * STDL_RESPONSIVE_HEIGHT: the display's own height, asked for as the
  *   tall screen is. A TT and a Falcon give 320x240 as above, on a
- *   Falcon's RGB or TV in overscan too; an ST, an STE or a Mega STE
- *   keeps its 200 lines and opens no border, with no error set, so
- *   every machine shows a whole screen of its own pixels. It links
- *   none of the border code, 8.7K of a program. Asked for with
+ *   Falcon's RGB or TV with its window opened too; an ST, an STE or a
+ *   Mega STE keeps its 200 lines and opens no border, with no error
+ *   set, so every machine shows a whole screen of its own pixels. It
+ *   links none of the border code, 8.7K of a program. Asked for with
  *   STDL_RESPONSIVE_TALL, the tall screen wins.
  *
  * STDL_RESPONSIVE_WIDE: 640x480 in 16 colours, asked for with a width
@@ -71,7 +73,7 @@
  *   - A TT: TT Medium, the TT's own 640x480 in 16 colours.
  *   - A Falcon on VGA: its own 640x480 in 16 colours. On RGB or a TV:
  *     640x400 interlaced, the desktop's PAL or NTSC, with the VIDEL's
- *     window opened 40 lines at each end, as its overscan modes have
+ *     window opened 40 rows at each end, as its overscan modes have
  *     it, to 480; where a mode leaves no room for that (NTSC with too
  *     few lines below the picture moves up instead), 640x400.
  *   - An ST, an STE or a Mega STE: no screen of 640 pixels in 16
@@ -88,8 +90,8 @@
  * A responsive screen on a TT or a Falcon is always double-buffered,
  * and with STDL_TRIPLEBUF it has a third page, as an ST's screen has
  * (stdl_video.h): another of the display's, 153.6K of ST RAM on a TT
- * (and 38.4K more for the tall 16-colour screen's own copy), 64-92K on
- * a Falcon in 256 colours and 38-46K in 16, and 153.6K for the wide
+ * (and 38.4K more for the tall 16-colour screen's own copy), 64-77K on
+ * a Falcon in 256 colours and 38.4K in 16, and 153.6K for the wide
  * screen on both. Without the memory it has two, its flags say so and
  * the error says why.
  * Its colours 0-15 start as an ST screen's do, and every palette call
@@ -140,8 +142,8 @@
  *     the library drew or STDL_UpdateRects reported (one box a page,
  *     around everything reported; none named is the whole screen), so
  *     a program may write both lines itself and report nothing;
- *   - on a Falcon, the display itself, nothing to report; on RGB or a
- *     TV with 240 rows, 384-pixel lines with pixels 32 bytes into one.
+ *   - on a Falcon, the display itself, nothing to report: 320 pixels a
+ *     line on every monitor, the picture at the page's start.
  * Staged (STDL_StagePalette), colours set just before Flip are shown
  * with its page, triple-buffered too (stdl_palette.h).
  */

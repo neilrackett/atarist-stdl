@@ -50,8 +50,8 @@
 #           which LATE can still change
 #   MONITOR hatari monitor: mono, rgb, vga or tv (default Hatari's
 #           own, rgb in a fresh configuration). A Falcon wants both
-#           vga and rgb: they give it different modes, RGB's line
-#           384 pixels with the picture centred
+#           vga and rgb: they give it different modes, RGB's 240
+#           lines its 200-line mode with the VIDEL's window opened
 #   SOUND   off, on, or a frequency in Hz (default off). "on" means
 #           44100. Recording is a separate step: send
 #           'fifo hatari-shortcut recsound' to start and again to

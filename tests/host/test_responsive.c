@@ -816,6 +816,10 @@ static void test_wide4(int falcon, int vga, int no480, uint32_t flags)
     scr = stdl_resp_video->set_mode(320, 200, 8, STDL_DOUBLEBUF);
     CHECK(scr != NULL && scr->w == 320 && scr->planes == 8,
           "%s: 320 asked, the colour", cfg());
+    /* down first, as video.c's enter takes a screen down before each
+     * mode set: called straight, a second set_mode would leak the
+     * first's pages (LeakSanitizer, on Linux only) */
+    stdl_resp_video->shutdown();
     scr = stdl_resp_video->set_mode(640, 480, 8, flags);
     sh = no480 && falcon && !vga ? 400 : 480;
     CHECK(scr != NULL && scr->w == 640 && scr->h == sh && scr->planes == 4
@@ -1000,6 +1004,8 @@ static void test_falcon_window(void)
         size_t k;
         int lit = 0, past = 0;
 
+        /* the last case's screen down, as video.c's enter does */
+        stdl_resp_video->shutdown();
         SET_MACHINE(1, c[i].vga);
         stdl_host_resp_noroom = c[i].noroom;
         scr = stdl_resp_video->set_mode(320, c[i].h, c[i].bpp,
@@ -1037,6 +1043,7 @@ static void test_falcon_window(void)
               "window %u: %d bytes lit in the rows, %d past them", i,
               lit, past);
     }
+    stdl_resp_video->shutdown();
     stdl_host_resp_noroom = 0;
 }
 #endif

@@ -117,9 +117,13 @@ console, unless `STDL_UseBanner(0)` came first.
   the host tests, then the cross build with `sizecheck`, then the
   libcmini archive. Two things it sees that a developer's Mac does
   not, so check them before blaming the runner: ASan on Linux turns
-  on LeakSanitizer, which macOS has none of, and its filesystem is
-  case-sensitive, which caught `stdl_fopen_ci` uppercasing whole
-  paths. A pushed `v*` tag additionally publishes `libstdl.a`,
+  on LeakSanitizer, which Apple's clang has none of, and its
+  filesystem is case-sensitive, which caught `stdl_fopen_ci`
+  uppercasing whole paths. Homebrew's LLVM has it: `make -C tests/host
+  run CC=/opt/homebrew/opt/llvm/bin/clang` with
+  `ASAN_OPTIONS=detect_leaks=1` (the add-ons' suites the same)
+  reported exactly CI's leaks when a test called `set_mode` twice
+  without the shutdown video.c's `enter` does between. A pushed `v*` tag additionally publishes `libstdl.a`,
   `libstdl-cmini.a` and `stdl-examples.zip` (`make bundle`: the
   example binaries and the assets they load) to the rolling
   `latest` release (`.github/workflows/release.yml`), so the

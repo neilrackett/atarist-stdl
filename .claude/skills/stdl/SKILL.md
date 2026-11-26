@@ -1906,6 +1906,23 @@ a newer one, newest release first. A release that changes a call
 already released says so here, with what a caller changes; the build
 finds every old use.
 
+### v1.34.0: 640x480 in 16 colours, and a Falcon's RGB lines 320 pixels
+
+New, with nothing to change: `STDL_RESPONSIVE_WIDE`, 640x480 in 16
+colours on a TT or a Falcon (`docs/responsive.md`), the SDL2 add-on's
+`SDL_GetDesktopDisplayMode`, and SDL's own 640x480 on it: a first
+window wider than 320 in the SDL2 add-on's experimental 68000 build, a
+640x480 `SDL_SetVideoMode` in the SDL1 add-on, and in the SDL 1.2 shim
+once the program has asked for the option.
+
+A program that writes the screen's pixels itself, on a Falcon's RGB or
+TV with 240 rows: its lines are 320 pixels now, the picture at the
+page's start, as on VGA, where they were TOS's 384-pixel overscan
+lines with the picture 32 pixels in. A program that starts at the
+screen's `pixels` and steps by its `pitch` changes nothing; one that
+skipped the margin itself, or took a line as 384 pixels, as the old
+header described, takes that out. The build cannot find those uses.
+
 ### v1.31.0: SDL 1.2's start and stop, and names a program met
 
 New in the SDL 1.2 shim and the SDL1 add-on, with nothing to change:

@@ -1659,7 +1659,11 @@ first.
   DMA at your buffer and the hardware reads it once - no ring, no
   refill, **no per-frame cost** (`STDL_PlaySampleLoop` for ambient
   loops). Stop before freeing a playing buffer - the DMA reads it
-  live. A Falcon has no 6258Hz: there a 6258Hz buffer plays from a
+  live. The buffer must be in ST RAM, and `STDL_LoadWAV`'s is
+  `malloc`'s: on a machine with TT-RAM or other alt-RAM, copy each
+  sample into an `Mxalloc(len, 0)` block before playing it (one port
+  played every effect from `STDL_LoadWAV`'s buffers and was silent on
+  a TT with TT-RAM, with nothing printed, as it ignored the -1). A Falcon has no 6258Hz: there a 6258Hz buffer plays from a
   copy at 12517 the library makes and keeps. Monophonic, so arbitrate by
   priority yourself. It is the one path that costs nothing; when a
   game needs sounds on top of each other, the SDL_mixer shim
